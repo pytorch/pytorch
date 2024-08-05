@@ -196,6 +196,59 @@ def _set_grad_enabled_tests():
     }
 
 
+def _with_autocast_tests():
+    from torch.export._trace import _export
+
+    class WithAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+            with torch.autocast(device_type="cpu", enabled=False):
+                d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
+    class WithAutocastOpMultiDep(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c1 = x.sin().sum()
+                c2 = x.cos().sum()
+            with torch.autocast(device_type="cpu", enabled=False):
+                d1 = c1 + 1
+                d2 = c2 + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e1 = d1 - 1
+                e2 = d2 - 1
+            return d1, d2, e1, e2
+
+    class SplitAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+            d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
+    x = torch.randn(2, 2)
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    return {
+        "ctx_manager": (_get_predispatch_module(WithAutocastOp(), (x,)), (x,)),
+        "ctx_manager_multi_dep": (
+            _get_predispatch_module(WithAutocastOpMultiDep(), (x,)),
+            (x,),
+        ),
+        "ctx_manager_split": (_get_predispatch_module(SplitAutocastOp(), (x,)), (x,)),
+    }
+
+
 def _sequential_split_inline_tests():
     from torch.export._trace import _export
 
@@ -257,12 +310,14 @@ class TestPasses(TestCase):
         super().setUp()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+        self.WITH_AUTOCAST_TESTS = _with_autocast_tests()
 
         init_torchbind_implementations()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
         self.SET_GRAD_ENABLED_TESTS.clear()
+        self.WITH_AUTOCAST_TESTS.clear()
         super().tearDown()
 
     def test_runtime_assert_one_dim(self) -> None:
@@ -655,7 +710,7 @@ def forward(self, token, obj_attr, x):
         ep = torch.export.export(func, args=(x,))
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
-    def test_predispatceh_set_grad(self):
+    def test_predispatch_set_grad(self):
         def _check_node_users_in_the_same_graph(gm):
             for node in gm.graph.nodes:
                 for user in node.users:
@@ -836,6 +891,150 @@ def forward(self, sin, cos):
     add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
     add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
     return (add_2, add_3)
+    """,
+        )
+
+    def test_predispatch_autocast(self):
+        def _check_node_users_in_the_same_graph(gm):
+            for node in gm.graph.nodes:
+                for user in node.users:
+                    self.assertTrue(user.graph is gm.graph)
+
+        mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager"]
+        _check_node_users_in_the_same_graph(mod)
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_4 = self.submod_1
+    sum_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    submod_5 = self.submod_2
+    add_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, False, None, submod_5, sum_1);  submod_5 = sum_1 = None
+    submod_6 = self.submod_3
+    sub = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_6, add_1);  submod_6 = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    return sum_1
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_2.code.strip("\n"),
+            """\
+def forward(self, sum_1):
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    return add_1
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add_1):
+    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
+    return sub
+    """,
+        )
+
+        mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_multi_dep"]
+        _check_node_users_in_the_same_graph(mod)
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_4 = self.submod_1
+    wrap_with_autocast = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    sum_1 = wrap_with_autocast[0]
+    sum_2 = wrap_with_autocast[1];  wrap_with_autocast = None
+    submod_5 = self.submod_2
+    wrap_with_autocast_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, False, None, submod_5, sum_1, sum_2);  submod_5 = sum_1 = sum_2 = None
+    add_1 = wrap_with_autocast_1[0]
+    add_2 = wrap_with_autocast_1[1];  wrap_with_autocast_1 = None
+    submod_6 = self.submod_3
+    wrap_with_autocast_2 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_6, add_1, add_2);  submod_6 = None
+    sub = wrap_with_autocast_2[0]
+    sub_1 = wrap_with_autocast_2[1];  wrap_with_autocast_2 = None
+    return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
+    """,  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add)
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_2 = torch.ops.aten.sum.default(cos);  cos = None
+    return (sum_1, sum_2)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_2.code.strip("\n"),
+            """\
+def forward(self, sum_1, sum_2):
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
+    return (add_1, add_2)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add_1, add_2):
+    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(add_2, 1);  add_2 = None
+    return (sub, sub_1)
+    """,
+        )
+
+        mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_split"]
+        _check_node_users_in_the_same_graph(mod)
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_4 = self.submod_1
+    sum_1 = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    submod_5 = self.submod_3
+    sub = torch._higher_order_ops.wrap.wrap_with_autocast('cpu', None, True, None, submod_5, add_1);  submod_5 = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    return sum_1
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add_1):
+    sub = torch.ops.aten.sub.Tensor(add_1, 1);  add_1 = None
+    return sub
     """,
         )
 
