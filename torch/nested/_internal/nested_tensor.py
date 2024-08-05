@@ -414,8 +414,8 @@ def jagged_from_list(
         )
 
     # compute this now since it's easy
-    min_seqlen = min([t.shape[0] for t in tensors])
-    max_seqlen = max([t.shape[0] for t in tensors])
+    min_seqlen = min(t.shape[0] for t in tensors)
+    max_seqlen = max(t.shape[0] for t in tensors)
     ret_nt = nested_view_from_values_offsets(
         values, offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
     )
