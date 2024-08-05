@@ -152,17 +152,19 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors = []
+    plain_tensors: List[Tensor] = []
     todo = [subclass]
     while todo:
         curr = todo.pop()
+        if not is_traceable_wrapper_subclass(curr):
+            assert isinstance(curr, Tensor)
+            plain_tensors.append(curr)
+            continue
+
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
+        for key in reversed(inner_keys):
+            todo.append(getattr(curr, key))
+
     return plain_tensors
 
 
@@ -1077,6 +1079,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config
@@ -1230,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:

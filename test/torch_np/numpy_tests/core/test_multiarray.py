@@ -1152,7 +1152,7 @@ class TestCreation(TestCase):
     def test_no_len_object_type(self):
         # gh-5100, want object array from iterable object without len()
         class Point2:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def __getitem__(self, ind):
