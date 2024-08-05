@@ -346,7 +346,7 @@ class Replicate(Placement):
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
     ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
     replica of the global Tensor. The ``Replicate`` placement can be used by all
-    DTensor APIs (i.e. distribute_tensor, from_local, etc.)
+    DTensor APIs (i.e. ``distribute_tensor``, ``DTensor.from_local``, etc.)
     """
 
     def __eq__(self, other: object) -> bool:
