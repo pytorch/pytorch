@@ -640,14 +640,14 @@ def handle_effect_tokens_fn(
             if trace_joint:
                 assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
                 fwd_tokens = args[0][:num_tokens]
+                assert all(token.numel() == 0 for token in fwd_tokens)
                 bwd_tokens = args[1][:num_tokens]
+                assert all(token.numel() == 0 for token in bwd_tokens)
                 args = (args[0][num_tokens:], args[1][num_tokens:], *args[2:])
             else:
                 fwd_tokens = args[:num_tokens]
+                assert all(token.numel() == 0 for token in fwd_tokens)
                 args = args[num_tokens:]
-
-            assert all(token.numel() == 0 for token in fwd_tokens)
-            assert all(token.numel() == 0 for token in bwd_tokens)
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
@@ -669,14 +669,22 @@ def handle_effect_tokens_fn(
 
         # Return both the tokens and the outputs
         # See Note [Side-Effectful Tokens in AOTAutograd]
+        if trace_joint:
+            assert len(outs) == 2
+            out_fwd_tokens = [
+                from_fun(t)
+                for t in functional_tensor_mode._tokens_forward_output.values()
+            ]
+            out_bwd_tokens = [
+                from_fun(t) for t in functional_tensor_mode._tokens.values()
+            ]
+            return ((*out_fwd_tokens, *outs[0]), (*out_bwd_tokens, *outs[1]))
+
+        assert len(outs) == 1
         out_fwd_tokens = [
             from_fun(t) for t in functional_tensor_mode._tokens_forward_output.values()
         ]
-        out_bwd_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
-
-        assert len(outs) == 2
-
-        return ((*out_fwd_tokens, *outs[0]), (*out_bwd_tokens, *outs[1]))
+        return (*out_fwd_tokens, *outs[0])
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]

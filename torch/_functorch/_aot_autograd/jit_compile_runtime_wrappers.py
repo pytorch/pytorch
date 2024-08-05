@@ -495,9 +495,7 @@ def aot_dispatch_autograd(
             if inner_meta.num_outputs_rng_offset > 0:
                 bw_outs_no_tokens_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
             if num_tokens > 0:
-                bw_outs_no_tokens_no_rng = bw_outs_no_tokens_no_rng[
-                    num_tokens:
-                ]
+                bw_outs_no_tokens_no_rng = bw_outs_no_tokens_no_rng[num_tokens:]
 
             assert len(bw_outs_no_tokens_no_rng) == len(fw_metadata.input_info)
 
