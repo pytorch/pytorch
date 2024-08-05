@@ -486,7 +486,7 @@ class BenchmarkRunner:
                     [
                         test_case.framework,
                         test_case.op_bench.module_name(),
-                        test_case.test_config.test_name,
+                        test_case.test_config.test_name + "_BACKWARD" if test_case.test_config.run_backward is True else False,
                         test_case.test_config.tag,
                         test_case.test_config.run_backward,
                         reported_time[0],
