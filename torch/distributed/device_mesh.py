@@ -302,14 +302,21 @@ else:
             dim_group_infos: List[Tuple[str, List[int], str]] = []
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
-                # if the mesh is the same as world_pg, we just append the default
-                # pg to the first dim groups, as new_group cannot have the exact
-                # same ranks as world
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
+                # Otherwise, create new pg.
+                default_group = _get_default_group()
+                ranks = list(range(get_world_size()))
+                dim_group = (
+                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
+                    if self.device_type == "cuda"
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
                 dim_group_infos.append(
                     (
-                        _get_group_tag(_get_default_group()),
-                        list(range(get_world_size())),
-                        _get_default_group().group_name,
+                        _get_group_tag(dim_group),
+                        ranks,
+                        dim_group.group_name,
                     )
                 )
             else:
