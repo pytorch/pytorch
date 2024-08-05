@@ -1,11 +1,15 @@
 # mypy: ignore-errors
 
 import functools
+import logging
 import sys
 from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
+
+
+log = logging.getLogger(__name__)
 
 
 class CompiledFn(Protocol):
@@ -57,8 +61,6 @@ def lookup_backend(compiler_fn):
         if compiler_fn not in _BACKENDS:
             _lazy_import()
         if compiler_fn not in _BACKENDS:
-            _lazy_import_entry_point(compiler_fn)
-        if compiler_fn not in _BACKENDS:
             from ..exc import InvalidBackend
 
             raise InvalidBackend(name=compiler_fn)
@@ -94,22 +96,27 @@ def _lazy_import():
 
     assert dynamo_minifier_backend is not None
 
+    _register_entrypoint_backends()
+
 
 @functools.lru_cache(None)
-def _lazy_import_entry_point(backend_name: str):
+def _register_entrypoint_backends():
     from importlib.metadata import entry_points
 
-    compiler_fn = None
     group_name = "torch_dynamo_backends"
     if sys.version_info < (3, 10):
-        backend_eps = entry_points()
-        eps = [ep for ep in backend_eps.get(group_name, ()) if ep.name == backend_name]
-        if len(eps) > 0:
-            compiler_fn = eps[0].load()
+        eps = entry_points()
+        eps = eps[group_name] if group_name in eps else []
+        eps = {ep.name: ep for ep in eps}
     else:
-        backend_eps = entry_points(group=group_name)
-        if backend_name in backend_eps.names:
-            compiler_fn = backend_eps[backend_name].load()
-
-    if compiler_fn is not None and backend_name not in list_backends(()):
-        register_backend(compiler_fn=compiler_fn, name=backend_name)
+        eps = entry_points(group=group_name)
+        eps = {name: eps[name] for name in eps.names}
+    for backend_name in eps:
+        try:
+            compiler_fn = eps[backend_name].load()
+            if compiler_fn is not None and backend_name not in _BACKENDS:
+                register_backend(compiler_fn=compiler_fn, name=backend_name)
+        except Exception:
+            log.warning(
+                "Failed to load compiler plugin %s", backend_name, exc_info=True
+            )
