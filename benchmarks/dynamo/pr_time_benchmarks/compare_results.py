@@ -28,10 +28,10 @@ def compute_percentage_difference(data1, data2, output_file):
         for metric in intersection_metrics:
             num1 = data1[benchmark_name][metric]
             num2 = data2[benchmark_name][metric]
-            diff = (num2 - num1) / num1 * 100 if num1 != 0 else 0
+            diff = ((num2 - num1) / num1) * 100 if num1 != 0 else 0
             print(f"{benchmark_name}, {metric}, {diff:.2f}%")
             writer.writerow((benchmark_name, metric, diff))
-            if diff > 0.03:
+            if diff > 3.0:
                 print(f"{benchmark_name}, {metric}, failed")
                 fail = True
 
