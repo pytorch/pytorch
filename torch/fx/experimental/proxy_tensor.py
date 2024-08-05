@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_proxy_mode"]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
 
