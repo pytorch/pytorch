@@ -2149,20 +2149,23 @@ class TestSDPA(NNTestCase):
     @parametrize("head_dim", [16, 32])
     @parametrize("dtype", [torch.float32, torch.float16])
     def test_fully_masked_out_rows(self, backend, device, seq_len, head_dim, dtype):
-        def attention_inputs(seq_len, head_dim, device, dtype, mask_probability=0.25):
+        def attention_inputs(seq_len, head_dim, device, dtype, mask_every_n_rows=4):
             query = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
             key = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
             value = torch.rand(1, 1, seq_len, head_dim, requires_grad=True, device=device, dtype=dtype)
 
-            # Create a mask with random row masking
+            # Create a mask with deterministic row masking
             mask = torch.ones(1, 1, seq_len, seq_len, dtype=torch.bool, device=device)
+            
+            # Mask every nth row
+            mask[0, 0, ::mask_every_n_rows, :] = False
 
-            # Randomly select rows to mask
-            random_mask = torch.rand(seq_len, device=device) < mask_probability
-            mask[0, 0, random_mask, :] = False
-
-            # Randomly mask out some elements on along rows with 20% probz
-            mask = mask & (torch.rand(1, 1, seq_len, seq_len, device=device) < 0.2)
+            # Create a fixed pattern for element-wise masking
+            element_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
+            element_mask[torch.arange(seq_len)[:, None] % 5 == torch.arange(seq_len) % 5] = True
+            
+            # Combine row masking and element-wise masking
+            mask = mask & element_mask.unsqueeze(0).unsqueeze(0)
 
             return query, key, value, mask
 
@@ -2203,11 +2206,11 @@ class TestSDPA(NNTestCase):
         masked_rows = (mask_sum == 0).expand_as(backend_out)
         self.assertTrue((mask_sum == 0).sum() > 0, "No fully masked out rows found")
         assert torch.all(backend_out[masked_rows] == 0), \
-            f"Non-zero values in fully masked rows for {backend}"
+            f"Non-zero values in fully masked rows for {backend=}"
 
         # Check if gradients for masked rows are zero
         grad_query = backend_grads[0]
-        assert torch.all(grad_query[masked_rows] == 0), f"Non-zero gradients in fully masked rows for {backend}"
+        assert torch.all(grad_query[masked_rows] == 0), f"Non-zero gradients in fully masked rows for {backend=}"
 
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
