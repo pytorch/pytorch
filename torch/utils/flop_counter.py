@@ -619,6 +619,7 @@ class FlopCounterMode(TorchDispatchMode):
             depth: int = 2,
             display: bool = True,
             custom_mapping: Optional[Dict[Any, Any]] = None):
+        super().__init__()
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display

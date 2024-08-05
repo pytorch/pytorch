@@ -481,10 +481,12 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
-        raise RuntimeError(f"Unknown metadata type {type(val)}")
+        raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr":
         return 0
-    raise RuntimeError("We should always have `val` metadata on the nodes")
+    raise RuntimeError(
+        f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
+    )
 
 
 # Used for some investigative purposes
@@ -1527,7 +1529,7 @@ def choose_saved_values_set(
         return runtime_optimized_saved_values
 
     def estimate_activations_size(saved_values: List[fx.Node]) -> float:
-        return sum([_size_of(i) for i in saved_values]) / 1e9
+        return sum(map(_size_of, saved_values)) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)
