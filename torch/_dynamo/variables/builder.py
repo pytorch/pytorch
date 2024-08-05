@@ -834,7 +834,7 @@ class VariableBuilder:
             return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
         elif PlacementClassVariable.is_placement_type(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
@@ -842,7 +842,7 @@ class VariableBuilder:
             return PlacementClassVariable(value, source=self.source)
         elif PlacementVariable.is_placement(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return PlacementVariable(
                 value,
                 source=self.source,
