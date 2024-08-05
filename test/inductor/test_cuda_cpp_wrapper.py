@@ -62,9 +62,7 @@ test_failures_cuda_wrapper = {
 
 
 if config.abi_compatible:
-    xfail_list = [
-        "test_profiler_mark_wrapper_call_cuda",
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=False
@@ -187,6 +185,8 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_pointwise_hermite_polynomial_he"),
+        BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
