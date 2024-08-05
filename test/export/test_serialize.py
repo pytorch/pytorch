@@ -265,6 +265,40 @@ class TestSerialize(TestCase):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_serialize_sym_int(self) -> None:
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dim1_bc = torch.export.Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }
+        exported_module = export(
+            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        sym_size_nodes = [
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == "torch.ops.aten.sym_size.int"
+        ]
+        for node in sym_size_nodes:
+            self.assertEqual(node.inputs[0].name, "self")
+            self.assertEqual(node.inputs[1].name, "dim")
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

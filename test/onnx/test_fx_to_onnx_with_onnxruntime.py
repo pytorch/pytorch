@@ -19,7 +19,7 @@ import torch
 import torch.onnx
 from torch import nn
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import exporter
+from torch.onnx._internal import _exporter_legacy
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_symbolic_graph_extractor,
@@ -99,7 +99,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
     @pytorch_test_common.xfail(
-        error_message="Unexpectedly found a <class 'torch.Tensor'> in the inputs.",
+        error_message="Tracing through optional input is not supported yet",
         reason="https://github.com/pytorch/pytorch/issues/96379",
     )
     def test_func_with_args_and_tensor_kwargs(self):
@@ -781,7 +781,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = exporter.ResolvedExportOptions(options)
+                export_options = _exporter_legacy.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
