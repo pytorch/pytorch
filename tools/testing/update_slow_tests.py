@@ -187,6 +187,7 @@ if __name__ == "__main__":
         json.dump(slow_tests, f, indent=2)
 
     branch_name = f"update_slow_tests_{int(time.time())}"
+    pr_num = None
 
     open_pr = search_for_open_pr("pytorch/pytorch", "Update slow tests")
     if open_pr is not None:
