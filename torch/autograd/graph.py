@@ -223,7 +223,7 @@ def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> No
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
-    the memory inplace based on this pointer.Can accept either a tensor, or a list of tensors.
+    the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
