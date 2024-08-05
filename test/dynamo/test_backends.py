@@ -305,6 +305,8 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
         mock_3_9 = MagicMock()
         mock_3_9.load.return_value = lambda: "mocked 3.9"
+        mock_3_9.name = name
+
         mock_3_10 = MagicMock()
         mock_3_10.load.return_value = lambda: "mocked 3.10"
 
