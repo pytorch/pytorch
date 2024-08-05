@@ -6226,6 +6226,38 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(njt.lengths(), torch.tensor([1, 2, 1], device=device))
         self.assertEqual(njt.offsets(), torch.tensor([0, 1, 3, 4], device=device))
 
+        t = torch.randn([2, 3, 3, 1], device=device)
+        mask = torch.tensor(
+            [
+                [
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                ],
+                [
+                    [[False], [True], [True]],
+                    [[False], [True], [True]],
+                    [[True], [True], [True]],
+                ],
+            ],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(
+            njt.lengths(),
+            torch.tensor(
+                [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1], device=device
+            ),
+        )
+        self.assertEqual(
+            njt.offsets(),
+            torch.tensor(
+                [0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13],
+                device=device,
+            ),
+        )
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

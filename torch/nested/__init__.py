@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
-from torch._prims_common import is_expandable_to
 
 from torch.types import _device as Device, _dtype as DType
 
@@ -414,6 +413,33 @@ Example::
         values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
 
 def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
+    r"""
+    Constructs a nested tensor given a a strided tensor input and a strided mask, the resulting jagged layout Nested Tensor
+    will have the
+
+    Args:
+    tensor (:class:`torch.Tensor`): a strided tensor from which the jagged layout nested tensor is constructed from.
+    mask (:class:`torch.Tensor`): a strided mask tensor which is applied to the tensor input
+
+Example::
+
+    >>> tensor = torch.randn(3,3)
+    >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
+    >>> nt = torch.nested.masked_select(tensor, mask)
+    >>> nt.shape
+    torch.Size([3, j3])
+    >>> # Length of each item in the batch:
+    >>> offsets.diff()
+    tensor([1, 2, 1])
+
+    >>> tensor = torch.randn(6, 5)
+    >>> mask = torch.tensor([False])
+    >>> nt = torch.nested_select(tensor, mask)
+    >>> torch.Size([3, j4])
+    >>> # Length of each item in the batch:
+    >>> offsets.diff()
+    >>> tensor([0, 0, 0, 0, 0, 0])
+    """
     if tensor.layout != torch.strided:
         raise RuntimeError(
             f"torch.nested.masked_select requires a strided tensor, given {tensor.layout}"
@@ -423,10 +449,9 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
         raise RuntimeError(
             f"torch.nested.masked_select requires a strided mask, given: {mask.layout}"
         )
-
     res_values = tensor.masked_select(mask)
     expanded_mask = mask.expand(tensor.shape)
-    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1)
+    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).reshape(-1)
 
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
