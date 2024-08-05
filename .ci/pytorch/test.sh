@@ -1385,7 +1385,7 @@ test_operator_benchmark() {
 
   python benchmarks/operator_benchmark/check_perf_csv.py \
   --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-  --expected "benchmarks/operator_benchmark_eager_float32_cpu_expected.csv"
+  --expected "benchmarks/operator_benchmark/expected_ci_operator_benchmark_eager_float32_cpu.csv"
 
 }
 
