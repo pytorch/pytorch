@@ -58,10 +58,13 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
     @with_comms
     def test_device_mesh_reuse_default_group(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
         if torch.cuda.is_available():
-            self.assertNotEqual(mesh.get_group(), _get_default_group())
+            self.assertNotEqual(mesh_group, default_group)
+            self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
-            self.assertEqual(mesh.get_group(), _get_default_group())
+            self.assertEqual(mesh_group, default_group)
 
 
 class DeviceMeshTest(DTensorTestBase):
