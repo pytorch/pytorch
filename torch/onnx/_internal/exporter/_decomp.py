@@ -1,5 +1,6 @@
 """Build decomp table from PyTorch."""
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 from typing import Callable, TYPE_CHECKING

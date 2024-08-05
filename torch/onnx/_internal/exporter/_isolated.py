@@ -1,5 +1,6 @@
 """Isolated calls to methods that may segfault."""
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import multiprocessing

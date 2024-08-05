@@ -6,6 +6,7 @@ to the same type as Tensor. The same thing needs to work for
 torch.ops.aten.add(1.0, Tensor) as well, which means we need a mechanism to`
 """
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import copy

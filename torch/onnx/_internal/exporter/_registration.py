@@ -9,6 +9,7 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 # opsets etc. The registry implemented for the exporter is designed to be modifiable at
 # export time by users, and is designed with dispatching in mind.
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses

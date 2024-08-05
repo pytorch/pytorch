@@ -1,5 +1,6 @@
 """Compatibility analyzer for PyTorch models."""
 
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
