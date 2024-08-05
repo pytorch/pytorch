@@ -1258,19 +1258,18 @@ PyObject* THPModule_increment_version(
     PyObject* _unused,
     PyObject* tensor_list) {
   HANDLE_TH_ERRORS
-  PyObject* iterator = PyObject_GetIter(tensor_list);
-  TORCH_CHECK(
-      iterator != nullptr,
-      "increment_version expect a Tensor or Iterable[Tensor] as input");
-  PyObject* item = nullptr;
-  while ((item = PyIter_Next(iterator))) {
+  auto iterator = THPObjectPtr(PyObject_GetIter(tensor_list));
+  TORCH_CHECK(iterator, "increment_version expect a Iterable[Tensor] as input");
+  auto item = THPObjectPtr(PyIter_Next(iterator));
+  while (item) {
     TORCH_CHECK(
         THPVariable_Check(item),
-        "increment_version expect a Tensor or Iterable[Tensor] as input");
+        "increment_version expects each element of the iterable to be a tensor");
     auto t = THPVariable_Unpack(item);
     if (!t.is_inference()) {
       torch::autograd::increment_version(t);
     }
+    item = THPObjectPtr(PyIter_Next(iterator));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
