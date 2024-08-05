@@ -924,6 +924,15 @@ elseif(USE_CUDA)
         ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
         ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   endif()
+  if(USE_FLASH_ATTENTION)
+    # flash_attn for cuda requires excessive memory, so restrict parallelism in ninja builds
+    add_library(flash_attention_cuda OBJECT)
+    # set_target_properties(flash_attention_cuda PROPERTIES LINKER_LANGUAGE CUDA)
+    set_property(GLOBAL PROPERTY JOB_POOLS flash_attention_pool=3)
+    set_property(TARGET flash_attention_cuda PROPERTY JOB_POOL_COMPILE flash_attention_pool)
+    target_sources(flash_attention_cuda PRIVATE ${FLASH_ATTENTION_CUDA_SOURCES})
+    target_link_libraries(torch_cuda PRIVATE flash_attention_cuda)
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
@@ -941,7 +950,6 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(USE_FLASH_ATTENTION)
-    target_link_libraries(torch_cuda PRIVATE flash_attention_cuda)
     target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
   endif()
   if(USE_MEM_EFF_ATTENTION)
@@ -1511,6 +1519,10 @@ if(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  #if(USE_FLASH_ATTENTION)
+  #  target_include_directories(
+  #      flash_attention_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+  #endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
