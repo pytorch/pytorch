@@ -220,6 +220,7 @@ class VectorizedN {
     return result;
   }
 
+  VECTORIZEDN_DEFINE_UNARY_OP(isnan)
   VECTORIZEDN_DEFINE_UNARY_OP(abs)
   VECTORIZEDN_DEFINE_UNARY_OP(sgn)
   VECTORIZEDN_DEFINE_UNARY_OP(angle)

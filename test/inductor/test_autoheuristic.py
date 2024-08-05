@@ -127,14 +127,22 @@ class AutoHeuristicTest(TestCase):
         # TODO (AlnisM): Find a way to check whether heuristic is used
         self.run_mm()
 
-    @inductor_config.patch(autoheuristic_collect="mixed_mm")
-    def test_global_feedback(self):
+    def run_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        a = torch.randn(8, 8, device="cuda")
-        b = torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda")
+        a = torch.randn(8, 1024, device="cuda", dtype=torch.float16)
+        b = torch.randint(-128, 127, (1024, 1024), dtype=torch.int8, device="cuda").t()
         torch.compile(fn, mode="max-autotune-no-cudagraphs")(a, b)
+
+    # have to set autoheuristic_use="" because if autoheuristic_use="mixed_mm",
+    # autoheuristic creates a precompile key, puts it into the registry, and then
+    # a choice made by the heuristic might be added to the list of choices
+    # and if select_algorithm now creates a new precompile key, it will be
+    # different from the precompile key created by autoheuristic
+    @inductor_config.patch(autoheuristic_collect="mixed_mm", autoheuristic_use="")
+    def test_global_feedback(self):
+        self.run_mixed_mm()
         path = self.get_path_to_autoheuristic_log("mixed_mm")
         self.assertTrue(os.path.exists(path))
         num_lines = self.count_lines_in_file(path)
@@ -142,6 +150,12 @@ class AutoHeuristicTest(TestCase):
         # 1 line for metadata, 1 line for header
         # 1 line for fallback + at least 1 config
         self.assertTrue(num_lines > 4)
+
+    @inductor_config.patch(autoheuristic_use="mixed_mm")
+    @unittest.skipIf(not IS_A100, "heuristic only run on A100")
+    def test_mixed_mm_a100(self):
+        self.run_mixed_mm()
+        # TODO (AlnisM): Find a way to check whether heuristic is used
 
 
 if __name__ == "__main__":
