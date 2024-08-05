@@ -29,7 +29,7 @@ static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseRetur
 static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
   auto result = self;
   bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
-  int64_t nDims = sizes.size();
+  int64_t nDims = static_cast<int64_t>(sizes.size());
   for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
       need_alias = false;

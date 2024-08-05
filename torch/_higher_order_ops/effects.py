@@ -55,7 +55,7 @@ class WithEffects(HigherOrderOperator):
     per "effect type", which are enumerated in the _EffectType enum.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("with_effects")
 
     def __call__(
