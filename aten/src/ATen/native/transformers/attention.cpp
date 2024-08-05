@@ -71,7 +71,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_safe_softmax.h>
 #include <ATen/ops/_safe_softmax_native.h>
-#include <ATen/ops/nan_to_num.h>
+#include <ATen/ops/all.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -616,7 +616,7 @@ Tensor _safe_softmax(
     std::optional<ScalarType> dtype) {
   auto out = at::softmax(self, dim, dtype);
   const auto masked = self.eq(-std::numeric_limits<float>::infinity());
-  const auto masked_rows = masked.all(dim, true);
+  const auto masked_rows = all(masked, dim, true);
   return at::where(masked_rows, at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device())), out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
