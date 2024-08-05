@@ -265,6 +265,18 @@ def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwar
     return sdpa_flop_count(query_shape, key_shape, value_shape)
 
 
+def _offsets_to_lengths(offsets, max_len):
+    """
+    If the offsets tensor is fake, then we don't know the actual lengths.
+    In that case, we can just assume the worst case; each batch has max length.
+    """
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import FunctionalTensor
+    if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
+        return offsets.diff().tolist()
+    return [max_len] * (offsets.size(0) - 1)
+
+
 def _unpack_flash_attention_nested_shapes(
     *,
     query,
@@ -298,8 +310,8 @@ def _unpack_flash_attention_nested_shapes(
         assert cum_seq_q is not None
         assert cum_seq_k is not None
         assert cum_seq_q.shape == cum_seq_k.shape
-        seq_q_lengths = (cum_seq_q[1:] - cum_seq_q[:-1]).tolist()
-        seq_k_lengths = (cum_seq_k[1:] - cum_seq_k[:-1]).tolist()
+        seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
+        seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
         for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
@@ -346,8 +358,8 @@ def _unpack_efficient_attention_nested_shapes(
         assert cu_seqlens_q is not None
         assert cu_seqlens_k is not None
         assert cu_seqlens_q.shape == cu_seqlens_k.shape
-        seqlens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
-        seqlens_k = (cu_seqlens_k[1:] - cu_seqlens_k[:-1]).tolist()
+        seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
+        seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
         for len_q, len_k in zip(seqlens_q, seqlens_k):
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
