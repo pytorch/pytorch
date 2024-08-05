@@ -333,7 +333,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             group_name=group.group_name,
         )
 
-        print(output_0, output_1)
         assert torch.allclose(output_0, output_1)
         assert output_0.stride() == output_1.stride()
 
