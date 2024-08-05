@@ -110,9 +110,15 @@ class SymNode:
         # in sync, so we've deleted it for now.)
 
         def compute_hint():
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
             # This occasionally gets exercised by, e.g.,
             # convert_shape_to_symint.  It's just a nicety so you don't HAVE
             # to have a correct hint on hand when making a SymNode.
+            # Don't attempt to compute for unbacked, this can be quite
+            # expensive.
+            if free_unbacked_symbols(self.expr):
+                return None
             hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
             if hint is not None:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint

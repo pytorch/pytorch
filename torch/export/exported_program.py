@@ -404,6 +404,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             {},
             fake_params_buffers,
             constant_attrs,
+            _check_autograd_state=False,
         )
 
         gm = aten_export_artifact.gm

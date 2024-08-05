@@ -135,6 +135,10 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
+    # If CUDA is not available, than it does not support bf16 either
+    if not is_available():
+        return False
+
     device = torch.cuda.current_device()
 
     # Check for CUDA version and device compute capability.
@@ -1621,6 +1625,8 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
     "temperature",
     "power_draw",
     "clock_rate",
