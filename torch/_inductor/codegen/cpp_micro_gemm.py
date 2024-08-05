@@ -356,9 +356,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     TEMPLATE_KERNEL = r"""
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
-    const {{input_t}}* __restrict__ A,
-    const {{input_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
@@ -432,6 +432,7 @@ inline void {{kernel_name}}_kernel(
             "block_m": self.register_blocking.block_m,
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
         result = KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
@@ -526,9 +527,9 @@ class CppMicroGemmAMX(CppMicroGemm):
 template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
-    const {{input_t}}* __restrict__ A,
-    const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
@@ -637,6 +638,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             "block_n": block_n,
             "block_k": block_k,
             "num_columns": num_columns,
+            "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
         result = ""

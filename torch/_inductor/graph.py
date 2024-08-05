@@ -763,9 +763,9 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    @dynamo_timed
     def run(self, *args: Any) -> Any:
-        return super().run(*args)
+        with dynamo_timed("GraphLowering.run"):
+            return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
         assert op.operation_name is None, f"Operation registered twice: {op}"
@@ -1763,8 +1763,13 @@ class GraphLowering(torch.fx.Interpreter):
         # No-op to be patched for unit tests
         pass
 
-    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self) -> ModuleType:
+        with dynamo_timed(
+            "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
+        ):
+            return self._compile_to_module()
+
+    def _compile_to_module(self) -> ModuleType:
         from .codecache import PyCodeCache
 
         code, linemap = (
