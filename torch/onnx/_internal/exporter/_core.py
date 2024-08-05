@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# flake8: noqa: B950 We do not need flake8 as it complains line length
 from __future__ import annotations
 
 import ctypes
@@ -614,7 +615,7 @@ def _get_inputs_and_attributes(
 
 def _maybe_start_profiler(should_profile: bool) -> Any:
     if should_profile:
-        import pyinstrument
+        import pyinstrument  # type: ignore[import-not-found]
 
         profiler = pyinstrument.Profiler(async_mode="disabled")
         profiler.start()
@@ -682,11 +683,11 @@ def exported_program_to_ir(
     """
     if registry is None:
         # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops
+        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
 
         del ops
         registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry
+            onnxscript.function_libs.torch_lib.registration.default_registry  # type: ignore[arg-type]
         )
     if lower != "none":
         exported_program = _prepare_exported_program_for_export(
@@ -805,7 +806,7 @@ def _exported_program_to_onnx_program(
             "pkg.torch.export.graph_signature.InputSpec.persistent"
         ] = str(persistent)
 
-        model.graph.inputs.append(value)  # type: ignore
+        model.graph.inputs.append(value)  # type: ignore[arg-type]
         if input_kind != graph_signature.InputKind.USER_INPUT:
             model.graph.initializers[value_name] = value
 
@@ -1057,7 +1058,7 @@ def export(
 
             del ops
             registry = _registration.ONNXRegistry.from_torchlib(
-                onnxscript.function_libs.torch_lib.registration.default_registry
+                onnxscript.function_libs.torch_lib.registration.default_registry   # type: ignore[arg-type]
             )
 
         # Process the exported program to run decompositions and type promotions etc.

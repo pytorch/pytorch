@@ -95,7 +95,7 @@ class TypeConstraintParam:
 
     @classmethod
     def any_value(cls, name: str, description: str = "") -> TypeConstraintParam:
-        return cls(name, _ALL_VALUE_TYPES, description)  # type: ignore
+        return cls(name, _ALL_VALUE_TYPES, description)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,7 +182,7 @@ def _convert_formal_parameter(
         # param.type_str can be a plain type like 'int64'.
         type_constraint = TypeConstraintParam(
             name=param.name,
-            allowed_types={_get_type_from_str(param.type_str)},  # type: ignore
+            allowed_types={_get_type_from_str(param.type_str)},
         )
     return Parameter(
         name=param.name,
@@ -280,7 +280,7 @@ def _get_allowed_types_from_type_annotation(
         else:
             bound = type_.__bound__
             if bound is None:
-                allowed_types = _ALL_VALUE_TYPES  # type: ignore
+                allowed_types = _ALL_VALUE_TYPES
             else:
                 allowed_types.update(_get_allowed_types_from_type_annotation(bound))
         return allowed_types
@@ -316,7 +316,7 @@ def _get_allowed_types_from_type_annotation(
         }
 
     # Allow everything by default
-    return _ALL_VALUE_TYPES  # type: ignore
+    return _ALL_VALUE_TYPES
 
 
 @dataclasses.dataclass
@@ -405,7 +405,7 @@ class OpSignature:
                     name=param.name,
                     type=ir.AttributeType(param.type),
                     required=param.required,
-                    default=default_attr,  # type: ignore
+                    default=default_attr,
                 )
             )
 

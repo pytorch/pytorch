@@ -269,7 +269,10 @@ def get_matching_overload(
                 # FIXME: Handle symfloat etc.
                 # Handle tensors and Python values
                 if not _param_type_compatible_with_arg(param, arg, assigned_types):
-                    fail_reason = f"Parameter type not compatible with argument: param=`{param}`, assigned_types=`{assigned_types}`, arg=`{arg}`"
+                    fail_reason = (
+                        f"Parameter type not compatible with argument: param=`{param}`, "
+                        f"assigned_types=`{assigned_types}`, arg=`{arg}`"
+                    )
                     break
             elif isinstance(param, _schemas.AttributeParameter):
                 if not _attribute_type_compatible_with_arg(param, arg):

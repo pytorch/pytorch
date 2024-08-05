@@ -388,7 +388,7 @@ class OpRecorder(evaluator.Evaluator):
                 f"named_inputs={named_inputs}, converted_named_inputs={converted_named_inputs}, "
                 f"named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
             ) from e
-        return node.outputs  # type: ignore
+        return node.outputs  # type: ignore[return-value]
 
     def eval(
         self,
@@ -415,12 +415,12 @@ class OpRecorder(evaluator.Evaluator):
                     and target_type.dtype is not None
                 )
                 if dtypes_available:
-                    if src_input.dtype == target_type.dtype:
+                    if src_input.dtype == target_type.dtype:  # type: ignore[union-attr]
                         # Same type. No cast needed
-                        return src_input
+                        return src_input  # type: ignore[return-value]
                     else:
                         # Create a Cast node
-                        return self.opset.Cast(src_input, to=target_type.dtype)
+                        return self.opset.Cast(src_input, to=target_type.dtype)  # type: ignore[union-attr,return-value]
 
             outputs = self._call_op(op_signature, named_inputs, named_attrs)
             if len(outputs) == 1:

@@ -1,6 +1,7 @@
 """Compatibility analyzer for PyTorch models."""
 
 # mypy: allow-untyped-defs
+# flake8: noqa: B950 We do not need flake8 as it complains line length
 from __future__ import annotations
 
 import dataclasses
@@ -203,11 +204,11 @@ def analyze(
 
     if registry is None:
         # Trigger op registration
-        from onnxscript.function_libs.torch_lib import ops
+        from onnxscript.function_libs.torch_lib import ops  # noqa: F401
 
         del ops
         registry = _registration.ONNXRegistry.from_torchlib(
-            onnxscript.function_libs.torch_lib.registration.default_registry
+            onnxscript.function_libs.torch_lib.registration.default_registry # type: ignore[arg-type]
         )
 
     # Try to find ops for every node in the graph
