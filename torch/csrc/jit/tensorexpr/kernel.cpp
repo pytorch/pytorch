@@ -1857,7 +1857,7 @@ void TensorExprKernel::recompile() {
 }
 
 TensorExprKernel::TensorExprKernel(
-    std::shared_ptr<Graph> subgraph,
+    const std::shared_ptr<Graph>& subgraph,
     std::string kernel_func_name,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
@@ -1865,8 +1865,8 @@ TensorExprKernel::TensorExprKernel(
     std::unordered_map<
         const torch::jit::Value*,
         std::vector<torch::jit::StrideInput>> symbolic_strides)
-    : graph_(std::move(subgraph)),
-      code_(graph_, ""),
+    : graph_(subgraph),
+      code_(subgraph, ""),
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),

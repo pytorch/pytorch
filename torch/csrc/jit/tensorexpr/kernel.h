@@ -119,7 +119,7 @@ class TORCH_API TensorExprKernel {
   //  * pre_alloc
   //      - a flag to control pre-allocation of buffers.
   explicit TensorExprKernel(
-      std::shared_ptr<Graph> subgraph,
+      const std::shared_ptr<Graph>& subgraph,
       std::string kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
