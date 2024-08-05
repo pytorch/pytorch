@@ -91,6 +91,19 @@ def _causal(
     return torch.where(token_q >= token_kv, score, float("-inf"))
 
 
+def _generate_windowed(offset):
+    def _windowed(score, b, h, q, kv):
+        return torch.where(q + offset >= kv, score, float("-inf"))
+
+    return _windowed
+
+
+def _get_windowed_sdpa_mask(Mq, Mkv, offset):
+    return torch.tril(torch.ones(Mkv, Mkv, dtype=torch.bool, device="cuda"))[
+        offset : offset + Mq
+    ]
+
+
 def _rel_bias(
     score: Tensor,
     batch: Tensor,
@@ -171,6 +184,7 @@ test_score_mods = [
     _rel_bias,
     _rel_causal,
     _generate_alibi_bias(8),
+    _generate_windowed(1000),
 ]
 
 captured_buffers_map = {
@@ -207,7 +221,7 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
-class TestFlexAttention(InductorTestCase):
+class TestFlexDecoding(InductorTestCase):
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -825,42 +839,48 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
 
     @supported_platform
-    def test_causal_no_mask_vs_sdpa(self):
-        attention = functools.partial(flex_attention, score_mod=_causal)
+    def test_windowed_no_mask_vs_sdpa(self):
+        score_mod = _generate_windowed(1000)
+        attention = functools.partial(flex_attention, score_mod=score_mod)
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
 
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
     @supported_platform
-    def test_causal_full_mask_vs_sdpa(self):
+    def test_windowed_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
-            return q >= kv
+            return q + 1000 >= kv
+
+        score_mod = _generate_windowed(1000)
 
         block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
         attention = functools.partial(
-            flex_attention, block_mask=block_mask, score_mod=_causal
+            flex_attention, block_mask=block_mask, score_mod=score_mod
         )
 
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    @expectedFailure  # TODO: add support for partial mask.
     @supported_platform
-    def test_causal_partial_block_vs_sdpa(self):
+    def test_windowed_partial_block_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
-            return q >= kv
+            return q + 1000 >= kv
 
         block_mask = create_block_mask(mask_mod, 1, 1, 8, S)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
         sdpa_attention = functools.partial(
-            torch.nn.functional.scaled_dot_product_attention, is_causal=True
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
@@ -885,6 +905,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -895,6 +920,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
 
         @torch.compile(backend="aot_eager")
@@ -903,7 +929,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return flex_attention_hop(q, k, v, score_mod, block_mask.as_tuple(), 1.0)
+            return flex_attention_hop(
+                q, k, v, score_mod, block_mask.as_tuple(), 1.0, kernel_options
+            )
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
@@ -958,6 +986,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -967,7 +1000,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                scale=1.0,
+                1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return lse_2
@@ -994,6 +1028,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_q(), make_kv(), make_kv()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1004,6 +1043,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1013,7 +1053,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check_count(".run(", 3, False).run(code[0])
 
 
-common_utils.instantiate_parametrized_tests(TestFlexAttention)
+common_utils.instantiate_parametrized_tests(TestFlexDecoding)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

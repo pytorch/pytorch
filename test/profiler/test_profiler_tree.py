@@ -556,7 +556,7 @@ class TestProfilerTree(TestCase):
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = [
                     torch.nn.ReLU(),

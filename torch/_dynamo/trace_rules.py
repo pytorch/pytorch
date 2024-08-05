@@ -17,7 +17,6 @@ import linecache
 import logging
 import multiprocessing
 import operator
-import os
 import posixpath
 import random
 import re
@@ -2930,7 +2929,9 @@ class FunctionIdSet:
     function_ids: Optional[Set[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
-    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+    def __init__(
+        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+    ) -> None:
         self.lazy_initializer = lazy_initializer
 
     def __call__(self):
@@ -2958,7 +2959,7 @@ class FunctionIdSet:
         if idx in function_ids:
             function_ids.remove(idx)
 
-    def __contains__(self, idx: int):
+    def __contains__(self, idx: int) -> bool:
         return idx in self()
 
 
@@ -3108,7 +3109,6 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    os,
     posixpath,
     random,
     re,
