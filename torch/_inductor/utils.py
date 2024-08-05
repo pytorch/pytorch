@@ -1131,7 +1131,8 @@ def use_ck_template(layout, m, n, k):
         native_arch.split(":")[0]: native_arch
     }
     requested_supported_archs = [
-        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+        requested_archs[k]
+        for k in requested_archs.keys() & config.rocm.ck_supported_arch
     ]
     if not requested_supported_archs:
         return False
