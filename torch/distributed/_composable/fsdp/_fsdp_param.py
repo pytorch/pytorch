@@ -118,6 +118,10 @@ nn.Parameter in order to see the result of .set_.
 def set__functionalize(tensor, data):
     torch._sync(tensor)
     torch._sync(data)
+    # AOTDispatcher needs to know if any inputs had their storages mutated.
+    # (Why? It sometimes detaches inputs before sending them into the graph,
+    #  when it sees that they do not need to have any gradients computed)
+    torch._functionalize_set_storage_changed(tensor)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     with torch._C._ExcludeDispatchKeyGuard(
