@@ -413,6 +413,6 @@ Example::
 # This library impl is here so pytorch picks it up when initializing, otherwise users had to import
 # torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
 # fun circular dependency hell, so this is the next best thing
-@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[misc]
+@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type, misc]
 def _aten_nested_get_jagged_dummy(x: Tensor) -> Tensor:
     return _nt_view_dummy()
