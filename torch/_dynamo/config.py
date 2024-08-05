@@ -365,9 +365,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = (
-    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
-)
+inline_inbuilt_nn_modules = not is_fbcode()
 
 
 def default_debug_dir_root():
@@ -473,5 +471,6 @@ if TYPE_CHECKING:
 
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])
