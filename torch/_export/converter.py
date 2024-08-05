@@ -456,9 +456,13 @@ class TS2FXGraphConverter:
         subgraph_nodes, subgraph_converters = [], []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, {}, {}, self.blocks_to_lifted_attrs, {}
+                block,
+                self.name_to_param,
+                self.name_to_buffer,
+                self.blocks_to_lifted_attrs,
+                {},
+                self.name_to_constant,
             )
-            subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
 
             for block_arg in arguments:
@@ -534,8 +538,8 @@ class TS2FXGraphConverter:
     def get_fx_value_by_fqn(self, name):
         if name in self.name_to_node:
             fx_node = self.name_to_node[name]
-        elif name in self.constant_map:
-            fx_node = self.constant_map[name]
+        elif name in self.name_to_constant:
+            fx_node = self.name_to_constant[name]
         elif name in self.name_to_non_tensor_attribute_node:
             fx_node = self.name_to_non_tensor_attribute_node[name]
         elif name in self.name_to_non_tensor_attribute:
@@ -672,24 +676,16 @@ class TS2FXGraphConverter:
             "This makes the converter non-functional: the result depends on the order of the append nodes being converter!"
         )
 
-        args = tuple(self.get_fx_value(inp) for inp in node.inputs())
+        args = tuple(self.get_fx_value_by_ir_value(inp) for inp in node.inputs())
         fx_node = self.fx_graph.call_function(list_append, args)
         self.name_to_node[node.output().debugName()] = fx_node
 
         # inplace mutate arg[0], which is the python list
         self.name_to_node[node.inputsAt(0).debugName()] = fx_node
 
-    def convert_aten_append(self, node: torch._C.Node):
-        inp_list = list(node.inputs())
-        inp_value_list = [self.get_fx_value_by_ir_value(inp) for inp in inp_list]
-        fx_node = self.fx_graph.call_function(
-            append_to_immutable_list, tuple(inp_value_list)
-        )
-        self.name_to_node[node.output().debugName()] = fx_node
-        self.name_to_node[inp_list[0].debugName()] = fx_node
-
-        if not self.is_top_level_graph() and inp_value_list[0].op == "placeholder":
-            self.name_update_from_subblock_to_parent.add(inp_list[0].debugName())
+        # Variables that need to be updated to parent module.
+        if not self.is_top_level_graph() and args[0].op == "placeholder":
+            self.name_update_from_subblock_to_parent.add(node.inputsAt(0).debugName())
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -720,7 +716,9 @@ class TS2FXGraphConverter:
         self.name_to_constant[name] = value
 
     def convert_prim_CallMethod(self, node: torch._C.Node):
-        inp_list = [self.get_fx_value(inp) for inp in node.inputs()]  # noqa: C416
+        inp_list = [
+            self.get_fx_value_by_ir_value(inp) for inp in node.inputs()
+        ]  # noqa: C416
         fx_node = self.fx_graph.call_method(
             node.s("name"),
             tuple(inp_list),
@@ -767,7 +765,7 @@ class TS2FXGraphConverter:
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_fqn = get_attribute_fqn_from_ts_node(self.name_to_attribute_fqn, node)
         attr_value = tuple(node.inputs())[1]
-        ts_graph_tensor_input = self.get_fx_value(attr_value)
+        ts_graph_tensor_input = self.get_fx_value_by_ir_value(attr_value)
         if self._is_get_attr_node(attr_fqn):
             fx_attr_node = self.fx_graph.get_attr(attr_fqn)
             self.fx_graph.call_function(
@@ -998,7 +996,7 @@ class TS2FXGraphConverter:
         inputs = list(node.inputs())
 
         # TODO: (1/N) stage.
-        if inputs[0].debugName() not in self.constant_map:
+        if inputs[0].debugName() not in self.name_to_constant:
             raise RuntimeError(
                 "prim::Loop currently cannot run with dynamic value of number of iterations."
             )
