@@ -346,6 +346,7 @@ class TestTransformers(NNTestCase):
     @parametrize("key_padding_mask_dim", [2, None])
     @parametrize("mask_dtype", [torch.bool, torch.float32])
     def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim, mask_dtype):
+        # MHA converts all
         with torch.no_grad():
             B = 2
             L = 4
@@ -355,7 +356,7 @@ class TestTransformers(NNTestCase):
             if attn_mask_dim == 2:
                 attn_mask = make_tensor((L, L), dtype=mask_dtype, device=device)
             elif attn_mask_dim == 3:
-                attn_mask = make_tensor((B * H, L, L), dtype=mask_dtype, device=device)
+                attn_mask = make_tensor((B, 1, L, L), dtype=mask_dtype, device=device).expand(B, H, L, L).reshape(B * H, L, L)
             elif attn_mask_dim is None:
                 attn_mask = None
 
@@ -371,7 +372,9 @@ class TestTransformers(NNTestCase):
             out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             mha.eval()  # enable fast path
             out_fp, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
-            self.assertEqual(out, out_fp)
+            # The FP kernel will return NaNs while the sdpa kernel which is ran when the fast path is turned off returns 0 instead
+            # of NaNs for fully masked rows
+            torch.testing.assert_close(out, out_fp.nan_to_num())
 
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):
@@ -2108,24 +2111,8 @@ class TestSDPA(NNTestCase):
             if dtype in [torch.bfloat16, torch.float16]:
                 math_ref = math_ref.to(dtype)
 
-            # TODO WE NEED TO UNIFY THESE SEMANTICS
-            # This test the fully masked out rows case
             self.assertFalse(torch.isnan(math_ref).any())
-            if torch.isnan(actual).any():
-                row_sums = attn_mask.sum(dim=-1)
-                masked_out_rows = (row_sums == 0)
-                if attn_mask.dim() == 2:
-                    masked_out_rows = masked_out_rows[None, None, :].expand(math_ref.shape[:-1])
-
-                # Slice out the fully masked rows from expected and actual
-                math_ref_masked_out = math_ref[masked_out_rows]
-                actual_masked_out = actual[masked_out_rows]
-
-                math_ref_all_zero = (math_ref_masked_out.abs().sum() == 0)
-                actual_all_nan = torch.isnan(actual_masked_out).all()
-                self.assertTrue(math_ref_all_zero)
-                self.assertTrue(actual_all_nan)
-                return
+            self.assertFalse(torch.isnan(actual).any())
 
             self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
