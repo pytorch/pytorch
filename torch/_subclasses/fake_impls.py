@@ -91,9 +91,9 @@ _device_not_kwarg_ops = ordered_set(
     aten._nested_tensor_from_tensor_list.default,
     aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
-    aten.is_pinned.default,
     aten.to.device,
     aten.to.prim_Device,
+    aten.is_pinned.default,
     aten._pin_memory.default,
     aten._pin_memory.out,
     aten._resize_output.default,
@@ -175,6 +175,19 @@ def constructors(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
+
+
+@register_op_impl(aten.is_pinned.default)
+def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    # we'll ignore device argument because it is deprecated and not
+    # actually used by is_pinned.
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(inp)
+    return r
 
 
 @register_op_impl(aten.to.prim_Device)
@@ -618,6 +631,7 @@ def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
         if x
         not in (
             # these are already registered elsewhere
+            aten.is_pinned.default,
             aten.to.device,
             aten.to.prim_Device,
             aten._nested_tensor_from_tensor_list.default,
