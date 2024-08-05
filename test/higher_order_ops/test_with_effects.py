@@ -376,7 +376,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     @skipIfNoDynamoSupport
     def test_effectful_custom_op_with_subclass(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
-            lib.define("foo(Tensor x) -> Tensor")
+            lib.define("zoo(Tensor x) -> Tensor")
 
             def foo_impl(a):
                 torch.ops.aten._print("fwd")
@@ -387,19 +387,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return grad.clone()
 
             for backend in ["CPU", "CUDA", "Meta"]:
-                lib.impl("foo", foo_impl, backend)
+                lib.impl("zoo", foo_impl, backend)
 
-            torch.library.register_autograd("_mylib::foo", foo_bwd)
+            torch.library.register_autograd("_mylib::zoo", foo_bwd)
 
             from torch._higher_order_ops.effects import (
                 _EffectType,
                 _register_effectful_op,
             )
 
-            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+            _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
 
             def fn(x, y):
-                return torch.ops._mylib.foo(x) + y
+                return torch.ops._mylib.zoo(x) + y
 
             def ins_sc():
                 return (

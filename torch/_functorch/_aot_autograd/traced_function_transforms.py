@@ -680,11 +680,8 @@ def handle_effect_tokens_fn(
             ]
             return ((*out_fwd_tokens, *outs[0]), (*out_bwd_tokens, *outs[1]))
 
-        assert len(outs) == 1
-        out_fwd_tokens = [
-            from_fun(t) for t in functional_tensor_mode._tokens_forward_output.values()
-        ]
-        return (*out_fwd_tokens, *outs[0])
+        out_fwd_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
+        return (*out_fwd_tokens, *outs)
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
