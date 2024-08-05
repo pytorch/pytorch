@@ -51,12 +51,22 @@ __all__ = [
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",
+    "MemPool",
+    "MemPoolContext",
 ]
 
 
 if not hasattr(torch._C, "_cuda_CUDAAllocator"):
     # Define dummy base classes
     torch._C.__dict__["_cuda_CUDAAllocator"] = _dummy_type("_cuda_CUDAAllocator")
+
+
+if not hasattr(torch._C, "_MemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
+    torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
+
+from torch._C import _cuda_CUDAAllocator, _MemPool, _MemPoolContext  # noqa: F401
 
 
 def _host_allocator():
@@ -946,3 +956,49 @@ def _get_current_allocator() -> _CUDAAllocator:
         See :ref:`cuda-memory-management` for details on creating and using a custom allocator
     """
     return _CUDAAllocator(torch._C._cuda_getAllocator())
+
+
+class MemPool(_MemPool):
+    r"""MemPool represents a pool of memory in a caching allocator. Currently,
+    it's just the ID of the pool object maintained in the CUDACachingAllocator.
+
+    Args:
+        allocator(torch._C._cuda_CUDAAllocator, optional): a
+            torch._C._cuda_CUDAAllocator object that can be used to
+            define how memory gets allocated in the pool. If :attr:`allocator`
+            is ``None`` (default), memory allocation follows the default/
+            current configuration of the CUDACachingAllocator.
+
+    """
+
+    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None):
+        super().__init__(allocator, True)
+
+    @property
+    def id(self) -> Tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    @property
+    def allocator(self) -> Optional[_cuda_CUDAAllocator]:
+        r"""Returns the allocator this MemPool routes allocations to"""
+        return super().allocator
+
+
+class MemPoolContext(_MemPoolContext):
+    r"""MemPoolContext holds the currently active pool and stashes the previous
+    pool. On deletion it makes the previous pool active.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+        allocations route to this pool.
+
+    """
+
+    def __init__(self, pool: MemPool):
+        super().__init__(pool)
+
+    @staticmethod
+    def active_pool() -> Optional[_MemPool]:
+        r"""Returns the active MemPool"""
+        return _MemPoolContext.active_pool()

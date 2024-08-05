@@ -36,7 +36,7 @@ class SampleModelForDynamicShapes(torch.nn.Module):
 
 
 class _LargeModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(2**28))  # 1GB
         self.param2 = torch.nn.Parameter(torch.randn(2**28))  # 1GB

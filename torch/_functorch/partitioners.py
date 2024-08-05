@@ -26,9 +26,11 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from torch.utils.checkpoint import CheckpointPolicy
+
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
+
 
 if TYPE_CHECKING:
     import sympy
@@ -460,6 +462,11 @@ def _tensor_nbytes(numel: int, dtype) -> int:
 
 
 def _size_of(node: fx.Node) -> int:
+    def object_nbytes(x) -> int:
+        if not isinstance(x, torch.Tensor):
+            return 0
+        return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
+
     if "val" in node.meta:
         val = node.meta["val"]
         if isinstance(val, py_sym_types):
@@ -468,18 +475,18 @@ def _size_of(node: fx.Node) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(
-                _tensor_nbytes(hint_int(n.numel(), fallback=4096), n.dtype)
-                for n in val
-                if isinstance(n, torch.Tensor)
-            )
+            return sum(object_nbytes(n) for n in val)
+        elif isinstance(val, dict):
+            return sum(object_nbytes(n) for _, n in val.items())
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
+            return object_nbytes(val)
 
-        raise RuntimeError(f"Unknown metadata type {type(val)}")
+        raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
     if node.op == "get_attr":
         return 0
-    raise RuntimeError("We should always have `val` metadata on the nodes")
+    raise RuntimeError(
+        f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
+    )
 
 
 # Used for some investigative purposes

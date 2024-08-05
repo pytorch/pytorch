@@ -49,7 +49,7 @@ ExprHandle tensorOrConstant(
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
-ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+ExprHandle broadcast(const BufHandle& b, const std::vector<ExprHandle>& axes);
 
 ExprHandle constant(const ArgValue& v);
 

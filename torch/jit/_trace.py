@@ -966,7 +966,7 @@ def trace(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
@@ -1182,7 +1182,7 @@ def trace_module(
         import torch.nn as nn
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 

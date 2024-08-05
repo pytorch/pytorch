@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import functools
-
 from typing import Any, Callable, Mapping, Sequence
 
 import torch
 import torch.fx
 import torch.onnx
-
 import torch.onnx._internal.fx.passes as passes
 from torch.onnx._internal import exporter, io_adapter
+
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
