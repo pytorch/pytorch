@@ -21,7 +21,7 @@ import itertools
 import tempfile
 
 class Foo(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
@@ -1414,7 +1414,7 @@ class TestQuantizedTensor(TestCase):
             class M(torch.jit.ScriptModule):
                 __constants__ = ['fname']
 
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fname = fname
 

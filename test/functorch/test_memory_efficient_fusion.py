@@ -278,7 +278,7 @@ class NoChangeTestCase(TestCase):
         # Test to repro issue with fx_graph_cse when
         # hash((primals_2, 1.0)) == hash((primals_2, 1))
 
-        if torch._dynamo.is_compiling():
+        if torch.compiler.is_compiling():
             self.skipTest("Unsupported if test run is compiled")
 
         def f(inpt, osize):

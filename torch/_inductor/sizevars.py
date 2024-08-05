@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 # lifting and in some cases we should be directly passing through to ShapeEnv,
 # but there is some extra inductor logic that needs to be handled here
 class SizeVarAllocator:
-    def __init__(self, shape_env=None):
+    def __init__(self, shape_env=None) -> None:
         super().__init__()
         if shape_env is None:
             shape_env = ShapeEnv()
@@ -856,7 +856,7 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     simplify ModularIndexing/FloorDiv.
     """
 
-    def __init__(self, inner, var_ranges: VarRanges):
+    def __init__(self, inner, var_ranges: VarRanges) -> None:
         super().__init__(inner)
         self.name = "SimplifyIndexing"
         self._simplify: Callable[
