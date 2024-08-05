@@ -29,6 +29,7 @@ __all__ = [
     "impl_abstract",
     "register_fake",
     "register_torch_dispatch",
+    "register_vmap",
     "get_ctx",
     "custom_op",
     "infer_schema",
@@ -260,6 +261,8 @@ class Library:
                 to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -326,6 +329,39 @@ class Library:
 
         _impls.add(key)
         self._op_impls.add(key)
+
+    def fallback(self, fn, dispatch_key="", *, with_keyset=False):
+        r"""Registers the function implementation as the fallback for the given key.
+
+        This function only works for a library with global namespace ("_").
+
+        Args:
+            fn: function used as fallback for the given dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+            with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
+                         to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+
+        Example::
+            >>> my_lib = Library("_", "IMPL")
+            >>> def fallback_kernel(op, *args, **kwargs):
+            >>>     # Handle all autocast ops generically
+            >>>     # ...
+            >>> my_lib.fallback(fallback_kernel, "Autocast")
+        """
+        if dispatch_key == "":
+            dispatch_key = self.dispatch_key
+
+        if self.ns != "_":
+            raise RuntimeError(
+                f"""Fallback can only be registered using libary fragment on the global namespace "_" but it is {self.ns}"""
+            )
+
+        assert dispatch_key != ""
+        assert self.m is not None
+
+        self.m.fallback(dispatch_key, fn, with_keyset)
 
     def _destroy(self):
         if self.m is not None:
@@ -699,10 +735,10 @@ def register_fake(
         >>>
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
-        >>>     # Number of nonzero-elements is data-dependent.
-        >>>     # Since we cannot peek at the data in an fake impl,
-        >>>     # we use the ctx object to construct a new symint that
-        >>>     # represents the data-dependent size.
+        >>> # Number of nonzero-elements is data-dependent.
+        >>> # Since we cannot peek at the data in an fake impl,
+        >>> # we use the ctx object to construct a new symint that
+        >>> # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
         >>>     nnz = ctx.new_dynamic_size()
         >>>     shape = [nnz, x.dim()]
@@ -806,11 +842,13 @@ def register_autograd(
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_sin", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, x.cos())
         >>>
         >>> # Example with a keyword-only arg
@@ -826,11 +864,13 @@ def register_autograd(
         >>> def backward(ctx, grad):
         >>>     return grad * ctx.val
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_mul", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_mul", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_mul(x, val=3.14)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """

@@ -66,7 +66,8 @@ jobs:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
             runner: linux.arm64.2xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
-            runner: linux.arm64.2xlarge
+            runner: linux.arm64.m7g.4xlarge
+            timeout-minutes: 600
     runs-on: [self-hosted, "${{ matrix.runner }}"]
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
@@ -123,7 +124,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
         with:
-          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ (matrix.runner == 'linux.arm64.2xlarge') && 'arm64v8' || 'tool' }}/alpine
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
         if: always()
 
       - name: Teardown Linux
