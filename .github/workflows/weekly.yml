@@ -1,6 +1,7 @@
 name: weekly
 
 on:
+  pull_request:
   schedule:
     # Mondays at 7:37am UTC = 12:27am PST
     # Choose a random time near midnight PST because it may be delayed if there are high loads
@@ -13,6 +14,7 @@ permissions: read-all
 jobs:
   update-commit-hash:
     runs-on: ubuntu-latest
+    if: false
     environment: update-commit-hash
     steps:
       - name: Checkout repo
