@@ -316,7 +316,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
-    ):
+    ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
         self.layout_opt = (

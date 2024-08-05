@@ -126,7 +126,7 @@ class ErasedTensor(torch.Tensor):
     def __new__(cls, elem, name, owning_mod):
         return super().__new__(cls, elem.to(device="meta"))
 
-    def __init__(self, elem, name: Optional[str], mod):
+    def __init__(self, elem, name: Optional[str], mod) -> None:
         self.erased_name = name
         self.owning_mod_ref = weakref.ref(mod)
 
