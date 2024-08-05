@@ -701,7 +701,7 @@ class WhyNoFuse:
     reason: str
     args: Tuple[Any, ...]
 
-    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         self.node1 = node1
         self.node2 = node2
 
@@ -1155,8 +1155,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
-    """Scheduler node which consists of a list of scheduler nodes that each operate on a
-    distinct tensor in a list of tensors."""
+    """
+    This is a schedular node that consists of a set of scheduler nodes that
+    has no data dependencies among them and can be executed in parallel.
+    """
 
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
@@ -1238,6 +1240,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
     ) -> ForeachKernelSchedulerNode:
         assert producer.is_foreach() or consumer.is_foreach()
+        if producer.is_foreach():
+            producer = typing.cast(ForeachKernelSchedulerNode, producer)
+            use_custom_partition_algo = producer.use_custom_partition_algo
+            enable_autotune = producer.enable_autotune
+        else:
+            consumer = typing.cast(ForeachKernelSchedulerNode, consumer)
+            use_custom_partition_algo = consumer.use_custom_partition_algo
+            enable_autotune = consumer.enable_autotune
         prev_node_1 = None
         prev_node_2 = None
         fused_nodes: List[BaseSchedulerNode]
@@ -1276,23 +1286,36 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     fused_nodes.append(new_node)
                 else:
                     fused_nodes.append(node)
+        else:
+            raise AssertionError(
+                "At least one node passed to ForeachKernelSchedulerNode.fuse should be a foreach node"
+            )
 
-        return cls(producer.scheduler, fused_nodes, prev_node_1, prev_node_2)
+        return cls(
+            producer.scheduler,
+            fused_nodes,
+            use_custom_partition_algo=use_custom_partition_algo,
+            prev_node_1=prev_node_1,
+            prev_node_2=prev_node_2,
+            enable_autotune=enable_autotune,
+        )
 
     def __init__(
         self,
         scheduler: Scheduler,
-        nodes: List[BaseSchedulerNode],
+        snodes: List[BaseSchedulerNode],
+        use_custom_partition_algo: bool,
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
+        enable_autotune: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
 
         if prev_node_1 is None or prev_node_2 is None:
-            super().__init__(scheduler, nodes)
+            super().__init__(scheduler, snodes)
 
-            for node in nodes:
+            for node in snodes:
                 for read in node.read_writes.reads:
                     self.read_to_node[read.name] = node
 
@@ -1300,7 +1323,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     self.name_to_node[name] = node
         else:
             self.scheduler = scheduler
-            self.snodes = nodes
+            self.snodes = snodes
             self.node = None
             self.users: List[NodeUser] = []
 
@@ -1338,9 +1361,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), ((sympy.Expr("foreach"),),))
-
+        self.use_custom_partition_algo = use_custom_partition_algo
+        self.group = (snodes[0].get_device(), ((sympy.Expr("combo_kernel"),),))
         self.origins: OrderedSet[torch.fx.Node] = OrderedSet()
+        self.enable_autotune = enable_autotune
 
     def mark_run(self) -> None:
         raise NotImplementedError
@@ -1524,8 +1548,11 @@ _post_grad_graph_counter = itertools.count()
 class Scheduler:
     __dep_size_hint_cache: Dict[Dep, int]
 
-    @dynamo_timed
     def __init__(self, nodes: List[ir.Operation]) -> None:
+        with dynamo_timed("Scheduler.__init__"):
+            self._init(nodes)
+
+    def _init(self, nodes: List[ir.Operation]) -> None:
         super().__init__()
         self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
@@ -1670,7 +1697,13 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
-            fe_node = ForeachKernelSchedulerNode(self, snodes)
+            enable_autotune = config.combo_kernels_autotune > 1
+            fe_node = ForeachKernelSchedulerNode(
+                self,
+                snodes,
+                use_custom_partition_algo=False,
+                enable_autotune=enable_autotune,
+            )
 
             fe_nodes.append(fe_node)
 
@@ -2939,8 +2972,11 @@ class Scheduler:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
-    @dynamo_timed
     def codegen(self) -> None:
+        with dynamo_timed("Scheduler.codegen"):
+            return self._codegen()
+
+    def _codegen(self) -> None:
         for node in self.nodes:
             try:
                 log.debug(
@@ -2994,7 +3030,7 @@ class Scheduler:
                     backend = backend_
                 else:
                     raise AssertionError(f"{type(self)=}")
-                backend.codegen_foreach(node)
+                backend.codegen_combo_kernel(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_node(node)
             else:
