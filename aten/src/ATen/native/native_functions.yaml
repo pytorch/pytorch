@@ -3291,7 +3291,6 @@
   dispatch:
     CompositeExplicitAutograd: nan_to_num
     SparseCPU, SparseCUDA: nan_to_num_sparse
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_nan_to_num
   tags: pointwise
 
 - func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
