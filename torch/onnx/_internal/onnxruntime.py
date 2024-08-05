@@ -47,8 +47,8 @@ try:
 
     import torch.onnx
     import torch.onnx._internal
+    import torch.onnx._internal._exporter_legacy
     import torch.onnx._internal.diagnostics
-    import torch.onnx._internal.exporter
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.fx import fx_onnx_interpreter
@@ -740,7 +740,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal.exporter.ResolvedExportOptions(
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
                 torch.onnx.ExportOptions()
                 if self._options.export_options is None
                 else self._options.export_options

@@ -14,7 +14,7 @@
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
@@ -33,7 +33,7 @@ struct BinaryPointwiseBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct BinaryPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
       const Tensor& other, std::optional<int64_t> other_batch_dim,
       T... extra_args) {
@@ -120,7 +120,7 @@ void binary_pointwise_inplace_batch_rule(
 }
 
 template <typename F, F Func>
-std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim) {
   // compute max logical rank
@@ -142,7 +142,7 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-static std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> where_self_batch_rule(
     const Tensor& condition, std::optional<int64_t> condition_bdim,
     const Tensor& self, std::optional<int64_t> self_bdim, const Tensor& other, std::optional<int64_t> other_bdim) {
   auto condition_logical_rank = rankWithoutBatchDim(condition, condition_bdim);
@@ -177,7 +177,7 @@ static std::tuple<Tensor, std::optional<int64_t>> gelu_backward_batch_rule(
   return std::make_tuple(at::gelu_backward(grad_out_, input_, approximate), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> masked_select_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& mask, std::optional<int64_t> mask_bdim) {
   TORCH_CHECK(!mask_bdim.has_value(),
@@ -196,7 +196,7 @@ static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_rule(
     const Tensor& grad, std::optional<int64_t> grad_bdim,
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& mask, std::optional<int64_t> mask_bdim) {
@@ -221,7 +221,7 @@ static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
     const Tensor& grad, std::optional<int64_t> grad_bdim,
     const Tensor& x1, std::optional<int64_t> x1_bdim,
     const Tensor& x2, std::optional<int64_t> x2_bdim,
