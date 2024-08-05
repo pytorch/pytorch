@@ -304,6 +304,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         value,
         block_mask,
         scale,
+        kernel_options,
         score_mod_subgraph,
         mask_mod_subgraph,
         score_mod_other_buffers,
@@ -323,8 +324,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,
     ) = block_mask
 
+    kernel_options = dict(kernel_options)
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
-    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
     if (
         full_kv_num_blocks is None
     ):  # Create a plackeholder full block list in case it is empty
@@ -353,9 +355,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     #     ]
     # TODO: fix autotuning.
 
-    SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
-    MAX_SPLIT_KV = SPLIT_KV
-    assert SPLIT_KV <= MAX_SPLIT_KV
+    kernel_options["SM_SCALE"] = scale
+    kernel_options["SPLIT_KV"] = get_split_k(
+        key.get_size()[0], key.get_size()[1], key.get_size()[2]
+    )
+    MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
+    assert kernel_options["SPLIT_KV"] <= MAX_SPLIT_KV
 
     # create config dependent intermediate buffers
     buf_ML_shape = query.get_size()[:-2] + [
@@ -386,8 +391,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
+    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+
     m = query.get_size()[-2]
-    BLOCK_M = (
+    kernel_options["BLOCK_M"] = (
         # m
         # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
         # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
@@ -400,8 +407,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
             16,
         )
     )
+    V.graph.sizevars.guard_leq(m, sympy.Integer(kernel_options["BLOCK_M"]))
 
-    V.graph.sizevars.guard_leq(m, sympy.Integer(BLOCK_M))
+    kernel_options["SAFE_M_BOUNDARY"] = (
+        query.get_size()[-2] % kernel_options["BLOCK_M"]
+    ) == 0
+    kernel_options["SAFE_N_BOUNDARY"] = True
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -409,6 +420,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     for BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
+
+        # Performance tuning
+        kernel_options["BLOCK_N"] = BLOCK_N
+        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -431,20 +447,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            BLOCK_M=BLOCK_M,
-            SPLIT_KV=SPLIT_KV,
-            BLOCK_DMODEL=query.get_size()[-1],
-            SM_SCALE=scale,
-            # Performance tuning
-            BLOCK_N=BLOCK_N,
-            # Sparse block size
-            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-            # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=False,
-            SAFE_M_BOUNDARY=(query.get_size()[-2] % BLOCK_M) == 0,
-            SAFE_N_BOUNDARY=True,
-            PRESCALE_QK=False,
-            HAS_FULL_BLOCKS=has_full_blocks,
+            **kernel_options,
         )
 
     inputs_for_flex_decoding = (

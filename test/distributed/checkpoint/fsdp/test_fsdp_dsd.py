@@ -204,17 +204,36 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         ]
 
         for state_dict_type in state_dict_type_list:
+            # Save state dict with original model
+            base_model = _get_base_model().cuda()
+            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+
             # Save state dict with model wrapped with FSDP1
             fsdp1_model = FSDP(
-                _get_base_model().cuda(),
+                copy.deepcopy(base_model),
                 use_orig_params=True,
                 auto_wrap_policy=always_wrap_policy,
             )
 
             fsdp1_optim = torch.optim.Adam(fsdp1_model.parameters(), lr=0.1)
 
-            fsdp1_model(torch.randn((2,), device=self.rank)).sum().backward()
+            # one-step training to modify state dict
+            inp = torch.randn((2,), device=self.rank)
+            base_model(inp).sum().backward()
+            base_optim.step()
+            fsdp1_model(inp).sum().backward()
             fsdp1_optim.step()
+
+            # obtain the unsharded state dict
+            base_msd = get_model_state_dict(
+                base_model,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
+            base_osd = get_optimizer_state_dict(
+                base_model,
+                base_optim,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
 
             with FSDP.state_dict_type(fsdp1_model, state_dict_type):
                 fsdp1_state_dict = {
@@ -287,6 +306,8 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             )
 
             # Compare full state dict to make sure they are the same.
+            self.assertEqual(base_msd, fsdp1_full_msd)
+            self.assertEqual(base_osd, fsdp1_full_osd)
             self.assertEqual(fsdp2_tp_full_msd, fsdp1_full_msd)
             self.assertEqual(fsdp2_tp_full_osd, fsdp1_full_osd)
 
@@ -321,8 +342,12 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         dp_mesh, tp_mesh = global_mesh_2d["dp"], global_mesh_2d["tp"]
 
         for save_full_state_dict in [True, False]:
+            # Save state dict with original model
+            base_model = _get_base_model().cuda()
+            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+
             # Save state dict with TP model
-            tp_model = _get_base_model()
+            tp_model = copy.deepcopy(base_model)
             tp_model = parallelize_module(
                 tp_model,
                 device_mesh=global_mesh_1d,
@@ -331,9 +356,25 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             tp_model_optim = torch.optim.Adam(tp_model.parameters(), lr=0.1)
 
             # one-step training to modify state dict
-            tp_model(torch.randn((2,), device=self.rank)).sum().backward()
+            inp = torch.randn((2,), device=self.rank)
+            base_model(inp).sum().backward()
+            base_optim.step()
+            tp_model(inp).sum().backward()
             tp_model_optim.step()
 
+            # obtain the unsharded state dict
+            base_msd = get_model_state_dict(
+                base_model,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
+
+            base_osd = get_optimizer_state_dict(
+                base_model,
+                base_optim,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
+
+            # obtain TP state dict
             tp_msd = get_model_state_dict(
                 tp_model,
                 options=StateDictOptions(full_state_dict=save_full_state_dict),
@@ -392,6 +433,8 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             )
 
             # Compare full state dict to make sure they are the same.
+            self.assertEqual(base_msd, fsdp2_tp_full_msd)
+            self.assertEqual(base_osd, fsdp2_tp_full_osd)
             self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
             self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
 
@@ -426,8 +469,12 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         dp_mesh, tp_mesh = global_mesh_2d["dp"], global_mesh_2d["tp"]
 
         for save_full_state_dict in [True, False]:
+            # Save state dict with original model
+            base_model = _get_base_model().cuda()
+            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+
             # Save state dict with FSDP2 + TP model
-            fsdp2_tp_model = _get_base_model()
+            fsdp2_tp_model = copy.deepcopy(base_model)
             fsdp2_tp_model = parallelize_module(
                 fsdp2_tp_model,
                 device_mesh=tp_mesh,
@@ -439,9 +486,24 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             fsdp2_tp_optim = torch.optim.Adam(fsdp2_tp_model.parameters(), lr=0.1)
 
             # one-step training to modify state dict
-            fsdp2_tp_model(torch.randn((2,), device=self.rank)).sum().backward()
+            inp = torch.randn((2,), device=self.rank)
+            base_model(inp).sum().backward()
+            base_optim.step()
+            fsdp2_tp_model(inp).sum().backward()
             fsdp2_tp_optim.step()
 
+            # obtain the unsharded state dict
+            base_msd = get_model_state_dict(
+                base_model,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
+            base_osd = get_optimizer_state_dict(
+                base_model,
+                base_optim,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
+
+            # obtain FSDP2 + TP state dict
             fsdp2_tp_msd = get_model_state_dict(
                 fsdp2_tp_model,
                 options=StateDictOptions(full_state_dict=save_full_state_dict),
@@ -493,6 +555,8 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             )
 
             # Compare full state dict to make sure they are the same.
+            self.assertEqual(base_msd, tp_full_msd)
+            self.assertEqual(base_osd, tp_full_osd)
             self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
             self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
 
