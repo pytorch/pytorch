@@ -404,6 +404,63 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (16,))
+    @parametrize("seq_lens", (128,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.bfloat16)
+    def test_linear_with_indirect_indexing(
+        self, batch_size, in_features, seq_lens, out_features, bias, dtype
+    ):
+        # Reproducer from the GPT2ForSequenceClassification model in HuggingFace
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.wte = torch.nn.Embedding(128, seq_lens)
+                self.wpe = torch.nn.Embedding(in_features, seq_lens)
+                self.linear = torch.nn.Linear(out_features, seq_lens, bias)
+
+            def forward(self, view_12, input_ids, view_9):
+                inputs_embeds = self.wte(input_ids)
+
+                position_ids = torch.arange(0, in_features, dtype=torch.long)
+                position_ids = position_ids.unsqueeze(0)
+                position_embeds = self.wpe(position_ids)
+
+                add = inputs_embeds + position_embeds
+                add_4 = view_9 + add
+
+                _linear_pointwise_default_45 = self.linear(view_12)
+
+                view_13 = torch.ops.aten.reshape.default(
+                    _linear_pointwise_default_45, [batch_size, in_features, seq_lens]
+                )
+                out = torch.ops.aten.add.Tensor(add_4, view_13)
+
+                return out
+
+        view_12 = torch.randn(batch_size * in_features, out_features)
+        input_ids = torch.randint(0, 128, (batch_size, in_features))
+        view_9 = torch.randn(batch_size, in_features, seq_lens)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (
+                    view_12,
+                    input_ids,
+                    view_9,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
