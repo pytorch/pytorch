@@ -26,7 +26,7 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 return g.op("Clip", input, min_f=scalar)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.clip = MyClip.apply
 
@@ -52,7 +52,7 @@ class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
                 return input.clamp(min=0)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.clip = MyClip.apply
                 self.relu = MyRelu.apply
@@ -89,7 +89,7 @@ class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
 
     def test_contrib_op_with_loop(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.gelu = torch.nn.GELU(approximate="none")
 
