@@ -1797,6 +1797,10 @@ def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
 
 
 def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
+    """
+    Current the currently active proxy tracing mode, or None if
+    we are not currently tracing.
+    """
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
