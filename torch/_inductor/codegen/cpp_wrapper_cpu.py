@@ -170,8 +170,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     #include <torch/csrc/inductor/aoti_runtime/model.h>
                     """
                 )
-            self.header.splice("typedef at::Half half;")
-            self.header.splice("typedef at::BFloat16 bfloat16;")
         else:
             self.header.splice(
                 """
@@ -190,6 +188,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 """
             )
 
+        self.header.splice("typedef at::Half half;")
+        self.header.splice("typedef at::BFloat16 bfloat16;")
         self.header.splice("#include <c10/util/generic_math.h>")
 
         if not V.graph.aot_mode:
@@ -2205,6 +2205,24 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
                 return f'PyUnicode_FromString("{raw_arg}")'
+            elif isinstance(arg_type, torch.NumberType):
+                # Union[bool, int, float, complex]
+                # torch/_prims_common/__init__.py
+                if isinstance(raw_arg, int):
+                    return f"PyLong_FromLongLong({raw_arg})"
+                elif isinstance(raw_arg, float):
+                    return f"PyFloat_FromDouble({raw_arg})"
+                elif isinstance(raw_arg, bool):
+                    return f"PyBool_FromLong({1 if raw_arg else 0})"
+                elif isinstance(raw_arg, complex):
+                    return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
+                elif isinstance(raw_arg, torch.SymInt):
+                    expr = raw_arg.node.expr
+                    return f"PyLong_FromLongLong({self.expr_printer(expr)})"
+                else:
+                    raise NotImplementedError(
+                        f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
+                    )
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
@@ -2365,8 +2383,8 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            # uint64_t is long on Linux, but long long on MacOS
-            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS and Windows
+            return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(

@@ -2,14 +2,15 @@
 import functools
 import math
 import operator
+from typing import *  # noqa: F403
 
 import torch
+import torch.nn.functional as F
+from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
-from typing import *  # noqa: F403
-import torch.nn.functional as F
-from torch.fx.operator_schemas import normalize_function
+
 
 __all__: List[Any] = []
 
@@ -962,7 +963,7 @@ def sum_dim_IntList(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
@@ -1324,7 +1325,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
