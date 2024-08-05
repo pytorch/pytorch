@@ -2138,7 +2138,6 @@ class TestSDPA(NNTestCase):
 
             return query, key, value, mask
 
-
         def compute_output_and_grads(query, key, value, mask, backend):
             with sdpa_kernel(backend):
                 masked_out = scaled_dot_product_attention(query, key, value, attn_mask=mask)
@@ -2180,6 +2179,21 @@ class TestSDPA(NNTestCase):
         # Check if gradients for masked rows are zero
         grad_query = backend_grads[0]
         assert torch.all(grad_query[masked_rows] == 0), f"Non-zero gradients in fully masked rows for {backend=}"
+
+    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("fill_val", [float("inf")])
+    def test_non_masked_rows_grad_pops(self, device, dtype, fill_val):
+        query = torch.randn(1, 2, 4, 16, device=device, dtype=dtype)
+        # a single NaN in the query input
+        query[0, 1, 2, 3] = fill_val
+        query = query.detach().requires_grad_(True)
+        key = torch.randn(1, 2, 4, 16, device=device, dtype=dtype, requires_grad=True)
+        value = torch.randn(1, 2, 4, 16, device=device, dtype=dtype, requires_grad=True)
+
+        out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
+        self.assertTrue(torch.isnan(out).any())
+        out.sum().backward()
+        self.assertTrue(torch.isnan(query.grad).any())
 
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
