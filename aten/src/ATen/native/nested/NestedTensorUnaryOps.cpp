@@ -29,13 +29,6 @@ Tensor& NestedTensor_abs_(Tensor& self) {
   return self;
 }
 
-Tensor NestedTensor_nan_to_num(const Tensor& self, std::optional<double> nan, std::optional<double> posinf, std::optional<double> neginf){
-    return map_nt(
-      self,
-      [nan, posinf, neginf](const Tensor& self) {
-        return at::nan_to_num(self, nan, posinf, neginf);
-      });
-}
 
 Tensor NestedTensor_sgn(const Tensor& self) {
   return map_nt(self, at::sgn);
