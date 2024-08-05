@@ -2911,3 +2911,12 @@ def verify_guard_fn_signature(value):
         raise InternalTorchDynamoError(
             "Tensor subclass method __metadata_guard__ must be a classmethod"
         )
+
+
+def does_not_override_dict_iter_methods(user_cls):
+    return (
+        user_cls.items in (dict.items, collections.OrderedDict.items)
+        and user_cls.values in (dict.values, collections.OrderedDict.values)
+        and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
+        and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
+    )
