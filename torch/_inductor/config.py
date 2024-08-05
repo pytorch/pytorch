@@ -978,10 +978,9 @@ class rocm:
     # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Enable for CDNA3 only for now
+    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
