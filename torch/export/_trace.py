@@ -1380,7 +1380,9 @@ def _strict_export_lower_to_aten_ir(
                 if arg.op == "get_attr":
                     for entry in torch.fx.proxy._COPY_META_FIELDS:
                         if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+                            params_buffers_to_node_meta[arg.target][entry] = meta[
+                                entry
+                            ]
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
