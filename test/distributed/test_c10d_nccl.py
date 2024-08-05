@@ -947,7 +947,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class ForwardReturnValueModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1065,7 +1065,7 @@ class DistributedDataParallelTest(
         process_group = c10d.distributed_c10d._get_default_group()
 
         class FindUnusedParametersModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1211,7 +1211,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class MultipleOutputModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 def define_module():
@@ -1273,7 +1273,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class NoGradModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1388,7 +1388,7 @@ class DistributedDataParallelTest(
         # not necessary to run barrier here, as DDP will synchronize
 
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
