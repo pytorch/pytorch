@@ -2156,14 +2156,14 @@ class TestSDPA(NNTestCase):
 
             # Create a mask with deterministic row masking
             mask = torch.ones(1, 1, seq_len, seq_len, dtype=torch.bool, device=device)
-            
+
             # Mask every nth row
             mask[0, 0, ::mask_every_n_rows, :] = False
 
             # Create a fixed pattern for element-wise masking
             element_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
             element_mask[torch.arange(seq_len)[:, None] % 5 == torch.arange(seq_len) % 5] = True
-            
+
             # Combine row masking and element-wise masking
             mask = mask & element_mask.unsqueeze(0).unsqueeze(0)
 
@@ -2193,13 +2193,13 @@ class TestSDPA(NNTestCase):
 
         # Compare outputs
         torch.testing.assert_close(backend_out, math_out, atol=5e-3, rtol=0)
-        self.assertTrue(not backend_out.isnan().any())
-        self.assertTrue(not math_out.isnan().any())
+        self.assertFalse(backend_out.isnan().any())
+        self.assertFalse(math_out.isnan().any())
         # Compare gradients
         for bg, mg in zip(backend_grads, math_grads):
             torch.testing.assert_close(bg, mg, atol=3e-3, rtol=0)
-            self.assertTrue(not bg.isnan().any())
-            self.assertTrue(not mg.isnan().any())
+            self.assertFalse(bg.isnan().any())
+            self.assertFalse(mg.isnan().any())
 
         # Check if masked rows are zero in output
         mask_sum = mask.sum(dim=-1, keepdim=True)
