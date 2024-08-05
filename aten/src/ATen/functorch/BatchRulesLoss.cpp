@@ -109,11 +109,11 @@ static Tensor binary_cross_entropy_plumbing(
     auto target_ = moveBatchDimToFront(target_value, target_bdim);
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), bdim_size);
     target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
-    result = at::binary_cross_entropy(self_, target_, nullopt, Reduction::None);
+    result = at::binary_cross_entropy(self_, target_, std::nullopt, Reduction::None);
     result = makeBatched(result, 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    result = at::binary_cross_entropy(self_value, target_value, nullopt, Reduction::None);
+    result = at::binary_cross_entropy(self_value, target_value, std::nullopt, Reduction::None);
   }
   if (weight.has_value() && weight->defined()) {
     result = result * weight.value();
@@ -153,12 +153,12 @@ static Tensor binary_cross_entropy_backward_plumbing(
     target_ = ensure_has_bdim(target_, target_bdim.has_value(), bdim_size);
 
     grad_input = at::binary_cross_entropy_backward(
-        grad_, input_, target_, nullopt, Reduction::None);
+        grad_, input_, target_, std::nullopt, Reduction::None);
     grad_input = makeBatched(grad_input, 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     grad_input = at::binary_cross_entropy_backward(
-        grad_value, input_value, target_value, nullopt, Reduction::None);
+        grad_value, input_value, target_value, std::nullopt, Reduction::None);
   }
   if (weight_opt.has_value() && weight_opt->defined()) {
     grad_input = grad_input * weight_opt.value();
