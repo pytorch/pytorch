@@ -72,7 +72,7 @@ class TestLiteScriptModule(TestCase):
                 return x * y
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.A0 = A()
                 self.A1 = A()
@@ -177,7 +177,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             # opt arg in script-to-script invocation
@@ -185,7 +185,7 @@ class TestLiteScriptModule(TestCase):
                 return x + two
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.A0 = A()
 
@@ -218,7 +218,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_unsupported_classtype(self):
         class Foo:
-            def __init__(self):
+            def __init__(self) -> None:
                 return
 
             def func(self, x: int, y: int):
@@ -243,7 +243,7 @@ class TestLiteScriptModule(TestCase):
             pass
 
         class MyTestModuleForListWithModuleClass(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo()
 
@@ -267,7 +267,7 @@ class TestLiteScriptModule(TestCase):
             pass
 
         class MyTestModuleForDictWithModuleClass(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo()
 
@@ -288,7 +288,7 @@ class TestLiteScriptModule(TestCase):
 
     def test_module_export_operator_list(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.ones((20, 1, 5, 5))
                 self.bias = torch.ones(20)
@@ -464,7 +464,7 @@ class TestLiteScriptModule(TestCase):
         class A(torch.nn.Module):
             b: Forward
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = B()
 
@@ -523,7 +523,7 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
     def test_quantization_example(self):
         # From the example in Static Quantization section of https://pytorch.org/docs/stable/quantization.html
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)

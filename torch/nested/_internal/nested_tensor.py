@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from typing import *  # noqa: F403
 from typing import Tuple
 
 import torch
@@ -6,7 +7,7 @@ from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
-from typing import *  # noqa: F403
+
 
 _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
@@ -413,8 +414,8 @@ def jagged_from_list(
         )
 
     # compute this now since it's easy
-    min_seqlen = min([t.shape[0] for t in tensors])
-    max_seqlen = max([t.shape[0] for t in tensors])
+    min_seqlen = min(t.shape[0] for t in tensors)
+    max_seqlen = max(t.shape[0] for t in tensors)
     ret_nt = nested_view_from_values_offsets(
         values, offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
     )
