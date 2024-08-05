@@ -8,15 +8,14 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-
 from typing import Any, Dict, Optional, Tuple, Union
 from typing_extensions import deprecated
 
 import torch
 from torch import _C
-
+from torch._utils import _dummy_type
 from torch.types import Device
-from .._utils import _dummy_type
+
 from . import (
     _get_amdsmi_device_index,
     _get_device_index,
@@ -24,8 +23,8 @@ from . import (
     _lazy_init,
     is_initialized,
 )
-
 from ._memory_viz import memory as _memory, segments as _segments
+
 
 __all__ = [
     "caching_allocator_alloc",
