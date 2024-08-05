@@ -144,9 +144,11 @@ from .api import (
     RendezvousTimeoutError,
 )
 from .registry import _register_default_handlers
+from .registry import _register_out_of_tree_handlers
 
 
 _register_default_handlers()
+_register_out_of_tree_handlers()
 
 
 __all__ = [
