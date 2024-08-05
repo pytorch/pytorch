@@ -561,6 +561,34 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
         self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
 
+    @with_comms
+    def test_flatten_mesh(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp", "cp", "tp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Test flatten contiguous dims
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        flattened_dp_cp_mesh = dp_cp_mesh._flatten()
+        self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+
+        # Test flatten non-contiguous dims
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        flattned_dp_tp_mesh = dp_tp_mesh._flatten()
+        self.assertEqual(dp_tp_mesh.mesh.flatten(), flattned_dp_tp_mesh.mesh)
+
+        # Test flatten non-contiguous dims with swapping order
+        # We sort the order of the mesh_dim_names in the mesh to flatten based on
+        # order of the mesh_dim_names in the root mesh, since we do not want to create
+        # DeviceMesh([0, 4, 1, 5], mesh_dim_names=('tp_dp',)) or DeviceMesh([2, 6, 3, 7], mesh_dim_names=('tp_dp',)).
+        # No matter the order of slice given, the result should be
+        # DeviceMesh([0, 1, 4, 5], mesh_dim_names=('dp_tp',) or DeviceMesh([2, 3, 6, 7], mesh_dim_names=('dp_tp',)).
+        tp_dp_mesh = mesh_3d["tp", "dp"]
+        flattned_tp_dp_mesh = tp_dp_mesh._flatten()
+        self.assertEqual(flattned_dp_tp_mesh, flattned_tp_dp_mesh)
+
 
 class TestMeshEnv(DTensorTestBase):
     @property
