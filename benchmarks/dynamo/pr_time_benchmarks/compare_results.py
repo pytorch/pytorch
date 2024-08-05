@@ -31,7 +31,7 @@ def compute_percentage_difference(data1, data2, output_file):
             diff = ((num2 - num1) / num1) * 100 if num1 != 0 else 0
             print(f"{benchmark_name}, {metric}, {diff:.2f}%")
             writer.writerow((benchmark_name, metric, diff))
-            if diff > 3.0:
+            if diff > 1.0:
                 print(f"{benchmark_name}, {metric}, failed")
                 fail = True
 
