@@ -138,7 +138,6 @@ class TORCH_API Reducer {
 // This is intended to be expanded in the loopnest and not make it to codegen.
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ReduceOp(
       const ExprPtr& body,
       std::vector<VarPtr> reduce_args,

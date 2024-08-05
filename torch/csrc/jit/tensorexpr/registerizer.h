@@ -248,8 +248,8 @@ class Scope {
   const std::unordered_set<VarPtr>& localVars() const {
     return localVars_;
   }
-  void addLocalVar(const VarPtr& v) {
-    localVars_.insert(v);
+  void addLocalVar(VarPtr v) {
+    localVars_.insert(std::move(v));
   }
 
   void closeAccess(const std::shared_ptr<AccessInfo>& info);

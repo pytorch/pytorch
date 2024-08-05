@@ -9,8 +9,6 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <utility>
-
 namespace torch::jit::tensorexpr {
 
 struct SmallSizeTPairHash {
@@ -121,7 +119,7 @@ class TORCH_API TensorExprKernel {
   //  * pre_alloc
   //      - a flag to control pre-allocation of buffers.
   explicit TensorExprKernel(
-      const std::shared_ptr<Graph>& subgraph,
+      std::shared_ptr<Graph> subgraph,
       std::string kernel_func_name,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},

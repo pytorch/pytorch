@@ -45,7 +45,7 @@ static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = true;
-static bool opt_conditionals = false; // NOLINT
+static bool opt_conditionals = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -697,7 +697,6 @@ static void fuseAllLoops(const StmtPtr& st) {
       continue;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr fusedLoop;
     if (!LoopNest::fuseLoops(outer_loops, &fusedLoop)) {
       continue;
@@ -861,7 +860,6 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
       int blockSize = getTECudaPointwiseBlockSize();
 
       if (loopLevels == 2) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
@@ -871,9 +869,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         flattened->set_gpu_block_index(0);
         inner->set_gpu_thread_index(0);
       } else if (loopLevels == 3) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         ForPtr inner1;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
@@ -1429,7 +1425,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     std::vector<ExprPtr> dims;
     BufPtr buf = alloc<Buf>(name_hint, dims, dtype);
     auto dataPtr = val.toObjectRef().getSlot(0).toCapsule().get();
-    // NOLINTNEXTLINE
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     constants_.push_back({buf, dataPtr, const_cast<Node*>(v->node())});
     bufs_[v] = buf;
     return;
@@ -1674,7 +1670,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   // Synchronize the symbolic strides information
   auto graph_outputs = graph_->outputs();
   TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
-  for (int i : c10::irange(graph_outputs.size())) {
+  for (auto i : c10::irange(graph_outputs.size())) {
     auto el_orig = _orignal_graph_outputs.at(i);
     auto el_new = graph_outputs.at(i);
     if (symbolic_strides_.count(el_orig) && (el_orig != el_new)) {
@@ -1811,7 +1807,6 @@ void TensorExprKernel::compile() {
       if (properly_strided_output.stmt()) {
         block->append_stmt(properly_strided_output.stmt());
       }
-      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       bufs_[output] = properly_strided_output.buf();
       auto sizes = *tt->sizes().concrete_sizes();
       tensorOutputSizes_.push_back(sizes);
@@ -1862,7 +1857,7 @@ void TensorExprKernel::recompile() {
 }
 
 TensorExprKernel::TensorExprKernel(
-    const std::shared_ptr<Graph>& subgraph,
+    std::shared_ptr<Graph> subgraph,
     std::string kernel_func_name,
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
@@ -1870,15 +1865,15 @@ TensorExprKernel::TensorExprKernel(
     std::unordered_map<
         const torch::jit::Value*,
         std::vector<torch::jit::StrideInput>> symbolic_strides)
-    : graph_(subgraph),
-      code_(subgraph, ""),
+    : graph_(std::move(subgraph)),
+      code_(graph_, ""),
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
       kernel_func_name_(std::move(kernel_func_name)),
       symbolic_strides_(std::move(symbolic_strides)) {
   optimizeOwningGraph();
-  // NOLINTNEXTLINE
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   allow_fallback_ = fallbackAllowed();
 
   if (!allow_fallback_) {

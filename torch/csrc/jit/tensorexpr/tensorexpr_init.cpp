@@ -456,6 +456,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init<const std::vector<Tensor>&, const std::vector<Tensor>&>())
       .def(py::init([](const StmtPtr& s, const std::vector<BufHandle>& bufs) {
         std::unordered_set<BufPtr> buf_nodes;
+        buf_nodes.reserve(bufs.size());
         for (auto& buf : bufs) {
           buf_nodes.insert(buf.node());
         }
@@ -533,7 +534,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const ForPtr& f, int factor) {
             ForPtr inner = nullptr, tail = nullptr;
             LoopNest::splitWithTail(f, factor, &inner, &tail);
-            return std::make_tuple(inner, tail);
+            return std::make_tuple(std::move(inner), std::move(tail));
           },
           py::return_value_policy::reference)
       .def(
@@ -549,7 +550,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const ForPtr& f, int factor) {
             ForPtr head = nullptr, tail = nullptr;
             LoopNest::sliceHead(f, factor, &head, &tail);
-            return std::make_tuple(head, tail);
+            return std::make_tuple(std::move(head), std::move(tail));
           },
           py::return_value_policy::reference)
       .def(
@@ -557,7 +558,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const ForPtr& f, int factor) {
             ForPtr head = nullptr, tail = nullptr;
             LoopNest::sliceTail(f, factor, &head, &tail);
-            return std::make_tuple(head, tail);
+            return std::make_tuple(std::move(head), std::move(tail));
           },
           py::return_value_policy::reference)
       .def_static(
@@ -775,16 +776,20 @@ void initTensorExprBindings(PyObject* module) {
               [](const TSGraph& g,
                  const std::unordered_map<std::string, NNCLoweringFunction>&
                      custom_lowerings_str,
-                 const std::vector<int64_t>& symbolic_shape_inputs,
+                 std::vector<int64_t> symbolic_shape_inputs,
                  bool pre_alloc = false) {
                 std::unordered_map<c10::Symbol, NNCLoweringFunction>
                     custom_lowerings;
+                custom_lowerings.reserve(custom_lowerings_str.size());
                 for (auto& kv : custom_lowerings_str) {
                   custom_lowerings[c10::Symbol::fromQualString(kv.first)] =
                       kv.second;
                 }
                 return std::make_unique<TensorExprKernel>(
-                    g, custom_lowerings, symbolic_shape_inputs, pre_alloc);
+                    g,
+                    std::move(custom_lowerings),
+                    std::move(symbolic_shape_inputs),
+                    pre_alloc);
               }),
           py::arg("g"),
           py::arg("custom_lowerings_str"),
