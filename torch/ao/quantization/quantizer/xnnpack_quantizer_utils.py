@@ -633,7 +633,6 @@ def _annotate_gru_io_only(
     return annotated_partitions
 
 
-
 @register_annotator("adaptive_avg_pool2d")
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
