@@ -670,7 +670,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
 
 class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
  private:
-  ExprPtr mutate(IntrinsicsPtr v) override {
+  ExprPtr mutate(const IntrinsicsPtr& v) override {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
