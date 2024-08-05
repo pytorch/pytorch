@@ -3934,7 +3934,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   // Use one device only
   auto device = devices.back();
   at::Tensor barrierTensor =
-      at::empty({1}, at::TensorOptions().device(device).dtype(at::kByte));
+      at::empty({1}, at::TensorOptions().device(device).dtype(at::kFloat));
   // All reduce to achieve the barrier
   auto work = allreduce_impl(barrierTensor);
 
