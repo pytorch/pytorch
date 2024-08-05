@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import sys
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from unittest.mock import patch
@@ -24,6 +25,13 @@ from .common import (
     KernelArgs,
     OptimizationContext,
 )
+
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
 
 DTYPE_TO_CPP = {
@@ -80,7 +88,9 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+_IS_WINDOWS = sys.platform == "win32"
+
+INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -219,7 +229,7 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))

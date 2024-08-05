@@ -136,9 +136,7 @@ class AutoHeuristic:
                 return decision
         return self.fallback()
 
-    def get_top_k_choices(
-        self, top_k: int, always_included: Optional[List[str]] = None
-    ) -> Optional[List[Choice]]:
+    def get_top_k_choices(self, top_k: int) -> Optional[List[Choice]]:
         if not self.satisfies_precondition():
             return None
         if torch._inductor.config.use_autoheuristic(self.name):
@@ -151,10 +149,6 @@ class AutoHeuristic:
             choices = controller.get_decisions_ranked(top_k)
             if choices is None:
                 return None
-            if always_included is not None:
-                for choice in always_included:
-                    if choice not in choices:
-                        choices.append(choice)
             return choices
         return None
 
@@ -308,10 +302,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
         choice = self.get_choice()
         return self.choicestr2choice.get(choice, None)
 
-    def get_top_k_choices_caller(
-        self, top_k: int, always_included: Optional[List[str]] = None
-    ) -> Optional[List[ChoiceCaller]]:
-        choices = self.get_top_k_choices(top_k, always_included)
+    def get_top_k_choices_caller(self, top_k: int) -> Optional[List[ChoiceCaller]]:
+        choices = self.get_top_k_choices(top_k)
         if choices is None:
             return None
         return [self.choicestr2choice[choice] for choice in choices]
