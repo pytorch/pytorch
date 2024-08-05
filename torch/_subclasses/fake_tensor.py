@@ -11,7 +11,6 @@ import os
 import traceback
 import typing
 import weakref
-
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
@@ -36,7 +35,6 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
-
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._prims_common import suggest_memory_format
@@ -62,7 +60,9 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
+
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -152,17 +152,19 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
     assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors = []
+    plain_tensors: List[Tensor] = []
     todo = [subclass]
     while todo:
         curr = todo.pop()
+        if not is_traceable_wrapper_subclass(curr):
+            assert isinstance(curr, Tensor)
+            plain_tensors.append(curr)
+            continue
+
         inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
+        for key in reversed(inner_keys):
+            todo.append(getattr(curr, key))
+
     return plain_tensors
 
 
@@ -955,7 +957,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         memory_format,
         storage_offset,
         # Only set storage_bytes for tensors that have storage (not sparse)
-        t.untyped_storage().nbytes() if not t.is_sparse else None,
+        t.untyped_storage().nbytes() if not is_sparse_any(t) else None,
         t.requires_grad,
         t.is_quantized,
         t.is_conj(),
@@ -963,8 +965,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_inference(),
         t.is_sparse,
         t.is_coalesced() if t.is_sparse else None,
-        t.dense_dim() if t.is_sparse else None,
-        t.sparse_dim() if t.is_sparse else None,
+        t.dense_dim() if is_sparse_any(t) else None,
+        t.sparse_dim() if is_sparse_any(t) else None,
     )
 
 
@@ -1077,6 +1079,7 @@ class FakeTensorMode(TorchDispatchMode):
         export: bool = False,
     ) -> None:
         log.debug("create_mode 0x%x", id(self))
+        super().__init__()
         self.allow_fallback_kernels = allow_fallback_kernels
 
         import torch._dynamo.config
@@ -1230,6 +1233,10 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
             if maybe_prev_only_lift_cpu_tensors is not None:
                 torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
@@ -1395,24 +1402,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
-                    raise _BypassDispatchCache("sparse tensor")
-                if arg.layout in [
-                    torch.sparse_csr,
-                    torch.sparse_csc,
-                    torch.sparse_bsr,
-                    torch.sparse_bsc,
-                ]:
-                    # Does this subsume arg.is_sparse?
-                    raise _BypassDispatchCache("sparse tensor layout")
-                # sparse tensors don't have storage, so check is after
-
+                if is_sparse_any(arg):
+                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 # FIXME: For now back out caching when there are symbolic nbytes
                 # - this doesn't seem to play nice with set(). See T196779132 for examples.
                 if isinstance(arg.untyped_storage().nbytes(), SymInt):
                     raise _BypassDispatchCache("symbolic nbytes")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -1538,7 +1533,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata is None:
             return None
 
-        assert not metadata.is_sparse
+        assert not is_sparse_any(metadata)
 
         def check_value(
             value: _MetadataIntLike, state: _CacheKeyState
@@ -1892,7 +1887,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
                     torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    and all(not is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:
@@ -2122,7 +2117,7 @@ class FakeTensorMode(TorchDispatchMode):
     def may_turn_const(self, t: Tensor) -> bool:
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
-            and not t.is_sparse
+            and not is_sparse_any(t)
             and not self.is_our_fake(t)
             and not t.device.type == "meta"
         )
@@ -2217,7 +2212,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, Tensor):
-            if not e.is_sparse:
+            if not is_sparse_any(e):
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -2228,7 +2223,7 @@ def run_fallback_kernel(
     def map_out(e: T) -> Union[T, FakeTensor]:
         if id(e) not in inp_impls and (
             isinstance(e, Tensor)
-            and not e.is_sparse
+            and not is_sparse_any(e)
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
@@ -2338,10 +2333,10 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
-    _device_not_kwarg_ops,  # noqa: F401
-    _is_tensor_constructor,  # noqa: F401
-    _like_tensor_constructors,  # noqa: F401
-    contains_tensor_types,  # noqa: F401
+    _device_not_kwarg_ops,
+    _is_tensor_constructor,
+    _like_tensor_constructors,
+    contains_tensor_types,
     get_fast_op_impls,
     has_meta,
     op_implementations_checks,
