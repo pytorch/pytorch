@@ -6,7 +6,6 @@ from torch._export.serde.schema_check import (
     SchemaUpdateError,
     update_schema,
 )
-
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, TestCase
 
 

@@ -21,6 +21,7 @@ from unittest import mock, SkipTest
 import torch
 import torch.distributed as c10d
 
+
 if not c10d.is_available() or not c10d.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -64,6 +65,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -234,6 +236,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.test_nan_assert_float16.__wrapped__,
             self.test_nan_assert_float32.__wrapped__,
             self.test_nan_assert_float64.__wrapped__,
+            self.test_nan_assert_bfloat16.__wrapped__,
         ]
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -344,7 +347,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
-    @parametrize("type", [torch.float16, torch.float32, torch.float64])
+    @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
     @skip_if_rocm
     def test_nan_assert(self, type):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -944,7 +947,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class ForwardReturnValueModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1062,7 +1065,7 @@ class DistributedDataParallelTest(
         process_group = c10d.distributed_c10d._get_default_group()
 
         class FindUnusedParametersModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1208,7 +1211,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class MultipleOutputModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 def define_module():
@@ -1270,7 +1273,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class NoGradModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1385,7 +1388,7 @@ class DistributedDataParallelTest(
         # not necessary to run barrier here, as DDP will synchronize
 
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -2111,12 +2114,12 @@ class WorkHookTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
+        super().tearDown()
         del os.environ["TORCH_NCCL_ENABLE_TIMING"]
         try:
             os.remove(self.file_name)
         except OSError:
             pass
-        super().tearDown()
 
     def _get_store(self):
         return dist.FileStore(self.file_name, self.world_size)
@@ -2787,7 +2790,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(
-        (2, 17), "Need NCCL 2.17+ for configuring NCCL communicators"
+        (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config(self):
@@ -2796,6 +2799,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.min_ctas = 2
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
+        pg_opts.config.split_share = 1
         nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
@@ -2807,6 +2811,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
+        split_share = re.search(
+            rb"Split share.*(\d+)|$", nccl_debug_file_content
+        ).group(1)
         cga_cluster_size = re.search(
             rb"CGA cluster.*(\d+)|$", nccl_debug_file_content
         ).group(1)
@@ -2817,6 +2824,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
         self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
         self.assertEqual(pg_opts.config.net_name, net_name.decode())
+        self.assertEqual(pg_opts.config.split_share, int(split_share))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -2904,74 +2912,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="nccl")
-
-
-class CompilerTest(test_c10d_common.CompilerTest):
-    @property
-    def world_size(self):
-        return 2
-
-    def _get_default_group(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-        )
-        return dist.distributed_c10d._get_default_group()
-
-    @skip_if_lt_x_gpu(2)
-    def test_allreduce_work_wait_gpu(self):
-        self._test_allreduce_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_work_wait_gpu(self):
-        self._test_allgather_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_into_tensor_work_wait_gpu(self):
-        self._test_allgather_into_tensor_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_work_wait_gpu(self):
-        self._test_reduce_scatter_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_work_wait_gpu(self):
-        self._test_reduce_scatter_tensor_work_wait(
-            torch.ones(4, 4, device=self.rank) * self.rank
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast_work_wait_gpu(self):
-        self._test_broadcast_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_scatter_work_wait_gpu(self):
-        self._test_scatter_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_alltoall_work_wait_gpu(self):
-        self._test_alltoall_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_nested_comm_tensor_wrapping(self):
-        self._test_nested_comm_tensor_wrapping(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_consecutive_comm_work_wait_gpu(self):
-        self._test_consecutive_comm_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3485,7 +3425,13 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     @classmethod
     def _run(
-        cls, parent_conn, rank: int, test_name: str, file_name: str, parent_pipe
+        cls,
+        parent_conn,
+        rank: int,
+        test_name: str,
+        file_name: str,
+        parent_pipe,
+        **kwargs,
     ) -> None:
         cls.parent = parent_conn
         super()._run(rank, test_name, file_name, parent_pipe)
@@ -3555,13 +3501,21 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.2")
+        self.assertEqual(ver, "2.3")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
         self.assertIn("name", default_pg_info)
         self.assertIn("desc", default_pg_info)
         self.assertIn("ranks", default_pg_info)
+        pg_status = t["pg_status"]
+        self.assertEqual(len(pg_status), 1)
+        self.assertEqual(str(pg_status["0"]["last_enqueued_collective"]), "2")
+        self.assertEqual(str(pg_status["0"]["last_completed_collective"]), "2")
+        self.assertEqual(
+            str(pg_status["0"]["last_started_collective"]),
+            "2" if timing_enabled else "-1",
+        )
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
         if include_collectives:

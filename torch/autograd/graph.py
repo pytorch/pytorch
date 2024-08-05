@@ -79,6 +79,11 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def _input_metadata(self) -> List[Any]:
+        raise NotImplementedError
+
     @abc.abstractmethod
     def _register_hook_dict(self, tensor: torch.Tensor) -> None:
         raise NotImplementedError
@@ -170,7 +175,9 @@ class Node(abc.ABC):
         return NotImplemented
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node:
+def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
         node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
@@ -427,7 +434,7 @@ def register_multi_grad_hook(
     ],
     *,
     mode: Literal["all", "any"] = "all",
-) -> _MultiHandle:
+) -> RemovableHandle:
     r"""Register a multi-grad backward hook.
 
     There are two supported modes: ``"all"`` and ``"any"``.
@@ -476,6 +483,8 @@ def register_multi_grad_hook(
         >>>
     """
     supported_modes = ("all", "any")
+    lock = threading.Lock()
+
     if mode not in supported_modes:
         raise ValueError(f"Expects mode to be one of {supported_modes} but got {mode}")
 
@@ -497,14 +506,19 @@ def register_multi_grad_hook(
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
-                if count[id] == 0:
-                    # On the first call, compute the actual nb_calls and buffer
-                    nb_calls = sum(map(torch._C._will_engine_execute_node, grad_fns))
+                with lock:
+                    curr_count, count[id] = count[id], count[id] + 1
+
+                    if curr_count == 0:
+                        # On the first call, compute the actual nb_calls and buffer
+                        nb_calls = sum(
+                            map(torch._C._will_engine_execute_node, grad_fns)
+                        )
 
                 buffer[id][idx] = grad
-                count[id] += 1
 
-                if count[id] == nb_calls:
+                assert nb_calls is not None
+                if curr_count == nb_calls - 1:
                     fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
                     del count[id]
@@ -517,7 +531,6 @@ def register_multi_grad_hook(
         )
     elif mode == "any":
         fn = cast(Callable[[torch.Tensor], None], fn)
-        lock = threading.Lock()
         ran_hook: Dict[int, bool] = defaultdict(bool)
 
         @functools.wraps(fn)
@@ -738,7 +751,7 @@ def allow_mutation_on_saved_tensors() -> (
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -788,7 +801,7 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[torch.Tensor],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:

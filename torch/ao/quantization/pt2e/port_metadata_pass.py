@@ -4,15 +4,12 @@ from typing import Optional
 
 import torch
 from torch._export.error import InternalError
-
 from torch.ao.quantization.pt2e.utils import (
     _filter_sym_size_users,
     _find_q_dq_node_for_user,
     _is_valid_annotation,
 )
-
 from torch.ao.quantization.quantizer import QuantizationSpecBase
-
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 

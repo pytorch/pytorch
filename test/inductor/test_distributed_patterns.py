@@ -10,6 +10,7 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
+
 # Fake distributed
 WORLD_SIZE = 2
 
@@ -109,13 +110,13 @@ def init_fake_distributed(device="cpu"):
 
 def init_module_bw_hooks(allow_eager):
     def bw_pre_hook(mod, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
+        assert allow_eager or torch.compiler.is_compiling()
         assert mod.weight.size() == (10, 10)
         mod.hook_count_pre.add_(1)
         return (torch.sin(gO[0] + 1.2),)
 
     def bw_post_hook(mod, gI, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
+        assert allow_eager or torch.compiler.is_compiling()
         assert mod.weight.size() == (10, 10)
         mod.hook_count_post.add_(1)
         return (torch.sin(gI[0] + 3.4),)

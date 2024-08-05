@@ -4545,9 +4545,11 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    NestedTensorCUDA, CUDA: is_pinned_cuda
-    MPS: is_pinned_mps
-    CompositeExplicitAutograd: is_pinned_default
+    # the NestedTensor keys are necessary because NestedTensor has been removed
+    # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
+    CompositeExplicitAutograd, NestedTensorCPU: is_pinned
+    SparseCsrCPU: is_pinned_sparse_compressed
+    SparseCPU: is_pinned_sparse_coo
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
@@ -4557,9 +4559,10 @@
 # Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
 - func: _pin_memory(Tensor self, Device? device=None) -> Tensor
   dispatch:
-    CUDA: _pin_memory_cuda
-    MPS: _pin_memory_mps
-    NestedTensorCUDA, NestedTensorCPU: _pin_memory_nested
+    CompositeExplicitAutograd: _pin_memory
+    NestedTensorCPU: _pin_memory_nested
+    SparseCPU: _pin_memory_sparse_coo
+    SparseCsrCPU: _pin_memory_sparse_compressed
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
@@ -8456,21 +8459,21 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __lshift__
+    CPU, CUDA, MPS: __lshift__
   tags: pointwise
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Scalar_out
   tags: pointwise
 
@@ -8478,7 +8481,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __ilshift__
+    CPU, CUDA, MPS: __ilshift__
   autogen: __lshift__.Tensor_out
   tags: pointwise
 
@@ -8499,7 +8502,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_left_shift_out
+    CPU, CUDA, MPS: bitwise_left_shift_out
   tags: pointwise
 
 - func: bitwise_left_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
@@ -8535,7 +8538,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: __rshift__
+    CPU, CUDA, MPS: __rshift__
   tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8549,14 +8552,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Scalar_out
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: __irshift__
+    CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Tensor_out
 
 - func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
@@ -8576,7 +8579,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: bitwise_right_shift_out
+    CPU, CUDA, MPS: bitwise_right_shift_out
   tags: pointwise
 
 - func: bitwise_right_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
@@ -14724,6 +14727,11 @@
 
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
   variants: function
+  tags: nondeterministic_seeded
+
+- func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
+  dispatch:
+    MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
