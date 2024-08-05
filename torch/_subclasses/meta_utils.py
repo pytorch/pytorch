@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import warnings
 import weakref
@@ -39,9 +38,9 @@ from torch._C._functorch import (
 )
 from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
-
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
+
 
 if TYPE_CHECKING:
     from torch._C._functorch import CInterpreter
