@@ -10,7 +10,7 @@ namespace jit {
 namespace mobile {
 SequentialSampler::SequentialSampler(size_t size) : size_(size) {}
 
-void SequentialSampler::reset(optional<size_t> new_size) {
+void SequentialSampler::reset(std::optional<size_t> new_size) {
   if (new_size.has_value()) {
     size_ = *new_size;
   }
