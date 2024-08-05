@@ -943,15 +943,16 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = "", None
-    for __name in dir(_C):
-        __candidate = getattr(_C, __name)
-        if inspect.ismodule(__candidate):
-            # submodule
-            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
+    def _import_extension_to_sys_modules(module, module_name):
+        for name in dir(module):
+            member = getattr(module, name)
+            if inspect.ismodule(member):
+                sys.modules.setdefault(f"{module_name}.{name}", member)
+                # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
+                _import_extension_to_sys_modules(member, f"{module_name}.{name}")
 
-    del __name, __candidate
-
+    _import_extension_to_sys_modules(_C, f"{__name__}._C")
+    del _import_extension_to_sys_modules
 
 ################################################################################
 # Define basic utilities
@@ -1171,18 +1172,18 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
 
         >>> torch.set_default_dtype(torch.float64)
         >>> # Python floats are now interpreted as float64
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float64
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex128
 
         >>> torch.set_default_dtype(torch.float16)
         >>> # Python floats are now interpreted as float16
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float16
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex32
 
     """
@@ -2107,11 +2108,14 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 
 
 from torch import _library as _library, _ops as _ops
-from torch._classes import classes as classes
 
 
-# Import the ops "namespace"
+# Import the ops and classes "namespace"
 from torch._ops import ops as ops  # usort: skip
+from torch._classes import classes as classes  # usort: skip
+
+sys.modules.setdefault(f"{__name__}.ops", ops)
+sys.modules.setdefault(f"{__name__}.classes", classes)
 
 # quantization depends on torch.fx and torch.ops
 # Import quantization
@@ -2290,8 +2294,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]:
-    ...
+) -> _Callable[_InputT, _RetT]: ...
 
 
 @_overload
@@ -2304,8 +2307,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
-    ...
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
@@ -2443,9 +2445,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):
@@ -2523,7 +2523,12 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
+    from torch import (
+        _dynamo as _dynamo,
+        _inductor as _inductor,
+        _subclasses as _subclasses,
+        onnx as onnx,
+    )
 
 else:
     _lazy_modules = {
