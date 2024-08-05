@@ -1,10 +1,9 @@
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, cast, Dict, Optional, Tuple
 
 import requests
 import rockset  # type: ignore[import]
@@ -120,13 +119,13 @@ def git_api(
         ).json()
 
 
-def make_pr(source_repo: str, params: Dict[str, Any]) -> Any:
+def make_pr(source_repo: str, params: Dict[str, Any]) -> int:
     response = git_api(f"/repos/{source_repo}/pulls", params, type="post")
     print(f"made pr {response['html_url']}")
-    return response["number"]
+    return cast(int, response["number"])
 
 
-def approve_pr(source_repo: str, pr_number: str) -> None:
+def approve_pr(source_repo: str, pr_number: int) -> None:
     params = {"event": "APPROVE"}
     # use pytorchbot to approve the pr
     git_api(
@@ -137,7 +136,7 @@ def approve_pr(source_repo: str, pr_number: str) -> None:
     )
 
 
-def make_comment(source_repo: str, pr_number: str, msg: str) -> None:
+def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
     params = {"body": msg}
     # comment with pytorchbot because pytorchmergebot gets ignored
     git_api(
@@ -148,16 +147,9 @@ def make_comment(source_repo: str, pr_number: str, msg: str) -> None:
     )
 
 
-def close_pr(source_repo: str, pr_number: str) -> None:
-    params = {"state": "closed"}
-    git_api(
-        f"/repos/{source_repo}/pulls/{pr_number}",
-        params,
-        type="patch",
-    )
-
-
-def search_for_open_pr(source_repo: str, search_string: str) -> Optional[Tuple[int, str]]:
+def search_for_open_pr(
+    source_repo: str, search_string: str
+) -> Optional[Tuple[int, str]]:
     params = {
         "q": f"is:pr is:open in:title author:pytorchupdatebot repo:{source_repo} {search_string}",
         "sort": "created",
@@ -174,6 +166,7 @@ def search_for_open_pr(source_repo: str, search_string: str) -> Optional[Tuple[i
         )
         return pr_num, branch_name
     return None
+
 
 if __name__ == "__main__":
     rs_client = rockset.RocksetClient(
@@ -196,7 +189,9 @@ if __name__ == "__main__":
     subprocess.run(["git", "checkout", "-b", branch_name], cwd=REPO_ROOT)
     subprocess.run(["git", "add", "test/slow_tests.json"], cwd=REPO_ROOT)
     subprocess.run(["git", "commit", "-m", "Update slow tests"], cwd=REPO_ROOT)
-    subprocess.run(f"git push --set-upstream origin {branch_name} -f".split(), cwd=REPO_ROOT)
+    subprocess.run(
+        f"git push --set-upstream origin {branch_name} -f".split(), cwd=REPO_ROOT
+    )
 
     params = {
         "title": "Update slow tests",
