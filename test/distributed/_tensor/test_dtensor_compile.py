@@ -530,7 +530,7 @@ def forward(self, primals_1):
     wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
     sin = torch.ops.aten.sin.default(wait_tensor)
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return [sin_1, primals_1, wait_tensor]""",
+    return (sin_1, primals_1, wait_tensor)""",
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -558,7 +558,7 @@ def forward(self, primals_1):
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     def test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.wq = nn.Linear(16, 16)
                 self.wk = nn.Linear(16, 16)
@@ -574,7 +574,7 @@ def forward(self, primals_1):
                 return self.wo(xo)
 
         class FakeTransformerBlock(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attn = FakeAttention()
 
@@ -582,7 +582,7 @@ def forward(self, primals_1):
                 return self.attn(x)
 
         class FakeTransformer(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = FakeTransformerBlock()
 
