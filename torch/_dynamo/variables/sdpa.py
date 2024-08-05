@@ -1,10 +1,15 @@
 # mypy: ignore-errors
 
 from inspect import getattr_static
+from typing import TYPE_CHECKING
 
 from ..bytecode_transformation import create_call_function
 from ..exc import Unsupported
 from .base import VariableTracker
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class SDPAParamsVariable(VariableTracker):
@@ -12,8 +17,9 @@ class SDPAParamsVariable(VariableTracker):
     This is a read-only container."""
 
     @staticmethod
-    def create(tx, value, source):
+    def create(tx: "InstructionTranslator", value, source):
         from torch.backends.cuda import SDPAParams
+
         from ..source import AttrSource
         from .builder import VariableBuilder
         from .torch import TorchInGraphFunctionVariable
@@ -40,7 +46,7 @@ class SDPAParamsVariable(VariableTracker):
             tx, param_vars, {}
         )
 
-    def __init__(self, proxy, param_vars, **kwargs):
+    def __init__(self, proxy, param_vars, **kwargs) -> None:
         self.proxy = proxy
         self.param_vars = param_vars
         super().__init__(**kwargs)
@@ -57,8 +63,9 @@ class SDPAParamsVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
+
         from ..source import AttrSource
         from .builder import wrap_fx_proxy
         from .misc import GetAttrVariable

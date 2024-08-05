@@ -7,6 +7,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import gc
 import inspect
@@ -26,11 +27,9 @@ from unittest import mock
 import numpy as np
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-
 import torch._functorch.config
 import torch.library
 import torch.utils._pytree as pytree
@@ -39,7 +38,6 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
-
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -310,7 +308,7 @@ class _ReversibleFunction(torch.autograd.Function):
 
 
 class ReformerEncoder(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.dropout = 0.5
         self.layer_norm = torch.nn.LayerNorm(512, eps=1.0e-12)
@@ -407,7 +405,7 @@ class ListConfig:
         except Exception:
             raise AssertionError from None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._content = [
             ListConfig.ValueNode(1),
             ListConfig.ValueNode(3),
@@ -437,7 +435,7 @@ def longformer_chunk(hidden_states, window_overlap=256):
 
 class PartialT5(torch.nn.Module):
     # Highly simplified T5Attention prefix
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.q = torch.nn.Linear(512, 512)
         self.k = torch.nn.Linear(512, 512)
@@ -515,7 +513,7 @@ class PartialT5(torch.nn.Module):
 
 class ChunkReformerFeedForward(torch.nn.Module):
     # simplified from HF modeling_reformer.py
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer_norm = torch.nn.LayerNorm(256, eps=1e-12)
         self.dense = torch.nn.Linear(256, 256)
@@ -560,7 +558,7 @@ def _validate_model_kwargs(fn, model_kwargs):
 
 
 class FakeMamlInner(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(784, 5)
 
@@ -570,7 +568,7 @@ class FakeMamlInner(torch.nn.Module):
 
 class PartialMaml(torch.nn.Module):
     # Highly simplified version of maml.meta.Meta.finetuning
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net = FakeMamlInner()
         self.update_step_test = 10
@@ -1242,7 +1240,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """21""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1663,7 +1661,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.nn.Sequential(*layers)
 
         class testmodel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.interaction_networks = torch.nn.ModuleList(
                     [fcnn(262, 1174, 400) for _ in range(4)]
@@ -1993,7 +1991,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_hf_gelu_inline(self):
         class GELUActivation(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.act = nn.functional.gelu
 
@@ -2168,10 +2166,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_sort_out2(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("sorted", torch.ones(4, 4))
-                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
+                self.sorted = torch.nn.Buffer(torch.ones(4, 4))
+                self.indices = torch.nn.Buffer(torch.ones(4, 4, dtype=torch.long))
 
             def forward(self, x):
                 torch.sort(x, out=(self.sorted, self.indices))
@@ -2200,9 +2198,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_sigmoid_out2(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("base", torch.ones(4, 4))
+                self.base = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 torch.sigmoid(x, out=self.base)
@@ -2265,11 +2263,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return p + q + r
 
         class Value:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._value = torch.randn(4)
 
         class Sample:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._jt_dict = {}
                 self._jt_dict["POSITION_ID"] = Value()
 
@@ -2414,7 +2412,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_ellipsis(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lnorm = torch.nn.LayerNorm(
                     (256,), eps=1e-06, elementwise_affine=True
@@ -2440,7 +2438,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_reinplacing(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_layoutlm_embeddings_x_position_embeddings = (
                     torch.nn.Embedding(1024, 768)
@@ -2477,7 +2475,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_optimized_deepcopy(self):
         # See https://github.com/pytorch/pytorch/pull/88629
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc = torch.nn.Linear(in_features=2, out_features=3, bias=True)
 
@@ -2494,7 +2492,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             a = 4
             b = torch.ones(3, 4)
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.c = 4
 
@@ -2508,10 +2506,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_named_buffers(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("x", torch.ones(3))
-                self.register_buffer("y", torch.ones(3))
+                self.x = torch.nn.Buffer(torch.ones(3))
+                self.y = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, inp):
                 res = 0
@@ -2608,7 +2606,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_modules(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc = torch.nn.Linear(4, 3)
 
@@ -2642,7 +2640,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_user_defined_iter(self):
         class MyIter:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.i = 0
 
             def __iter__(self):
@@ -2770,7 +2768,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # NB: not a parameter or buffer
                 self.t = torch.randn(3)
@@ -3256,7 +3254,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(
                     64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True
@@ -3439,7 +3437,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_attached_attribute_in_dir(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(16, 16)
                 self.relu = torch.nn.ReLU()
@@ -3523,6 +3521,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(torch.zeros(6, 4), torch.tensor(2)),
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
+
+    def test_dataclass_init_with_default_factory_with_inputs(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x, inp_list):
+            d = DClass(inp_list)
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        inp_list1 = [1, 2, 3]
+        inp_list2 = [2, 3, 4]
+        inp_list3 = [1, 2]
+        ref1 = fn(x, inp_list1)
+        ref2 = fn(x, inp_list2)
+        ref3 = fn(x, inp_list3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, fullgraph=True)
+
+        opt_ret1 = opt_fn(x, inp_list1)
+        opt_ret2 = opt_fn(x, inp_list2)
+        opt_ret3 = opt_fn(x, inp_list3)
+        self.assertEqual(ref1.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
 
     def test_list_index(self):
         for i, list_type in enumerate(
@@ -3881,7 +3908,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_inference_mode_dynamic_shapes(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, param):
@@ -3898,7 +3925,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_kwargs_out_list_variable(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, param):
@@ -4374,7 +4401,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_unbacked_arange_in_bounds(self):
         # see https://github.com/pytorch/pytorch/issues/113002
         class PaddingNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, lengths):
@@ -4635,7 +4662,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
-    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
+    _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = _assert_async = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -4807,7 +4834,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     #     )
     #     def test_storage_resize_forward_full_graph(self):
     #         class TestModule(torch.nn.Module):
-    #             def __init__(self):
+    #             def __init__(self) -> None:
     #                 super().__init__()
     #                 self.param = torch.nn.Parameter(torch.randn(4, 4))
 
@@ -4889,6 +4916,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_vc_bumped_in_inference_graph(self):
+        @torch.compile
+        def f(x):
+            return x.mul_(2)
+
+        x = torch.randn(4)
+        vc_before = x._version
+        f(x)
+        vc_after = x._version
+        self.assertTrue(vc_after > vc_before)
 
     def test_nn_module_callable(self):
         class M(nn.Module):
@@ -5079,8 +5117,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
 
-    @unittest.expectedFailure
-    def test_trace_functional_tensor_with_error(self):
+    def test_trace_functional_tensor_with(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
@@ -5110,9 +5147,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             ):
                 opt_f(inp, tmp)
 
-        # grad state may not be properly reset after the error
-        self.assertTrue(torch.is_grad_enabled())
-
     def test_const_dict_keyerror(self):
         d = {}
 
@@ -5129,7 +5163,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     def test_dict_tag_guard(self):
         class Foo:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.scalar = 10
 
         def fn(d, x):
@@ -5181,7 +5215,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.cos(x) * c
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fast_cos = fast_cos
 
@@ -5255,7 +5289,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return gm.forward
 
         class SubMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -5263,7 +5297,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return self.linear(x)
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submod1 = SubMod()
                 self.submod2 = SubMod()
@@ -5298,7 +5332,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.nums = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
                 self.t = 5
@@ -5327,6 +5361,34 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         tensor = torch.randn([2, 3])
         res = random_op(tensor, params)
 
+    # https://github.com/pytorch/pytorch/issues/131019
+    def test_tensor_uniform(self):
+        def uniform_op(tensor, params):
+            res = tensor.uniform_(**params)
+            return res
+
+        uniform_op = torch.compile(uniform_op)
+        params = {"from": -10, "to": 10}
+        tensor = torch.randn([2, 3])
+        res = uniform_op(tensor, params)
+
+    def test_data_attr_mutation_after_saved_for_bw(self):
+        def f(x):
+            out = x.sin()
+            x.data.mul_(2)
+            return out
+
+        x = torch.randn(4, requires_grad=True)
+        x_test = x.clone().detach().requires_grad_(True)
+
+        out = f(x)
+        out_test = torch.compile(f, backend="aot_eager")(x_test)
+        self.assertEqual(out, out_test)
+
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(x.grad, x_test.grad)
+
     # https://github.com/pytorch/pytorch/issues/128072
     def test_map_with_multiple_args(self):
         def f(a, b):
@@ -5338,15 +5400,110 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+
+    def test_staticmethod_allow_in_graph(self):
+        class MyClass:
+            i = 3
+
+            @staticmethod
+            def foo_inner(x):
+                return torch.mul(x, MyClass.i)
+
+            # if dynamo inlines with fullgraph, will error
+            # verify that dynamo doesn't inline
+            @staticmethod
+            @torch._dynamo.allow_in_graph
+            def foo1(x):
+                torch._dynamo.graph_break()
+                return MyClass.foo_inner(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f_bad(x):
+            return MyClass.foo1(x)
+
+        f_bad(torch.ones(2, 2))
+
+    def test_guard_with_tuple_mutation(self):
+        class Foo:
+            def __init__(self) -> None:
+                self.x = 10
+
+        foo = Foo()
+        d = {
+            "a": 2,
+            "b": (foo,),
+        }
+
+        def fn(x, d):
+            return x * d["a"] * d["b"][0].x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+        d["b"][0].x = 12
+        self.assertEqual(fn(inp, d), opt_fn(inp, d))
+
+    def test_compile_complex_conj(self):
+        def f(x):
+            return torch.mul(x, 2j)
+
+        x_ref = torch.randn(4, 2, requires_grad=True)
+        x_test = x_ref.clone().detach().requires_grad_(True)
+
+        out_ref = f(torch.view_as_complex(x_ref))
+        out_test = torch.compile(f, backend="aot_eager")(torch.view_as_complex(x_test))
+        self.assertEqual(out_ref, out_test)
+
+        torch.view_as_real(out_ref).sum().backward()
+        torch.view_as_real(out_test).sum().backward()
+        self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_changing_stride(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return x * y
+
+        for i in range(1, 4):
+            x = torch.randn(4, i)
+
+            # create a view for i > 1
+            if i == 1:
+                x1 = x
+            else:
+                x1 = x[:, 0:1]
+
+            y = torch.randn(4, 1)
+            print(x1.shape, y.shape)
+            fn(x1, y)
+
+        self.assertTrue(cnt.frame_count <= 2)
+
+    def test_optimized_module_training(self):
+        mod = torch.nn.Linear(3, 3)
+        mod.eval()
+
+        opt_mod = torch.compile(mod, backend="eager")
+        self.assertFalse(opt_mod.training)
+
+        opt_mod.train()
+        self.assertTrue(opt_mod.training)
+        self.assertTrue(mod.training)
+
+        mod.eval()
+        self.assertFalse(opt_mod.training)
 
 
 instantiate_parametrized_tests(ReproTests)

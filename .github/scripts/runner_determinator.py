@@ -12,6 +12,7 @@ from github.Issue import Issue
 
 WORKFLOW_LABEL_META = ""  # use meta runners
 WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundation
 
 GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
@@ -202,6 +203,10 @@ def main() -> None:
                 f"Failed to get issue. Falling back to meta runners. Exception: {e}"
             )
             label_type = WORKFLOW_LABEL_META
+
+    # For Canary builds use canary runners
+    if args.github_repo == "pytorch/pytorch-canary" and label_type == WORKFLOW_LABEL_LF:
+        label_type = WORKFLOW_LABEL_LF_CANARY
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, label_type)
 

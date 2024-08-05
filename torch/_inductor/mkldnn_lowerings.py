@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from typing import List, Optional
@@ -5,6 +6,7 @@ from typing import List, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
+
 from . import ir, mkldnn_ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox

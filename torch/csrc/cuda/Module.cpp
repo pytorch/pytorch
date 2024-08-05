@@ -737,7 +737,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
-  py::str user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -761,8 +760,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
-      case TraceEntry::USER_DEFINED:
-        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -786,6 +783,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace.append(trace_entry);
     }
     traces.append(trace);
+  }
+
+  py::list external_annotations;
+  for (const auto& ae : snapshot.external_annotations) {
+    py::dict annotation_entry;
+    for (const auto& md : ae.metadata_) {
+      annotation_entry[(py::str)md.first] = md.second;
+    }
+    annotation_entry[device_s] = ae.device_;
+    annotation_entry[time_us_s] = ae.time_.t_;
+    external_annotations.append(annotation_entry);
   }
 
   py::dict allocator_settings;
@@ -825,6 +833,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
+  result["external_annotations"] = external_annotations;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -1175,16 +1184,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using namespace torch::cuda::CUDAPluggableAllocator;
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        malloc_fn, free_fn);
+    return createCustomAllocator(malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1214,13 +1221,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
         t.unsafeGetTensorImpl()
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  m.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
       });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
