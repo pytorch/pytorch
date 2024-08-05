@@ -92,7 +92,7 @@ class CKGemmTemplate(CKTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         super().__init__(
             "ck_gemm_template",
             input_nodes=input_nodes,

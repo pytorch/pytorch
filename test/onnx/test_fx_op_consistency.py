@@ -46,13 +46,12 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
 import error_reproduction
-
 import onnx_test_common
-
 import parameterized
 import pytest
 import pytorch_test_common
@@ -65,7 +64,10 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,

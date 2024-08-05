@@ -526,7 +526,7 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(10, 10, dtype=torch.complex64)
 
@@ -540,7 +540,7 @@ class TestAOTAutograd(AOTTestCase):
         # test that this works even though the sparse tensor has no storage.
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.EmbeddingBag(100, 8, sparse=True)
 
@@ -641,8 +641,8 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(primals_2, 2)
     add = torch.ops.aten.add.Tensor(mul, mul)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = None
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = set_ = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -766,11 +766,11 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
     arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
-    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = None
+    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = set_ = None
     mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1)
+    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1);  set__1 = None
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = None
+    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = set__2 = None
     mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
     add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
@@ -1004,7 +1004,7 @@ def forward(self, primals_1):
     @skipIfTorchDynamo("This test suite already uses dynamo")
     def test_composite_impl_compile(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1166,11 +1166,11 @@ def forward(self, arg0_1, arg1_1):
             fw_graph_cell[0].code.strip(),
             """\
 def forward(self, primals_1):
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 32);  resize_storage_bytes_ = None
     ones = torch.ops.aten.ones.default([8], device = device(type='cpu'), pin_memory = False)
     copy = torch.ops.aten.copy.default(primals_1, ones);  ones = None
     add = torch.ops.aten.add.Tensor(copy, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, copy);  primals_1 = copy = copy_ = None
     return (add,)""",
         )
 
@@ -1203,7 +1203,7 @@ def forward(self, primals_1):
             """\
 def forward(self, primals_1):
     sin = torch.ops.aten.sin.default(primals_1)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0)
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_1, 0);  resize_storage_bytes_ = None
     return (sin, primals_1)""",
         )
 
@@ -1303,8 +1303,8 @@ def forward(self, primals_1):
 def forward(self, primals_1, primals_2):
     cat = torch.ops.aten.cat.default([primals_2, primals_2]);  primals_2 = None
     sin = torch.ops.aten.sin.default(cat)
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0)
-    set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = None
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(cat, 0);  resize_storage_bytes_ = None
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, cat);  primals_1 = set_ = None
     return (sin, cat)""",
         )
 
@@ -1400,7 +1400,7 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
     view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
     add = torch.ops.aten.add.Tensor(view_1, 1)
-    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = copy_ = None
     return (add,)""",
         )
 
@@ -1422,7 +1422,7 @@ def forward(self, primals_1):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = None
+    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -1444,7 +1444,7 @@ def forward(self, primals_1):
 def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 2)
     add = torch.ops.aten.add.Tensor(mul, 3)
-    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = copy_ = None
     return (add,)""",
         )
 
@@ -1547,8 +1547,8 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1):
-    view = torch.ops.aten.view.default(primals_1, [-1]);  primals_1 = None
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [-1]);  arg0_1 = None
     return (view,)""",
         )
 
@@ -2199,12 +2199,11 @@ def forward(self, primals_1):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             """\
-def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
-    t = torch.ops.aten.t.default(view);  view = None
-    view_1 = torch.ops.aten.view.default(primals_2, [3, 3]);  primals_2 = None
-    view_2 = torch.ops.aten.view.default(t, [3, 3])
-    return (t, view_1, view_2)""",
+def forward(self, arg0_1, arg1_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    view = torch.ops.aten.view.default(arg1_1, [3, 3]);  arg1_1 = None
+    view_1 = torch.ops.aten.view.default(t, [3, 3])
+    return (t, view, view_1)""",
         )
 
     def test_view_detach(self):
@@ -3585,9 +3584,9 @@ def forward(self, tangents_1):
 
     def test_buffer_copied_in_graph(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.w1 = torch.nn.Parameter(torch.zeros(1))
                 self.w2 = torch.nn.Parameter(torch.zeros(1))
 
@@ -3623,7 +3622,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     sum_1 = torch.ops.aten.sum.default(mul_1);  mul_1 = None
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, add);  primals_3 = add = copy_ = None
     return (add_1, primals_1, primals_2, primals_4, mul)""",
         )
 
@@ -3640,9 +3639,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 
     def test_buffer_copied_in_graph_with_different_shapes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.ones(4, 4))
+                self.buf = torch.nn.Buffer(torch.ones(4, 4))
                 self.w = torch.nn.Parameter(
                     torch.Tensor([[4, 5], [1, 2], [6, 7], [8, 9]])
                 )
@@ -3678,7 +3677,7 @@ def forward(self, primals_1, primals_2, primals_3):
     sum_1 = torch.ops.aten.sum.default(mm);  mm = None
     sum_2 = torch.ops.aten.sum.default(add)
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
-    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = copy_ = None
     return (add_1, primals_1, primals_3)""",
         )
         self.assertEqual(out_ref, out_test)
@@ -3695,7 +3694,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.BatchNorm1d(100)
 
@@ -3734,9 +3733,9 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     getitem_2 = _native_batch_norm_legit_functional[2]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
-    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
-    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
+    copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = copy_ = None
+    copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = copy__1 = None
+    copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = copy__2 = None
     return (getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4)""",  # noqa: B950
         )
 
@@ -3817,7 +3816,7 @@ def forward(self, tangents_1):
         from functorch.experimental import functionalize
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -3866,9 +3865,9 @@ def forward(self, tangents_1):
 
     def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 5))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -4090,9 +4089,9 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 2)
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
     add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
     add_2 = torch.ops.aten.add.Tensor(mul, add_1);  mul = add_1 = None
     return (add_2,)""",
@@ -4114,9 +4113,9 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
@@ -4143,7 +4142,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_composite_implicit_linear(self):
         class MM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -4185,9 +4184,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
@@ -4220,9 +4219,9 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_buffer_mutation_metadata(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("foo", torch.zeros(2, 2))
+                self.foo = torch.nn.Buffer(torch.zeros(2, 2))
 
             def forward(self, x):
                 self.foo.add_(4)
@@ -4271,14 +4270,14 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
     add = torch.ops.aten.add.Tensor(arg1_1, 5)
     add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, 7);  add_1 = None
     cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
     sin = torch.ops.aten.sin.default(add_2);  add_2 = None
     add_3 = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False);  _set_grad_enabled_1 = None
     return (add_3,)""",
         )
 
@@ -4288,7 +4287,7 @@ def forward(self, arg0_1, arg1_1):
     )
     def test_aot_export_predispatch_with_cond_nested(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4366,7 +4365,7 @@ def forward(self, arg0_1):
     )
     def test_aot_export_predispatch_map_1(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -4424,13 +4423,13 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    select = torch.ops.aten.select.int(cos, 0, 0)
+    select = torch.ops.aten.select.int(cos, 0, 0);  select = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    select_1 = torch.ops.aten.select.int(cos, 0, 0);  select_1 = None
     body_graph_1 = self.body_graph_1
     map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
     getitem_1 = map_impl_1[0];  map_impl_1 = None
@@ -4450,7 +4449,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_map_2(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -4493,7 +4492,7 @@ def forward(self, arg0_1, arg1_1):
     )
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4541,7 +4540,7 @@ def forward(self, arg0_1):
 
     def test_aot_export_predispatch_conv_and_bn(self):
         class ConvBatchnorm(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -4608,7 +4607,7 @@ def forward(self, arg0_1):
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(3)
@@ -4647,7 +4646,7 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
-        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
@@ -4671,7 +4670,7 @@ class <lambda>(torch.nn.Module):
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
         getitem_7: "f32[3]" = native_batch_norm_backward[2];  native_batch_norm_backward = None
         convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
-        getitem_8 = convolution_backward[0]
+        getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
@@ -4794,9 +4793,9 @@ class <lambda>(torch.nn.Module):
 
     def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -4820,9 +4819,9 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_forward_mutation_multiple_mut(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -4929,7 +4928,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     )
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -4968,7 +4967,7 @@ def forward(self, arg0_1):
             """\
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 4)
-    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     return (cos,)""",
         )
@@ -4978,7 +4977,7 @@ def forward(self, arg0_1):
             """\
 def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 5)
-    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
+    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""",
         )
@@ -5066,7 +5065,7 @@ class TestPartitioning(AOTTestCase):
         # Following module results in inplace ops while tracing. The test checks
         # that the meta tensor information is stored for inplace ops.
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.randn(3072, 768, requires_grad=True)
@@ -5744,11 +5743,64 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
 
+    def test_aot_dispatch_output_requires_grad_in_no_grad(self):
+        def fn(x):
+            out1 = x.sin()
+            with torch.enable_grad():
+                out2 = x.cos()
+            return out1, out2
+
+        inp_fns = [
+            lambda: torch.ones(10, requires_grad=True),
+            lambda: torch.ones(10, requires_grad=False),
+        ]
+
+        compiled_f = aot_function(fn, nop)
+        for inp_fn in inp_fns:
+            with torch.no_grad():
+                ref_x = inp_fn()
+                ref_out = fn(ref_x)
+                x = inp_fn()
+                out = compiled_f(x)
+                for r, o in zip(ref_out, out):
+                    self.assertEqual(r.requires_grad, o.requires_grad)
+            if ref_x.requires_grad:
+                with torch.enable_grad():
+                    (ref_out[0] + ref_out[1]).sum().backward()
+                    (out[0] + out[1]).sum().backward()
+                    self.assertEqual(ref_x.grad, x.grad)
+                    assert torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3)
+
+    def test_aot_dispatch_output_requires_grad_in_no_grad_views(self):
+        # view-type ops preserve requires_grad even in no_grad.
+        def fn(x):
+            return x.view(-1), x.sin()
+
+        inference_graph_cell = [None]
+        inference_compiler = make_boxed_compiler(
+            partial(extract_graph, graph_cell=inference_graph_cell)
+        )
+        compiled_fn = aot_function(fn, nop, inference_compiler=inference_compiler)
+
+        inp_x0 = torch.ones(2, 3, requires_grad=True)
+        # Clone in no_grad will make requires_grad=False tensors, keep clone outside of no_grad
+        ref_x0 = inp_x0.clone()
+        x0 = inp_x0.clone()
+        with torch.no_grad():
+            ref_out1, ref_out2 = fn(ref_x0)
+
+            out1, out2 = compiled_fn(x0)
+            # Assert that we executed inference graph
+            self.assertTrue(inference_graph_cell[0] is not None)
+
+            self.assertEqual(ref_out1.requires_grad, out1.requires_grad)
+            self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
+
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5777,7 +5829,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_dynamic(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5840,7 +5892,7 @@ class TestAOTModuleSimplified(AOTTestCase):
     def test_inference_python_dispatcher(self):
         # Extracted from unet
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.upsample = torch.nn.Upsample(
                     scale_factor=2, mode="bilinear", align_corners=True
@@ -5859,7 +5911,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(20, 30)
 
@@ -5900,7 +5952,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -6338,7 +6390,7 @@ class MockFXGraphCache:
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cache = {}
 
     def save(self, key, gm):

@@ -313,8 +313,8 @@ def snapshot_fake(val: Tensor) -> Optional[Tensor]:
 
 _ExtractValType = Optional[Union[
     PySymType, _AnyScriptObjectType, BackwardState,
-    List["_ExtractValType"], Tuple["_ExtractValType", ...], Tensor,
-    int, float, bool]]
+    List["_ExtractValType"], Tuple["_ExtractValType", ...],
+    Dict[str, "_ExtractValType"], Tensor, int, float, bool]]
 
 def extract_val(val: _ExtractValType) -> _ExtractValType:
     if is_fake(val):
@@ -327,6 +327,8 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
+    elif isinstance(val, dict):
+        return {k: extract_val(v) for k, v in val.items()}
     elif isinstance(val, Tensor):
         if not val.is_sparse:
             # NB: Kinda hacky, but we should try to get val as the metadata
@@ -485,9 +487,8 @@ def track_tensor_tree(
             # which does not participate in const-prop)
             assert constant is None
 
-            # if isinstance(proxy, fx.Proxy):
-            #    # BUG? This is guaranteed to be a no-op
-            #    set_meta(proxy, e)
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
 
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)  # type: ignore[index]
@@ -1169,6 +1170,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return func(*args, **kwargs)
 
         return proxy_call(self, func, self.pre_dispatch, args, kwargs)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -1915,7 +1920,8 @@ def get_isolated_graphmodule(
         func: Callable,
         args: Tuple[object, ...],
         kwargs: Dict[str, object],
-        tracing_mode: str = "real"
+        tracing_mode: str = "real",
+        decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
 ) -> GraphModule:
     """A helper function used to get the GraphModule for the given func.
 
@@ -1926,7 +1932,7 @@ def get_isolated_graphmodule(
     wrapped, all_args = wrapper_and_args_for_make_fx(func, args, kwargs)
 
     with disable_proxy_modes_tracing():
-        gm = make_fx(wrapped, tracing_mode=tracing_mode)(all_args)
+        gm = make_fx(wrapped, decomposition_table=decomposition_table, tracing_mode=tracing_mode)(all_args)
     return gm
 
 
