@@ -1,4 +1,4 @@
-# Owner(s): ["module: nn"]
+# Owner(s): ["module: multi-headed-attention"]
 
 import contextlib
 from functools import partial
@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -3617,6 +3618,7 @@ class TestAttnBias(NNTestCase):
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
+@unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod

@@ -436,7 +436,7 @@ class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_qconfig: Dict[

@@ -645,7 +645,7 @@ class FunctionEvent(FormattedTimesMixin):
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.key: Optional[str] = None
         self.count: int = 0
         self.node_id: int = 0

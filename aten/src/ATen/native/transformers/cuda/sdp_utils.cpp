@@ -561,11 +561,21 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   return true;
 }
 
-bool can_use_flash_attention(sdp_params const& params, bool debug) {
-#ifndef USE_FLASH_ATTENTION
-  TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
+bool is_flash_attention_available() {
+#ifdef USE_FLASH_ATTENTION
+  return true;
+#else
   return false;
 #endif
+}
+
+bool can_use_flash_attention(sdp_params const& params, bool debug) {
+  if (!is_flash_attention_available()) {
+    if (debug) {
+      TORCH_WARN("Torch was not compiled with flash attention.");
+    }
+    return false;
+  }
 
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
