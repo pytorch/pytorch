@@ -255,23 +255,105 @@ def load_ratio_right(
 
 
 # the block sizes are limited by hardware (the shared memory)
-# in theory all numbers are independent; e.g. BLOCK_SIZE_M is not necessarily equal to BLOCK_SIZE_O
+# intuitively, the optimization works when the intermediate matrix is large
+# and we assign large block sizes to large dimensions
 b2b_gemm_configs = [
     {
-        "BLOCK_SIZE_M": m,
-        "BLOCK_SIZE_N": n,
-        "BLOCK_SIZE_O": m,
-        "BLOCK_SIZE_P": n,
-        "num_stages": s,
-        "num_warps": 2 * s,
-    }
-    for (m, n, s) in {  # deduplicate
-        (m, n, s)
-        for m in [16, 32, 64, 128]
-        for n in [16, 32, 64, 128]
-        for s in ([2] if (m == 128 or n == 128) else [2, 4])  # don't be too large
-        if not (m == n == 128)  # don't be too large
-    }
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 16,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 32,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 128,
+        "BLOCK_SIZE_P": 64,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 16,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 32,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 16,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 16,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 4,
+        "num_warps": 8,
+    },
+    {
+        "BLOCK_SIZE_M": 32,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 32,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
+    {
+        "BLOCK_SIZE_M": 64,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_O": 64,
+        "BLOCK_SIZE_P": 128,
+        "num_stages": 2,
+        "num_warps": 4,
+    },
 ]
 
 
@@ -552,7 +634,10 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
                     all_reachable = False
                     break
 
-        return (all_reachable and all(count == 0 for count in input_counter.values()), visited)
+        return (
+            all_reachable and all(count == 0 for count in input_counter.values()),
+            visited,
+        )
 
     # check inner_mm reaches f_node on every user path via pointwise nodes with no outside input_nodes
     ok, subgraph_node_set = all_reach_via_pointwise_with_no_other_inputs(
