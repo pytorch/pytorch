@@ -399,10 +399,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, pred, true_fn, false_fn, operands):
-    if mode.enable_tracing:
-        return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-    else:
-        return cond_op(pred, true_fn, false_fn, operands)
+    return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
 @cond_op.py_impl(FakeTensorMode)
