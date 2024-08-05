@@ -536,12 +536,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize(
-        "executor",
-        [
-            "aten",
-        ],
-    )
+    @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -566,12 +561,7 @@ class TestCommon(TestCase):
 
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(
-            contextlib.nullcontext,
-            device,
-            dtype,
-            op,
-        )
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -2372,10 +2362,7 @@ supported_dynamic_output_op_tests = (
 )
 
 # some inputs invoke dynamic output shape operators, some do not
-sometimes_dynamic_output_op_test = (
-    "__getitem__",
-    "index_select",
-)
+sometimes_dynamic_output_op_test = ("__getitem__", "index_select")
 
 data_dependent_op_tests = (
     "equal",

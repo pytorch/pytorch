@@ -110,7 +110,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_onnx_program_supports_retraced_graph(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
 
@@ -119,7 +119,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x.sum() + self.buf.sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
@@ -209,7 +209,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for persistent in (True, False):
 
             class CustomModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.register_buffer(
                         "my_buffer", torch.tensor(4.0), persistent=persistent
