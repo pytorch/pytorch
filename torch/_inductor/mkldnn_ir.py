@@ -804,8 +804,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
         const_arg_names = [
-            "act_scale",
-            "act_zero_point",
+            "x_scale",
+            "x_zero_point",
             "accum_scale",
             "accum_zero_point",
             "stride",
@@ -817,9 +817,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             "output_dtype",
             "binary_attr",
             "alpha",
-            "attr",
-            "scalars",
-            "algorithm",
+            "unary_attr",
+            "unary_scalars",
+            "unary_algorithm",
         ]
         const_args = list(self.codegen_const_args(const_arg_names))
 
