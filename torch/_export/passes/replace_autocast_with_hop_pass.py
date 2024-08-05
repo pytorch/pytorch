@@ -1,14 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 import copy
-
 from typing import List
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
 
 from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
-
 from .replace_with_hop_pass_util import _replace_with_hop_helper
 
 
@@ -96,6 +94,18 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Nodes between the **outer-most** `_enter_autocast` and `_exit_autocast(_enter_autocast)` are splitted
     into a submodule. Nested autocast regions are not splitted.
     `_enter_autocast` and `_exit_autocast(_enter_autocast)` nodes are in the submodule as well.
+
+    Below is an example of splitting. A, B, C, D, E are blocks of non-autocast nodes in the original graph
+    module. Nodes marked with the same number are grouped into the same submodule.
+    A               # 0
+    enter_autocast  # 1
+    B               # 1
+    exit_autocast   # 1
+    C               # 2
+    enter_autocast  # 3
+    D               # 3
+    exit_autocast   # 3
+    E               # 4
     """
     enter_autocast_node_stack: List[torch.fx.Node] = []
     first_node_after_outer_most_exit: bool = False
