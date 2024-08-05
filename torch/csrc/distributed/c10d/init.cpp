@@ -2708,23 +2708,21 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_set_ephemeral_timeout",
+              "_add_ephemeral_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                  const std::chrono::milliseconds& timeout) {
-                self->setEphemeralTimeout(timeout);
+                self->addEphemeralTimeout(timeout);
               },
-              py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("timeout"))
           .def(
-              "_check_work_timeout",
+              "_verify_work_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                  const c10::intrusive_ptr<::c10d::Work> work,
                  const std::chrono::milliseconds& timeout) {
-                return self->checkWorkTimeout(work, timeout);
+                return self->verifyWorkTimeoutForTest(work, timeout);
               },
               py::arg("work"),
-              py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("timeout"))
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)

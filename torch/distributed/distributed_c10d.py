@@ -1327,9 +1327,9 @@ def _get_backends_for_timeout_set(group: ProcessGroup) -> Set[c10d_Backend]:
     return backends  # type: ignore[return-value]
 
 
-def _set_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
+def _add_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
     """
-    This API sets an ephemeral timeout extension for all PGs locally
+    This API adds an ephemeral timeout extension for all PGs locally
     on one rank. The timeout gets reset when the first collective issued
     after API called finished.
     NOTE: We only support to set timeout for cuda backends for now.
@@ -1350,7 +1350,7 @@ def _set_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
         backends = _get_backends_for_timeout_set(pg)
         for backend in backends:
             if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-                backend._set_ephemeral_timeout(timeout)
+                backend._add_ephemeral_timeout(timeout)
 
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
