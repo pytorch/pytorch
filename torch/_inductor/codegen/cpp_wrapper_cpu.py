@@ -170,7 +170,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     #include <torch/csrc/inductor/aoti_runtime/model.h>
                     """
                 )
-
         else:
             self.header.splice(
                 """

@@ -54,6 +54,7 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -146,6 +147,9 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_item_complex64(
+    AtenTensorHandle tensor,
+    c10::complex<float>* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
@@ -180,6 +184,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int64(
     AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
+    c10::complex<float> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -204,7 +211,7 @@ aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
-AOTI_TORCH_EXPORT AOTITorchError 
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(

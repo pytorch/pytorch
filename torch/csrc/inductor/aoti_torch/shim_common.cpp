@@ -202,8 +202,8 @@ AOTITorchError aoti_torch_get_numel(
 }
 
 AOTITorchError aoti_torch_get_storage_numel(
-  AtenTensorHandle tensor, 
-  int64_t* ret_numel) {
+    AtenTensorHandle tensor,
+    int64_t* ret_numel) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     TORCH_INTERNAL_ASSERT(t->has_storage());
