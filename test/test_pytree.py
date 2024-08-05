@@ -1317,7 +1317,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
         )
 
     @parametrize(
