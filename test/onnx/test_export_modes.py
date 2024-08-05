@@ -23,7 +23,7 @@ from torch.testing._internal import common_utils
 # Smoke tests for export methods
 class TestExportModes(pytorch_test_common.ExportTestCase):
     class MyModel(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestExportModes.MyModel, self).__init__()
 
         def forward(self, x):

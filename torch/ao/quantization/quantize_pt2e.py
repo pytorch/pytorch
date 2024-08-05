@@ -56,7 +56,7 @@ def prepare_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 
@@ -129,7 +129,7 @@ def prepare_qat_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 

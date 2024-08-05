@@ -4045,7 +4045,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)
@@ -4071,7 +4071,7 @@ class TestSerialization(TestCase, SerializationMixin):
                      "CUDA is unavailable or NamedTemporaryFile on Windows")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)

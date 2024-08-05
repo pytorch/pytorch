@@ -30,7 +30,7 @@ from torch.autograd.forward_ad import _set_fwd_grad_enabled
 # We do this by using creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
 class CustomFunctionHigherOrderOperator(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("custom_function_call")
 
     def __call__(self, autograd_function, *args, **kwargs):
@@ -713,7 +713,7 @@ def autograd_function_forward_rewritten(original_forward, original_setup_context
 
 
 class AutogradFunctionApply(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("autograd_function_apply")
 
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):

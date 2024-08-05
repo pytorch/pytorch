@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import functools
 import getpass
 import inspect
@@ -214,10 +215,9 @@ def get_first_attr(obj, *attrs):
 
 
 try:
-    dynamo_timed = torch._dynamo.utils.dynamo_timed
+    dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 except AttributeError:  # Compile workers only have a mock version of torch
 
-    def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
-        if original_function:
-            return original_function
-        return dynamo_timed
+    @contextlib.contextmanager
+    def dynamo_timed(key, phase_name=None, fwd_only=True):
+        yield

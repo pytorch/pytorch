@@ -28,7 +28,7 @@ class AHTrain:
     Base class for AutoHeuristic training.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = argparse.ArgumentParser()
         self.add_base_arguments()
         self.args = None

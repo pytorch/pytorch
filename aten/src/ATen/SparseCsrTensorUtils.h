@@ -139,6 +139,21 @@
 
 namespace at::sparse_csr {
 
+// Implements RAII object to manage checking sparse tensor invariants:
+class CheckSparseTensorInvariants {
+  bool old_state;
+
+ public:
+  CheckSparseTensorInvariants(bool state) {
+    old_state = at::globalContext().checkSparseTensorInvariants();
+    at::globalContext().setCheckSparseTensorInvariants(state);
+  }
+
+  ~CheckSparseTensorInvariants() {
+    at::globalContext().setCheckSparseTensorInvariants(old_state);
+  }
+};
+
 using SparseCsrTensor = Tensor;
 
 inline bool is_sparse_compressed(const Layout& layout) {
