@@ -13,7 +13,7 @@ from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.runtime_utils import do_bench
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import serialTest
+from torch.testing._internal.common_utils import requires_cuda, serialTest
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -85,7 +85,25 @@ def forward_and_backward_pass(m, inputs):
         "triton.cudagraphs": USE_CUDA_GRAPHS,
     }
 )
+@requires_cuda
 class TestCaseBase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if HAS_CUDA:
+            cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
+            cls.prior_default_device = torch.get_default_device()
+            torch.set_float32_matmul_precision("high")
+            torch.set_default_device("cuda")
+
+    @classmethod
+    def tearDownClass(cls):
+        if HAS_CUDA:
+            torch.set_float32_matmul_precision(cls.prior_float32_matmul_precision)
+            torch.set_default_device(cls.prior_default_device)
+
+            cls.prior_float32_matmul_precision = None
+            cls.prior_default_device = None
+
     def check_close(self, ref, act, tol=1e-3):
         if type(ref).__name__ == "LongformerMaskedLMOutput":
             ref = ref.loss
@@ -301,7 +319,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
         x = torch.randn(4, layer_sizes[0])
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 mod_list = []
                 for i in range(len(layer_sizes) - 1):
@@ -449,10 +467,8 @@ class PaddingTest(TestCaseBase):
             forward_and_backward_pass, m_bad_shape_opt, inputs_bad_shape
         )
         forward_and_backward_pass(m_bad_shape, inputs_bad_shape)
-        self.assertTrue(
-            torch.allclose(
-                m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
-            )
+        self.assertEqual(
+            m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
         self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
         forward_wrapper = wrapper_codes[0]
@@ -475,7 +491,7 @@ class PaddingTest(TestCaseBase):
         inv_scale = (num_heads / hidden_size) ** 0.5
 
         class Attention(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.query = nn.Linear(hidden_size, hidden_size)
                 self.key = nn.Linear(hidden_size, hidden_size)
@@ -637,6 +653,4 @@ class PaddingTest(TestCaseBase):
 
 if __name__ == "__main__":
     if HAS_CUDA:
-        torch.set_float32_matmul_precision("high")
-        torch.set_default_device("cuda")
         run_tests()
