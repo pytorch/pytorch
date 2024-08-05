@@ -199,17 +199,28 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-def raise_observed_user_stop_iteration(vt, tx):
+class ObservedKeyError(ObservedException):
+    # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
+    pass
+
+
+observed_exception_map = {
+    StopIteration: ObservedUserStopIteration,
+    KeyError: ObservedKeyError,
+}
+
+
+def raise_observed_exception(e, tx, vt):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(StopIteration).call_function(vt, [], {})
+    exception_vt = BuiltinVariable(e).call_function(vt, [], {})
     tx.exn_vt_stack.append(exception_vt)
-    raise ObservedUserStopIteration
+    raise observed_exception_map[e]
 
 
-def handle_observed_user_stop_iteration(tx):
+def handle_observed_exception(tx):
     # This is essentially exception handling code, equivalent of this pseudo code
     #
     # try:
