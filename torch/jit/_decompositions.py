@@ -2,6 +2,7 @@
 import torch
 from torch import Tensor
 
+
 aten = torch.ops.aten
 import inspect
 import warnings
@@ -9,6 +10,7 @@ from typing import Callable, Dict, List, Optional, Set, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
+
 
 decomposition_table: Dict[str, torch.jit.ScriptFunction] = {}
 function_name_set: Set[str] = set()
