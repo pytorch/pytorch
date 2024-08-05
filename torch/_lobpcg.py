@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-"""Locally Optimal Block Preconditioned Conjugate Gradient methods.
-"""
+"""Locally Optimal Block Preconditioned Conjugate Gradient methods."""
 # Author: Pearu Peterson
 # Created: February 2020
 
@@ -920,13 +919,7 @@ class LOBPCG:
             # Update E, X, P
             self.X[:, nc:] = mm(S_, Z[:, : n - nc])
             self.E[nc:] = E_[: n - nc]
-            P = mm(
-                S_,
-                mm(
-                    Z[:, n - nc :],
-                    _utils.basis(Z[: n - nc, n - nc :].mT),
-                ),
-            )
+            P = mm(S_, mm(Z[:, n - nc :], _utils.basis(Z[: n - nc, n - nc :].mT)))
             np = P.shape[-1]
 
             # check convergence
@@ -996,9 +989,7 @@ class LOBPCG:
             R, d_row.diag_embed(), upper=True, left=False
         )
 
-    def _get_svqb(
-        self, U: Tensor, drop: bool, tau: float  # Tensor  # bool  # float
-    ) -> Tensor:
+    def _get_svqb(self, U: Tensor, drop: bool, tau: float) -> Tensor:
         """Return B-orthonormal U.
 
         .. note:: When `drop` is `False` then `svqb` is based on the
