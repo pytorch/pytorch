@@ -4984,7 +4984,7 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    @unittest.skipIf(IS_WINDOWS)
+    @unittest.skipIf(IS_WINDOWS, "fails in periodic")
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
