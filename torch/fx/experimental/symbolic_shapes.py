@@ -1241,6 +1241,15 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
+def _has_unsupported_sympy_function(expr) -> bool:
+    return expr.has(
+        torch.utils._sympy.functions.ToFloat,
+        torch.utils._sympy.functions.TruncToInt,
+        torch.utils._sympy.functions.CeilToInt,
+        # add more sympy functions that involve float<->int conversion here
+        # since our solver does not know what to do with them
+    )
+
 @dataclass(frozen=True)
 class SymbolicContext:
     """
@@ -1712,14 +1721,6 @@ class DimConstraints:
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
-    def _has_unsupported_sympy_function(self, expr) -> bool:
-        return expr.has(
-            torch.utils._sympy.functions.ToFloat,
-            torch.utils._sympy.functions.TruncToInt,
-            # add more sympy functions that involve float<->int conversion here
-            # since our solver does not know what to do with them
-        )
-
     def add(self, expr) -> bool:
         """Add an expression to the set of constraints.
 
@@ -1736,7 +1737,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne) or self._has_unsupported_sympy_function(expr):
+        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -5575,7 +5576,7 @@ def _blame_user_code(e, frame):
     )
     msg = e.args[0]
     msg += (
-        '\n\nUser code:\n' +
+        '\n\nThe following call raised this error:\n' +
         ''.join(traceback.StackSummary.from_list([frame_summary]).format())
     )
     e.args = (msg,)
@@ -5593,7 +5594,7 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
         self.src_map = src_map
 
     def _print_Symbol(self, sym):
-        return self.src_map[sym.name]
+        return self.src_map[sym.name][0]
 
     def _print_Relational(self, expr):
         lhs = self.parenthesize(expr.lhs, sympy.printing.precedence.precedence(expr))
@@ -5611,7 +5612,7 @@ def _suggest_torch_checks(e, src_map):
         return
     printer = _PythonPrinter(src_map)
     msg = e.args[0]
-    msg += "\nSuggested fixes (please choose one of the following):"
+    msg += "\nTo fix the error, insert one of the following checks before this call:"
     # suggested fixes to resolve `cond`` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
     suggested_fixes = [
@@ -5620,6 +5621,11 @@ def _suggest_torch_checks(e, src_map):
     ]
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i+1}. {fix}"
+    src_mapped = ', '.join(
+        f"`{s}` with {' or '.join(src_map[s])}"
+        for s in sorted(s.name for s in cond.free_symbols)
+    )
+    msg += f"\n\n(These suggested fixes were derived by replacing {src_mapped} in {cond} and its negation.)"
     e.args = (msg,)
 
 
@@ -5638,17 +5644,17 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
             _blame_user_code(e, frame)
 
             # map symbol names reachable via frame locals to their source-level names
-            src_map = {}
+            src_map = defaultdict(list)
             for var, val in frame.f_locals.items():
                 # figure out how to access any symbol inside `val` through `var`
                 for path, leaf in pytree.tree_leaves_with_path(val):
                     name = var + pytree.keystr(path)
                     if isinstance(leaf, torch.SymInt):
-                        src_map[str(leaf.node.expr)] = name
+                        src_map[str(leaf.node.expr)].append(name)
                     elif isinstance(leaf, torch.Tensor):
                         for i, dim in enumerate(leaf.shape):
                             if isinstance(dim, torch.SymInt):
-                                src_map[str(dim.node.expr)] = f"{name}.shape[{i}]"
+                                src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
 
             # add suggested torch.check()s based on `src_map` to the error message
             # replacing unbacked symints in the unresolved condition in the error
