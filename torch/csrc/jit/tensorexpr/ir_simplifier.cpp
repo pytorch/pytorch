@@ -205,7 +205,7 @@ void MinTerm::uniquefy() {
 
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
 template <class Op>
-ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
+ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
@@ -2081,7 +2081,7 @@ static ExprPtr simplifyRoundModPattern(const PolynomialPtr& poly) {
         continue;
       }
 
-      for (int64_t k = rounds.size() - 1; k >= 0; k--) {
+      for (int64_t k = static_cast<int64_t>(rounds.size()) - 1; k >= 0; k--) {
         TermPtr r = rounds[k];
         RoundOffPtr roundoff = to<RoundOff>(r->variables()[0]);
         CHECK(roundoff);
