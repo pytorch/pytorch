@@ -116,13 +116,16 @@ else:
         def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             flatten_dims_in_root = [
-                root_mesh.mesh_dim_names.index(flattened_mesh_dim_name)
+                not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
             # sort dims to flatten based on the order of the dims in the root mesh.
             flatten_dims_in_root.sort()
             flatten_mesh_dim_names = "_".join(
-                [root_mesh.mesh_dim_names[dim] for dim in flatten_dims_in_root]
+                [
+                    not_none(root_mesh.mesh_dim_names)[dim]
+                    for dim in flatten_dims_in_root
+                ]
             )
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
