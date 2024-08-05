@@ -1844,3 +1844,34 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         )
+
+    def check_0dim_cpu_tensor(self, args: List[Any]) -> Set[str]:
+        """
+        Check if there is any 0-dim CPU tensor in the args for CUDA kenrels. If so, we need to
+        convert them to scalar before passing to the kernel.
+        """
+        zero_dim_cpu_tensor_list = set()
+        target_device_cuda = False
+        for arg in args:
+            if not isinstance(arg, str):
+                continue
+            buf = V.graph.name_to_buffer.get(arg, None)
+            if buf is not None and buf.get_device().type == "cuda":
+                target_device_cuda = True
+                break
+            arg_is_input = V.graph.graph_inputs.get(arg, None)
+            if arg_is_input is not None and arg_is_input.get_device().type == "cuda":
+                target_device_cuda = True
+                break
+        if target_device_cuda:
+            for arg in args:
+                if not isinstance(arg, str):
+                    continue
+                buf = V.graph.name_to_buffer.get(arg, None)
+                if (
+                    buf is not None
+                    and buf.get_device().type == "cpu"
+                    and buf.get_size() == []
+                ):
+                    zero_dim_cpu_tensor_list.add(arg)
+        return zero_dim_cpu_tensor_list

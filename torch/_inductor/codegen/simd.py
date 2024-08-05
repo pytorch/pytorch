@@ -1349,7 +1349,13 @@ class SIMDScheduling(BaseScheduling):
             **kernel_kwargs,
         )
         kernel.buf_accesses = buf_accesses
-
+        tmp_args = []
+        for node in node_schedule:
+            for read in node.read_writes.reads:
+                tmp_args.append(read.name)
+            for write in node.read_writes.writes:
+                tmp_args.append(write.name)
+        kernel.zero_dim_cpu_tensor_list = V.graph.check_0dim_cpu_tensor(tmp_args)
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         with V.set_kernel_handler(kernel):
@@ -1440,7 +1446,6 @@ class SIMDScheduling(BaseScheduling):
                     )
 
             kernel.finalize_indexing(all_indexing.keys())
-
             # Second pass to do codegen
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
@@ -1772,7 +1777,6 @@ class SIMDScheduling(BaseScheduling):
                 mutations=mutations,
                 index_dtype=index_dtype,
             )
-
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             with config.patch(
                 "benchmark_kernel", benchmark_kernel

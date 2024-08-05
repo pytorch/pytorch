@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import sympy
 
@@ -12,7 +12,12 @@ from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
+def signature_of(
+    arg: KernelArgType,
+    *,
+    size_dtype: str,
+    zero_dim_cpu_tensor_list: Optional[Set[str]] = None,
+) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -33,6 +38,12 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
                 return "fp32"
             else:
                 return new_tye
+        elif zero_dim_cpu_tensor_list and (arg.buffer in zero_dim_cpu_tensor_list):
+            new_tye = tye.lstrip("*")
+            if new_tye.startswith("fp"):
+                return "fp64"
+            else:
+                return "int"
         else:
             return tye
     if isinstance(arg, SizeArg):
@@ -58,11 +69,17 @@ def signature_to_meta(
     *,
     size_dtype: str,
     indices: Optional[List[int]] = None,
+    zero_dim_cpu_tensor_list: Optional[Set[str]] = None,
 ) -> Dict[int, str]:
+    call_args = [arg.buffer for arg in signature if isinstance(arg, TensorArg)]
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        i: signature_of(arg, size_dtype=size_dtype)
+        i: signature_of(
+            arg,
+            size_dtype=size_dtype,
+            zero_dim_cpu_tensor_list=zero_dim_cpu_tensor_list,
+        )
         for i, arg in zip(indices, signature)
     }
 
