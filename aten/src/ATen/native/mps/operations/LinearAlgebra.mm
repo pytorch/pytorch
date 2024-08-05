@@ -580,6 +580,7 @@ static void cholesky_kernel_mps(const Tensor& A, const Tensor& status, bool uppe
   uint64_t aElemSize = A.element_size();
 
   Tensor result = at::empty_like(A, A.options());
+  Tensor stat = at::zeros_like(status, status.options());
   std::vector<Tensor> statusTensorsVector;
   statusTensorsVector.reserve(batchSize);
   for (const auto i : c10::irange(batchSize)) {
@@ -640,6 +641,7 @@ static void cholesky_kernel_mps(const Tensor& A, const Tensor& status, bool uppe
     result = result.tril();
   }
   A.copy_(result);
+  status.copy_(stat);
 
   // MPS decomposition statuses only match the LAPACK scheme when successful
   // Assert here to catch the failures with MPS error codes
