@@ -70,7 +70,7 @@ class PythonDispatcher:
     ]
     supported_keys = runtime_keys + alias_keys
 
-    def __init__(self):
+    def __init__(self) -> None:
         C._dispatch_check_invariants(self.name)  # type: ignore[attr-defined]
         self.ref = C._dispatch_library("FRAGMENT", self.namespace, "")
         self.ref.def_("foo(Tensor x) -> Tensor")

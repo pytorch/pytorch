@@ -3967,13 +3967,13 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 
 def _create_basic_net():
     class Layer(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
             self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
