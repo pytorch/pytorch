@@ -17,6 +17,7 @@ from torch._decomp import (
 )
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
+    constant_pad_nd as decomp_constant_pad_nd,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
@@ -51,7 +52,6 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
-        aten.constant_pad_nd,
         aten.dist,
         aten.empty_like,
         aten.flip,
@@ -949,3 +949,17 @@ def max_pool2d_with_indices(
         padding,
     )
     return vals, indices
+
+
+# TODO: remove this when gcc 10 support is dropped in inductor
+@register_decomposition(aten.constant_pad_nd)
+def constant_pad_nd(
+    input: torch.Tensor,
+    pad: List[int],
+    value: torch.types.Number = 0,
+) -> Union[torch.Tensor, type]:
+    if input.device.type == "cpu":
+        # The generated code fails on gcc-9 and gcc-10 due to a codegen bug.
+        return NotImplemented
+
+    return decomp_constant_pad_nd(input, pad, value)

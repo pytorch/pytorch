@@ -572,7 +572,7 @@ def triton_acc_type(dtype):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
         super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
@@ -1181,7 +1181,9 @@ class TritonKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         override_persistent_reduction=None,
-    ):
+        optimize_mask=True,
+    ) -> None:
+        self.optimize_mask: bool = optimize_mask
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -2862,6 +2864,8 @@ class TritonKernel(SIMDKernel):
         return pid
 
     def _has_constant_mask(self, tree: IterationRangesRoot):
+        if not self.optimize_mask:
+            return False
         if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
             return True
         # Masks are superfluous if numel is a multiple of BLOCK

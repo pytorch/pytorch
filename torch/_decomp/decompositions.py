@@ -3858,7 +3858,7 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
 @out_wrapper()
 def constant_pad_nd(
     input: Tensor,
-    pad: Tuple[int, ...],
+    pad: List[int],
     value: NumberType = 0,
 ) -> Tensor:
     # Avoid importing sympy at a module level

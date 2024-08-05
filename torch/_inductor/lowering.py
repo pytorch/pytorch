@@ -26,6 +26,7 @@ from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
+    dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     get_computation_dtype,
@@ -455,6 +456,7 @@ def make_pointwise(
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+            and dtype in (torch.bfloat16, torch.float16)
         )
 
         def inner_fn(index):
@@ -464,8 +466,16 @@ def make_pointwise(
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
-                out = fn(*[load(index) for load in loaders])
-                if emulate_precision_casts and dtype in (torch.bfloat16, torch.float16):
+                inputs_loaded = []
+                for load in loaders:
+                    out = load(index)
+                    if emulate_precision_casts:
+                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, dtype)
+                    inputs_loaded.append(out)
+
+                out = fn(*inputs_loaded)
+                if emulate_precision_casts:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
@@ -3561,6 +3571,57 @@ def rev(x, dims):
         dtype=x.get_dtype(),
         inner_fn=loader,
         ranges=sizes,
+    )
+
+
+# TODO: remove this when gcc 10 support is dropped in inductor
+@register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
+def constant_pad_nd(x, padding, fill_value=0):
+    assert (len(padding) % 2) == 0
+    if all(p == 0 for p in padding):
+        return clone(x)
+
+    sizes = x.get_size()
+
+    bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
+    n = len(sizes) - len(bounds)
+
+    # if padding is a complicated expression, hoist it
+    bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
+    for l, h in bounds:
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
+
+    output_size = list(sizes[:n])
+    mask_sizes = []
+    for (low, high), size in zip(bounds, sizes[n:]):
+        mask_sizes.append(size)
+        output_size.append(sympy.expand(size + low + high))
+    assert len(output_size) == len(sizes)
+    fill_value = dtype_to_type(x.get_dtype())(fill_value)
+
+    def mask(index):
+        mask = []
+        for idx, (low, high), length in zip(index[n:], bounds, mask_sizes):
+            if low != 0:
+                mask.append(range_mask_low(idx, 0))
+            if high != 0:
+                mask.append(range_mask_high(idx, length))
+        mask = functools.reduce(ops.and_, mask)
+        return ops.masked(mask, lambda: x_loader(index), fill_value)
+
+    def offset_fn(index):
+        new_index = list(index[:n])
+        for idx, (low, high) in zip(index[n:], bounds_precomp):
+            new_index.append(idx - low)
+        assert len(new_index) == len(index)
+        return mask(new_index)
+
+    x_loader = x.make_loader()
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=offset_fn,
+        ranges=output_size,
     )
 
 
