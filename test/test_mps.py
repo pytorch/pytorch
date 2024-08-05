@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import itertools
 from collections import defaultdict
 from torch import inf
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, IS_CI,
@@ -1202,6 +1202,29 @@ class MpsMemoryLeakCheck:
                    f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
 
             raise RuntimeError(msg)
+
+class TestAutocastMPS(TestCase):
+
+    def test_matmul_autocast(self):
+        autocast_tensor_A = torch.rand((8, 8), device="mps")
+        autocast_tensor_B = torch.rand((8, 8), device="mps")
+        tensor_A = autocast_tensor_A.clone().detach()
+        tensor_B = autocast_tensor_B.clone().detach()
+        autocast_output_tensor = torch.empty(8, 8)
+        output_tensor = autocast_output_tensor.clone().detach()
+
+        with torch.autocast(device_type="mps"):
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_tensor_B)
+            autocast_output_tensor = torch.mm(autocast_tensor_A, autocast_output_tensor)
+
+        output_tensor = torch.mm(tensor_A, tensor_B)
+        output_tensor = torch.mm(tensor_A, output_tensor)
+
+        self.assertEqual(autocast_output_tensor.dtype, torch.float16, "Autocast output tensor was not expected type float16")
+        self.assertEqual(autocast_output_tensor,
+                         output_tensor.to(torch.float16),
+                         f"Autocast & non-autocast tensors did not match, \
+                         got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
@@ -8598,17 +8621,17 @@ class TestNNMPS(NNTestCase):
 
     def _create_basic_net(self):
         class Layer(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+                self.layer_dummy_buf = Buffer(torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+                self.dummy_buf = Buffer(torch.zeros(7, 3, 3, 1))
 
         l = Layer()
         n = Net()
@@ -10672,6 +10695,7 @@ class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
+    @unittest.skipIf(product_version < 14.0, "Skipped on macOS < 14")
     def test_nonzero_no_warning(self):
         device = "mps"
         t = torch.randn((2, 2), device=device)

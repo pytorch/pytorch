@@ -23,31 +23,30 @@ from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
-from torch._utils_internal import maybe_upload_prof_stats_to_manifold
-
-from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.utils._traceback import CapturedTraceback
-
-np: Optional[ModuleType]
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 import torch._logging
+import torch.fx.experimental._sym_dispatch_mode
+from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import compile_time_strobelight_meta, signpost_event
+from torch._utils_internal import (
+    compile_time_strobelight_meta,
+    maybe_upload_prof_stats_to_manifold,
+    signpost_event,
+)
+from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch.utils._python_dispatch import _disable_current_modes
-from torch.utils._traceback import format_traceback_short
+from torch.utils._python_dispatch import (
+    _disable_current_modes,
+    is_in_torch_dispatch_mode,
+)
+from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -109,16 +108,25 @@ from .utils import (
     write_record_to_file,
 )
 
+
+np: Optional[ModuleType]
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+
 if typing.TYPE_CHECKING:
     from .backends.registry import CompilerFn
     from .repro.after_dynamo import WrapBackendDebug
     from .types import BytecodeHook, CacheEntry
     from .variables.builder import FrameStateSizeEntry
 
+
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
 
 compile_lock = threading.RLock()
 
@@ -536,6 +544,7 @@ from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
 
+
 if typing.TYPE_CHECKING:
     from .output_graph import OutputGraph
 
@@ -643,10 +652,18 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    @dynamo_timed(phase_name="entire_frame_compile")
+    def compile_inner(
+        code: CodeType,
+        one_graph: bool,
+        hooks: Hooks,
+        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+    ) -> Optional[GuardedCode]:
+        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
+            return _compile_inner(code, one_graph, hooks, transform)
+
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
-    def compile_inner(
+    def _compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
@@ -702,6 +719,10 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
+
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
 
         assert out_code is not None
         log_bytecode(
@@ -844,12 +865,25 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
+        convert_frame_intern = structured.intern_string(__file__)
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=4 + skip).summary()
+                "stack": list(
+                    itertools.takewhile(
+                        lambda f: f["filename"] != convert_frame_intern,
+                        structured.from_traceback(
+                            CapturedTraceback.extract(skip=4 + skip).summary()
+                        ),
+                    )
                 )
+                + [
+                    {
+                        "line": code.co_firstlineno,
+                        "name": code.co_name,
+                        "filename": structured.intern_string(code.co_filename),
+                    }
+                ]
             },
         )
         start_time = time.time()
@@ -1133,18 +1167,23 @@ class CatchErrorsWrapper:
             has_started_execution
             or is_skipfile
             or config.disable
+            or (
+                is_in_torch_dispatch_mode(include_infra_modes=False)
+                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+            )
         ):
             if log.isEnabledFor(logging.DEBUG):
                 print(frame.f_lasti, first_real_inst_idx(frame.f_code))
-                skip_reason = (
-                    "traced frame already"
-                    if has_started_execution
-                    else (
-                        "in skipfiles"
-                        if trace_rules.check(frame.f_code)
-                        else "dynamo tracing is disabled"
-                    )
-                )
+
+                if has_started_execution:
+                    skip_reason = "traced frame already"
+                elif trace_rules.check(frame.f_code):
+                    skip_reason = "in skipfiles"
+                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                    skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
+                else:
+                    skip_reason = "dynamo tracing is disabled"
+
                 log.debug(
                     "skipping: %s (reason: %s, file: %s)",
                     frame.f_code.co_name,
@@ -1152,6 +1191,7 @@ class CatchErrorsWrapper:
                     frame.f_code.co_filename,
                 )
             return None
+
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
@@ -1177,7 +1217,9 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
-        with compile_lock, _disable_current_modes():
+        with (
+            compile_lock
+        ), _disable_current_modes(), torch.fx.experimental._sym_dispatch_mode.disable_sym_dispatch():
             # skip=1: skip this frame
             return self._torchdynamo_orig_callable(
                 frame, cache_entry, self.hooks, frame_state, skip=1
