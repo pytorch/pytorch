@@ -2220,35 +2220,31 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(tt.view(2 * 3), out)
         self.assertEqual(out.shape, (6,))
 
-    @unittest.expectedFailure
-    def test_tensor_subclass_WrapperTensor_simple(self):
-        def f(t):
-            return t * t.size()[0]
+    def test_tensor_subclass_TwoTensor_nested(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x, i, y):
+            out1 = x.sin() + i.sin() + y.sin()
+            val1 = x.shape[0] * i.shape[1] * y.shape[0]
+            return out1 * val1
 
-        a = torch.ones(3, 4, requires_grad=True)
-        t = WrapperSubclass(a)
+        i = torch.randn(2, 2, requires_grad=True)
+        x = TwoTensor(i, i.clone())
+        y = TwoTensor(x.clone(), x.clone())
 
-        fw, bw = self._compile_check(f, [(t,)], dynamic=False, call_backward=True)
+        out = f(x, i, y)
 
-        self.assertExpectedInline(
-            normalize_gm(fw[0].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 4]"):
-        mul: "f32[3, 4]" = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-        return [mul]
-""",  # noqa: B950
-        )
+        x_test = x.clone().detach().requires_grad_(True)
+        i_test = i.clone().detach().requires_grad_(True)
+        y_test = y.clone().detach().requires_grad_(True)
 
-        self.assertExpectedInline(
-            normalize_gm(bw[0].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[3, 4]"):
-        mul_1: "f32[3, 4]" = torch.ops.aten.mul.Tensor(tangents_1, 3);  tangents_1 = None
-        return [mul_1]
-""",  # noqa: B950
-        )
+        out_test = f(x_test, i_test, y_test)
+        torch.allclose(out, out_test)
+
+        out.sum().backward()
+        out_test.sum().backward()
+        torch.allclose(x.grad, x_test.grad)
+        torch.allclose(i.grad, i_test.grad)
+        torch.allclose(y.grad, y_test.grad)
 
     @unittest.expectedFailure
     def test_tensor_subclass_DoubleTensor_simple(self):

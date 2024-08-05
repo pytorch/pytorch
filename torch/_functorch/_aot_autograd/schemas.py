@@ -184,7 +184,6 @@ class SubclassCreationMeta:
     outer_size: List[Union[int, torch.SymInt]]
     outer_stride: List[Union[int, torch.SymInt]]
     meta: Any
-    symint_placeholders: List[bool]
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
@@ -195,30 +194,52 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
 
-    def compute_outer_size(
+    def compute_outer_size_and_stride(
         self,
         all_args,
         *,
         curr_start_idx: int,
         is_runtime: bool,
+        is_subclass: bool,
     ):
-        is_symbolic = any(self.symint_placeholders)
-        num_symbolic = sum(self.symint_placeholders)
+        symint_placeholders = [type(i) is not int for i in self.outer_size]
+        has_symbolic = any(symint_placeholders)
+        num_symbolic = sum(symint_placeholders)
 
-        if is_runtime and is_symbolic:
+        if is_runtime and has_symbolic and not is_subclass:
             start = curr_start_idx
             end = start + num_symbolic
             it = iter(all_args[start:end])
-            return pytree.tree_map_only(
+            outer_size = pytree.tree_map_only(
                 torch.SymInt, lambda _: next(it), self.outer_size
             )
-        return self.outer_size
+
+            # Use the fact that size and strides share symbolic objects
+            # to map the ones from strides back into concrete values.
+            # Open questions:
+            # (1) Is this safe for caching? We need the original outer_size with
+            # symints and they might be harder to serialize
+            # (2) Feels like a hack doing this. Should we just add the outer_strides
+            # as argument to the FX graph as well?
+            from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+
+            sym_dict = _SymHashingDict()
+            for k, v in zip(self.outer_size, outer_size):
+                sym_dict[k] = v
+
+            outer_stride = pytree.tree_map_only(
+                torch.SymInt, lambda k: sym_dict[k], self.outer_stride
+            )
+            return outer_size, outer_stride
+
+        return self.outer_size, self.outer_stride
 
     def creation_fn(
         self,
         all_args,
         *,
         is_runtime: bool,
+        is_subclass: bool,
     ):
         inner_tensors = {}
 
@@ -228,7 +249,9 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                subclass = creation_meta.creation_fn(
+                    all_args, is_runtime=is_runtime, is_subclass=True
+                )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
 
@@ -238,14 +261,15 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
-        outer_size = self.compute_outer_size(
+        outer_size, outer_stride = self.compute_outer_size_and_stride(
             all_args,
             curr_start_idx=curr_start_idx,
             is_runtime=is_runtime,
+            is_subclass=is_subclass,
         )
 
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, outer_size, self.outer_stride
+            inner_tensors, self.meta, outer_size, outer_stride
         )
 
         if not is_runtime:

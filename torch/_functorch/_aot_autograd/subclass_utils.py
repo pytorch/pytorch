@@ -52,13 +52,10 @@ def create_subclass_metadata(a, start_idx):
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
     assert isinstance(a, Tensor)
 
-    symint_placeholders = [isinstance(s, SymInt) for s in a.size()]
-
     return (
         SubclassCreationMeta(
             flat_tensor_start_idx=start_idx,
             arg_count=new_start_idx - start_idx,
-            symint_placeholders=symint_placeholders,
             attrs=attrs,
             meta=metadata,
             outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
@@ -85,27 +82,20 @@ def get_types_for_subclass(tensor_subclass):
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]]
+    curr_args: Union[List[Any], Tuple[Any, ...]],
+    count_symints: bool = True,
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
-    # Each tensor subclass i adds K_i extra arguments.
-    num_extra_sizes = sum(
-        len(filter_symints(a.size()))  # type: ignore[misc]
-        for a in curr_args
-        if is_traceable_wrapper_subclass(a)
-    )
-    extra_sizes_count = 0
-
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
             assert isinstance(a, Tensor)
             start_idx = idx
-            extra_sizes_offset = num_extra_sizes - extra_sizes_count
-            extra_sizes_count += len([s for s in a.shape if isinstance(s, SymInt)])
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
-            cnt = subclass_meta.arg_count + len(filter_symints(a.size()))
+            cnt = subclass_meta.arg_count + count_symints * len(
+                filter_symints(a.size())
+            )
         else:
             infos.append(idx)
             cnt = 1
@@ -130,6 +120,15 @@ def filter_symints(size: Union[Size, List[Union[int, SymInt]]]) -> List[SymInt]:
     return [s for s in size if isinstance(s, SymInt)]
 
 
+# The reason for "append_symints"
+#
+# * At compile time: we append extra symint args when unwrapping primals
+# (but not tangents, because they should always share symints with primals).
+# We also append extra symints when unwrapping the subclass outputs of the
+# traced function, so we can return them as extra outputs
+#
+# * At runtime: we similarly append subclass sizes when we unwrap subclass
+# primals (but not tangents) on entry to the forward.
 def unwrap_tensor_subclasses(
     wrapped_args: List[Union[Tensor, int]],
     *,
@@ -148,7 +147,7 @@ def unwrap_tensor_subclasses(
                     assert subclass_metas is not None
                     meta = subclass_metas[idx]
                     assert isinstance(meta, SubclassCreationMeta)
-                    symint_placeholders = meta.symint_placeholders
+                    symint_placeholders = [type(i) is not int for i in meta.outer_size]
                     assert len(size) == len(symint_placeholders)
                     xs_inner.extend(
                         [
@@ -252,8 +251,7 @@ def wrap_tensor_subclasses(
             assert isinstance(subclass_meta, SubclassCreationMeta)
             wrapped_args.append(
                 subclass_meta.creation_fn(
-                    unwrapped_args,
-                    is_runtime=is_runtime,
+                    unwrapped_args, is_runtime=is_runtime, is_subclass=False
                 )
             )
             assert subclass_meta.outer_size is not None
@@ -425,7 +423,6 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             for _ in range(inp_meta.arg_count + num_extra_symints):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
-
     if inner_metadata is not None:
         assert len(inner_metadata.input_info) == len(updated_input_info)
 
