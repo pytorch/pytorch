@@ -44,7 +44,7 @@ class TestPassInfra(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x, y):
@@ -74,7 +74,7 @@ class TestPassInfra(TestCase):
         # Tests that graph nodes stay the same for nodes that are not touched
         # during transformation
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 # Define a parameter
@@ -110,7 +110,7 @@ class TestPassInfra(TestCase):
         # Checks that pass infra correctly updates graph signature
         # after transformations.
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
@@ -152,7 +152,7 @@ class TestPassInfra(TestCase):
 
     def test_replace_hook_basic(self) -> None:
         class CustomModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
