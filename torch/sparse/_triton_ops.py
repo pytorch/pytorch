@@ -8,7 +8,9 @@ from typing import Optional, Tuple
 
 import torch
 from torch.utils._triton import has_triton
+
 from ._triton_ops_meta import get_meta
+
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
     os.getenv("TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE", 2)
