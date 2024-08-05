@@ -693,6 +693,9 @@ class FSDPParam:
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
+    def __repr__(self):
+        return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
+
 
 def alloc_storage(tensor: torch.Tensor) -> None:
     size = tensor.numel() * tensor.itemsize

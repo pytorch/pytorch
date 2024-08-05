@@ -705,7 +705,7 @@ class TestAutocast(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_jit_freeze_autocast_constants(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.rand((3, 4), dtype=torch.float).cuda()
 

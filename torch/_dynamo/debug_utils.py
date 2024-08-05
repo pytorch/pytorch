@@ -20,7 +20,6 @@ import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
-
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -28,6 +27,7 @@ from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
+
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class NNModuleToString:
             """
             from torch.nn import *
             class Repro(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
             """
         )
@@ -491,7 +491,7 @@ _is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.total = 0
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
