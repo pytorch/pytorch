@@ -277,12 +277,12 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @inductor_config.patch(mixed_mm_choice="heuristic", autoheuristic_use="")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        # examples that should not be selected by heuristic
+        # examples that should not be selected by handwritten heuristic
         mat1_dtype = torch.float16
         dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
         torch._dynamo.mark_dynamic(dyn_tensor, 0)
@@ -336,7 +336,7 @@ class TestPatternMatcher(TestCase):
             return torch.mm(a, b.to(a.dtype))
 
         mat1_dtype = torch.float16
-        # examples that should be selected by heuristic
+        # examples that should be selected by handwritten heuristic
         args_list = [
             (
                 torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
@@ -638,7 +638,7 @@ class TestPatternMatcher(TestCase):
 
     def test_addmm_broadcasting_bias(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.functional.linear
                 self.linear_weight = torch.randn(4, 4).cuda()
@@ -931,7 +931,7 @@ class TestPatternMatcher(TestCase):
         saved_graph = None
 
         class _CustomPass(PatternMatcherPass):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def __call__(self, g: torch.fx.graph.Graph):
@@ -991,6 +991,7 @@ class TestPatternMatcher(TestCase):
                 "target=torch.ops.aten.sym_size"
             ).run(str(saved_graph))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_with_mutation(self):
         counter = 0
         test_pass = PatternMatcherPass(pass_name="test")
@@ -1148,6 +1149,7 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1204,6 +1206,7 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1249,6 +1252,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0
         test_pass = PatternMatcherPass()
