@@ -33,8 +33,8 @@ import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
 import torch.utils._pytree as _pytree
-
 from torch.utils._pytree import KeyEntry
+
 
 __all__ = [
     "PyTree",
