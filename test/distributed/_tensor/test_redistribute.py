@@ -5,15 +5,16 @@ import itertools
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor._collective_utils import shard_dim_alltoall
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
-
+from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 funcol = torch.ops.c10d_functional
 
@@ -416,6 +417,18 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
+
+    @with_comms
+    def test_shard_dim_alltoall(self):
+        # init 2d mesh here so we can test when group_rank != global_rank
+        mesh = init_device_mesh(self.device_type, (2, 2))
+        tensor = torch.randn(12, self.world_size, device=self.device_type)
+        new_tensor = shard_dim_alltoall(tensor, 0, 1, mesh, 0)
+
+        meta_tensor = torch.randn(12, self.world_size, device="meta")
+        new_meta_tensor = shard_dim_alltoall(meta_tensor, 0, 1, mesh, 0)
+
+        self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
 
 
 class MultiDimRedistributeTest(DTensorTestBase):

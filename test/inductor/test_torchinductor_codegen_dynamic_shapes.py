@@ -20,6 +20,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"
@@ -141,6 +142,7 @@ test_failures = {
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #

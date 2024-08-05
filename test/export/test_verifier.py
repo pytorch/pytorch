@@ -2,11 +2,9 @@
 import unittest
 
 import torch
-
 from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
-
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
@@ -141,7 +139,7 @@ class TestVerifier(TestCase):
 
     def test_ep_verifier_invalid_buffer(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.tensor(3.0)
 
@@ -162,13 +160,13 @@ class TestVerifier(TestCase):
 
     def test_ep_verifier_buffer_mutate(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
+                self.my_buffer1 = torch.nn.Buffer(torch.tensor(3.0))
+                self.my_buffer2 = torch.nn.Buffer(torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
@@ -185,13 +183,13 @@ class TestVerifier(TestCase):
 
     def test_ep_verifier_invalid_output(self) -> None:
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
 
-                self.register_buffer("my_buffer1", torch.tensor(3.0))
-                self.register_buffer("my_buffer2", torch.tensor(4.0))
+                self.my_buffer1 = torch.nn.Buffer(torch.tensor(3.0))
+                self.my_buffer2 = torch.nn.Buffer(torch.tensor(4.0))
 
             def forward(self, x1, x2):
                 # Use the parameter, buffers, and both inputs in the forward method
