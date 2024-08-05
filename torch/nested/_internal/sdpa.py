@@ -17,6 +17,7 @@ from torch.nn.attention import SDPBackend
 
 from .nested_tensor import NestedTensor
 
+
 log = logging.getLogger(__name__)
 
 
@@ -261,7 +262,7 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     return True
 
 
-def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable_gqa):
+def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
     if (
         not flash_sdp_enabled()
         and not mem_efficient_sdp_enabled()
@@ -275,7 +276,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
         SDPBackend.MATH,
     )
 
-    params = SDPAParams(query, key, value, attn_mask, dropout, is_causal, enable_gqa)
+    params = SDPAParams(query, key, value, attn_mask, dropout, is_causal)
 
     for backend in ordering:
         if backend == SDPBackend.FLASH_ATTENTION:
@@ -622,7 +623,6 @@ def jagged_scaled_dot_product_attention(
     dropout_p=0.0,
     is_causal=False,
     scale=None,
-    enable_gqa=False,
 ):
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
@@ -653,7 +653,7 @@ def jagged_scaled_dot_product_attention(
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
-        query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
+        query, key, value, attn_mask, dropout_p, is_causal
     )
 
     if backend_choice == SDPBackend.FLASH_ATTENTION:
