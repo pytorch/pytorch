@@ -256,7 +256,7 @@ static std::tuple<Tensor, Tensor> expand_bdims(
       b_has_bdim ? b : b.expand_as(flagpole));
 }
 
-static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _softmax_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
@@ -286,7 +286,7 @@ static std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
   return std::make_tuple(at::_softmax_backward_data(grad_output_, output_.contiguous(), dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _log_softmax_backward_batch_rule(
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
     const Tensor& output, std::optional<int64_t> output_bdim,
     int64_t dim,
@@ -314,7 +314,7 @@ static std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
   return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, input_dtype), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
     std::optional<int64_t> sorted_sequence_bdim,
     const Tensor& self,

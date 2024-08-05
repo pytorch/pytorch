@@ -25,6 +25,7 @@ from .profiler import (
     tensorboard_trace_handler,
 )
 
+
 __all__ = [
     "profile",
     "schedule",
