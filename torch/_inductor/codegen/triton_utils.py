@@ -72,7 +72,6 @@ def signature_to_meta(
     indices: Optional[List[int]] = None,
     zero_dim_cpu_tensor_list: Optional[Set[str]] = None,
 ) -> Dict[int, str]:
-    call_args = [arg.buffer for arg in signature if isinstance(arg, TensorArg)]
     if indices is None:
         indices = list(range(len(signature)))
     return {

@@ -10793,7 +10793,13 @@ class CommonTemplate:
         for cpu_dtype in test_dtypes:
             x = torch.rand([20], device="cuda")
             y = torch.rand([4], device="cpu", dtype=cpu_dtype)
-            self.common(fn, (x, y), check_lowp=False)
+            self.common(
+                fn,
+                (x, y),
+                check_lowp=False,
+                copy_to_gpu=False,
+                reference_in_float=False,
+            )
 
     def test_float16_to_int16(self):
         def fn(x):
