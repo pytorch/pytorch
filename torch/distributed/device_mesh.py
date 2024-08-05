@@ -651,7 +651,6 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
-                    
 
     def init_device_mesh(
         device_type: str,
