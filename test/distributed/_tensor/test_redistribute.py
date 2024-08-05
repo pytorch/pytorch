@@ -499,6 +499,37 @@ class MultiDimRedistributeTest(DTensorTestBase):
                         expected = num_sums * full_tensor
                         self.assertEqual(local_full, expected)
 
+    @with_comms
+    def test_redistribute_shard_dim_multi_dim_mesh(self):
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+
+        sharding_src_dst_pairs_3d = [
+            ([Shard(0), Shard(0), Shard(0)], [Shard(1), Shard(1), Shard(1)]),
+            ([Shard(0), Shard(1), Shard(0)], [Shard(1), Shard(0), Shard(0)]),
+            ([Shard(0), Shard(1), Shard(2)], [Shard(2), Shard(1), Shard(0)]),
+        ]
+        comm_counts_3d = [
+            3,  # 2: S0 - R, 1: S1 -> R, 0: S0 -> S1
+            3,  # 2: S0 -> R, 1: S1 -> R, 0: S0 -> S1, 1: R -> S0, 2: R -> S0
+            2,  # 2: S2 -> R, 0: S1 -> S2
+        ]
+
+        comm_mode = CommDebugMode()
+        for idx, (src_placement, dst_placement) in enumerate(sharding_src_dst_pairs_3d):
+            expected_dt = distribute_tensor(input_data.clone(), mesh, dst_placement)
+            sharded_dt = distribute_tensor(input_data, mesh, src_placement)
+
+            with comm_mode:
+                out_dt = sharded_dt.redistribute(mesh, dst_placement)
+
+            self.assertEqual(out_dt.placements, expected_dt.placements)
+            self.assertEqual(comm_mode.get_total_counts(), comm_counts_3d[idx])
+
+            local_out_dt = out_dt.to_local()
+            local_expected_dt = expected_dt.to_local()
+            self.assertEqual(local_out_dt, local_expected_dt)
+
 
 if __name__ == "__main__":
     run_tests()

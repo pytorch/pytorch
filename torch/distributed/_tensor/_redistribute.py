@@ -17,6 +17,7 @@ from torch.distributed._tensor.placement_types import (
     TensorMeta,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,11 +38,11 @@ def _gen_transform_infos(
 
     To transform from source to target placement it might have multiple steps, i.e. it
     might decompose Si -> Sj into Si -> R -> Sj.
-    This would detects if there're mis-aligned/nested shardings between src/dst placements.
-    i.e. (Shard(0), Shard(0)) -> (Replicate(), Shard(0)), in this case Shard(0) -> Shard(0)
-    for mesh dimension 1 actually needs reshard, because in the first case it's a nested-sharding
-    of an already tensor dimension 0, and in the second case, it's the first sharding on tensor
-    dimension 0.
+    This would detect if there're mis-aligned/nested shardings between src/dst placements.
+    E.g. Suppose the redistribution to perform is (Shard(0), Shard(0)) -> (Replicate(), Shard(0)),
+    in this case Shard(0) -> Shard(0) for mesh dimension 1 actually needs resharding, because in
+    the former is a nested-sharding of a tensor already already sharded dimension 0, whereras
+    the latter is the first sharding on tensor dimension 0.
     """
     transform_infos: List[_TransformInfo] = []
 
@@ -63,7 +64,7 @@ def _gen_transform_infos(
         )
         return transform_infos
 
-    # handle multi-dim device mesh placement redistribute
+    # handle multi-dim device mesh placement redistribution
     src_placements = list(src_spec.placements)
     dst_placements = list(dst_spec.placements)
     mesh_dims_to_logical_shape = [initial_logical_shape]
@@ -89,7 +90,7 @@ def _gen_transform_infos(
     if src_spec.num_shards > 1:
         # If src_spec have sharding, it could potentially have sharding that is misaligned with dst_spec
         # a common case of this is nested sharding (i.e. (S(0), S(0)) -> (R, S(0))).
-        # In those cases, we first tranverse from inner placement to outer placement
+        # In those cases, we first traverse from inner placement to outer placement
         # to detect misaligned shardings and properly replicate nested sharding
         search_transform_infos(
             src_placements,
@@ -101,7 +102,7 @@ def _gen_transform_infos(
             left_to_right=False,
         )
 
-    # we always tranverse from outer placement to inner placement to generate the transform infos
+    # we always traverse from outer placement to inner placement to generate the transform infos
     search_transform_infos(
         src_placements,
         dst_placements,
@@ -114,37 +115,41 @@ def _gen_transform_infos(
     return transform_infos
 
 
-def reshardable_from_src_to_dst(src_placements, dst_placements, mesh_dim) -> bool:
-    src = src_placements[mesh_dim]
-    dst = dst_placements[mesh_dim]
+def reshardable_from_src_to_dst(
+    current_placements, target_placements, mesh_dim
+) -> bool:
+    # util function to check if we can redistribute from current placements to target placements
+    # on the current mesh_dim
+    current = current_placements[mesh_dim]
+    target = target_placements[mesh_dim]
 
-    # For src that is Shard, check if it's the inner most sharding
-    # if not then it's not reshardable, else we check the dst sharding
-    if src.is_shard():
-        for i in reversed(range(len(src_placements))):
-            if src_placements[i].is_shard(src.dim):
+    # For current that is Shard, check if it's the inner most sharding
+    # if not then it's not reshardable, else we check the target sharding
+    if current.is_shard():
+        for i in reversed(range(len(current_placements))):
+            if current_placements[i].is_shard(current.dim):
                 if i != mesh_dim:
                     return False
                 else:
                     break
 
-    if not dst.is_shard():
+    # if target is not shard, we can directly perform redistribute
+    if not target.is_shard():
         return True
 
-    shard_dim = dst.dim
-    # For dst that is Shard, check if src/dst_placements have the same
-    # sharding on the tensor dim BEFORE the current mesh_dim
-    src_dim_count, dst_dim_count = 0, 0
-    for i, (s, p) in enumerate(zip(src_placements, dst_placements)):
+    shard_dim = target.dim
+    # For target is Shard case, check if current/target_placements have the same
+    # mesh sharding on the tensor dim BEFORE the current mesh_dim
+    current_mesh_sharding, target_mesh_sharding = [], []
+    for i, (s, p) in enumerate(zip(current_placements, target_placements)):
         if i >= mesh_dim:
             break
-        # if isinstance(s, Shard) and s.dim == shard_dim:
         if s.is_shard(shard_dim):
-            src_dim_count += 1
+            current_mesh_sharding.append(i)
         if p.is_shard(shard_dim):
-            dst_dim_count += 1
+            target_mesh_sharding.append(i)
 
-    return src_dim_count == dst_dim_count
+    return current_mesh_sharding == target_mesh_sharding
 
 
 def search_transform_infos(
@@ -167,7 +172,7 @@ def search_transform_infos(
     dst = dst_placements[current_mesh_idx]
 
     if reshardable_from_src_to_dst(src_placements, dst_placements, current_mesh_idx):
-        # can transform directly
+        # current src_placements can transform directly to dst_placements on mesh_idx
         if src != dst:
             transform_infos.append(
                 _TransformInfo(

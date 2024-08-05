@@ -2,8 +2,10 @@
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
+import json
 import logging
 import operator
 import re
@@ -16,9 +18,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 import sympy
 
 import torch._guards
-
 import torch._logging
-
+import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
@@ -30,7 +31,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -101,11 +102,12 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-
 from .variables.torch_function import TensorWithTFOverrideVariable
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -1136,6 +1138,10 @@ class OutputGraph:
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
+            else:
+                # NB: Important to run compiler collective even when there is
+                # a graph break
+                self.run_compiler_collective(tx)
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
@@ -1252,6 +1258,29 @@ class OutputGraph:
                 GlobalContextCheckpointState(current_global_state)
             )
 
+    def run_compiler_collective(self, tx):
+        if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            compile_pg = ds.compile_pg
+            log.info("compiler_collective %s", ds.local_state)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compiler_collective",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    dataclasses.asdict(ds.local_state),
+                ),
+            )
+            with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
+                all_states = [None] * compile_pg.size()
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                ds.all_states = all_states
+            # Clear speculation log, because are tracing may diverge due to
+            # this information from the compiler collective
+            tx.speculation_log.clear()
+            raise exc.CompileCollectiveRestartAnalysis
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -1262,16 +1291,19 @@ class OutputGraph:
 
         assert self.should_exit
 
+        self.run_compiler_collective(tx)
+
         name = unique_id("__compiled_fn")
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
-        self.create_node(
+        output_node = self.create_node(
             "output",
             "output",
             (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
             {},
         )
+        tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
         if not config.do_not_emit_runtime_asserts:
             insert_deferred_runtime_asserts(
                 fx.GraphModule(root, self.graph),
@@ -1331,7 +1363,7 @@ class OutputGraph:
 
         if isinstance(compiled_fn, _LazyGraphModule) or (
             isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
-            and compiled_fn.__name__ == "_lazy_forward"
+            and compiled_fn.__name__ == "_lazy_forward"  # type: ignore[attr-defined]
         ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
@@ -1341,7 +1373,7 @@ class OutputGraph:
             lazy_gm = (
                 compiled_fn
                 if isinstance(compiled_fn, _LazyGraphModule)
-                else compiled_fn.__self__
+                else compiled_fn.__self__  # type: ignore[attr-defined]
             )
 
             _LazyGraphModule.force_recompile(lazy_gm)
@@ -1368,8 +1400,13 @@ class OutputGraph:
     def graphargs(self) -> List[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        with dynamo_timed(
+            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+        ):
+            return self._call_user_compiler(gm)
+
+    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1416,9 +1453,7 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
 
         signpost_event(
             "dynamo",
@@ -1826,6 +1861,27 @@ class SubgraphTracer(fx.Tracer):
                 (self.graph._target_to_str(source_target), source_target)
             ]
 
+    # preserve original meta if it is available
+    def _maybe_preserve_original_meta(self, tx, node):
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
+            if node_idx is not None:
+                meta = self._orig_gm_meta[node_idx]
+                for field in fx.proxy._COPY_META_FIELDS:
+                    if field in meta:
+                        node.meta[field] = meta[field]
+                if "stack_trace" in meta:
+                    node.meta["stack_trace"] = meta["stack_trace"]
+
     def create_proxy(
         self,
         kind,
@@ -1945,25 +2001,7 @@ class SubgraphTracer(fx.Tracer):
                 )
             ]
 
-        # preserve original meta if it is available
-        if (
-            self._orig_gm_meta
-            and self._orig_gm_lineno_map
-            and self._orig_gm_firstlineno
-        ):
-            lineno = tx.current_instruction.starts_line
-            node_idx = None
-            if lineno is not None:
-                node_idx = self._orig_gm_lineno_map.get(
-                    lineno - self._orig_gm_firstlineno, None
-                )
-            if node_idx is not None:
-                meta = self._orig_gm_meta[node_idx]
-                for field in fx.proxy._COPY_META_FIELDS:
-                    if field in meta:
-                        rv.node.meta[field] = meta[field]
-                if "stack_trace" in meta:
-                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+        self._maybe_preserve_original_meta(tx, rv.node)
 
         if not is_retracing:
             if "nn_module_stack" not in rv.node.meta:
@@ -1992,7 +2030,10 @@ class SubgraphTracer(fx.Tracer):
         if "stack_trace" not in rv.node.meta:
             frame_summaries: List[traceback.FrameSummary] = []
             while tx:
-                frame_summaries.append(tx.frame_summary())
+                # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
+                # the user code.
+                if not tx.is_co_filename_from_nn_modules():
+                    frame_summaries.append(tx.frame_summary())
                 tx = getattr(tx, "parent", None)
             # Reverse the frame_summaries, such that the innermost frame is at the last
             frame_summaries.reverse()
