@@ -419,14 +419,11 @@ class BenchmarkRunner:
             for line in lines:
                 writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
-    def _generate_csv_name(self, dtype, suite, device, compiler):
-        return f"operator_benchmark_{suite}_{dtype}_{compiler}_{device}.csv"
-
     def run(self):
         self._print_header()
         DEFAULT_OUTPUT_DIR = "benchmark_logs"
         mode = "JIT" if self.use_jit else "Eager"
-        output_filename = f"{self.args.output_dir}/{self._generate_csv_name('default', 'all', self.args.device, mode)}"
+        output_filename = self.args.output_dir
         headers = [
             "Benchmarking Framework",
             "Benchamrking Module Name",
