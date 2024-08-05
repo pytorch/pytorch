@@ -44,7 +44,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch.distributed.utils import _replace_by_prefix
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -55,6 +54,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import justknobs_check, log_export_usage
+from torch.distributed.utils import _replace_by_prefix
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
