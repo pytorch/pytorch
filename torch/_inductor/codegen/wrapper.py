@@ -591,7 +591,7 @@ class WrapperCodeGen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
+            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
             """
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
@@ -837,8 +837,11 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
-    @dynamo_timed
     def generate(self, is_inference):
+        with dynamo_timed("WrapperCodeGen.generate"):
+            return self._generate(is_inference)
+
+    def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
@@ -1525,15 +1528,8 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-    def generate_default_grid(
-        self,
-        name: str,
-        grid: List[Any],
-        cuda: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = None,
-        **grid_extra_kwags,
-    ):
-        return grid
+    def generate_default_grid(self, name: str, grid_args: List[Any]):
+        return grid_args
 
     def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
@@ -1618,7 +1614,6 @@ class WrapperCodeGen(CodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
-        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -1641,8 +1636,6 @@ class WrapperCodeGen(CodeGen):
                     grid_str = grid_fn
                 else:
                     grid_str = ", ".join(pexpr(item) for item in grid)
-                    if grid_extra_kwargs:
-                        grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"

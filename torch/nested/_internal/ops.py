@@ -2,14 +2,15 @@
 import functools
 import math
 import operator
+from typing import *  # noqa: F403
 
 import torch
+import torch.nn.functional as F
+from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
-from typing import *  # noqa: F403
-import torch.nn.functional as F
-from torch.fx.operator_schemas import normalize_function
+
 
 __all__: List[Any] = []
 
@@ -38,11 +39,15 @@ def _wrap_jagged_dim(
 
 def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
-    For NestedTensor operators that support multiple dimensions,
+    For NestedTensor operators,
     wraps dimensions to non-negative values,
     and returns metadata related to reduction dimension(s).
     """
     from torch._prims_common import canonicalize_dims
+
+    assert isinstance(
+        dims, (tuple, list)
+    ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -164,7 +169,7 @@ def squeeze_leading_ones(t):
     # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
     # at step (4) and we would need to update this function to record how
     # many ones we unsqueezed.
-    while t.shape[0] == 1:
+    while t.dim() > 0 and t.shape[0] == 1:
         t = t.squeeze(0)
     return t
 
@@ -205,7 +210,18 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
-            check_schema("self: jt_all, ...", func, *args, **kwargs)
+            # Build up the check schema string. The first tensor arg is assumed to be
+            # an NJT and other args are sent through as-is.
+            schema_parts = []
+            for arg in func._schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    schema_parts.append(f"{arg.name}: jt_all")
+                    break
+                else:
+                    schema_parts.append(f"{arg.name}: any")
+            schema_parts.append("...")
+            check_schema_str = ", ".join(schema_parts)
+            check_schema(check_schema_str, func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
@@ -224,8 +240,11 @@ def extract_kwargs(arg):
 
 
 def jagged_unary_pointwise(func, *args, **kwargs):
+    # assume if we get here that there is a single NJT input in the args
+    njt = next(arg for arg in args if isinstance(arg, NestedTensor))
     return NestedTensor(
-        func(args[0]._values, *args[1:], **kwargs), **extract_kwargs(args[0])
+        func(*(arg._values if arg is njt else arg for arg in args), **kwargs),
+        **extract_kwargs(njt),
     )
 
 
@@ -305,7 +324,7 @@ def jagged_torch_function(func, *args, **kwargs):
         def _flatten_sig(input, start_dim=0, end_dim=-1):
             pass
 
-        _, new_kwargs = normalize_function(  # type: ignore[misc]
+        _, new_kwargs = normalize_function(
             _flatten_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
         )
 
@@ -385,7 +404,7 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 def is_contiguous_general(func, *args, **kwargs):
     from torch._prims_common import is_contiguous_for_memory_format
 
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
@@ -409,7 +428,7 @@ register_jagged_func(
 
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -423,7 +442,7 @@ def linear_default(func, *args, **kwargs):
     "self: jt, grad_output: jt, weight: t, output_mask: any",
 )
 def linear_backward_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -444,7 +463,7 @@ def linear_backward_default(func, *args, **kwargs):
 def to_copy_default(func, *args, **kwargs):
     from .nested_tensor import _tensor_symint_registry
 
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -476,7 +495,7 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
     "self: jt_all",
 )
 def like_factory_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -492,7 +511,7 @@ def like_factory_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.zero_.default, "self: jt_all")
 def zero__default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -502,16 +521,76 @@ def zero__default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
+    torch.ops.aten._softmax.default, "self: jt_all, dim: any, half_to_float: any"
 )
 def _softmax_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
+    if isinstance(new_kwargs["dim"], tuple):
+        raise RuntimeError(
+            "softmax(): not supported for dimensions of type 'tuple' for NestedTensor"
+        )
+
     inp = new_kwargs.pop("input")
-    dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        (new_kwargs["dim"],),
+        "softmax",
+        inp._ragged_idx,
+    )
+
+    if reduce_on_batch:
+        raise RuntimeError(
+            "softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._ragged_idx > 1:
+        raise RuntimeError(
+            "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._lengths is not None:
+        raise RuntimeError(
+            "softmax(): not supported where lengths is not None "
+            + "if reducing across the ragged dimension for NestedTensor"
+        )
+
+    new_kwargs["dim"] = new_kwargs["dim"][
+        0
+    ]  # torch.softmax takes in the reduction dimension as an integer
+
+    if reduce_on_ragged:
+        padded_softmax_values = torch.nn.functional.softmax(
+            torch.ops.aten._jagged_to_padded_dense_forward(
+                inp._values.flatten(
+                    start_dim=inp._ragged_idx
+                ),  # values are required to be 2D tensors for j2pd
+                [inp._offsets],
+                max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+                padding_value=float("-inf"),  # e^-inf = 0
+            ),
+            dim=inp._ragged_idx,
+        )
+
+        softmax_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_softmax_values,
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        ).reshape(
+            -1, *inp._values.shape[1:]
+        )  # expand softmax_values back to original shape (inp._values.shape)
+
+        return NestedTensor(softmax_values, **extract_kwargs(inp))
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -521,7 +600,7 @@ def _softmax_default(func, *args, **kwargs):
     "grad_output: jt, output: jt, dim: any, input_dtype: any",
 )
 def _softmax_backward(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     grad_out = new_kwargs.pop("grad_output")
@@ -535,7 +614,7 @@ def _softmax_backward(func, *args, **kwargs):
     torch.ops.aten.native_dropout.default, "self: jt, float: any, train: any?"
 )
 def native_dropout_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -552,7 +631,7 @@ def native_dropout_default(func, *args, **kwargs):
     "grad_output: jt, mask: jt, scale: any",
 )
 def native_dropout_backward_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     grad_output = new_kwargs.pop("grad_output")
@@ -565,7 +644,7 @@ def native_dropout_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.prod.dim_int, "self: jt, dim: any, keepdim: any?")
 def prod_dim_int(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -584,7 +663,7 @@ def prod_dim_int(func, *args, **kwargs):
     torch.ops.aten.split.Tensor, "self: jt, split_size: any, dim: any"
 )
 def split_tensor(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -602,7 +681,7 @@ def split_tensor(func, *args, **kwargs):
     torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any"
 )
 def split_with_sizes_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -618,9 +697,28 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
+@register_jagged_func(
+    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+)
+def narrow(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+
+    dim = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "narrow")
+    values = func(
+        inp._values,
+        dim=dim,
+        start=new_kwargs["start"],
+        length=new_kwargs["length"],
+    )
+    return NestedTensor(values, **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
 def chunk_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -663,7 +761,7 @@ def chunk_default(func, *args, **kwargs):
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -697,7 +795,7 @@ def unbind_int(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.squeeze.dim, "self: jt, dim: any")
 def squeeze_dim(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -710,7 +808,7 @@ def squeeze_dim(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
 def unsqueeze_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -725,7 +823,7 @@ def unsqueeze_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
 def cat_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -748,7 +846,7 @@ def cat_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.matmul.default, "self: jt, other: any")
 def matmul_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -773,7 +871,7 @@ def matmul_default(func, *args, **kwargs):
     torch.ops.aten.expand.default, "self: jt, size: any, implicit: any?"
 )
 def expand_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -790,7 +888,7 @@ def expand_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
 def expand_as_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -802,7 +900,7 @@ def expand_as_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
 def where_self(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -820,7 +918,7 @@ def where_self(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._pin_memory.default, "self: jt, device: any?")
 def _pin_memory_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -831,7 +929,7 @@ def _pin_memory_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.is_pinned.default, "self: jt, device: any?")
 def is_pinned_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -856,7 +954,7 @@ def sum_dim_IntList(func, *args, **kwargs):
     Performs a sum along the provided tensor dimension.
     Returns a dense tensor if the ragged dimension is reduced away, else returns a nested tensor.
     """
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
@@ -865,16 +963,13 @@ def sum_dim_IntList(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
         "sum",
         inp._ragged_idx,
     )
-
-    if inp._ragged_idx != 1:
-        raise RuntimeError("sum(): not supported when ragged_idx != 1 for NestedTensor")
 
     if reduce_on_ragged and inp._lengths is not None:
         raise RuntimeError(
@@ -897,20 +992,40 @@ def sum_dim_IntList(func, *args, **kwargs):
                     "sum(): not supported along a ragged and non-batch dimension for NestedTensor"
                 )
             # reduction cases: (ragged)
+            values_ragged_dim_outer = inp._values.permute(
+                inp._ragged_idx - 1,  # outer dimension
+                *range(0, inp._ragged_idx - 1),
+                *range(inp._ragged_idx, inp.dim() - 1),
+            )  # shift reduction dimension of values backward to outer dimension
+
+            # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+            # with the ragged dimension as the 0th dimension
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
+                [inp._offsets],
+                max_lengths=[inp._max_seqlen],
+            )
+
+            padded_ragged_dim_original = padded.view(
+                padded.shape[0],
+                inp._max_seqlen,
+                *values_ragged_dim_outer.shape[
+                    1:
+                ],  # expand non-batch dimensions of padded tensor
+            ).permute(
+                0,
+                *range(2, inp._ragged_idx + 1),
+                1,
+                *range(inp._ragged_idx + 1, inp.dim()),
+            )  # shift reduction dimension of padded tensor forward to original ragged dimension
+
             out = torch.sum(
-                torch.ops.aten._jagged_to_padded_dense_forward(
-                    inp._values.view(*inp._values.shape[: inp._ragged_idx], -1),
-                    [inp._offsets],
-                    max_lengths=[inp._max_seqlen],
-                ).view(
-                    *inp.shape[: inp._ragged_idx],
-                    inp._max_seqlen,
-                    *inp.shape[inp._ragged_idx + 1 :],
-                ),
+                padded_ragged_dim_original,
                 dim=inp._ragged_idx,
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
+            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
             out = out.unsqueeze(0)
         return out
     else:  # raggedness preserved --> return nested tensor
@@ -918,7 +1033,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             reduce_on_batch
         ):  # invalid reduction cases: (batch), (batch, non-batch), etc.
             raise RuntimeError(
-                "sum(): not supported along only the batch dimension for NestedTensor"
+                "sum(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
             )
         # reduction cases: (non-batch), (non-batch, non-batch), etc.
         return NestedTensor(
@@ -930,7 +1045,7 @@ def sum_dim_IntList(func, *args, **kwargs):
     torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any"
 )
 def transpose_int(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -977,7 +1092,7 @@ def transpose_int(func, *args, **kwargs):
     "self: jt_all, size: any",
 )
 def view_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1022,20 +1137,99 @@ def view_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
-    "input: jt, normalized_shape: any, weight: any?, bias: any?, eps: any",
+    "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",
 )
 def native_layer_norm_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
     inp = new_kwargs.pop("input")
-    normalized_shape = new_kwargs["normalized_shape"]
 
-    # Ensure we're not trying to normalize over the ragged dim
-    if inp.dim() < 3 or (inp.dim() - len(normalized_shape)) < 2:
+    if inp.dim() <= 2:
         raise RuntimeError(
-            "layer_norm(): normalizing over ragged dim not supported for nested tensors"
+            "layer_norm(): not supported for NestedTensor objects with 2 or fewer dimensions"
+        )
+
+    normalized_shape = new_kwargs["normalized_shape"]
+    ragged_size = inp.shape[inp._ragged_idx]
+
+    num_dims_not_normalized = inp.dim() - len(normalized_shape)
+
+    if (
+        num_dims_not_normalized == 0
+    ):  # error if trying to normalize over the batch dimension
+        raise RuntimeError(
+            "layer_norm(): not supported when normalizing over the batch dimension for NestedTensor"
+        )
+
+    if ragged_size in normalized_shape and inp._lengths is not None:
+        raise RuntimeError(
+            "layer_norm(): not supported where lengths is not None if operating on the ragged dimension for NestedTensor"
+        )
+
+    if (
+        ragged_size in normalized_shape
+    ):  # special handling for normalizing over the ragged dimension
+        padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
+            inp._values.flatten(
+                start_dim=inp._ragged_idx
+            ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        )
+
+        padded_mask = torch.ops.aten._jagged_to_padded_dense_forward(
+            torch.ones((inp._values.shape[0], 1), device=inp.device, dtype=inp.dtype),
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        ).expand(
+            padded_input.shape
+        )  # mask elements outside of the ragged dimension and expand to the same shape as padded input (3D dense tensor)
+
+        ragged_lengths = (
+            inp._offsets.diff().unsqueeze(1).unsqueeze(1) * padded_input.shape[2]
+        )  # ragged dim * inner dim, since we sum over dims (1, 2) (the layer on which we normalize)
+
+        mean = (
+            torch.sum(
+                padded_input,
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        padded_normalized = (
+            padded_input - mean
+        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+
+        variance = (
+            torch.sum(
+                torch.square(padded_normalized),
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        std = torch.sqrt(variance + new_kwargs["eps"])
+        padded_layer_norm = padded_normalized / std
+
+        jagged_layer_norm_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_layer_norm,
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        ).unflatten(
+            -1, inp.shape[inp._ragged_idx + 1 :]
+        )  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
+
+        return (
+            NestedTensor(jagged_layer_norm_values, **extract_kwargs(inp)),
+            mean,
+            std,
         )
 
     output, mean, std = func(inp._values, **new_kwargs)
@@ -1047,7 +1241,7 @@ def native_layer_norm_default(func, *args, **kwargs):
     "grad_out: jt, input: jt, normalized_shape: any, mean: any, rstd: any, weight: any?, bias: any?, output_mask: any",
 )
 def native_layer_norm_backward_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     grad_out = new_kwargs.pop("grad_out")
@@ -1061,12 +1255,19 @@ def native_layer_norm_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")
 def select_int(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
     inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "select")
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "select", allow_batch_dim=True
+    )
+
+    # handle batch dim slicing via unbind() for now
+    # TODO: make this more efficient
+    if new_kwargs["dim"] == 0:
+        return inp.unbind()[new_kwargs["index"]]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1076,7 +1277,7 @@ def select_int(func, *args, **kwargs):
     "self: jt, dim: any?, start: any?, end: any?, step: any?",
 )
 def slice_tensor(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1092,7 +1293,7 @@ def slice_tensor(func, *args, **kwargs):
     "dilation: any, transposed: any, output_padding: any, groups: any",
 )
 def convolution_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1109,7 +1310,7 @@ def mean_dim(func, *args, **kwargs):
     Performs a mean along the provided tensor dimension.
     Returns a dense tensor if the ragged dimension is reduced away, else returns a nested tensor.
     """
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1118,16 +1319,13 @@ def mean_dim(func, *args, **kwargs):
             "mean(): not supported across multiple dimensions for NestedTensor"
         )
 
-    if not new_kwargs["keepdim"]:
-        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
-
     inp = new_kwargs.pop("input")
 
     (
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
@@ -1135,9 +1333,9 @@ def mean_dim(func, *args, **kwargs):
         inp._ragged_idx,
     )
 
-    if inp._ragged_idx != 1:
+    if reduce_on_batch:
         raise RuntimeError(
-            "mean(): not supported when ragged_idx != 1 for NestedTensor"
+            "mean(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
         )
 
     if reduce_on_ragged and inp._lengths is not None:
@@ -1146,14 +1344,17 @@ def mean_dim(func, *args, **kwargs):
             + "if reducing across the ragged dimension for NestedTensor"
         )
 
+    if not new_kwargs["keepdim"]:
+        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
+
     if reduce_on_ragged:  # raggedness reduced away
         torch_sum = torch.sum(inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"])
 
-        # for every non-batch dimension past the ragged dimension,
+        # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - inp._ragged_idx - 1):
+        for _ in range(inp.dim() - 2):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
@@ -1165,7 +1366,7 @@ def mean_dim(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")
 def stack_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1199,7 +1400,7 @@ def stack_default(func, *args, **kwargs):
     "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?",
 )
 def embedding_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1220,7 +1421,7 @@ def embedding_default(func, *args, **kwargs):
     "self: jt_all",
 )
 def values_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1231,12 +1432,23 @@ def values_default(func, *args, **kwargs):
     return inp._values.detach()
 
 
+@register_jagged_func(torch.ops.aten.all.default, "self: jt_all")
+def all_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values)
+
+
 @register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
     "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: t?, max_seqlen: t?",
 )
 def _nested_view_from_jagged_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1265,7 +1477,7 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
 def _nested_get_offsets(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1275,7 +1487,7 @@ def _nested_get_offsets(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._nested_get_lengths.default, "self: jt_all")
 def _nested_get_lengths(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1285,7 +1497,7 @@ def _nested_get_lengths(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._nested_get_ragged_idx.default, "self: jt_all")
 def _nested_get_ragged_idx(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1295,7 +1507,7 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._nested_get_min_seqlen.default, "self: jt_all")
 def _nested_get_min_seqlen(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
@@ -1305,7 +1517,7 @@ def _nested_get_min_seqlen(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._nested_get_max_seqlen.default, "self: jt_all")
 def _nested_get_max_seqlen(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
+    _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 

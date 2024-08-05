@@ -1,33 +1,33 @@
 # mypy: ignore-errors
 
-MAX_CYCLE = 3000
-
 import itertools
 import operator
-
 from typing import Dict, List, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 from .. import polyfill, variables
 from ..exc import (
-    handle_observed_user_stop_iteration,
+    handle_observed_exception,
     ObservedUserStopIteration,
-    raise_observed_user_stop_iteration,
+    raise_observed_exception,
     unimplemented,
 )
-
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+MAX_CYCLE = 3000
+
+
 class ItertoolsVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
     def python_type(self):
@@ -193,12 +193,16 @@ class ItertoolsVariable(VariableTracker):
             return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
                 tx, args, kwargs
             )
+        elif self.value is itertools.zip_longest:
+            return variables.UserFunctionVariable(polyfill.zip_longest).call_function(
+                tx, args, kwargs
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
 
 class IteratorVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
     def next_variable(self, tx):
@@ -206,7 +210,7 @@ class IteratorVariable(VariableTracker):
 
 
 class RepeatIteratorVariable(IteratorVariable):
-    def __init__(self, item: VariableTracker, **kwargs):
+    def __init__(self, item: VariableTracker, **kwargs) -> None:
         super().__init__(**kwargs)
         self.item = item
 
@@ -216,7 +220,7 @@ class RepeatIteratorVariable(IteratorVariable):
 
 
 class CountIteratorVariable(IteratorVariable):
-    def __init__(self, item: int = 0, step: int = 1, **kwargs):
+    def __init__(self, item: int = 0, step: int = 1, **kwargs) -> None:
         super().__init__(**kwargs)
         if not isinstance(item, VariableTracker):
             item = ConstantVariable.create(item)
@@ -241,7 +245,7 @@ class CycleIteratorVariable(IteratorVariable):
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
-    ):
+    ) -> None:
         if saved is None:
             saved = []
         super().__init__(**kwargs)
@@ -267,7 +271,7 @@ class CycleIteratorVariable(IteratorVariable):
                     return self.next_variable(tx)
                 return self.item
             except ObservedUserStopIteration:
-                handle_observed_user_stop_iteration(tx)
+                handle_observed_exception(tx)
                 self.iterator = None
                 return self.next_variable(tx)
         elif len(self.saved) > 0:
@@ -275,4 +279,4 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx, self)
