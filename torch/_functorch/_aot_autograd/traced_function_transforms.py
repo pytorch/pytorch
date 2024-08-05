@@ -233,9 +233,8 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
-            assert functional_tensor_mode is not None
-
-            functional_tensor_mode.on_forward_tracing_end()
+            if functional_tensor_mode is not None:
+                functional_tensor_mode.on_forward_tracing_end()
 
             with fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
