@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import copy
 import functools
-
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
@@ -21,10 +20,8 @@ from torch.ao.quantization.observer import (
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
-
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 from torch.ao.quantization.quantizer.utils import _get_module_name_filter
-
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
@@ -271,7 +268,7 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[
