@@ -66,7 +66,7 @@ class TestDataParallel(TestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.rnn = torch.nn.LSTM(
                     300, 1024, 1, batch_first=True, bidirectional=True
@@ -320,7 +320,7 @@ class TestDataParallel(TestCase):
         import gc
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(1, 1)
 
@@ -544,7 +544,7 @@ class TestDataParallel(TestCase):
     def test_data_parallel_complex(self):
         # We expect complex parameters to be broadcast by view_as_real, e.g. move from C to R^2
         class Cplx(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.cplx = torch.nn.Parameter(
                     torch.zeros(1, 10, dtype=torch.cfloat).cuda()
@@ -685,7 +685,7 @@ class TestDataParallel(TestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_autocast(self):
         class Model(torch.nn.Linear):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(8, 8)
 
             @torch.cuda.amp.autocast()
@@ -870,7 +870,7 @@ class TestDataParallelDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only(self, device, dtype):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = l
 
@@ -890,7 +890,7 @@ class TestDataParallelDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = l
 
@@ -910,7 +910,7 @@ class TestDataParallelDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = l
 
@@ -930,7 +930,7 @@ class TestDataParallelDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.half)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = l
 

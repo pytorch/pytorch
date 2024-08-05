@@ -617,7 +617,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -670,7 +670,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -1628,14 +1628,14 @@ def forward(self, a_1):
     def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 return x + 1
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 

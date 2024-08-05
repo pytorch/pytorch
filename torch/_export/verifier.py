@@ -133,6 +133,7 @@ class Verifier(metaclass=_VerifierMeta):
             operator.abs,
             math.ceil,
             math.floor,
+            math.trunc,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:

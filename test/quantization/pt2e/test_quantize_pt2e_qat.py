@@ -1100,7 +1100,7 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
 
 class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
     class TwoLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear1 = torch.nn.Linear(16, 8, bias=False)
             self.linear2 = torch.nn.Linear(8, 8)
@@ -1109,7 +1109,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             return self.linear2(self.linear1(x))
 
     class QATPTQTestModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 16, 3)
             self.linears = TestQuantizeMixQATAndPTQ.TwoLinear()
