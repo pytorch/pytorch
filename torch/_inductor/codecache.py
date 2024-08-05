@@ -2064,6 +2064,7 @@ class AotCodeCompiler:
                 )
 
                 log.debug("aot compilation command: %s", compile_cmd)
+                output_o = os.path.splitext(input_path)[0] + ".o"
                 if fbcode_aot_cpu_re:
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
@@ -2170,6 +2171,11 @@ class AotCodeCompiler:
             )
 
             log.debug("aot linkage command: %s", link_cmd)
+            output_so = (
+                config.aot_inductor.output_path
+                if specified_so_name
+                else os.path.splitext(input_path)[0] + ".so"
+            )
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
                 os.chmod(output_so, 0o755)
