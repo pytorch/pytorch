@@ -878,7 +878,7 @@ def flex_attention(
         raise RuntimeError("flex_attention requires dynamo support")
 
     # Dynamo is expecting a callable with "__code__" attribute.
-    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
