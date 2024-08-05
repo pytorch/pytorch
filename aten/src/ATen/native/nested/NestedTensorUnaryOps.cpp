@@ -29,12 +29,42 @@ Tensor& NestedTensor_abs_(Tensor& self) {
   return self;
 }
 
-Tensor NestedTensor_nan_to_num(const Tensor& self, std::optional<double> nan, std::optional<double> posinf, std::optional<double> neginf){
-    return map_nt(
-      self,
-      [nan, posinf, neginf](const Tensor& self) {
-        return at::nan_to_num(self, nan, posinf, neginf);
-      });
+Tensor NestedTensor_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(condition.is_nested(), "condition must be nested");
+  TORCH_CHECK(other.is_nested(), "other must be nested");
+  TORCH_CHECK(!self.is_nested(), "self must not be nested");
+
+  auto condition_ptr = get_nested_tensor_impl(condition);
+  auto other_ptr = get_nested_tensor_impl(other);
+
+  int64_t ntensors = condition_ptr->size(0);
+  TORCH_CHECK(other_ptr->size(0) == ntensors, "condition and other must have the same number of tensors");
+
+  // Get the buffer and sizes of the 'other' tensor to use for the output
+  const Tensor& other_buffer = other_ptr->get_unsafe_storage_as_tensor();
+  const Tensor& other_sizes = other_ptr->get_nested_sizes();
+
+  // Create output buffer with the same size as other_buffer
+  Tensor output_buffer = other_buffer.new_empty(other_buffer.sizes());
+
+  // Create the output nested tensor
+  Tensor output = wrap_buffer(output_buffer, other_sizes.clone());
+
+  // Unbind condition, other, and output into lists of tensors
+  std::vector<Tensor> condition_unbind = condition.unbind();
+  std::vector<Tensor> other_unbind = other.unbind();
+  std::vector<Tensor> output_unbind = output.unbind();
+
+  // Apply at::where operation on each triplet of condition, self, and other tensors
+  for (int64_t i = 0; i < ntensors; i++) {
+    at::where_out(
+      output_unbind[i],
+      condition_unbind[i],
+      self,  // Note: self is not nested, so we use it directly
+      other_unbind[i]);
+  }
+
+  return output;
 }
 
 Tensor NestedTensor_sgn(const Tensor& self) {
