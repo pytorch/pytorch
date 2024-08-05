@@ -117,7 +117,7 @@ else:
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             flatten_dims_in_root = [
                 root_mesh.mesh_dim_names.index(flattened_mesh_dim_name)
-                for flattened_mesh_dim_name in device_mesh.mesh_dim_names
+                for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
             # sort dims to flatten based on the order of the dims in the root mesh.
             flatten_dims_in_root.sort()
@@ -144,7 +144,7 @@ else:
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
-            self.child_to_root_mapping[res_flattened_mesh] = root_mesh
+            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
