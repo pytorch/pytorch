@@ -56,6 +56,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -116,9 +117,25 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
+@functools.lru_cache(None)
+def check_compiler_exist_windows(compiler: str) -> None:
+    """
+    Check if compiler is ready, in case end user not activate MSVC environment.
+    """
+    try:
+        output_msg = (
+            subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+
+
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc()
@@ -150,6 +167,24 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_msvc_cl(cpp_compiler: str) -> bool:
+    if not _IS_WINDOWS:
+        return False
+    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+    try:
+        output_msg = (
+            subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        return "Microsoft" in output_msg.splitlines()[0]
+    except FileNotFoundError as exc:
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -162,6 +197,11 @@ def is_clang() -> bool:
 @functools.lru_cache(None)
 def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_msvc_cl() -> bool:
+    return _is_msvc_cl(get_cpp_compiler())
 
 
 def get_compiler_version_info(compiler: str) -> str:

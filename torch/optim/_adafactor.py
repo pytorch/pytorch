@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
@@ -11,6 +12,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["Adafactor", "adafactor"]
 
@@ -421,7 +423,7 @@ def adafactor(
 
     See :class:`~torch.optim.Adafactor` for details.
     """
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
