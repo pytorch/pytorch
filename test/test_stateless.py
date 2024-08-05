@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase, parametriz
 
 
 class MockModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
         self.buffer = torch.nn.Buffer(torch.ones(1))
@@ -26,7 +26,7 @@ class MockModule(torch.nn.Module):
 
 
 class MockTiedModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(1, 1)
         self.tied_bias = self.l1.bias
@@ -630,7 +630,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_setattr(self, functional_call):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
@@ -654,7 +654,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_in_place_operator(self, functional_call):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Buffer(torch.tensor([0.0]))
 
@@ -678,7 +678,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_setattr_strict(self, functional_call):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 assert not hasattr(self, 'extra')
 
@@ -775,7 +775,7 @@ class TestStatelessFunctionalAPI(TestCase):
     ])
     def test_functional_call_member_reference(self, functional_call):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
                 self.buffer = torch.nn.Buffer(torch.ones(1))

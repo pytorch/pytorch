@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import IS_WINDOWS
 
 class TestHelperModules:
     class Conv2dWithObsSharingOps(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 3, 3)
             self.hardtanh = torch.nn.Hardtanh()
@@ -46,7 +46,7 @@ class TestHelperModules:
             return x
 
     class Conv2dWithSharedDQ(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv1 = torch.nn.Conv2d(3, 3, 3)
             self.conv2 = torch.nn.Conv2d(3, 3, 1)
@@ -64,7 +64,7 @@ class TestHelperModules:
             return w, add_output, extra_output
 
     class ModuleForDifferentQconfig(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv1 = torch.nn.Conv2d(3, 3, 3)
             self.conv2 = torch.nn.Conv2d(3, 3, 1)
