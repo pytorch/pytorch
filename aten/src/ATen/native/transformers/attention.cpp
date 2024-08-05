@@ -712,7 +712,7 @@ Tensor scaled_dot_product_attention(
             attn_mask,
             dropout_p,
             is_causal,
-            c10::nullopt, /*dropout_mask*/
+            std::nullopt, /*dropout_mask*/
             scale));
       }
       return std::get<0>(at::_scaled_dot_product_attention_math(
