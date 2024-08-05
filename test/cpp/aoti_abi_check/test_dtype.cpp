@@ -97,12 +97,12 @@ TEST(TestDtype, TestHalf) {
 }
 
 TEST(TestDtype, TestComplexFloat) {
-  c10::complex<float> a(std::complex<float>(1.0 + 2i));
-  c10::complex<float> b(std::complex<float>(3.0 + 4i));
-  c10::complex<float> add(std::complex<float>(4.0 + 6i));
-  c10::complex<float> sub(std::complex<float>(-2.0 + -2i));
-  c10::complex<float> mul(std::complex<float>(-5.0 + 10i));
-  c10::complex<float> div(std::complex<float>(0.44 + 0.08i));
+  c10::complex<float> a(std::complex<float>(1.0f, 2.0f));
+  c10::complex<float> b(std::complex<float>(3.0f,  4.0f));
+  c10::complex<float> add(std::complex<float>(4.0f,  6.0f));
+  c10::complex<float> sub(std::complex<float>(-2.0f,  -2.0f));
+  c10::complex<float> mul(std::complex<float>(-5.0f,  10.0f));
+  c10::complex<float> div(std::complex<float>(0.44f,  0.08f));
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
