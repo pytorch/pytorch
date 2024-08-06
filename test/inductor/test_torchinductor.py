@@ -9959,7 +9959,7 @@ class CommonTemplate:
     def test_full_bits_lowp(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.cpp import CppKernelProxy, KernelGroup
-        from torch._inductor.compile_fx import _shape_env_from_inputs
+        from torch._inductor.compile_fx import shape_env_from_inputs
         from torch._inductor.debug import DebugContext
         from torch._inductor.graph import GraphLowering
         from torch._inductor.virtualized import V
@@ -9972,7 +9972,7 @@ class CommonTemplate:
             self.common(func, example_inputs)
             gm, _ = torch._dynamo.export(func)(*example_inputs)
             gm = torch.fx.symbolic_trace(gm)
-            shape_env = _shape_env_from_inputs(example_inputs)
+            shape_env = shape_env_from_inputs(example_inputs)
             fake_mode = detect_fake_mode(example_inputs)
             if not fake_mode:
                 fake_mode = torch._subclasses.FakeTensorMode()
