@@ -43,7 +43,6 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
-#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -2942,7 +2941,8 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             // Work.result() returns a vector of tensors. This signature is
             // problematic as some collectives may just return one tensor
             // (e.g all-reduce), while some others may return multiple
-            // tensors (e.g. all-gather). Deprecating work.result() would
+            // tensors (e.g. all-gather).
+            // Deprecating work.result() would
             // also allow us to remove the `outputs_` field in the Work
             // class, avoiding an "artificial" reference to the tensors,
             // which could potentially hold up the tensors' memory.
