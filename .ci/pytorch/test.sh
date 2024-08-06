@@ -1383,7 +1383,8 @@ test_operator_benchmark() {
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   taskset -c 0-"$end_core" python -m benchmark_all_test --device cpu --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
 
-  python benchmarks/operator_benchmark/check_perf_csv.py \
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  python check_perf_csv.py \
   --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
   --expected "benchmarks/operator_benchmark/expected_ci_operator_benchmark_eager_float32_cpu.csv"
 
