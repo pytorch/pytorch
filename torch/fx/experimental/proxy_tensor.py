@@ -32,6 +32,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._subclasses.fake_impls import fast_detach
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import Proxy
 from torch.fx import Tracer, GraphModule
 from torch.fx.graph_module import _assign_attr
@@ -369,20 +370,18 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
             lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_size.int, (proxy, i), {}), x),
             i)
 
-    for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(
-            s,
-            lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x),
-            i)
+    if not is_sparse_any(tensor):
+        for i, s in enumerate(tensor.stride()):
+            try_set_proxy_slot(s, lambda x, i: set_meta(
+                tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x), i)
 
     try_set_proxy_slot(
         tensor.numel(),
         lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x)
     )
-    try_set_proxy_slot(
-        tensor.storage_offset(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
-    )
+    if not is_sparse_any(tensor):
+        try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 _NestedProxys = Union[Proxy, Sequence["_NestedProxys"], Mapping[object, "_NestedProxys"]]

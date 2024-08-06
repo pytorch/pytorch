@@ -857,7 +857,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
-            self.DLL.close()
+            """
+            Check close attr due to it crash on Windows.
+            """
+            if hasattr(self.DLL, "close"):
+                self.DLL.close()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"
