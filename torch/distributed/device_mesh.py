@@ -75,6 +75,9 @@ else:
         def create_sub_mesh(
             self, device_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
+            if device_mesh != self.get_root_mesh(device_mesh):
+                raise RuntimeError("Cannot create a submesh from a submesh.")
+
             # submesh_dims are the mesh dimension of the submesh in the device mesh.
             submesh_dims = [
                 not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
@@ -109,7 +112,7 @@ else:
             res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
                 device_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
             ]
-            self.child_to_root_mapping[res_submesh] = self.get_root_mesh(device_mesh)
+            self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
 
