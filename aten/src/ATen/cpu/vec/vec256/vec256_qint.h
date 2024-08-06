@@ -1357,7 +1357,7 @@ template <typename T>
 typename std::enable_if_t<std::is_same_v<T, uint8_t>, at::vec::Vectorized<float>>
 inline convert_int8_to_float(at::vec::Vectorized<T> src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-    auto u8x8 = vld1_u8(src.operator const int8_t*());
+    auto u8x8 = vld1_u8(src.operator const uint8_t*());
     auto u16x8 = vmovl_u8(u8x8);
     auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
     auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
