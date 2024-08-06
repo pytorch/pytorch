@@ -54,6 +54,7 @@ from weakref import WeakKeyDictionary
 
 if TYPE_CHECKING:
     import types
+    import sympy
 
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
@@ -176,6 +177,22 @@ def set_proxy_slot(
         if obj not in tracer.symnode_tracker:
             tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
 
+            # WAR: python test/dynamo/test_subclasses.py
+            # TestNestedTensor.test_basic_autograd
+            #
+            # AOTAutograd doesn't pass the "outer sizes" as an actual argument
+            # to make_fx, but it is made use of internally in AOTAutograd's
+            # call to tensor unflatten.  Because the outer sizes isn't passed
+            # as an argument, it is therefore untracked.  However, it turns
+            # out you luck out, because *Dynamo* will manually add the outer
+            # sizes as an argument so you can fix up the proxy'ness.
+            #
+            # This is probably fixed in
+            # https://github.com/pytorch/pytorch/pull/125941/
+            import sympy
+            if isinstance(obj.node.expr, sympy.Symbol):
+                tracer.sympy_expr_tracker[obj.node.expr] = proxy
+
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
@@ -277,10 +294,15 @@ def get_proxy_slot(
         tracker = tracer.symnode_tracker
 
     if obj not in tracker:
-        if isinstance(default, _NoDefault):
-            raise RuntimeError(f"{obj} ({id(obj)})is not tracked with proxy for {tracer}")
-        return default
-    value = tracker[obj]
+        # Last ditch
+        if isinstance(obj, py_sym_types) and obj.node.expr in tracer.sympy_expr_tracker:
+            value = tracer.sympy_expr_tracker[obj.node.expr]
+        else:
+            if isinstance(default, _NoDefault):
+                raise RuntimeError(f"{obj} ({id(obj)})is not tracked with proxy for {tracer}")
+            return default
+    else:
+        value = tracker[obj]
     res = transform(value)
     return res
 
@@ -828,6 +850,7 @@ class PythonKeyTracer(Tracer):
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = _SymNodeDict()
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
+        self.sympy_expr_tracker: Dict[sympy.Symbol, object] = dict()
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1191,6 +1214,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: WeakKeyDictionary
     symnode_tracker: WeakKeyDictionary
     tensor_tracker: WeakTensorKeyDictionary
+    sympy_expr_tracker: Dict[sympy.Symbol, object]
     torch_fn_metadata: Optional[OpOverload]
     torch_fn_counts: Dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -1212,6 +1236,7 @@ class DecompositionInterpreter(fx.Interpreter):
         # Blegh
         self.tracer.tensor_tracker = WeakTensorKeyDictionary()
         self.tracer.symnode_tracker = weakref.WeakKeyDictionary()
+        self.tracer.sympy_expr_tracker = dict()
         self.decomposition_table = decomposition_table or {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
