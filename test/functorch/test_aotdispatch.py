@@ -4068,8 +4068,8 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add,)""",
+    add_8 = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add_8,)""",
         )
 
     def test_aot_export_predispatch_func_simple(self):
