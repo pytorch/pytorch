@@ -415,7 +415,7 @@ Example::
 def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     r"""
     Constructs a nested tensor given a a strided tensor input and a strided mask, the resulting jagged layout Nested Tensor
-    will have values equivalent to running :func:`masked_select` with the provided tensor and mask. The offsets will be 
+    will have values equivalent to running :func:`masked_select` with the provided tensor and mask. The offsets will be
     generated from the contiguous True values in the mask.
 
     Args:
@@ -452,7 +452,7 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
         )
     res_values = tensor.masked_select(mask)
     expanded_mask = mask.expand(tensor.shape)
-    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).reshape(-1)
+    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).view(-1)
 
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
