@@ -8,7 +8,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
@@ -777,7 +776,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             return (inp[0] + 1,)
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
                 for i in range(10):

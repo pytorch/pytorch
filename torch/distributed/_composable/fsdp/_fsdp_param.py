@@ -118,6 +118,10 @@ nn.Parameter in order to see the result of .set_.
 def set__functionalize(tensor, data):
     torch._sync(tensor)
     torch._sync(data)
+    # AOTDispatcher needs to know if any inputs had their storages mutated.
+    # (Why? It sometimes detaches inputs before sending them into the graph,
+    #  when it sees that they do not need to have any gradients computed)
+    torch._functionalize_set_storage_changed(tensor)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     with torch._C._ExcludeDispatchKeyGuard(
@@ -692,6 +696,9 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+
+    def __repr__(self):
+        return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

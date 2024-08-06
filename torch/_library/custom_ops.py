@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
 import logging
@@ -10,49 +11,22 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Literal,
     Optional,
-    overload,
     Sequence,
     Set,
     Tuple,
     Union,
 )
 
+import torch
+from torch import _C, _ops, Tensor
 from torch.utils._exposed_in import exposed_in
 
-from .. import _C, _library, _ops, autograd, library, Tensor
-from . import utils
+from . import autograd, utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
 log = logging.getLogger(__name__)
-
-
-@overload
-def custom_op(
-    name: str,
-    fn: Literal[None] = None,
-    /,
-    *,
-    mutates_args: Union[str, Iterable[str]],
-    device_types: device_types_t = None,
-    schema: Optional[str] = None,
-) -> Callable[[Callable[..., object]], "CustomOpDef"]:
-    ...
-
-
-@overload
-def custom_op(
-    name: str,
-    fn: Callable[..., object],
-    /,
-    *,
-    mutates_args: Union[str, Iterable[str]],
-    device_types: device_types_t = None,
-    schema: Optional[str] = None,
-) -> "CustomOpDef":
-    ...
 
 
 @exposed_in("torch.library")
@@ -64,7 +38,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
+) -> Callable:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -152,13 +126,11 @@ def custom_op(
 
     """
 
-    def inner(fn: Callable[..., object]) -> CustomOpDef:
+    def inner(fn):
         import torch
 
         if schema is None:
-            import torch._custom_op.impl
-
-            schema_str = torch._custom_op.impl.infer_schema(fn, mutates_args)
+            schema_str = torch.library.infer_schema(fn, mutates_args=mutates_args)
         else:
             schema_str = schema
 
@@ -392,10 +364,10 @@ class CustomOpDef:
                 self._backend_fns[device_type] = wrapped_fn
             return fn
 
-        from torch._library.utils import get_device_arg_index, has_tensor_arg
-
-        if device_types is not None and not has_tensor_arg(self._opoverload._schema):
-            device_arg_index = get_device_arg_index(self._opoverload._schema)
+        if device_types is not None and not utils.has_tensor_arg(
+            self._opoverload._schema
+        ):
+            device_arg_index = utils.get_device_arg_index(self._opoverload._schema)
             if device_arg_index is None:
                 raise ValueError(
                     "Functions without tensor inputs are required to have a `device: torch.device` argument"
@@ -595,7 +567,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not _library.utils.is_functional_schema(schema):
+        if not utils.is_functional_schema(schema):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -622,11 +594,11 @@ class CustomOpDef:
             schema_str,
             tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
         )
-        self._opoverload = _library.utils.lookup_op(self._qualname)
+        self._opoverload = utils.lookup_op(self._qualname)
 
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
-                if _library.utils.can_generate_trivial_fake_impl(self._opoverload):
+                if utils.can_generate_trivial_fake_impl(self._opoverload):
                     return None
                 raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
@@ -638,24 +610,24 @@ class CustomOpDef:
 
         lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
-        autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
+        autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
-                for arg, val in _library.utils.zip_schema(schema, args, kwargs):
+                for arg, val in utils.zip_schema(schema, args, kwargs):
                     if not arg.alias_info:
                         continue
                     if not arg.alias_info.is_write:
                         continue
                     if isinstance(val, Tensor):
-                        autograd.graph.increment_version(val)
+                        torch.autograd.graph.increment_version(val)
                     elif isinstance(val, (tuple, list)):
                         for v in val:
                             if isinstance(v, Tensor):
-                                autograd.graph.increment_version(v)
+                                torch.autograd.graph.increment_version(v)
                 with _C._AutoDispatchBelowADInplaceOrView():
                     return self._opoverload.redispatch(
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
@@ -812,18 +784,20 @@ class CustomOpDef:
 # decorator.
 
 
-OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
+OPDEF_TO_LIB: Dict[str, "torch.library.Library"] = {}
 OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
-def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
+def get_library_allowing_overwrite(
+    namespace: str, name: str
+) -> "torch.library.Library":
     qualname = f"{namespace}::{name}"
 
     if qualname in OPDEF_TO_LIB:
         OPDEF_TO_LIB[qualname]._destroy()
         del OPDEF_TO_LIB[qualname]
 
-    lib = library.Library(namespace, "FRAGMENT")
+    lib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
     OPDEF_TO_LIB[qualname] = lib
     return lib
 
