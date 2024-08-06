@@ -13,6 +13,19 @@ from torch._dynamo.utils import counters
 from torch._inductor.config import benchmarking as benchmarking_config, is_fbcode
 
 
+try:
+    from torch._inductor.fb.benchmarking import (
+        ENABLE_EARLY_PRUNING_VERSION,
+        ENABLE_EARLY_RANKING_VERSION,
+        ENABLE_LAZY_BENCHMARKING_VERSION,
+        FALLBACK_TO_ORIGINAL_BENCHMARKING_VERSION,
+    )
+except ImportError:
+    FALLBACK_TO_ORIGINAL_BENCHMARKING_VERSION = None
+    ENABLE_LAZY_BENCHMARKING_VERSION = None
+    ENABLE_EARLY_RANKING_VERSION = None
+    ENABLE_EARLY_PRUNING_VERSION = None
+
 log = torch._logging.getArtifactLogger(__name__, "benchmarking")
 
 
@@ -38,28 +51,18 @@ def should_generic(
     config_name: str,
     jk_name: str,
     default_oss: bool,
-    default_internal_if_jk: bool,
+    local_version: Optional[int],
 ) -> bool:
     config_val = getattr(benchmarking_config, config_name)
-
-    @lru_cache(None)
-    def is_jk_enabled(name: str) -> bool:
-        try:
-            val = getattr(import_module("torch._inductor.fb.benchmarking"), name)
-        except ModuleNotFoundError:
-            return False
-        else:
-            return val >= torch._utils_internal.justknobs_getval_int(
-                f"pytorch/benchmarking:{name}"
-            )
-
     if config_val is not None:
         return config_val
     if not is_fbcode():
         return default_oss
-    if is_jk_enabled(jk_name):
-        return default_internal_if_jk
-    return not default_internal_if_jk
+    if local_version is None:
+        return False
+    return local_version >= torch._utils_internal.justknobs_getval_int(
+        f"pytorch/benchmarking:{jk_name}"
+    )
 
 
 should_fallback_to_original_benchmarking = partial(
@@ -67,28 +70,28 @@ should_fallback_to_original_benchmarking = partial(
     "fallback_to_original_benchmarking",
     "fallback_to_original_benchmarking_version",
     benchmarking_config.fallback_to_original_benchmarking_default_oss,
-    benchmarking_config.fallback_to_original_benchmarking_default_internal_if_jk,
+    FALLBACK_TO_ORIGINAL_BENCHMARKING_VERSION,
 )
 should_enable_lazy_benchmarking = partial(
     should_generic,
     "enable_lazy_benchmarking",
     "enable_lazy_benchmarking_version",
     benchmarking_config.enable_lazy_benchmarking_default_oss,
-    benchmarking_config.enable_lazy_benchmarking_default_internal_if_jk,
+    ENABLE_LAZY_BENCHMARKING_VERSION,
 )
 should_enable_early_ranking = partial(
     should_generic,
     "enable_early_ranking",
     "enable_early_ranking_verison",
     benchmarking_config.enable_early_ranking_default_oss,
-    benchmarking_config.enable_early_ranking_default_internal_if_jk,
+    ENABLE_EARLY_RANKING_VERSION,
 )
 should_enable_early_pruning = partial(
     should_generic,
     "enable_early_pruning",
     "enable_early_pruning_verison",
     benchmarking_config.enable_early_pruning_default_oss,
-    benchmarking_config.enable_early_pruning_default_internal_if_jk,
+    ENABLE_EARLY_PRUNING_VERSION,
 )
 
 
@@ -763,7 +766,9 @@ class Benchmarker:
             for _ in range(memory_warmup_iters_per_block):
                 buffer.zero_()
             for event_pairs in interleaved_event_pairs[block_start:block_end]:
-                for _callable, (start_event, end_event) in zip(callables_to_benchmark, event_pairs):
+                for _callable, (start_event, end_event) in zip(
+                    callables_to_benchmark, event_pairs
+                ):
                     buffer.zero_()
                     start_event.record()
                     _callable()
