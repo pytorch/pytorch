@@ -1,14 +1,15 @@
 # mypy: ignore-errors
 
 import collections
+import functools
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
@@ -233,18 +234,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        """getattr(self, name) returning a python constant"""
-        raise NotImplementedError
+        v = self.as_python_constant()
+        if not hasattr(v, name):
+            raise NotImplementedError
+        return getattr(v, name)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        value = self.const_getattr(tx, name)
-        if not variables.ConstantVariable.is_literal(value):
-            raise NotImplementedError
-        source = None
+
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .misc import GetAttrVariable
+
         if self.source:
             source = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, source=source)
+            builder = VariableBuilder(tx, source)
+        else:
+            source = None
+            builder = functools.partial(SourcelessBuilder.create, tx=tx)
+
+        try:
+            value = self.const_getattr(tx, name)
+        except NotImplementedError:
+            return GetAttrVariable(self, name, source=source)
+
+        # Otherwise VariableBuilder will Skip it
+        # This is the path taken by list.append and similar methods
+        if is_function_or_wrapper(value):
+            return GetAttrVariable(self, name, source=source)
+
+        try:
+            return builder(value=value)
+        except (NotImplementedError, Unsupported):
+            return GetAttrVariable(self, name, source=source)
 
     def is_proxy(self):
         try:

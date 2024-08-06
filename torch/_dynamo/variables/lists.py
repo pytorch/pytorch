@@ -732,7 +732,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                super().var_getattr(tx, name)
+                return super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)]
 

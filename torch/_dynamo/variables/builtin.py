@@ -26,7 +26,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -131,7 +131,6 @@ class BuiltinVariable(VariableTracker):
             chr,
             divmod,
             float,
-            getattr,
             int,
             len,
             max,
@@ -844,28 +843,14 @@ class BuiltinVariable(VariableTracker):
 
             handlers.append(constant_fold_handler)
 
-        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
-        if len(handlers) == 0:
-            return lambda *args: unimplemented(error_msg)
-        elif len(handlers) == 1:
-            (handler,) = handlers
-
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
-                rv = handler(tx, args, kwargs)
+        def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
+            for f in handlers:
+                rv = f(tx, args, kwargs)
                 if rv:
                     return rv
-                unimplemented(error_msg)
+            unimplemented(f"builtin: {fn.__name__} {arg_types} {has_kwargs}")
 
-        else:
-
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
-                for fn in handlers:
-                    rv = fn(tx, args, kwargs)
-                    if rv:
-                        return rv
-                unimplemented(error_msg)
-
-        return builtin_dipatch
+        return builtin_dispatch
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -1632,7 +1617,6 @@ class BuiltinVariable(VariableTracker):
         from .. import trace_rules
         from . import (
             ConstantVariable,
-            GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
@@ -1679,40 +1663,8 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
-            try:
-                value = obj.as_python_constant()
-                if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
-            except NotImplementedError:
-                pass
-
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
-        elif isinstance(
-            obj,
-            (
-                variables.TensorVariable,
-                variables.NamedTupleVariable,
-                variables.ConstantVariable,
-                variables.DistributedVariable,
-                variables.UserDefinedClassVariable,
-                variables.UserDefinedObjectVariable,
-            ),
-        ):
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
@@ -1735,11 +1687,8 @@ class BuiltinVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
-        else:
-            try:
-                return obj.var_getattr(tx, name)
-            except NotImplementedError:
-                return GetAttrVariable(obj, name, **options)
+
+        return obj.var_getattr(tx, name)
 
     def call_setattr(
         self,

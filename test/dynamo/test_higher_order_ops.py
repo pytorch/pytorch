@@ -5947,7 +5947,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(f)(x, y)
 
         actual = wrapper_fn(x, y)
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])
