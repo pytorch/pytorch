@@ -1094,14 +1094,7 @@ class TestOptimRenewed(TestCase):
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
         opt_name = optim_cls.__name__
-        if (
-            opt_name
-            in (
-                "SGD",
-                "Adagrad",
-            )
-            and impl == "capturable"
-        ):
+        if opt_name in ("SGD", "Adagrad") and impl == "capturable":
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
         if _get_device_type(device) == "cpu":
