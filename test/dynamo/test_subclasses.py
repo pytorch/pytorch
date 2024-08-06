@@ -2263,7 +2263,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
     # have a metaclass that overrides __isinstance__,
     # that dynamo needs to respect when it inlines the if statement.
     def test_param_subclass_isinstance_input(self):
-        x_inner = torch.randn(16, 16, requires_grad=True)
+        x_inner = torch.randn(16, 16)
         x = torch.nn.Parameter(TwoTensor(x_inner, x_inner))
         m = torch.nn.Linear(16, 16)
         m.weight = x

@@ -56,7 +56,8 @@ def two_tensor_fsdp_post_all_gather(
     tensors_to_free = (a, b)
     # If the cast is real, then the all-gather outputs will not alias the
     # returned `TwoTensor`'s `a` and `b`
-    two_tensor = TwoTensor(a, b).to(param_dtype)
+    # TODO: does this TwoTensor actually need requires_grad?
+    two_tensor = TwoTensor(a, b, requires_grad=a.requires_grad).to(param_dtype)
     return two_tensor, tensors_to_free
 
 
