@@ -82,7 +82,6 @@ jobs:
         )
         git clone https://github.com/pytorch/vision.git C:\vision > git_vision_repo_log.txt
         cd C:\vision
-        pip install -r docs/requirements.txt > pip_install_vision_requirements_log.txt
         for %%f in (C:\pytorch\dist\torch-*.whl) do (
           set "TORCH_WHL=%%f"
         )
@@ -92,7 +91,7 @@ jobs:
           echo "No torch whl found."
           exit /b 1
         )
-
+        pip install -r docs/requirements.txt > pip_install_vision_requirements_log.txt
         python setup.py bdist_wheel > build_vision_wheel_log.txt
 
         for %%f in (C:\vision\dist\torchvision-*.whl) do (
