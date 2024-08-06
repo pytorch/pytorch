@@ -135,7 +135,7 @@ def _while_loop_tests():
             return while_loop(cond_fn, body_fn, (ci, cj, a, b))
 
     class SimpleWithLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(2, 2)
             self.dec = torch.nn.Buffer(torch.tensor(1))
@@ -150,7 +150,7 @@ def _while_loop_tests():
             return while_loop(cond_fn, body_fn, (iter, x))
 
     class NestedWithLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.mod = SimpleWithLinear()
             self.outer_linear = torch.nn.Linear(2, 2)
@@ -446,7 +446,7 @@ def forward(self, pred_1, x_1, y_1, z_1):
     false_graph_1 = self.false_graph_1
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, z_1, y_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = z_1 = y_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1];  cond_1 = None
+    getitem_2 = cond_1[1];  cond_1 = getitem_2 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
@@ -505,10 +505,10 @@ def forward(self, pred_1, x_1):
     _param_constant1_1 = self._param_constant1
     _tensor_constant0_1 = self._tensor_constant0
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _param_constant0_1, _param_constant1_1, x_1, _tensor_constant0_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _param_constant0_1 = _param_constant1_1 = x_1 = _tensor_constant0_1 = None
-    getitem_1 = cond_1[0]
+    getitem_1 = cond_1[0];  getitem_1 = None
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2]
-    getitem_4 = cond_1[3];  cond_1 = None
+    getitem_3 = cond_1[2];  getitem_3 = None
+    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
     return (getitem_2,)""",  # noqa: B950
         )
 
@@ -621,7 +621,7 @@ def forward(self, pred_1, a_1, b_1, c_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, a_1, b_1, c_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = a_1 = b_1 = c_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
         # Forward
@@ -637,7 +637,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             gm.true_graph_1.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = add = None
     clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     return [clone, clone_1, None]""",
@@ -695,7 +695,7 @@ def forward(self, pred_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, _tensor_constant0_1, _tensor_constant1_1, _tensor_constant2_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = _tensor_constant0_1 = _tensor_constant1_1 = _tensor_constant2_1 = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  cond_1 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
 
@@ -823,18 +823,18 @@ def forward(self, pred_1, x_1):
     _param_constant5_1 = self._param_constant5
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (ones_like, x_1, _param_constant0_1, _param_constant1_1, _param_constant2_1, _param_constant3_1, _param_constant4_1, _param_constant5_1));  pred_1 = true_graph_1 = false_graph_1 = ones_like = x_1 = _param_constant0_1 = _param_constant1_1 = _param_constant2_1 = _param_constant3_1 = _param_constant4_1 = _param_constant5_1 = None
     getitem_1 = cond_1[0]
-    getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2]
-    getitem_4 = cond_1[3]
-    getitem_5 = cond_1[4]
-    getitem_6 = cond_1[5]
-    getitem_7 = cond_1[6];  cond_1 = None
+    getitem_2 = cond_1[1];  getitem_2 = None
+    getitem_3 = cond_1[2];  getitem_3 = None
+    getitem_4 = cond_1[3];  getitem_4 = None
+    getitem_5 = cond_1[4];  getitem_5 = None
+    getitem_6 = cond_1[5];  getitem_6 = None
+    getitem_7 = cond_1[6];  cond_1 = getitem_7 = None
     return (getitem_1,)""",  # noqa: B950
         )
 
     def test_cond_autograd_user_nn_module(self):
         class User_nn_module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, input):
@@ -1893,7 +1893,7 @@ def forward(self, x_1):
     view_2 = torch.ops.aten.view.default(view_1, [4, 5])
     sin = torch.ops.aten.sin.default(view_2);  view_2 = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )
 
@@ -1934,7 +1934,7 @@ def forward(self, x_1):
     view_2 = torch.ops.aten.view.default(view_1, [5, 5])
     cos = torch.ops.aten.cos.default(view_2);  view_2 = None
     sum_1 = torch.ops.aten.sum.default(cos);  cos = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = None
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )
 
@@ -2964,7 +2964,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
@@ -3495,15 +3495,54 @@ def forward(self, l_inp_, l_tmp_):
     a = l_inp__1.clone();  l_inp__1 = None
     a_view = a.view(-1)
     tmp = l_tmp__1.clone();  l_tmp__1 = None
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    set_ = a.set_(tmp)
-    mul_ = a_view.mul_(2);  a_view = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+    set_ = a.set_(tmp);  set_ = None
+    mul_ = a_view.mul_(2);  a_view = mul_ = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
     add = a + tmp;  a = tmp = None
     return (add,)
     """,
         )
         self.assertEqual(out, f(inp, tmp))
+
+    def test_two_hops_not_sharing_code_obj(self):
+        pred, args = torch.tensor(True), (torch.ones(3, 3),)
+
+        def fn1(x):
+            return x + 1
+
+        def fn2(x):
+            return x - 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        # Tests rely on automatic_dynamic = True
+        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
+            cnt = CompileCounter()
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            args = (torch.randn(3, 3),)
+            # No recompilation
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            def cond_fn(x):
+                return x.sum() > 0
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            # recompilation
+            self.assertEqual(cnt.frame_count, 2)
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            self.assertEqual(cnt.frame_count, 2)
+
+            # With recompilation due to automatic dynamic
+            # This also proves that while_loop doesn't share code obj with cond
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, (torch.randn(4, 4),))
+            self.assertEqual(cnt.frame_count, 3)
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)
