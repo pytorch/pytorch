@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import copy
 import dataclasses
 import io
@@ -26,7 +25,6 @@ from typing import (
 )
 
 import numpy as np
-
 import onnxruntime
 import pytest
 import pytorch_test_common
@@ -38,6 +36,7 @@ from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
+
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
