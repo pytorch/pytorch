@@ -3556,7 +3556,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            if type(val) is int:
+            if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             else:
                 sympy_expr = make_symbol(SymT.FLOAT, len(self.var_to_val), positive=positive, real=True)
