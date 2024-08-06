@@ -15,6 +15,7 @@ exclude_patterns = [
     'functorch/examples/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -196,6 +197,8 @@ include_patterns = [
     'aten/src/ATen/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
+    'aten/src/ATen/cudnn/*.h',
+    'aten/src/ATen/cudnn/*.cpp',
     'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
@@ -1005,16 +1008,16 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
-# Black + usort
+# usort + ruff-format
 [[linter]]
-code = 'UFMT'
+code = 'PYFMT'
 include_patterns = [
     '**/*.py',
     '**/*.pyi',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/ufmt_linter.py',
+    'tools/linter/adapters/pyfmt_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -1029,6 +1032,7 @@ exclude_patterns = [
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/_nvfuser/__init__.py',
@@ -1471,9 +1475,9 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
     'black==23.12.1',
-    'ufmt==2.7.0',
     'usort==1.0.8.post1',
     'isort==5.13.2',
+    'ruff==0.5.5',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1540,6 +1544,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1557,7 +1562,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.5',
+    'ruff==0.5.5',  # sync with PYFMT
 ]
 is_formatter = true
 
