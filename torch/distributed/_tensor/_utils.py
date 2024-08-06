@@ -128,9 +128,28 @@ def compute_local_shape_and_global_offset(
 
                 num_shards_by_tensor_dim[shard_dim] *= mesh_dim_size
 
-        # TODO: this logic only allows contiguous sharding followed by strided sharding
-        # such as [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] but not
-        # [_StridedShard(0, split_factor=2), Shard(0), Shard(0)]
+        # NOTE: the offset compute relies on the local shard index and it has no
+        # problem when strided sharding is not present. To correctly compute, we assume
+        # that the ``_StridedShard.split_factor`` field encodes how many partitions
+        # each local tensor will be further split into when sharding on higher mesh
+        # dimensions. However, this number is only correct if the DTensor is not
+        # sharded after the strided sharding completes. For example,
+        # [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] is the placements
+        # where the DTensor's dim-0 is first sharded on device mesh dim-0, then on
+        # device mesh dim-2, and last on mesh dim-1. We define the
+        # "_StridedShard(0, split_factor=2), Shard(0)" part as the strided sharding
+        # part because strided sharding happens on mesh dim-1 and it was caused by
+        # the fact that sharding on dim-2 occurred ahead. In this case, there's no
+        # further sharding after this strided sharding part and ``split_factor``
+        # correctly encodes the number. Another example is
+        # [_StridedShard(0, split_factor=2), Shard(0), Shard(0)] where the DTensor's
+        # dim-0 is first sharded on mesh dim-1, then on mesh dim-0, and last on mesh
+        # dim-2. This violates our assumption that no further sharding shall occur
+        # after the strided sharding part and ``split_factor`` won't correctly
+        # encode the number of further split. So far, the only case where _StridedShard
+        # placement would appear is FSDP2 + TP on 2D mesh and the above case could only
+        # happen on mesh of 3 or more dimensions.
+        # TODO: change this function to correctly address this.
         # TODO: this logic can be applied to contiguous sharding as well
         strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
         if strided_sharding:
