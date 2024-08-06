@@ -577,7 +577,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten mesh with mesh_dim_name provided
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten(mesh_dim_name="dpcp")
-        self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names, ("dpcp",))
+        self.assertEqual(flattened_dp_cp_mesh_2.mesh_dim_names, ("dpcp",))
         self.assertNotEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
 
         # Test flatten non-contiguous dims
