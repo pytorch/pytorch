@@ -694,6 +694,9 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_all
+
 
 - func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6498,6 +6501,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA, MPS: where
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_where
   tags: [core, pointwise]
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
