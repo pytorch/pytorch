@@ -95,6 +95,9 @@ else:
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -495,6 +498,8 @@ def _compile_fx_inner(
 
     if static_input_idxs is None:
         static_input_idxs = []
+
+    static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
 
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
