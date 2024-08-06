@@ -1451,6 +1451,7 @@ class SIMDScheduling(BaseScheduling):
                     )
 
             kernel.finalize_indexing(all_indexing.keys())
+
             # Second pass to do codegen
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
@@ -1579,6 +1580,7 @@ class SIMDScheduling(BaseScheduling):
                     # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
                     for n in nodes:
                         n.last_usage = OrderedSet()
+
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),

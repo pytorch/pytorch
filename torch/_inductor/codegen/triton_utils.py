@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 import sympy
 
@@ -16,7 +16,6 @@ def signature_of(
     arg: KernelArgType,
     *,
     size_dtype: str,
-    zero_dim_cpu_tensor_list: Optional[Set[str]] = None,
 ) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
