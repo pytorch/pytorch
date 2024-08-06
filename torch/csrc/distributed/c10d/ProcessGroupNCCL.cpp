@@ -496,7 +496,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       ncclComm_(w.ncclComm_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
-      timeoutReductionOnComplete_(w.timeoutReductionOnComplete_),
+      ownedEphermeralTimeout_(w.ownedEphermeralTimeout_),
       workStartTime_(w.workStartTime_),
       seq_(w.seq_),
       startTraceUpdated_(w.startTraceUpdated_),
@@ -1799,9 +1799,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         {
           // Reset the timeout and first work if the work is completed.
           std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
-          if (work.timeoutReductionOnComplete_.count() > 0) {
-            ephemeralTimeoutActive_ -= work.timeoutReductionOnComplete_;
-            ephemeralTimeoutInflight_ -= work.timeoutReductionOnComplete_;
+          if (work.ownedEphermeralTimeout_.count() > 0) {
+            ephemeralTimeoutActive_ -= work.ownedEphermeralTimeout_;
+            ephemeralTimeoutInflight_ -= work.ownedEphermeralTimeout_;
           }
         }
         pgStatus_->lastCompletedSeq = work.seq_;
@@ -2445,7 +2445,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
     timeout += ephemeralTimeoutActive_;
   }
   work->opTimeout_ = timeout;
-  work->timeoutReductionOnComplete_ =
+  work->ownedEphermeralTimeout_ =
       ephemeralTimeoutActive_ - ephemeralTimeoutInflight_;
   ephemeralTimeoutInflight_ = ephemeralTimeoutActive_;
 }

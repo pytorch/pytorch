@@ -341,8 +341,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
 
-    // timeout to be reduced after this work finishes.
-    std::chrono::milliseconds timeoutReductionOnComplete_ =
+    // Ephemeral timeouts are owned by exactly one work,
+    // and reset after that work completes.
+    // There may be more than one ephemeral timeout active at the same time,
+    // and this variable is used to track the ownership of ephemeral timeout.
+    std::chrono::milliseconds ownedEphermeralTimeout_ =
         std::chrono::milliseconds(0);
 
     // Time point representing when the work started.
