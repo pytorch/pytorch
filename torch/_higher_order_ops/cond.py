@@ -26,7 +26,6 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
-from torch.fx.experimental._sym_dispatch_mode import disable_sym_dispatch
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -148,10 +147,15 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _cond_op_wrapper(*args, **kwargs):
+        return cond_op(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                return torch.compile(_cond_op_wrapper, backend="eager", fullgraph=True)(
                     pred, true_fn, false_fn, operands
                 )
 
@@ -168,7 +172,7 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
 
     with suspend_functionalization(), disable_functional_mode():
-        with disable_proxy_modes_tracing(), disable_sym_dispatch():
+        with disable_proxy_modes_tracing():
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
             fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))
@@ -375,7 +379,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
         torch.Tensor,
-        lambda t: not t.requires_grad,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (pred, operands),
     ):
         with torch._C._AutoDispatchBelowAutograd():
@@ -400,10 +404,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, pred, true_fn, false_fn, operands):
-    if mode.enable_tracing:
-        return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-    else:
-        return cond_op(pred, true_fn, false_fn, operands)
+    return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
 @cond_op.py_impl(FakeTensorMode)

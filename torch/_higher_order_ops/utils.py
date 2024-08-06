@@ -8,7 +8,6 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
-from torch.fx.experimental._sym_dispatch_mode import disable_sym_dispatch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -130,8 +129,7 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        with disable_sym_dispatch():
-            gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -171,8 +169,7 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     bit restrictive as the branch must be traceable.
     """
     try:
-        with disable_sym_dispatch():
-            gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized

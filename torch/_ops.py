@@ -98,15 +98,8 @@ class OperatorBase:
                 return True
         return False
 
-    def py_impl(self, k, *, raw=False):
+    def py_impl(self, k):
         def inner(fn):
-            # import cycles
-            if "torch.fx.experimental.proxy_tensor" in sys.modules:
-                from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-
-                if not raw and k is ProxyTorchDispatchMode:
-                    return self.py_proxy_impl(fn)
-
             if inspect.isclass(k) and (
                 issubclass(k, TorchDispatchMode) or issubclass(k, torch.Tensor)
             ):
@@ -135,23 +128,6 @@ class OperatorBase:
             return fn
 
         return inner
-
-    # Special registrar for ProxyTensorMode that handles basic stuff that
-    # every proxy tensor mode implementation needs to handle
-    def py_proxy_impl(self, fn):
-        from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-
-        def wrapped_proxy_fn(mode, *args, **kwargs):
-            # TODO: set_original_aten_op(self) could be useful but
-            # there is downstream code querying this meta assuming you have an
-            # OpOverload, not a HigherOrderOp
-            with mode.sym_mode.enable(False):
-                if not mode.enable_tracing:
-                    return self(*args, **kwargs)
-
-                return fn(mode, *args, **kwargs)
-
-        return self.py_impl(ProxyTorchDispatchMode, raw=True)(wrapped_proxy_fn)
 
     # Registers an implementation to all **3** variants of functionalization that we have:
     # - DispatchKey.Functionalize
@@ -298,10 +274,10 @@ class HigherOrderOperator(OperatorBase):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def py_impl(self, k, *, raw=False):
+    def py_impl(self, k):
         if isinstance(k, DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
-        return super().py_impl(k, raw=raw)
+        return super().py_impl(k)
 
     @property
     def namespace(self):
@@ -358,7 +334,7 @@ class HigherOrderOperator(OperatorBase):
                         result = handler(mode, *args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        "There was no rule registered for HOP {self._name} and mode {curr_mode}. "
+                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
                         "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
@@ -379,7 +355,7 @@ class HigherOrderOperator(OperatorBase):
                     result = handler(*args, **kwargs)
                 else:
                     raise NotImplementedError(
-                        "There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
+                        f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
                         "We recommend filing an issue."
                     )
                 if result is not NotImplemented:
