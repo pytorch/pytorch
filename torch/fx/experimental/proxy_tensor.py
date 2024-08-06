@@ -1264,7 +1264,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         with set_original_aten_op(func):
-            return self.inner_torch_dispatch(func, types, args, kwargs)
+            kwargs = kwargs or {}
+
+            if func in (prim.device.default,):
+                return func(*args, **kwargs)
+
+            return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
@@ -1286,20 +1291,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             _push_mode(mb_previous_proxy_mode)
 
         return b
-
-    def inner_torch_dispatch(
-        self,
-        func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
-    ) -> object:
-        kwargs = kwargs or {}
-
-        if func in (prim.device.default,):
-            return func(*args, **kwargs)
-
-        return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
     @classmethod
     def is_infra_mode(cls) -> bool:
