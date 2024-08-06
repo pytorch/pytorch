@@ -327,6 +327,10 @@ def _offload_state_dict_to_cpu(
         ranks_only=ranks_only,
         type_check=type_check,
     )
+
+    if hasattr(torch,"hpu"):
+        torch.hpu.synchronize()
+
     return ret
 
 
@@ -410,13 +414,12 @@ def _create_cpu_state_dict(
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
 
-        if share_memory and pin_memory:
-            assert device == "cuda"
-
         if share_memory:
             t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
             t = t.share_memory_()
             if pin_memory:
+                # share_memory and pin_memory together is supported only on cuda
+                assert device == "cuda"
 
                 def unpin_memory(t):
                     succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
