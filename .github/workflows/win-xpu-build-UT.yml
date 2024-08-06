@@ -9,17 +9,23 @@ on:
             - "icx-4434"
             - "142497"
             - "self-hosted"
-        working_commit:
+        xpu_commit:
             description: 'Working commit to pass to xpu.txt'
             required: true
             type: string
+        pytorch_commit:
+            description: 'Check out commit of pytorch repo'
+            required: true
+            type: string  
+
 env:
-    home_dir: 't'
+    home_dir: 'torch_home'
     conda_env: 'torch_venv'
     conda_path: 'C:\Users\nrvalgo_jenkinsadm\miniforge3'
     python_version: '3.10'
     USE_XPU: 1
     VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
+
 jobs:
   Preparation:
     runs-on: ["${{ inputs.win_runner }}"]
@@ -31,17 +37,19 @@ jobs:
         ref: main
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
+
     - name: Set conda environment
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat
         call conda remove -n %conda_env% --all -y
-        call conda create -n %conda_env% python=3.10 -y
+        call conda create -n %conda_env% python=%python_version% -y
         call conda activate %conda_env%
         call conda install cmake==3.26.4 ninja -y
         call conda remove ucrt -y
         call pip install pyyaml
         call conda list
+
   Build-whls:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation]
@@ -54,39 +62,41 @@ jobs:
         if exist "C:\pytorch" (
           rmdir /s /q "C:\pytorch"
         )
-        git clone https://github.com/pytorch/pytorch.git C:\pytorch > tmp_git_log.txt
+        git clone https://github.com/pytorch/pytorch.git C:\pytorch > git_pytorch_repo_log.txt
         cd C:\pytorch
-        git checkout c8626a4e1f0553c8a9af32515555409d151a00c0
-        set commit_number_arg=${{ inputs.working_commit }}
+        git checkout %pytorch_commit%
+        set commit_number_arg=${{ inputs.xpu_commit }}
         python -c "import os;commit_number = os.getenv('commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
         call conda install conda-forge::rust -y
         call conda install typing_extensions -y
-        python -m pip install -r requirements.txt > tmp_pip_install_requirements_log.txt
-        python setup.py bdist_wheel > tmp_log.txt
+        python -m pip install -r requirements.txt > pip_install_pytorch_requirements_log.txt
+        python setup.py bdist_wheel > build_torch_wheel_log.txt
+
     - name: Build TorchVision
       shell: cmd
       run: |
         call %conda_path%\Scripts\activate.bat %conda_env%
-        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
-        call "%basekit_path%\setvars.bat"
-        if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
-        git clone https://github.com/pytorch/vision.git %home_dir%\vision
-        cd %home_dir%\vision
-        git submodule update --init --recursive
-        pip install -r docs/requirements.txt
-        if exist %home_dir%\pytorch\dist\torch-*.whl (
-          pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
+        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        if exist "C:\vision" (
+          rmdir /s /q "C:\vision"
+        )
+        git clone https://github.com/pytorch/vision.git C:\vision > git_vision_repo_log.txt
+        cd C:\vision
+        pip install -r docs/requirements.txt > pip_install_vision_requirements_log.txt
+        if exist C:\pytorch\dist\torch-*.whl (
+          pip install C:\pytorch\dist\torch-*.whl --force-reinstall
         ) else (
           echo "No torch whl found."
           exit
         )
-        python setup.py bdist_wheel
-        if exist %home_dir%\vision\dist\torchvision-*.whl (
-          pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall        
+        python setup.py bdist_wheel > build_vision_wheel_log.txt
+        if exist C:\vision\dist\torchvision-*.whl (
+          pip install C:\vision\dist\torchvision-*.whl --force-reinstall        
         ) else (
           echo "No torchvision whl found."
           exit         
         )
+
   Unit-tests:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Build-whls, Preparation]
@@ -94,27 +104,41 @@ jobs:
     - name: Run Unit Tests
       shell: cmd
       run: |
-        call %conda_path%\Scripts\activate.bat activate %conda_env%
-        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
-        call "%basekit_path%\setvars.bat"
-        if exist "%home_dir%\xpurepo" (
-          rmdir /s /q "%home_dir%\xpurepo"
+        call %conda_path%\Scripts\activate.bat %conda_env%
+        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        if exist "C:\xpurepo" (
+          rmdir /s /q "C:\xpurepo"
         )
-        git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
-        cd %home_dir%\xpurepo\examples
+        git clone https://github.com/intel/torch-xpu-ops.git C:\xpurepo
+        cd C:\xpurepo\examples
         pip install pytest expecttest
-        python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
+        python -m pytest -v > ut.log
+
   Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation, Build-whls]
     steps:
-    - name: Upload whls
+    - name: Upload pytorch wheel
       uses: actions/upload-artifact@v2
       with:
-        name: whls
+        name: pytorch wheel
         path: C:\pytorch\dist
+
+    - name: Upload torchvision wheel
+      uses: actions/upload-artifact@v2
+      with:
+        name: torchvision wheel
+        path: C:\vision\dist
+
     - name: Upload logs
       uses: actions/upload-artifact@v2
       with:
         name: logs
-        path: C:\pytorch\tmp_log.txt 
+        path: |
+          C:\pytorch\git_pytorch_repo_log.txt
+          C:\pytorch\pip_install_pytorch_requirements_log.txt
+          C:\pytorch\build_torch_wheel_log.txt
+          C:\vision\git_vision_repo_log.txt
+          C:\vision\pip_install_vision_requirements_log.txt
+          C:\vision\build_vision_wheel_log.txt
+          C:\xpurepo\examples\ut.log
