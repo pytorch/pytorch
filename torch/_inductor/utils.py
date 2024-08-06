@@ -14,7 +14,6 @@ import math
 import operator
 import os
 import platform
-import re
 import shutil
 import sys
 import tempfile
