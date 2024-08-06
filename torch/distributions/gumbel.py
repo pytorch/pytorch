@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number
 
@@ -7,6 +8,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
+
 
 __all__ = ["Gumbel"]
 

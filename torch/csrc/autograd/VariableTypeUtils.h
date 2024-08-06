@@ -217,7 +217,7 @@ inline at::Tensor as_view(
           tensor,
           diff_view_meta->get_backward_view().chain(
               base, tensor, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);
@@ -225,7 +225,7 @@ inline at::Tensor as_view(
       return make_variable_differentiable_view(
           tensor,
           ViewInfo(base, std::move(view_func), std::move(rev_view_func)),
-          c10::nullopt,
+          std::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
           allow_tensor_metadata_change);

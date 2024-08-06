@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import functools
 import getpass
 import inspect
@@ -18,6 +20,11 @@ def conditional_product(*args):
 
 def ceildiv(numer: int, denom: int) -> int:
     return -(numer // -denom)
+
+
+def is_power_of_2(n: int) -> bool:
+    """Returns whether n = 2 ** m for some integer m."""
+    return n > 0 and n & n - 1 == 0
 
 
 def next_power_of_2(n: int) -> int:
@@ -112,18 +119,36 @@ def do_bench_gpu(*args, **kwargs):
     return triton_do_bench(*args, **kwargs)[0]
 
 
-def do_bench_cpu(fn, warmup=5, times=20):
-    assert times > 0
-    for _ in range(warmup):
+def do_bench_cpu(fn, warmup=20, rep=100):
+    """
+    Benchmark a function on the CPU.
+
+    Parameters:
+    - fn: The function to be benchmarked.
+    - warmup: The number of milliseconds to run the function before starting the benchmark.
+    - rep: The number of milliseconds to run the function for the benchmark.
+
+    Returns:
+    - The median time (in milliseconds) taken by the function.
+
+    """
+    start = time.perf_counter()
+    while True:
         fn()
+        if (time.perf_counter() - start) * 1000 > warmup:
+            break
     durations = []
-    for _ in range(times):
+    start = time.perf_counter()
+    while True:
         t0 = time.perf_counter()
         fn()
         t1 = time.perf_counter()
         durations.append((t1 - t0) * 1000)
+        if (t1 - start) * 1000 > rep:
+            break
     # return the median time
     sorted_durations = sorted(durations)
+    times = len(durations)
     if times % 2 == 0:
         return (sorted_durations[times // 2 - 1] + sorted_durations[times // 2]) / 2
     else:
@@ -133,20 +158,26 @@ def do_bench_cpu(fn, warmup=5, times=20):
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = os.path.join(
-            tempfile.gettempdir(),
-            "torchinductor_" + sanitized_username,
-        )
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
 
-HAS_COLORAMA = True
+def default_cache_dir():
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    return os.path.join(
+        tempfile.gettempdir(),
+        "torchinductor_" + sanitized_username,
+    )
+
+
 try:
     import colorama
-except ImportError:
+
+    HAS_COLORAMA = True
+except ModuleNotFoundError:
     HAS_COLORAMA = False
+    colorama = None  # type: ignore[assignment]
 
 
 def _color_text(msg, color):
@@ -184,10 +215,9 @@ def get_first_attr(obj, *attrs):
 
 
 try:
-    dynamo_timed = torch._dynamo.utils.dynamo_timed
+    dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 except AttributeError:  # Compile workers only have a mock version of torch
 
-    def dynamo_timed(original_function=None, phase_name=None):
-        if original_function:
-            return original_function
-        return dynamo_timed
+    @contextlib.contextmanager
+    def dynamo_timed(key, phase_name=None, fwd_only=True):
+        yield

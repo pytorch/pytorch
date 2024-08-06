@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""This package adds support for device memory management implemented in CUDA."""
 
 import collections
@@ -7,17 +8,23 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-
 from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
-
+from torch._utils import _dummy_type
 from torch.types import Device
-from .._utils import _dummy_type
-from . import _get_device_index, _get_nvml_device_index, _lazy_init, is_initialized
 
+from . import (
+    _get_amdsmi_device_index,
+    _get_device_index,
+    _get_nvml_device_index,
+    _lazy_init,
+    is_initialized,
+)
 from ._memory_viz import memory as _memory, segments as _segments
+
 
 __all__ = [
     "caching_allocator_alloc",
@@ -43,12 +50,22 @@ __all__ = [
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",
+    "MemPool",
+    "MemPoolContext",
 ]
 
 
 if not hasattr(torch._C, "_cuda_CUDAAllocator"):
     # Define dummy base classes
     torch._C.__dict__["_cuda_CUDAAllocator"] = _dummy_type("_cuda_CUDAAllocator")
+
+
+if not hasattr(torch._C, "_MemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
+    torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
+
+from torch._C import _cuda_CUDAAllocator, _MemPool, _MemPoolContext  # noqa: F401
 
 
 def _host_allocator():
@@ -440,21 +457,21 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
+@deprecated(
+    "`torch.cuda.memory_cached` has been renamed to `torch.cuda.memory_reserved`",
+    category=FutureWarning,
+)
 def memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        FutureWarning,
-    )
     return memory_reserved(device=device)
 
 
+@deprecated(
+    "`torch.cuda.max_memory_cached` has been renamed to `torch.cuda.max_memory_reserved`",
+    category=FutureWarning,
+)
 def max_memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        FutureWarning,
-    )
     return max_memory_reserved(device=device)
 
 
@@ -609,26 +626,57 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             printout for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        return "pynvml module not found, please install pynvml"
-    from pynvml import NVMLError_DriverNotLoaded
+    if not torch.version.hip:
+        try:
+            import pynvml  # type: ignore[import]
+        except ModuleNotFoundError:
+            return "pynvml module not found, please install pynvml"
+        from pynvml import NVMLError_DriverNotLoaded
 
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        return "cuda driver can't be loaded, is cuda enabled?"
-    device = _get_nvml_device_index(device)
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
-    procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        try:
+            pynvml.nvmlInit()
+        except NVMLError_DriverNotLoaded:
+            return "cuda driver can't be loaded, is cuda enabled?"
+
+        device = _get_nvml_device_index(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    else:
+        try:
+            import amdsmi  # type: ignore[import]
+        except ModuleNotFoundError:
+            return "amdsmi module not found, please install amdsmi"
+        try:
+            amdsmi.amdsmi_init()  # type: ignore[attr-defined]
+        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            return "amdsmi driver can't be loaded, is ROCm installed?"
+
+        device = _get_amdsmi_device_index(device)
+
+        try:
+            handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
+            procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            return "amdsmi cannot list processes from other users"
+
     lines = []
     lines.append(f"GPU:{device}")
     if len(procs) == 0:
         lines.append("no processes are running")
     for p in procs:
-        mem = p.usedGpuMemory / (1024 * 1024)
-        lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
+        if not torch.version.hip:
+            mem = p.usedGpuMemory / (1024 * 1024)
+            pid = p.pid
+        else:
+            try:
+                proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            except AttributeError:
+                # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
+                # is a BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
+                proc_info = p
+            mem = proc_info["memory_usage"]["vram_mem"] / (1024 * 1024)
+            pid = proc_info["pid"]
+        lines.append(f"process {pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
 
 
@@ -907,3 +955,49 @@ def _get_current_allocator() -> _CUDAAllocator:
         See :ref:`cuda-memory-management` for details on creating and using a custom allocator
     """
     return _CUDAAllocator(torch._C._cuda_getAllocator())
+
+
+class MemPool(_MemPool):
+    r"""MemPool represents a pool of memory in a caching allocator. Currently,
+    it's just the ID of the pool object maintained in the CUDACachingAllocator.
+
+    Args:
+        allocator(torch._C._cuda_CUDAAllocator, optional): a
+            torch._C._cuda_CUDAAllocator object that can be used to
+            define how memory gets allocated in the pool. If :attr:`allocator`
+            is ``None`` (default), memory allocation follows the default/
+            current configuration of the CUDACachingAllocator.
+
+    """
+
+    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None):
+        super().__init__(allocator, True)
+
+    @property
+    def id(self) -> Tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    @property
+    def allocator(self) -> Optional[_cuda_CUDAAllocator]:
+        r"""Returns the allocator this MemPool routes allocations to"""
+        return super().allocator
+
+
+class MemPoolContext(_MemPoolContext):
+    r"""MemPoolContext holds the currently active pool and stashes the previous
+    pool. On deletion it makes the previous pool active.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+        allocations route to this pool.
+
+    """
+
+    def __init__(self, pool: MemPool):
+        super().__init__(pool)
+
+    @staticmethod
+    def active_pool() -> Optional[_MemPool]:
+        r"""Returns the active MemPool"""
+        return _MemPoolContext.active_pool()

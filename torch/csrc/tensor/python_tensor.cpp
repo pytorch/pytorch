@@ -449,7 +449,7 @@ void py_set_default_dtype(PyObject* obj) {
       THPDtype_Check(obj),
       "invalid dtype object: only floating-point types are supported as the default type");
   auto scalar_type = ((THPDtype*)obj)->scalar_type;
-  set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
+  set_default_tensor_type(/*backend=*/std::nullopt, scalar_type);
 }
 
 c10::DispatchKey get_default_dispatch_key() {

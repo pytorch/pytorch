@@ -19,7 +19,7 @@ namespace jit {
 // Conservatively compare two optionals. If both are undefined, assume
 // they aren't equal
 template <typename T>
-static bool mustBeEqual(const std::optional<T>& a, const c10::optional<T>& b) {
+static bool mustBeEqual(const std::optional<T>& a, const std::optional<T>& b) {
   return a == b && a.has_value();
 }
 

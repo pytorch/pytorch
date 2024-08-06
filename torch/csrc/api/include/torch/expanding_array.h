@@ -2,8 +2,8 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <algorithm>
 #include <array>
@@ -104,7 +104,7 @@ std::ostream& operator<<(
 }
 
 /// A utility class that accepts either a container of `D`-many
-/// `std::optional<T>` values, or a single `c10::optional<T>` value, which is
+/// `std::optional<T>` values, or a single `std::optional<T>` value, which is
 /// internally repeated `D` times. It has the additional ability to accept
 /// containers of the underlying type `T` and convert them to a container of
 /// `std::optional<T>`.

@@ -1,14 +1,17 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import warnings
 from itertools import product
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.testing
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
+
 
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
 # since they have been exposed from before we added `__all__`  and we already maintain BC for them
@@ -306,6 +309,14 @@ def _get_numerical_jacobian(
     return jacobians
 
 
+@deprecated(
+    "`get_numerical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     """Compute the numerical Jacobian for a given fn and its inputs.
 
@@ -325,13 +336,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    warnings.warn(
-        "get_numerical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons
@@ -818,16 +822,17 @@ def _get_analytical_vJu_backward_mode(
     return reduced_jacobians
 
 
+@deprecated(
+    "`get_analytical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
     # This shares much of its code with _check_analytical_jacobian_attributes
-    warnings.warn(
-        "get_analytical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons

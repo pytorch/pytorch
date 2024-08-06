@@ -1,16 +1,19 @@
+# mypy: allow-untyped-defs
 import warnings
 from typing import Tuple, Union
 
+import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.device_mesh import _mesh_resources
-try:
-    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
-except Exception:
-    def is_torchdynamo_compiling():  # type: ignore[misc]
-        return False
+
 
 LayoutsType = Union[Placement, Tuple[Placement, ...]]
+
+
+def is_torchdynamo_compiling() -> bool:
+    # Use local function to avoid circular imports
+    return torch.compiler.is_compiling()
 
 
 def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
@@ -22,7 +25,11 @@ def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
     """
     # TODO: Will follow up with dynamo POC to make warnings.warn working with dynamo.
     if not is_torchdynamo_compiling():
-        warnings.warn(f"{func_name} is deprecated and will be removed soon. {extra_msg}")
+        warnings.warn(
+            f"{func_name} is deprecated and will be removed soon. {extra_msg}",
+            FutureWarning,
+            stacklevel=3,
+        )
 
 
 def _validate_tp_mesh_dim(
@@ -41,8 +48,10 @@ def _validate_tp_mesh_dim(
         is valid, `False` otherwise.
     """
     if device_mesh.ndim > 1:
-        raise ValueError(f"Tensor Parallel only accepts a 1D DeviceMesh, but found {device_mesh.ndim}D!"
-                         "If you have a 2-D or N-D device_mesh, consider passing in device_mesh[\"tp\"]")
+        raise ValueError(
+            f"Tensor Parallel only accepts a 1D DeviceMesh, but found {device_mesh.ndim}D!"
+            'If you have a 2-D or N-D device_mesh, consider passing in device_mesh["tp"]'
+        )
 
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:

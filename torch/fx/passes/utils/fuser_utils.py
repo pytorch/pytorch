@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
 from typing import List, Dict, Tuple
@@ -23,7 +25,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
         if indegree_map[node] == 0:
             candidates.put(node)
 
-    sorted_nodes: NodeList = list()
+    sorted_nodes: NodeList = []
     while not candidates.empty():
         node = candidates.get()
         sorted_nodes.append(node)
@@ -46,7 +48,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     partition_set = set(partition)
 
-    outputs: NodeList = list()
+    outputs: NodeList = []
     for node in partition_set:
         for user_node in node.users:
             if user_node not in partition_set:
@@ -218,11 +220,11 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
+def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList], prefix: str = "fused_") -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         sorted_nodes = topo_sort(nodes)
 
-        submodule_name = "fused_" + str(partition_id)
+        submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name)
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)

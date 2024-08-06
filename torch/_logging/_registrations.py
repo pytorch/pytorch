@@ -1,6 +1,7 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
+
 DYNAMIC = [
     "torch.fx.experimental.symbolic_shapes",
     "torch.fx.experimental.sym_node",
@@ -13,6 +14,7 @@ DISTRIBUTED = [
 ]
 
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
+register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
@@ -26,14 +28,18 @@ register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
 register_log("distributed", DISTRIBUTED)
 register_log(
-    "dist_c10d", ["torch.distributed.distributed_c10d", "torch.distributed.rendezvous"]
+    "c10d", ["torch.distributed.distributed_c10d", "torch.distributed.rendezvous"]
 )
 register_log(
-    "dist_ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
+    "ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
 )
-register_log("dist_fsdp", ["torch.distributed.fsdp"])
+register_log("pp", ["torch.distributed.pipelining"])
+register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
+register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
-register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
+register_log(
+    "export", ["torch._dynamo", "torch.export", *DYNAMIC, "torch._export.converter"]
+)
 
 register_artifact(
     "guards",
@@ -122,6 +128,12 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "kernel_code",
+    "Prints the code that Inductor generates (on a per-kernel basis)",
+    off_by_default=True,
+    visible=True,
+)
+register_artifact(
     "schedule",
     "Inductor scheduler information. Useful if working on Inductor fusion algo",
     off_by_default=True,
@@ -141,6 +153,11 @@ register_artifact(
 register_artifact(
     "sym_node",
     "Logs extra info for various SymNode operations",
+    off_by_default=True,
+)
+register_artifact(
+    "trace_shape_events",
+    "Logs traces for every ShapeEnv operation that we record for replay",
     off_by_default=True,
 )
 

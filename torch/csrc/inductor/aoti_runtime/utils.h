@@ -93,20 +93,20 @@ class RAIIAtenTensorHandle {
   }
 
   int64_t size(int64_t d) {
-    int64_t size;
+    int64_t size = 0;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_.get(), d, &size));
     return size;
   }
 
   int64_t stride(int64_t d) {
-    int64_t stride;
+    int64_t stride = 0;
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_stride(handle_.get(), d, &stride));
     return stride;
   }
 
   int64_t storage_offset() {
-    int64_t storage_offset;
+    int64_t storage_offset = 0;
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
     return storage_offset;
@@ -145,12 +145,16 @@ class ConstantHandle {
     return handle_;
   }
 
+  AtenTensorHandle get() const {
+    return handle_;
+  }
+
   void* data_ptr() const {
     return data_;
   }
 
  private:
-  AtenTensorHandle handle_;
+  AtenTensorHandle handle_{};
   void* data_ = nullptr;
 };
 
@@ -173,5 +177,8 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 #define CACHE_TORCH_DEVICE(device)                \
   static auto cached_torch_device_type_##device = \
       aoti_torch_device_type_##device()
+
+#define CACHE_TORCH_LAYOUT(layout) \
+  static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
 
 } // namespace torch::aot_inductor
