@@ -1290,6 +1290,7 @@ def get_default_op_list() -> OpTypes:
         aten._flash_attention_forward,
         aten._efficient_attention_forward,
         aten.upsample_bilinear2d,
+        aten._scaled_mm,
     ]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
@@ -1459,7 +1460,9 @@ def estimate_runtime(node):
                 return hint_int(d, fallback=4096)
 
             shape = [realize_symbol(s) for s in shape]
-            return x.meta["val"].new_zeros(shape)
+            return x.meta["val"].new_empty_strided(
+                shape, stride=x.meta["tensor_meta"].stride
+            )
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
             return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
@@ -1529,7 +1532,7 @@ def choose_saved_values_set(
         return runtime_optimized_saved_values
 
     def estimate_activations_size(saved_values: List[fx.Node]) -> float:
-        return sum([_size_of(i) for i in saved_values]) / 1e9
+        return sum(map(_size_of, saved_values)) / 1e9
 
     min_act_size = estimate_activations_size(node_info.inputs)
     max_act_size = estimate_activations_size(runtime_optimized_saved_values)
