@@ -151,6 +151,10 @@ def export_api_rollout_check() -> bool:
     return False
 
 
+def export_training_ir_rollout_check() -> bool:
+    return False
+
+
 def justknobs_check(name: str) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
