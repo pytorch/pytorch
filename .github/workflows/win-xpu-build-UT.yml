@@ -134,6 +134,7 @@ jobs:
       run: |
         call %conda_path%\Scripts\activate.bat %conda_env%
         call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        set USE_XPU=1
         if exist "C:\xpurepo" (
           rmdir /s /q "C:\xpurepo"
         )
