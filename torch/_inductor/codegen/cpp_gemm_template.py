@@ -393,12 +393,13 @@ class CppPackedGemmTemplate(CppTemplate):
                 Kc_blocks = math.floor(
                     B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B)
                 )
+                assert Kc_blocks > 0
 
             Kt_blocks = thread_blocking.block_k
             size_cache_A = M0 * Mc_blocks * K0 * Kt_blocks * num_byte_A
             if size_cache_A > A_size_limit:
-                Mc_blocks = math.floor(
-                    A_size_limit / (M0 * Kt_blocks * K0 * num_byte_A)
+                Mc_blocks = max(
+                    math.floor(A_size_limit / (M0 * Kt_blocks * K0 * num_byte_A)), 1
                 )
 
             return Mc_blocks, Nc_blocks, Kc_blocks
