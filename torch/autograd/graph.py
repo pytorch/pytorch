@@ -215,7 +215,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr)
 
 
-def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
+def increment_version(tensor: torch.Tensor) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -223,16 +223,11 @@ def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> No
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
-    the memory inplace based on this pointer. Can accept either a tensor, or a list of tensors.
+    the memory inplace based on this pointer.
 
     Note that incrementing the version counter multiple times for a single inplace operation
     is not problematic.
-
-    Note that if you pass in tensor constructed under torch.inference_mode(),
-    we will not bump its version counter (because your tensor does not have one).
     """
-    if isinstance(tensor, torch.Tensor):
-        tensor = (tensor,)
     torch._C._increment_version(tensor)
 
 
