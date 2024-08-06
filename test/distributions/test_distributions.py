@@ -3344,6 +3344,36 @@ class TestDistributions(DistributionsTestCase):
                 f"Exponential(rate={rate})",
             )
 
+    def test_distribution_duplicated_permutations(self):
+        def test_duplicated_permutations(dist, dtype, sample_size, size, thre_size):
+            sample = dist(torch.empty(sample_size, dtype=dtype))
+            for _ in range(thre_size):
+                test = dist(torch.empty(size, dtype=dtype))
+                allFound = True
+                for s in sample:
+                    if s not in test:
+                        allFound = False
+                        break
+                if not allFound:
+                    continue
+                # Check duplicated permutations
+                sample_list = sample.tolist()
+                test_list = test.tolist()
+                found_indices = [
+                    i
+                    for i in range(size - sample_size + 1)
+                    if test_list[i] == sample_list[0]
+                ]
+                for i in found_indices:
+                    self.assertFalse(test_list[i : i + 100] == sample_list)
+
+        test_duplicated_permutations(
+            lambda x: x.exponential_(), torch.float, 100, 1024 * 1024 * 2, 10240
+        )
+        test_duplicated_permutations(
+            lambda x: x.exponential_(), torch.double, 100, 1024 * 1024 * 2, 10240
+        )
+
     @set_default_dtype(torch.double)
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
