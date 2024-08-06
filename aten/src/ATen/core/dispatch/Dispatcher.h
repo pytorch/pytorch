@@ -707,7 +707,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-    detail::_print_dispatch_trace("redispatch", toString(op.operator_name()), dispatchKeySet);
+    detail::_print_dispatch_trace("redispatch", toString(op.operator_name()), currentDispatchKeySet);
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
