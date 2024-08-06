@@ -607,6 +607,8 @@ struct CaptureKernelCall<void> {
   void release() && {}
 };
 
+void _print_dispatch_trace(const std::string& type, const std::string& op_name, const DispatchKeySet& dispatchKeySet);
+
 } // namespace detail
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -668,9 +670,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      _print_dispatch_trace("call", op.operator_name(), dispatchKeySet);
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
@@ -707,9 +707,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      _print_dispatch_trace("redispatch", op.operator_name(), dispatchKeySet);
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(currentDispatchKeySet);
@@ -776,9 +774,7 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
-      auto nesting_value = dispatch_trace_nesting_value();
-      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
-      std::cerr << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
+      _print_dispatch_trace("redispatchBoxed", op.operator_name(), dispatchKeySet);
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
