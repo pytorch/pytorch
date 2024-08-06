@@ -198,12 +198,12 @@ class BlockMask:
 
     The essentials of our format are:
 
-    - num_blocks_in_row: Tensor[ROWS]
-        Describes the number of blocks present in each row.
+    num_blocks_in_row: Tensor[ROWS]:
+    Describes the number of blocks present in each row.
 
-    - col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]
-        `col_indices[i]` is the sequence of block positions for row i. The values of
-        this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
+    col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]:
+    `col_indices[i]` is the sequence of block positions for row i. The values of
+    this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
 
     For example, to reconstruct the original tensor from this format:
 
