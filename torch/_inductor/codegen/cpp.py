@@ -2346,11 +2346,7 @@ class CppVecKernel(CppKernel):
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                is_bool = dtype == torch.bool and reduction_type in (
-                    "min",
-                    "max",
-                    "any",
-                )
+                is_bool = dtype == torch.bool
                 # we are using at::vec::VecMask<float, N> for bool
                 vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
@@ -2453,7 +2449,8 @@ class CppVecKernel(CppKernel):
 
         scalar_init = reduction_init(reduction_type, dtype)
         vec_init = f"{vec_type}({scalar_init})"
-        if dtype == torch.bool and reduction_type in ("min", "max"):
+        if dtype == torch.bool:
+            assert reduction_type in ("min", "max", "sum")
             return f"{self._get_mask_type()}::from({vec_init})"
         return vec_init
 
@@ -2466,7 +2463,8 @@ class CppVecKernel(CppKernel):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
-        if dtype == torch.bool and reduction_type in ("min", "max", "any"):
+        if dtype == torch.bool:
+            assert reduction_type in ("min", "max", "any", "sum")
             return f"{self._get_mask_type()}"
         return vec_type
 
@@ -2503,7 +2501,8 @@ class CppVecKernel(CppKernel):
                 else f"at::vec::minimum({var}, {next_value})"
             )
         elif reduction_type == "sum":
-            return f"{var} + {next_value}"
+            conjunction = "|" if is_bool else "+"
+            return f"{var} {conjunction} {next_value}"
         elif reduction_type == "prod":
             return f"{var} * {next_value}"
         elif reduction_type == "xor_sum":
