@@ -25,6 +25,7 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 
 namespace at {
@@ -327,12 +328,18 @@ class TORCH_API Context {
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
-  bool allowTF32CuDNN() const;
+  void setFloat32Precision(
+      const std::string& s,
+      const std::string& backend,
+      const std::string& op);
+  bool allowTF32CuDNN(const std::string& op = std::string()) const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
-  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
+  std::string float32Precision(
+      const std::string& backend,
+      const std::string& op) const;
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
@@ -426,6 +433,26 @@ class TORCH_API Context {
   std::optional<at::QEngine> quantized_engine = std::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
+
+  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
+      {"generic", {{"all", "default"}}},
+      {"mkldnn",
+       {{"matmul",
+         float32_matmul_precision == at::Float32MatmulPrecision::MEDIUM
+             ? "bf16"
+             : "default"},
+        {"conv", "default"},
+        {"rnn", "default"},
+        {"all", "default"}}},
+      {"cuda",
+       {{"matmul",
+         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+             ? "default"
+             : "tf32"},
+        {"conv", allow_tf32_cudnn ? "tf32" : "default"},
+        {"rnn", allow_tf32_cudnn ? "tf32" : "default"},
+        {"all", "default"}}},
+  };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };

@@ -6,7 +6,14 @@ from contextlib import contextmanager
 from typing import Optional
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    _get_fp32_precision,
+    _set_fp32_precision,
+    ContextProp,
+    FP32Precision,
+    PropModule,
+)
 
 
 try:
@@ -128,6 +135,7 @@ def set_flags(
     _benchmark_limit=None,
     _deterministic=None,
     _allow_tf32=None,
+    _fp32_precision=None,
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -135,6 +143,7 @@ def set_flags(
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
+        torch._C._get_fp32_precision("cuda", "all"),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -146,6 +155,8 @@ def set_flags(
         torch._C._set_cudnn_deterministic(_deterministic)
     if _allow_tf32 is not None:
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
+    if _fp32_precision is not None:
+        torch._C._set_fp32_precision(_fp32_precision, "cuda", "all")
     return orig_flags
 
 
@@ -156,10 +167,16 @@ def flags(
     benchmark_limit=10,
     deterministic=False,
     allow_tf32=True,
+    fp32_precision="default",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
-            enabled, benchmark, benchmark_limit, deterministic, allow_tf32
+            enabled,
+            benchmark,
+            benchmark_limit,
+            deterministic,
+            allow_tf32,
+            fp32_precision,
         )
     try:
         yield
@@ -193,6 +210,11 @@ class CudnnModule(PropModule):
         )
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
+    )
+    conv = FP32Precision("cuda", "conv")
+    rnn = FP32Precision("cuda", "rnn")
+    fp32_precision = ContextProp(
+        _get_fp32_precision("cuda", "all"), _set_fp32_precision("cuda", "all")
     )
 
 
