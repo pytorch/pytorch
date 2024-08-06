@@ -692,15 +692,14 @@ else:
 
         def _flatten(self) -> "DeviceMesh":
             """
-            Returns a 1D DeviceMesh created from flattening the current DeviceMesh.
+            Returns a 1D DeviceMesh by flattening the current DeviceMesh.
             """
             if not self.mesh_dim_names:
                 raise RuntimeError(
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            flatten_mesh = _mesh_resources.create_flatten_mesh(self)
-            return flatten_mesh
+            return _mesh_resources.create_flatten_mesh(self)
 
     def init_device_mesh(
         device_type: str,
