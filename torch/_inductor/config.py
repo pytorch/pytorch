@@ -431,9 +431,6 @@ unroll_reductions_threshold = 8
 # Add extra comments to output code (causes compile cache misses)
 comment_origin = False
 
-# Add torch.nn.Module stack trace info to comments on output code (can contain Python object IDs, non-deterministic)
-comment_nn_module_stack_trace_info = False
-
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 

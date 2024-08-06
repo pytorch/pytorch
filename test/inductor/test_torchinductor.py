@@ -11940,8 +11940,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("Graph fragment" in code)
             self.assertTrue("sin = torch.ops.aten.sin.default" in code)
             self.assertTrue("relu = torch.ops.aten.relu.default" in code)
-            # nn_module_stack comments are off by default
-            self.assertTrue("nn_module_stack" not in code)
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

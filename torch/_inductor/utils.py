@@ -566,35 +566,6 @@ def get_kernel_metadata(node_schedule, wrapper):
                 continue
             detailed_metadata.append(f"{wrapper.comment} {line}")
 
-    if config.comment_nn_module_stack_trace_info:
-        # print the unique fwd and bwd nn.Module stack values, if applicable
-        unique_nn_mod_stack_vals = set()
-        for node in inductor_nodes:
-            if "nn_module_stack" in node.meta:
-                nn_s = node.meta["nn_module_stack"]
-                last_key = list(nn_s.keys())[-1]
-                last_val = nn_s[last_key]
-                unique_nn_mod_stack_vals.add((last_key, last_val))
-        if len(unique_nn_mod_stack_vals):
-            detailed_metadata.append(
-                f"{wrapper.comment} Unique node to nn_module_stack last element"
-            )
-            for val in unique_nn_mod_stack_vals:
-                detailed_metadata.append(f"{wrapper.comment}     {val}")
-        unique_fwd_nn_mod_stack_vals = set()
-        for node in inductor_nodes:
-            if "fwd_nn_module_stack" in node.meta:
-                fwd_nn_s = node.meta["fwd_nn_module_stack"]
-                last_key = list(fwd_nn_s.keys())[-1]
-                last_val = fwd_nn_s[last_key]
-                unique_fwd_nn_mod_stack_vals.add((last_key, last_val))
-        if len(unique_fwd_nn_mod_stack_vals):
-            detailed_metadata.append(
-                f"{wrapper.comment} Unique node to fwd_nn_module_stack last element"
-            )
-            for val in unique_fwd_nn_mod_stack_vals:
-                detailed_metadata.append(f"{wrapper.comment}     {val}")
-
     return metadata, "\n".join(detailed_metadata)
 
 
