@@ -792,7 +792,7 @@ cpu_flash_attention(
               // Do copy due to the limitation of input_ld of oneDNN pack:
               // Regarding packing [K, N], only input_ld == N is supported
               // TODO: remove the copy when pack supports input_ld >= N
-              copy_value_with_pad(
+              copy_value_with_pad<scalar_t>(
                   v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
                   v_copy_buffer,
                   kvBlockSize,
