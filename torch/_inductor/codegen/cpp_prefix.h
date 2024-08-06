@@ -130,7 +130,6 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
   return result;
 }
 
-<<<<<<< HEAD
 template <typename T>
 struct IndexValue {
   int64_t index;
@@ -138,7 +137,7 @@ struct IndexValue {
   IndexValue(int64_t idx, T val) :index(idx), value(val) {};
   IndexValue() {};
 };
-=======
+
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
@@ -181,7 +180,6 @@ T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   return T::set(a, out, tail_size);
 }
 #endif
->>>>>>> acbe7337cf0 ([Inductor] support masked vectorization for the tail_loop)
 
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
