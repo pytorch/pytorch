@@ -1917,7 +1917,7 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s3 - 1, s0)
-Eq(zf1, zf6)""",
+Eq(s1, s6)""",
                 )
             else:
                 self.assertExpectedInline(
