@@ -2,10 +2,18 @@
 """Gradient interface."""
 
 import torch
-from .modules.utils import _single, _pair, _triple
+from torch.nn.modules.utils import _pair, _single, _triple
 
 
-def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv1d_input(
+    input_size,
+    weight,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv1d with respect to the input of the convolution.
 
     This is same as the 1D transposed convolution operator under the hood but requires
@@ -32,12 +40,30 @@ def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     """
     input = grad_output.new_empty(1).expand(input_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _single(stride), _single(padding), _single(dilation),
-                                               False, [0], groups, (True, False, False))[0]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _single(stride),
+        _single(padding),
+        _single(dilation),
+        False,
+        [0],
+        groups,
+        (True, False, False),
+    )[0]
 
 
-def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv1d_weight(
+    input,
+    weight_size,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv1d with respect to the weight of the convolution.
 
     Args:
@@ -62,12 +88,30 @@ def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     """
     weight = grad_output.new_empty(1).expand(weight_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _single(stride), _single(padding), _single(dilation),
-                                               False, [0], groups, (False, True, False))[1]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _single(stride),
+        _single(padding),
+        _single(dilation),
+        False,
+        [0],
+        groups,
+        (False, True, False),
+    )[1]
 
 
-def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv2d_input(
+    input_size,
+    weight,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv2d with respect to the input of the convolution.
 
     This is same as the 2D transposed convolution operator under the hood but requires
@@ -94,12 +138,30 @@ def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     """
     input = grad_output.new_empty(1).expand(input_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _pair(stride), _pair(padding), _pair(dilation),
-                                               False, [0], groups, (True, False, False))[0]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _pair(stride),
+        _pair(padding),
+        _pair(dilation),
+        False,
+        [0],
+        groups,
+        (True, False, False),
+    )[0]
 
 
-def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv2d_weight(
+    input,
+    weight_size,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv2d with respect to the weight of the convolution.
 
     Args:
@@ -124,12 +186,30 @@ def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     """
     weight = grad_output.new_empty(1).expand(weight_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _pair(stride), _pair(padding), _pair(dilation),
-                                               False, [0], groups, (False, True, False))[1]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _pair(stride),
+        _pair(padding),
+        _pair(dilation),
+        False,
+        [0],
+        groups,
+        (False, True, False),
+    )[1]
 
 
-def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv3d_input(
+    input_size,
+    weight,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv3d with respect to the input of the convolution.
 
     This is same as the 3D transposed convolution operator under the hood but requires
@@ -156,12 +236,30 @@ def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=
     """
     input = grad_output.new_empty(1).expand(input_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _triple(stride), _triple(padding), _triple(dilation),
-                                               False, [0], groups, (True, False, False))[0]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _triple(stride),
+        _triple(padding),
+        _triple(dilation),
+        False,
+        [0],
+        groups,
+        (True, False, False),
+    )[0]
 
 
-def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1):
+def conv3d_weight(
+    input,
+    weight_size,
+    grad_output,
+    stride=1,
+    padding=0,
+    dilation=1,
+    groups=1,
+):
     r"""Compute the gradient of conv3d with respect to the weight of the convolution.
 
     Args:
@@ -185,6 +283,16 @@ def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation
     """
     weight = grad_output.new_empty(1).expand(weight_size)
 
-    return torch.ops.aten.convolution_backward(grad_output, input, weight, None,
-                                               _triple(stride), _triple(padding), _triple(dilation),
-                                               False, [0], groups, (False, True, False))[1]
+    return torch.ops.aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        None,
+        _triple(stride),
+        _triple(padding),
+        _triple(dilation),
+        False,
+        [0],
+        groups,
+        (False, True, False),
+    )[1]

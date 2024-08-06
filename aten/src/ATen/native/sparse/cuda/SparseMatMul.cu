@@ -179,6 +179,18 @@ struct csrOutput {
     cusparseDestroyMatDescr(description_);
   }
 
+  csrOutput(const csrOutput&) = delete;
+  csrOutput& operator=(const csrOutput&) = delete;
+  csrOutput(csrOutput&& rhs) {
+    csr_indices_ = std::move(rhs.csr_indices_);
+    csr_pointers_ = std::move(rhs.csr_pointers_);
+    csr_values_ = std::move(rhs.csr_values_);
+    nnz_ = rhs.nnz_;
+    size_ = std::move(rhs.size_);
+    description_ = rhs.description_;
+    rhs.description_ = 0;
+  }
+  csrOutput& operator=(csrOutput&&) = delete;
   int size(int index) const {
     return size_.at(index);
   }

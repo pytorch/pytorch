@@ -65,7 +65,7 @@ def get_all(store, rank: int, prefix: str, world_size: int):
         # Rank0 runs the TCPStore daemon, as a result it needs to exit last.
         # Otherwise, the barrier may timeout if rank0 process finished the work
         # before other processes finished `get_all` method
-        store.get(barrier_key)
+        store.wait([barrier_key])
 
     return data_arr
 
@@ -128,4 +128,4 @@ def barrier(
         last_member_key = _barrier_nonblocking(
             store=store, world_size=world_size, key_prefix=key_prefix
         )
-        store.get(last_member_key)
+        store.wait([last_member_key])

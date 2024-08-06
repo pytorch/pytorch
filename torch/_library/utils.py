@@ -2,11 +2,11 @@
 import dataclasses
 import inspect
 import sys
-from typing import Any, Callable, Dict, Iterable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple, Union
 
 import torch
-import torch._utils_internal as _utils_internal
-from torch import _C
+from torch import _C, _utils_internal
+from torch._ops import OpOverload
 
 
 @dataclasses.dataclass
@@ -56,7 +56,7 @@ def parse_namespace(qualname: str) -> Tuple[str, str]:
     return splits[0], splits[1]
 
 
-def lookup_op(qualname: str) -> torch._ops.OpOverload:
+def lookup_op(qualname: str) -> OpOverload:
     namespace, name = parse_namespace(qualname)
     if "." in name:
         name, overload = name.split(".")
@@ -67,8 +67,8 @@ def lookup_op(qualname: str) -> torch._ops.OpOverload:
     return getattr(packet, overload)
 
 
-def is_builtin(op: torch._ops.OpOverload) -> bool:
-    assert isinstance(op, torch._ops.OpOverload)
+def is_builtin(op: OpOverload) -> bool:
+    assert isinstance(op, OpOverload)
     return op.namespace in {"aten", "prim", "prims"}
 
 
@@ -121,7 +121,7 @@ def is_tensor_like_type(typ: Any) -> bool:
     return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
 
 
-def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
+def mutates_and_returns_first_arg(op: OpOverload):
     """Check if an op is an inplace aten op, i.e. it mutates and returns the first arg.
 
     TODO: torchgen/model.py's FunctionSchema.parse is the source of truth for this,
@@ -201,8 +201,8 @@ def zip_schema(
     return
 
 
-def can_generate_trivial_fake_impl(op: torch._ops.OpOverload) -> bool:
-    assert isinstance(op, torch._ops.OpOverload)
+def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
+    assert isinstance(op, OpOverload)
     if is_builtin(op):
         # We control the built-ins. These may (in rare cases)
         # do input metadata mutation (which we have banned on custom ops)
@@ -256,3 +256,25 @@ def has_kwarg_only_tensors(schema: _C.FunctionSchema):
             continue
         return True
     return False
+
+
+def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
+    """
+    Given a schema, returns True if the schema has a Tensor arg.
+    A Tensor arg is any arg with a type annotation that might involve Tensor.
+    """
+    return any(
+        (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type))
+        for a in schema.arguments
+    )
+
+
+def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
+    """
+    Given a schema, returns the id of the `device: torch.device` argument.
+    If it does not exist, returns None.
+    """
+    for index, arg in enumerate(schema.arguments):
+        if arg.type is _C.DeviceObjType.get() and arg.name == "device":
+            return index
+    return None

@@ -809,7 +809,7 @@ void _cufft_clear_plan_cache(DeviceIndex device_index) {
 }
 
 template <typename Stream, typename T>
-static Stream& write_opt(Stream& SS, const optional<T>& value) {
+static Stream& write_opt(Stream& SS, const std::optional<T>& value) {
   if (value) {
     SS << *value;
   } else {
@@ -823,10 +823,10 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  * This is modeled after librosa but with support for complex time-domain
  * signals and complex windows.
  */
-Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-            const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
+Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
+            const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
             const bool center, c10::string_view mode, const bool normalized,
-            const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
+            const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -979,10 +979,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 }
 
 Tensor stft(
-    const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-    const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
+    const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
+    const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
     const bool normalized,
-    const optional<bool> onesidedOpt, const optional<bool> return_complexOpt) {
+    const std::optional<bool> onesidedOpt, const std::optional<bool> return_complexOpt) {
   return at::stft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window_opt,
       /*center=*/false, /*mode=*/"constant", normalized, onesidedOpt,
@@ -1010,10 +1010,10 @@ static Tensor as_complex(const Tensor& self) {
  * This is modeled after librosa but with support for complex time-domain
  * signals and complex windows.
  */
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
+Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t> hop_lengthOpt,
+             const std::optional<int64_t> win_lengthOpt, const std::optional<Tensor>& window_opt,
              const bool center, const bool normalized, const std::optional<bool> onesidedOpt,
-             const optional<int64_t> lengthOpt, const bool return_complex) {
+             const std::optional<int64_t> lengthOpt, const bool return_complex) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;

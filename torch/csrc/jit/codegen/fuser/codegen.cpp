@@ -66,7 +66,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     return "half";
   }
   if (type == at::ScalarType::BFloat16) {
-    return "__nv_bfloat16";
+    return cuda::bfloat16_type_string;
   }
 
   switch (type) {

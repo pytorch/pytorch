@@ -80,7 +80,7 @@ std::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_na
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return found->second;
   });
@@ -93,7 +93,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != c10::nullopt;
+    return findOp(schema.operator_name()) != std::nullopt;
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -127,7 +127,7 @@ std::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
     if (it->hasSchema()) {
       return it;
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   } else {
     return it;
@@ -164,7 +164,7 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != c10::nullopt) {
+  if (found != std::nullopt) {
     return *found;
   }
 
@@ -279,7 +279,7 @@ std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(Operato
   std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = pythonModulesSingleton().find(op_name);
   if (found == pythonModulesSingleton().end()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return found->second;
 }

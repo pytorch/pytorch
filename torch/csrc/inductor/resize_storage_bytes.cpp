@@ -7,10 +7,10 @@
 #include <ATen/native/cuda/Resize.h>
 #endif
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 using namespace at;
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
   // similar to THPStorage_resize_ in StorageMethods.cpp, but is traceable
   if (variable.storage().device_type() == at::kCUDA) {
@@ -28,6 +28,7 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
 
 static void resize_storage_bytes__functionalize(
     const Tensor& variable,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     SymInt new_size) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("inductor::resize_storage_bytes_", "")
@@ -38,12 +39,14 @@ static void resize_storage_bytes__functionalize(
     op.call(variable, new_size);
     return;
   }
+  // Don't functionalize, call the mutable op on the inner tensor.
   auto functional_impl =
       at::functionalization::impl::unsafeGetFunctionalWrapper(variable);
-  // Sync pending mutations before running the resize_()
-  functional_impl->sync_();
-  functional_impl->storage_resize_(new_size);
-  return;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    op.call(functional_impl->value(), new_size);
+    return;
+  }
 }
 
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
@@ -59,5 +62,4 @@ TORCH_LIBRARY_IMPL(inductor, Functionalize, m) {
       "resize_storage_bytes_", TORCH_FN(resize_storage_bytes__functionalize));
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

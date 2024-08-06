@@ -68,7 +68,7 @@ else:
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[tuple(), tuple(), tuple(), tuple()],
+        defaults=[(), (), (), ()],
     )
 
 
@@ -139,13 +139,15 @@ class HalideInputSpec(typing.NamedTuple):
     alias_of: Optional[str] = None
 
     def bindings_type(self):
-        if self.ctype == "half*":
-            return "void*"  # half not defined
+        if self.ctype in ("half*", "bfloat16*"):
+            return "uint16_t*"  # half not defined
         return self.ctype
 
     def halide_type(self):
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
+        if self.ctype == "bfloat16*":
+            return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
     def is_scalar(self):
@@ -158,15 +160,19 @@ class HalideInputSpec(typing.NamedTuple):
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
-    scheduler: str
-    scheduler_flags: Dict[str, Union[int, str]]
+    scheduler: Optional[str] = None
+    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
     def args(self):
         """Command line args to pass to halide generator"""
-        args = [f"target={self.target}", f"autoscheduler={self.scheduler}"]
-        for k, v in self.scheduler_flags.items():
-            args.append(f"autoscheduler.{k}={v}")
+        args = [f"target={self.target}"]
+        if self.scheduler:
+            args.append(f"autoscheduler={self.scheduler}")
+        if self.scheduler_flags:
+            assert self.scheduler
+            for k, v in self.scheduler_flags.items():
+                args.append(f"autoscheduler.{k}={v}")
         return args
 
     def is_cuda(self):

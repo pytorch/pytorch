@@ -99,7 +99,7 @@ struct OptionalStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalStreamGuard(optional<Stream> stream_opt)
+  explicit OptionalStreamGuard(std::optional<Stream> stream_opt)
       : guard_(stream_opt) {}
 
   /// Copy is disallowed
@@ -123,14 +123,14 @@ struct OptionalStreamGuard {
 
   /// Returns the stream that was set at the time the guard was most recently
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> original_stream() const {
+  std::optional<Stream> original_stream() const {
     return guard_.original_stream();
   }
 
   /// Returns the most recent  stream that was set using this stream guard,
   /// either from construction, or via reset_stream, if the guard is
   /// initialized, or nullopt if the guard is uninitialized.
-  optional<Stream> current_stream() const {
+  std::optional<Stream> current_stream() const {
     return guard_.current_stream();
   }
 

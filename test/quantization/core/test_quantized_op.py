@@ -1903,8 +1903,8 @@ class TestQuantizedOps(TestCase):
             X = np.array(X)
             scale = 1
             H, W = X.shape[-2:]
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
             if output_size_h == output_size_w:
                 output_size = output_size_h
             else:
@@ -1977,9 +1977,9 @@ class TestQuantizedOps(TestCase):
                 dim_to_check.append(3)
 
             D, H, W = X.shape[-3:]
-            output_size_d = output_size_d if (output_size_d <= D) else D
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
 
             X = torch.from_numpy(X)
             qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -2049,9 +2049,9 @@ class TestQuantizedOps(TestCase):
             X = np.array(X)
             scale = 1
             D, H, W = X.shape[-3:]
-            output_size_d = output_size_d if (output_size_d <= D) else D
-            output_size_h = output_size_h if (output_size_h <= H) else H
-            output_size_w = output_size_w if (output_size_w <= W) else W
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
             if output_size_d == output_size_h == output_size_w:
                 output_size = output_size_h
             else:
@@ -4332,8 +4332,8 @@ class TestQuantizedLinear(TestCase):
                         accum = accum.bfloat16()
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, used_y_scale, used_y_zp, output_dtype,
-                        accum, x2_scale, x2_zp, "sum", binary_alpha,
+                        accum, b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
                     y_ref = y_ref + x2 * binary_alpha
@@ -4350,8 +4350,8 @@ class TestQuantizedLinear(TestCase):
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     qy_cpu = qlinear_op(
                         qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, used_y_scale, used_y_zp, output_dtype,
-                        x2, 1.0, 0, "add", binary_alpha,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
                         unary_post_op, unary_post_op_args, post_op_algo
                     )
                     y_ref = y_ref + x2 * binary_alpha

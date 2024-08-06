@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -19,6 +19,7 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
+
 if TYPE_CHECKING:
     from ..graph import GraphLowering
 
@@ -28,7 +29,7 @@ class CppWrapperCuda(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
@@ -77,6 +78,44 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, raw_args, grid, configs, triton_meta, constexprs
+    ):
+        # in C++ wrapper, we don't pass constexpr args, as they don't
+        # get added as parameters to the PTX code compiled from the
+        # user-defined Triton kernel (only non-constexpr args do)
+        raw_args = [
+            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
+        ]
+
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid_decision = grid[0]
+        else:
+            meta = CudaKernelParamCache.get(kernel_name)
+            assert meta is not None
+            grid_decision = None
+            for i, c in enumerate(configs):
+                if all(arg == meta["meta"][key] for key, arg in c.kwargs.items()):
+                    grid_decision = grid[i]
+                    break
+            assert grid_decision is not None
+
+        args = [self.val_to_arg_str(v) for v in raw_args]
+        arg_types = [
+            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            for arg in raw_args
+        ]
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            arg_types=arg_types,
+            grid=grid_decision,
+            cuda=True,
+            triton=True,
+            triton_meta=triton_meta,
+        )
+
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
@@ -115,7 +154,18 @@ class CppWrapperCuda(CppWrapperCpu):
                             var_name,
                         )
                     else:
-                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                        from torch import bfloat16, float16
+
+                        if arg_type in (float16, bfloat16):
+                            var_name_tmp = f"{var_name}_tmp"
+                            self.writeline(
+                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
+                            )
+                            self.writeline(f"float {var_name} = float({var_name_tmp});")
+                        else:
+                            self.writeline(
+                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
+                            )
                 else:
                     if config.abi_compatible:
                         self.writeline(
@@ -140,16 +190,27 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(self, name: str, grid: List[Any], cuda: bool = True):
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwargs,
+    ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics.
         """
         if not cuda:
             return grid
-        assert isinstance(grid, list), f"expected {grid=} to be a list"
+        assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
-        grid_fn = default_grid(*grid)
+        grid_callable = grid_callable or default_grid
+        if not grid_extra_kwargs:
+            grid_fn = grid_callable(*grid)
+        else:
+            grid_fn = grid_callable(*grid, **grid_extra_kwargs)
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
@@ -173,6 +234,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
@@ -237,17 +299,20 @@ class CppWrapperCuda(CppWrapperCpu):
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                kernel_var_name,
-                f"{grid_name}.grid_x",
-                f"{grid_name}.grid_y",
-                f"{grid_name}.grid_z",
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                stream,
-            )
+        launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
+            kernel_var_name,
+            f"{grid_name}.grid_x",
+            f"{grid_name}.grid_y",
+            f"{grid_name}.grid_z",
+            params["num_warps"],
+            params["shared_mem"],
+            kernel_args_var,
+            stream,
         )
         if grid_uses_symbolic_shapes:
+            # TODO: Use codegen `do_indent()` to properly generate the indentation.
+            # This works in this case as there's only one `if` condition.
+            self.writeline("    " + launch_kernel_call)
             self.writeline("}")
+        else:
+            self.writeline(launch_kernel_call)

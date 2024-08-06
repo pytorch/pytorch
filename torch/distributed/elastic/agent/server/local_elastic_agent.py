@@ -288,6 +288,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         restart_count = spec.max_restarts - self._remaining_restarts
 
         use_agent_store: bool = spec.rdzv_handler.use_agent_store
+        logger.info("use_agent_store: %s", use_agent_store)
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}

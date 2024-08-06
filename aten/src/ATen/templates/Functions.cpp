@@ -16,7 +16,7 @@ Tensor TensorMaker::make_tensor() {
        !deleter_ || !ctx_,
        "The deleter and context arguments are mutually exclusive.");
 
-   if (device_ == nullopt) {
+   if (device_ == std::nullopt) {
      device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
    }
 

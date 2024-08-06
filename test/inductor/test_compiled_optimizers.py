@@ -4,19 +4,15 @@ import sys
 import unittest
 import weakref
 from contextlib import ExitStack
-
 from copy import deepcopy
 from typing import NamedTuple
 
 import torch
-
 import torch._inductor
 import torch._inductor.cudagraph_trees
 import torch.optim.lr_scheduler
 from torch._inductor import config
-
 from torch._inductor.test_case import TestCase
-
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -31,7 +27,6 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
-
 from torch.optim.lr_scheduler import (
     ChainedScheduler,
     ConstantLR,
@@ -48,18 +43,15 @@ from torch.optim.lr_scheduler import (
     ReduceLROnPlateau,
     StepLR,
 )
-
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
 )
-
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     optims,
 )
-
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
@@ -576,7 +568,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)

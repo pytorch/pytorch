@@ -249,7 +249,7 @@ static NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
 }
 
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
-  if (dim.has_value() && dim.value().size() != 0) {
+  if (dim.has_value() && !dim.value().empty()) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
     auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
@@ -655,13 +655,14 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
+  static const char* fast_math = std::getenv("PYTORCH_MPS_FAST_MATH");
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion2_3];
-    [options setFastMathEnabled:NO];
+    [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];

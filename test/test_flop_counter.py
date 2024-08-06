@@ -6,9 +6,11 @@ import unittest
 import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -300,7 +302,8 @@ class TestFlopCounter(TestCase):
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
-        or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        or not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
         "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
     )
     def test_sdpa(self):
@@ -355,15 +358,31 @@ class TestFlopCounter(TestCase):
 
             if backend == "math":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=False, enable_math=True, enable_mem_efficient=False
+                    enable_flash=False,
+                    enable_math=True,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
                 )
             elif backend == "flash":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=True, enable_math=False, enable_mem_efficient=False
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
                 )
             elif backend == "mem_efficient":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=False, enable_math=False, enable_mem_efficient=True
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=True,
+                    enable_cudnn=False,
+                )
+            elif backend == "cudnn":
+                backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=True,
                 )
 
             mode = FlopCounterMode()
@@ -389,22 +408,24 @@ class TestFlopCounter(TestCase):
 
         flops = [
             run_uniform_flops(backend, with_backward=False)
-            for backend in ["math", "flash", "mem_efficient"]
+            for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient = flops
+        flops_fw_math, flops_fw_flash, flops_fw_efficient, flops_fw_cudnn = flops
         self.assertEqual(flops_fw_math, flops_fw_flash)
         self.assertEqual(flops_fw_math, flops_fw_efficient)
+        self.assertEqual(flops_fw_math, flops_fw_cudnn)
 
         self.assertExpectedInline(str(flops_fw_math), """134217728""")
 
         flops = [
             run_uniform_flops(backend, with_backward=True)
-            for backend in ["math", "flash", "mem_efficient"]
+            for backend in ["math", "flash", "mem_efficient", "cudnn"]
         ]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient = flops
+        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient, flops_fw_bw_cudnn = flops
         self.assertEqual(flops_fw_math * 3, flops_fw_bw_math)
         self.assertEqual(flops_fw_math * 7 // 2, flops_fw_bw_flash)
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
+        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_cudnn)
 
         run_nonuniform_flops = functools.partial(
             get_flops,
@@ -448,15 +469,24 @@ class TestFlopCounter(TestCase):
 
             if backend == "math":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=False, enable_math=True, enable_mem_efficient=False
+                    enable_flash=False,
+                    enable_math=True,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
                 )
             elif backend == "flash":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=True, enable_math=False, enable_mem_efficient=False
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False,
+                    enable_cudnn=False,
                 )
             elif backend == "mem_efficient":
                 backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=False, enable_math=False, enable_mem_efficient=True
+                    enable_flash=False,
+                    enable_math=False,
+                    enable_mem_efficient=True,
+                    enable_cudnn=False,
                 )
 
             with backend, mode:
@@ -646,6 +676,53 @@ class TestFlopCounter(TestCase):
             ),
         )
 
+    @skipIfRocm  # Nested tensor
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
+    def test_nested_attention_fake_tensors(self):
+        x = torch.randn(123, 4, 16, device="cuda", dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 30, 60, 90, 123], device="cuda")
+        max_seqlen = 40
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_offsets = fake_mode.from_tensor(offsets)
+
+            with FlopCounterMode() as fake_flop_counter_mode:
+                torch.ops.aten._flash_attention_forward(
+                    fake_x,
+                    fake_x,
+                    fake_x,
+                    fake_offsets,
+                    fake_offsets,
+                    max_seqlen,
+                    max_seqlen,
+                    0.0,
+                    False,
+                    False,
+                )
+
+        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device="cuda").transpose(1, 2)
+
+        with FlopCounterMode() as real_flop_counter_mode:
+            torch.ops.aten._flash_attention_forward(
+                dense_x,
+                dense_x,
+                dense_x,
+                None,
+                None,
+                max_seqlen,
+                max_seqlen,
+                0.0,
+                False,
+                False,
+            )
+
+        self.assertEqual(int(get_total_flops(fake_flop_counter_mode)), int(get_total_flops(real_flop_counter_mode)))
+
+
     def test_addmm_out(self):
         def f(x):
             y = torch.zeros(10, 10)
@@ -675,7 +752,7 @@ class TestFlopCounter(TestCase):
                 return {"a": torch.mm(x, x)}
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = Foo()
                 self.b = Foo()
@@ -707,6 +784,31 @@ class TestFlopCounter(TestCase):
         mod = torch.nn.Linear(2, 2)
         with self.assertWarnsRegex(UserWarning, "not needed"):
             FlopCounterMode(mod)
+
+    def test_custom_op(self):
+        from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        called = 0
+
+        with self.assertRaisesRegex(ValueError, "expected each target to be OpOverloadPacket"):
+            register_flop_formula(torch.ops.mylib.foo.default)(lambda x: x)
+
+        @register_flop_formula(torch.ops.mylib.foo)
+        def formula(*args, **kwargs):
+            nonlocal called
+            called += 1
+            return 9001
+
+        x = torch.randn(3)
+        with FlopCounterMode(display=False) as mode:
+            y = foo(x)
+
+        self.assertEqual(called, 1)
+        self.assertExpectedInline(get_total_flops(mode), """9001""")
 
 
 if __name__ == "__main__":

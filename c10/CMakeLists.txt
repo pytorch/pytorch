@@ -95,6 +95,7 @@ if(NOT BUILD_LIBTORCHLESS)
     target_link_libraries(c10 PUBLIC glog::glog)
   endif()
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+  target_link_libraries(c10 PRIVATE nlohmann)
 
   if(C10_USE_NUMA)
     message(STATUS "NUMA paths:")
@@ -122,6 +123,10 @@ if(NOT BUILD_LIBTORCHLESS)
   if(USE_MIMALLOC)
     target_link_libraries(c10 PRIVATE "mimalloc-static")
     add_dependencies(c10 mimalloc-static)
+  endif()
+
+  if(LINUX)
+    target_link_libraries(c10 PRIVATE Threads::Threads)
   endif()
 
   if(ANDROID)

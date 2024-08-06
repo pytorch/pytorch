@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional
 
 import sympy
 
 import torch
-
 from torch._prims_common import make_channels_last_strides_for
+from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
     ExternKernelAlloc,
@@ -15,16 +15,14 @@ from .ir import (
     IRNode,
     is_contiguous_storage_and_layout,
     Layout,
-    mark_node_as_mutating,
     may_convert_to_optional,
     MultiOutput,
     MultiOutputLayout,
+    MutationOutput,
     NoneLayout,
     TensorBox,
 )
-
 from .utils import convert_shape_to_inductor, pad_listlike
-
 from .virtualized import V
 
 
@@ -113,7 +111,7 @@ def _prepare_convolution_fusion_create(
         else:
             assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -234,7 +232,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -305,7 +303,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         cpp_constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -393,7 +391,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         kernel_layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
@@ -424,6 +422,11 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 torch::List<c10::optional<at::Scalar>> unary_scalars,
                 c10::optional<c10::string_view> unary_algorithm)"""
 
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
+            MutationOutput(NoneLayout(inputs[1].get_device()), inputs[1], self),
+        ]
+
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
@@ -435,11 +438,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.cpp_kernel_overload_name,
         )
 
-    def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(
@@ -480,7 +480,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
-        mark_node_as_mutating(packed, inputs[1])
         # This op mutates in place which means that the result is not the
         # target but rather the input that is being mutated
         # init reorders the inputs, so inputs[1] becomes packed.inputs[0]
@@ -493,7 +492,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -578,7 +577,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp]
@@ -729,8 +728,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             algorithm,
         ]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
             kernel_layout.dtype = output_dtype
@@ -748,7 +747,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         """
         Needs input/weight/output qparams
         if bias is not None
@@ -864,8 +863,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @classmethod
     def create(
@@ -944,12 +943,12 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             binary_attr == "sum"
         ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
 
+        V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
             layout=NoneLayout(qaccum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
-        mark_node_as_mutating(packed, qaccum)
 
         # Return accum since it has been inplace changed.
         return packed.inputs[packed.idx_for_inplace_sum]
@@ -961,7 +960,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1019,7 +1018,7 @@ class LinearUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1085,7 +1084,7 @@ class LinearBinary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1155,7 +1154,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         constant_args=(),
         has_bias=True,
         x_scale_zp_are_tensors=False,
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp]
@@ -1309,8 +1308,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             post_op_algorithm,
         ]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = output_dtype
@@ -1332,7 +1331,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         constant_args=(),
         has_bias=True,
         x_scale_zp_are_tensors=False,
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp, x2]
@@ -1374,11 +1373,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> other,
                 c10::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                c10::optional<at::Tensor> other,
                 double other_scale,
                 int64_t other_zero_point,
                 c10::string_view binary_post_op,
@@ -1436,11 +1435,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             packed_weight,
             w_scale,
             w_zp,
+            other,
             bias,
             o_scale,
             o_zp,
             output_dtype,
-            other,
             other_scale,
             other_zp,
             binary_attr,
@@ -1461,6 +1460,13 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
+    def get_mutation_names(self):
+        binary_post_op = self.constant_args[-5]
+        if binary_post_op == "sum":
+            return [self.inputs[-1].get_name()]
+        else:
+            return []
+
     @classmethod
     def create(
         cls,
@@ -1470,11 +1476,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         qw: "TensorBox",  # packed_weight
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
+        other: "TensorBox",
         bias: "TensorBox",
         output_scale: float,
         output_zero_point: int,
         output_dtype,
-        other: "TensorBox",
         other_scale,
         other_zp,
         binary_post_op,
@@ -1524,6 +1530,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         ]
 
         if binary_post_op == "sum":
+            V.graph.mark_buffer_mutated(other.get_name())
             packed = QLinearPointwiseBinaryPT2E(
                 layout=NoneLayout(other.get_device()),
                 inputs=inputs,
@@ -1531,12 +1538,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 has_bias=(bias is not None),
                 x_scale_zp_are_tensors=x_scale_zp_are_tensors,
             )
-            mark_node_as_mutating(packed, other)
             # Return other since it has been inplace changed.
             return packed.inputs[-1]
 
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
+        assert output_dtype is not None
+        if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
             kernel_layout.dtype = output_dtype
@@ -1556,7 +1562,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,

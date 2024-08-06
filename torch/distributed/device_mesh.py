@@ -38,6 +38,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_backend,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -105,9 +106,8 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
-            res_submesh._dim_group_infos = [
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
             ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
@@ -241,8 +241,7 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional[DeviceMesh] = None
-            self._thread_id = threading.get_ident()
+            self._thread_id = None
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -253,6 +252,9 @@ else:
                 if _init_backend:
                     self._get_or_create_default_group()
                     self._init_process_groups()
+
+                if is_initialized() and get_backend() == "threaded":
+                    self._thread_id = threading.get_ident()
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
@@ -346,7 +348,7 @@ else:
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
                                 raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
+                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
@@ -370,9 +372,9 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"DeviceMesh({self.mesh.tolist()})"
+                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
                 if not self.mesh_dim_names
-                else f"DeviceMesh({self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
             )
             return device_mesh_repr
 
@@ -386,7 +388,6 @@ else:
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
-                        self._parent_mesh,
                         self._thread_id,
                     )
                 )
@@ -403,7 +404,6 @@ else:
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
-                    and self._parent_mesh == other._parent_mesh
                     and self._thread_id == other._thread_id
                 )
 
@@ -411,31 +411,46 @@ else:
             self, mesh_dim_names: Union[str, Tuple[str, ...]]
         ) -> "DeviceMesh":
             """
-            Slice the current DeviceMesh based on the mesh_dim_name given to create a child
-            DeviceMesh.
+            Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
+            The submesh created consists of the dimensions and the communicators indicated by
+            ``mesh_dim_names``
 
             Args:
-                mesh_dim_name (Union[str, Tuple[str]]): the name or the tuple of names of the
-                mesh dimension of the parent DeviceMesh to create the child DeviceMesh for.
+                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
 
-            The following program runs on each process/rank in an SPMD manner. In this example, we have 2
-            hosts with 4 GPUs each.
-            Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
-            Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
-            Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
-            Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
-            Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
-            Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
+            The following program runs on each process/rank in an SPMD manner in a world size of 8.
+            In the first example:
+                Calling mesh_2d["tp"] on rank 0, 1, 2, 3 returns a 1D submesh of DeviceMesh:([0, 1, 2, 3]).
+                Calling mesh_2d["tp"] on rank 4, 5, 6, 7 returns a 1D submesh of  DeviceMesh:([4, 5, 6, 7]).
+                Calling mesh_2d["dp"] on rank 0, 4 returns a 1D submesh of  DeviceMesh:([0, 4]).
+                Calling mesh_2d["dp"] on rank 1, 5 returns a 1D submesh of  DeviceMesh:([1, 5]).
+                Calling mesh_2d["dp"] on rank 2, 6 returns a 1D submesh of  DeviceMesh:([2, 6]).
+                Calling mesh_2d["dp"] on rank 3, 7 returns a 1D submesh of  DeviceMesh:([3, 7]).
+
+            In the second example:
+                Calling mesh_3d["dp", "cp"] on rank 0, 1, 4, 5 returns a 2D submesh of DeviceMesh:([[0, 1], [4, 5]]).
+                Calling mesh_3d["dp", "cp"] on rank 2, 3, 6, 7 returns a 2D submesh of DeviceMesh:([[2, 3], [6, 7]]).
+                Calling mesh_3d["cp", "dp"] on rank 0, 1, 4, 5 returns a 2D submesh of DeviceMesh:([[0, 4], [1, 5]]).
+                Calling mesh_3d["cp", "dp"] on rank 2, 3, 6, 7 returns a 2D submesh of DeviceMesh:([[2, 6], [3, 7]]).
 
             Example::
                 >>> # xdoctest: +SKIP("no rank")
                 >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
-                >>> # Initialize device mesh as (2, 4) to represent the topology
+                >>> # Initialize a 2D device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
-                >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
+                >>> mesh_2d = init_device_mesh(device_type="cuda", (2,4), mesh_dim_names=("dp", "tp"))
+                >>> tp_mesh = mesh_2d["tp"]
+                >>> dp_mesh = mesh_2d["dp"]
+                >>>
+                >>> # Initialize a 3D mesh.
+                >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
+                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> dp_cp_mesh = mesh_3d["dp", "cp"]
+                >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
@@ -444,28 +459,16 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
-            error_msg = (
-                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
-            )
-
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
                 mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
             ):
-                raise KeyError(error_msg)
-            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
-            # of the current DeviceMesh.
-            else:
-                outermost_dim_name = mesh_dim_names[0]
-                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
-                for i, j in zip(
-                    mesh_dim_names,
-                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
-                ):
-                    if i != j:
-                        raise KeyError(error_msg)
+                raise KeyError(
+                    f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                    "Valid mesh_dim_names should be a subsequence of valid"
+                    f"mesh_dim_names from {self.mesh_dim_names}."
+                )
 
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh

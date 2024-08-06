@@ -2,7 +2,7 @@
 # the project is compiled.
 
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
-   EXEC_PROGRAM(cat ARGS "/proc/cpuinfo" OUTPUT_VARIABLE CPUINFO)
+   EXECUTE_PROCESS(COMMAND cat /proc/cpuinfo OUTPUT_VARIABLE CPUINFO)
 
    #neon instruction can be found on the majority part of modern ARM processor
    STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE ${CPUINFO})
@@ -44,7 +44,7 @@ ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
    IF(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
       set(NEON_FOUND true CACHE BOOL "NEON available on ARM64")
    ENDIF()
-   EXEC_PROGRAM("/usr/sbin/sysctl -n machdep.cpu.features" OUTPUT_VARIABLE
+   EXECUTE_PROCESS(COMMAND /usr/sbin/sysctl -n machdep.cpu.features OUTPUT_VARIABLE
       CPUINFO)
 
    IF(NOT CPUINFO STREQUAL "")

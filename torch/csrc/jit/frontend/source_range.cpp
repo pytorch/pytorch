@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <iostream>
+#include <regex>
 
 namespace torch::jit {
 
@@ -154,7 +155,7 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
 std::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }

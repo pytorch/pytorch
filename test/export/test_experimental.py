@@ -1,18 +1,15 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import unittest
-
 from typing import Dict, List, Tuple
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
-
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export._trace import _convert_ts_to_export_experimental
 from torch.export.experimental import _export_forward_backward
-
 from torch.testing import FileCheck
 
 
@@ -21,9 +18,9 @@ class TestExperiment(TestCase):
     def test_with_buffer_as_submodule(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(3))
+                self.buffer1 = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 y = x + 2
@@ -34,7 +31,7 @@ class TestExperiment(TestCase):
                 return x.sum() + y.sum() + buffer_updated.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = B()
 
@@ -89,7 +86,7 @@ def forward(self, arg0_1, arg1_1):
     def test_mark_strict_with_container_type(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -97,7 +94,7 @@ def forward(self, arg0_1, arg1_1):
                 return x0.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = B()
 
@@ -197,7 +194,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
                 self.loss = torch.nn.CrossEntropyLoss()
@@ -264,6 +261,26 @@ def forward(self, arg0_1, arg1_1):
         )
         Range constraints: {}
         """
+
+    def test_joint_dynamic(self) -> None:
+        from torch.export import Dim
+
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.y = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                x = torch.ones(x.shape[0], 3)
+                return (self.y + x).sum()
+
+        m = Module()
+        example_inputs = (torch.randn(3),)
+        m(*example_inputs)
+        ep = torch.export._trace._export(
+            m, example_inputs, pre_dispatch=True, dynamic_shapes={"x": {0: Dim("x0")}}
+        )
+        joint_ep = _export_forward_backward(ep)
 
 
 if __name__ == "__main__":
