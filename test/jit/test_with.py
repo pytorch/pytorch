@@ -447,7 +447,7 @@ class TestWith(JitTestCase):
             This class is missing __enter__ and __exit__ methods.
             """
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 1
 
         @torch.jit.script
@@ -456,7 +456,7 @@ class TestWith(JitTestCase):
             This class has an __enter__ method with an incorrect signature.
             """
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 1
 
             def __enter__(self, incr: int):  # noqa: PLE0302
@@ -471,7 +471,7 @@ class TestWith(JitTestCase):
             This class has an __exit__ method with an incorrect signature.
             """
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 1
 
             def __enter__(self):
@@ -486,7 +486,7 @@ class TestWith(JitTestCase):
             This class has an __exit__ method with unsupported argument types.
             """
 
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 1
 
             def __enter__(self):
