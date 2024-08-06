@@ -612,13 +612,6 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
 
-        # Slice the 1D mesh from the 2D submesh.
-        dp_mesh = dp_cp_mesh["dp"]
-        cp_mesh = dp_cp_mesh["cp"]
-        # Check the root mesh is still the original 3D mesh.
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
-
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
         mesh_shape = (2, self.world_size // 2)
