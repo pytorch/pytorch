@@ -340,6 +340,137 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
+# kw_only is only available in python >= 3.10
+kw_only_dataclass = dict(kw_only=True) if "kw_only" in dataclass.__kwdefaults__ else {}
+
+
+@dataclass(frozen=True, **kw_only_dataclass)
+class _StridedShard(Shard):
+    """
+    _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
+    is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
+    We call this right-to-left sharding which is the opposite of the default
+    left-to-right sharding. See the example below:
+        tensor shape: [8, 8]
+        mesh: [[0, 1], [2, 3]], names=("dp", "tp")
+        placements: [Shard(0), Shard(0)]
+
+    The default sharding behavior shards the tensor on "dp" mesh dimension first then
+    "tp" dimension. The sharding result will be:
+        Rank    |   Mesh Coordinate |   Shard Index
+        ------------------------------------------------
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   1 (row 2-3)
+        2       |   (1, 0)          |   2 (row 4-5)
+        3       |   (1, 1)          |   3 (row 6-7)
+
+    While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
+    "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
+    result:
+        Rank    |   Mesh Coordinate |   Shard Index
+        ------------------------------------------------
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   2 (row 4-5)
+        2       |   (1, 0)          |   1 (row 2-3)
+        3       |   (1, 1)          |   3 (row 6-7)
+
+    The consequence is, any attempt to redistribute this DTensor to a full replica will
+    produce a wrong result because the shard-to-replicate redistribution always happens
+    right-to-left, regardless it's left-to-right sharding or right-to-left. To address
+    this, we use _StridedShard placement to make this right-to-left sharding compatible
+    with our left-to-right convention on both tensor distribution and redistribution.
+
+    Now with _StridedShard, the right-to-left sharding above can be represented as:
+        tensor shape: [8, 8]
+        mesh: [[0, 1], [2, 3]], names=("dp", "tp")
+        placements: [_StridedShard(0, split_factor=2), Shard(0)]
+
+    And a left-to-right processing of `placements` will produce the same result, which is
+    different from using the `Shard` placement:
+        Rank    |   Mesh Coordinate |   Shard Index
+        ------------------------------------------------
+        0       |   (0, 0)          |   0 (row 0-1)
+        1       |   (0, 1)          |   2 (row 4-5)
+        2       |   (1, 0)          |   1 (row 2-3)
+        3       |   (1, 1)          |   3 (row 6-7)
+
+    The argument `split_factor` is the number of existing shards over the tensor sharding
+    dimension before processing the _StridedShard placement, as if the sharding happened
+    right-to-left. In the example above, the tensor should first be sharded on the "tp"
+    dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
+    `split_factor` of the _StridedShard placement on "dp" dim is 2.
+
+    TODO: strided sharding needs to work fine with uneven sharding. Now it forbids
+    resharding if the tensor is unevenly sharded.
+    TODO: we should remove _StridedShard placement once we can unify it with Shard
+    """
+
+    split_factor: int
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _StridedShard):
+            return self.dim == other.dim and self.split_factor == other.split_factor
+        elif isinstance(other, Shard):
+            # TODO: this is to avoid extra all-gather in dtensor op dispatch
+            # note that sharding prop would not produce _StridedShard and an
+            # placement inequality would introduce an all-gather for resharding
+            return self.dim == other.dim
+        return False
+
+    def __hash__(self) -> int:
+        return hash((self.dim, self.split_factor))
+
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the _StridedShard placement
+        """
+        return f"_StridedShard(dim={self.dim}, sf={self.split_factor})"
+
+    def __str__(self) -> str:
+        """human readable representation of the _StridedShard placement"""
+        return f"_S({self.dim}, {self.split_factor})"
+
+    def _split_tensor(
+        self,
+        tensor: torch.Tensor,
+        num_chunks: int,
+        *,
+        with_padding: bool = True,
+        contiguous: bool = True,
+    ) -> Tuple[List[torch.Tensor], List[int]]:
+        """
+        TODO: currently _StridedShard does not support padding
+        """
+        assert (
+            self.dim <= tensor.ndim
+        ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+
+        total_split = num_chunks * self.split_factor
+        assert tensor.size(self.dim) % total_split == 0, (
+            "_StridedShard currently only allows even sharding but got tensor size"
+            f" {tensor.size(self.dim)} on dim {self.dim} and total split"
+            f" {total_split}={num_chunks} * {self.split_factor}"
+        )
+
+        group_size = self.split_factor
+        total_split_tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
+        tensor_list = [
+            torch.cat(
+                [
+                    total_split_tensor_list[i + j * num_chunks]  # stride is num_chunks
+                    for j in range(group_size)
+                ],
+                dim=self.dim,
+            )
+            for i in range(num_chunks)
+        ]
+
+        if contiguous:
+            tensor_list = [t.contiguous() for t in tensor_list]
+
+        return tensor_list, []
+
+
 @dataclass(frozen=True)
 class Replicate(Placement):
     """
