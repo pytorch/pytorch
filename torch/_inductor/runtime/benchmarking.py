@@ -36,21 +36,20 @@ def time_and_log(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 def should_generic(
     config_name: str,
-    default_oss: bool,
-    internal_if_enabled: bool,
-    internal_if_disabled: bool,
     jk_name: str,
+    default_oss: bool,
+    default_internal_if_jk: bool,
 ) -> bool:
     config_val = getattr(benchmarking_config, config_name)
 
     @lru_cache(None)
     def is_jk_enabled(name: str) -> bool:
         try:
-            value = getattr(import_module("torch._inductor.fb.benchmarking"), name)
+            val = getattr(import_module("torch._inductor.fb.benchmarking"), name)
         except ModuleNotFoundError:
             return False
         else:
-            return value >= torch._utils_internal.justknobs_getval_int(
+            return val >= torch._utils_internal.justknobs_getval_int(
                 f"pytorch/benchmarking:{name}"
             )
 
@@ -59,41 +58,37 @@ def should_generic(
     if not is_fbcode():
         return default_oss
     if is_jk_enabled(jk_name):
-        return internal_if_enabled
-    return internal_if_disabled
+        return default_internal_if_jk
+    return not default_internal_if_jk
 
 
 should_fallback_to_original_benchmarking = partial(
     should_generic,
     "fallback_to_original_benchmarking",
-    False,
-    False,
-    True,
     "fallback_to_original_benchmarking_version",
+    benchmarking_config.fallback_to_original_benchmarking_default_oss,
+    benchmarking_config.fallback_to_original_benchmarking_default_internal_if_jk,
 )
 should_enable_lazy_benchmarking = partial(
     should_generic,
     "enable_lazy_benchmarking",
-    True,
-    False,
-    True,
     "enable_lazy_benchmarking_version",
+    benchmarking_config.enable_lazy_benchmarking_default_oss,
+    benchmarking_config.enable_lazy_benchmarking_default_internal_if_jk,
 )
 should_enable_early_ranking = partial(
     should_generic,
     "enable_early_ranking",
-    True,
-    False,
-    True,
     "enable_early_ranking_verison",
+    benchmarking_config.enable_early_ranking_default_oss,
+    benchmarking_config.enable_early_ranking_default_internal_if_jk,
 )
 should_enable_early_pruning = partial(
     should_generic,
     "enable_early_pruning",
-    True,
-    False,
-    True,
     "enable_early_pruning_verison",
+    benchmarking_config.enable_early_pruning_default_oss,
+    benchmarking_config.enable_early_pruning_default_internal_if_jk,
 )
 
 

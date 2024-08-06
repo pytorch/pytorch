@@ -1087,12 +1087,18 @@ class benchmarking:
         "TORCHINDUCTOR_FALLBACK_TO_ORIGINAL_BENCHMARKING"
     )
 
+    fallback_to_original_benchmarking_default_oss = False
+    fallback_to_original_benchmarking_default_internal_if_jk = True
+
     # enable lazy benchmarking which postpones benchmarking until timing value
     # is required, allows the benchmarking module to group similar benchmarks
     # together for faster and more accurate timing values
     enable_lazy_benchmarking: Optional[bool] = get_config_value(
         "TORCHINDUCTOR_ENABLE_LAZY_BENCHMARKING"
     )
+
+    enable_lazy_benchmarking_default_oss = True
+    enable_lazy_benchmarking_default_internal_if_jk = True
 
     # enable early ranking which terminates after the estimation loop for
     # grouped benchmarkings, this significantly reduces benchmarking overhead
@@ -1102,12 +1108,18 @@ class benchmarking:
         "TORCHINDUCTOR_ENABLE_EARLY_RANKING"
     )
 
+    enable_early_ranking_default_oss = True
+    enable_early_ranking_default_internal_if_jk = True
+
     # enables early pruning which removes underperforming kernels after the
     # estimation loop, this reduces benchmarking overhead by fully benchmarking
     # only the most promising of kernels
     enable_early_pruning: Optional[bool] = get_config_value(
         "TORCHINDUCTOR_ENABLE_EARLY_PRUNING"
     )
+
+    enable_early_pruning_default_oss = True
+    enable_early_pruning_default_internal_if_jk = True
 
 
 _save_config_ignore = [
