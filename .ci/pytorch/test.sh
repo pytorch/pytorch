@@ -697,7 +697,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   do
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
-    # local speedup_target=${model_cfg[5]}
+    local speedup_target=${model_cfg[5]}
     local backend=${model_cfg[1]}
     if [[ ${model_cfg[4]} == "cpp" ]]; then
       export TORCHINDUCTOR_CPP_WRAPPER=1
@@ -717,8 +717,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    # TODO: re-enable this after https://github.com/pytorch/pytorch/pull/131812 lands
-    # python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
 
   # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
@@ -1044,11 +1043,113 @@ test_xla() {
   assert_git_not_dirty
 }
 
+function check_public_api_test_fails {
+    test_name=$1
+    invalid_item_name=$2
+    invalid_item_desc=$3
+
+    echo "Running public API test '${test_name}'..."
+    test_output=$(python test/test_public_bindings.py -k "${test_name}" 2>&1) && ret=$? || ret=$?
+
+    # Ensure test fails correctly.
+    if [ "$ret" -eq 0 ]; then
+        cat << EOF
+Expected the public API test '${test_name}' to fail after introducing
+${invalid_item_desc}, but it succeeded! Check test/test_public_bindings.py
+for any changes that may have broken the test.
+EOF
+        return 1
+    fi
+
+    # Ensure invalid item is in the test output.
+    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
+
+    if [ $ret -ne 0 ]; then
+        cat << EOF
+Expected the public API test '${test_name}' to identify ${invalid_item_desc}, but
+it didn't! It's possible the test may not have run. Check test/test_public_bindings.py
+for any changes that may have broken the test.
+EOF
+        return 1
+    fi
+
+    echo "Success! '${test_name}' identified ${invalid_item_desc} ${invalid_item_name}."
+    return 0
+}
+
 # Do NOT run this test before any other tests, like test_python_shard, etc.
 # Because this function uninstalls the torch built from branch and installs
 # the torch built on its base commit.
 test_forward_backward_compatibility() {
   set -x
+
+  # First, validate public API tests in the torch built from branch.
+  # Step 1. Make sure the public API test "test_correct_module_names" fails when a new file
+  # introduces an invalid public API function.
+  new_filename=$(mktemp XXXXXXXX.py -p "${TORCH_INSTALL_DIR}")
+
+  BAD_PUBLIC_FUNC=$(
+  cat << 'EOF'
+def new_public_func():
+  pass
+
+# valid public API functions have __module__ set correctly
+new_public_func.__module__ = None
+EOF
+  )
+
+  echo "${BAD_PUBLIC_FUNC}" >> "${new_filename}"
+  invalid_api="torch.$(basename -s '.py' "${new_filename}").new_public_func"
+  echo "Created an invalid public API function ${invalid_api}..."
+
+  check_public_api_test_fails \
+      "test_correct_module_names" \
+      "${invalid_api}" \
+      "an invalid public API function" && ret=$? || ret=$?
+
+  rm -v "${new_filename}"
+
+  if [ "$ret" -ne 0 ]; then
+      exit 1
+  fi
+
+  # Step 2. Make sure that the public API test "test_correct_module_names" fails when an existing
+  # file is modified to introduce an invalid public API function.
+  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/nn/parameter.py"
+  cp -v "${EXISTING_FILEPATH}" "${EXISTING_FILEPATH}.orig"
+  echo "${BAD_PUBLIC_FUNC}" >> "${EXISTING_FILEPATH}"
+  invalid_api="torch.nn.parameter.new_public_func"
+  echo "Appended an invalid public API function to existing file ${EXISTING_FILEPATH}..."
+
+  check_public_api_test_fails \
+      "test_correct_module_names" \
+      "${invalid_api}" \
+      "an invalid public API function" && ret=$? || ret=$?
+
+  mv -v "${EXISTING_FILEPATH}.orig" "${EXISTING_FILEPATH}"
+
+  if [ "$ret" -ne 0 ]; then
+      exit 1
+  fi
+
+  # Step 3. Make sure that the public API test "test_modules_can_be_imported" fails when a module
+  # cannot be imported.
+  new_module_dir=$(mktemp XXXXXXXX -d -p "${TORCH_INSTALL_DIR}")
+  echo "invalid syntax garbage" > "${new_module_dir}/__init__.py"
+  invalid_module_name="torch.$(basename "${new_module_dir}")"
+
+  check_public_api_test_fails \
+      "test_modules_can_be_imported" \
+      "${invalid_module_name}" \
+      "a non-importable module" && ret=$? || ret=$?
+
+  rm -rv "${new_module_dir}"
+
+  if [ "$ret" -ne 0 ]; then
+      exit 1
+  fi
+
+  # Next, build torch from the merge base.
   REPO_DIR=$(pwd)
   if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
     echo "On trunk, we should compare schemas with torch built from the parent commit"
@@ -1326,9 +1427,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
+    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
-      shufflenet_v2_x1_0 hf_GPT2 yolov3 mobilenet_v2 resnext50_32x4d hf_T5_base
+      functorch_maml_omniglot yolov3 mobilenet_v2 resnext50_32x4d densenet121 mnasnet1_0
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench

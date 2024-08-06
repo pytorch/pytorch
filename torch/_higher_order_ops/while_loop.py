@@ -136,8 +136,13 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     _validate_input(cond_fn, body_fn, carried_inputs)
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _while_loop_op_wrapper(*args, **kwargs):
+        return while_loop_op(*args, **kwargs)
+
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+        return torch.compile(_while_loop_op_wrapper, backend="eager", fullgraph=True)(
             cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
