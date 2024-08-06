@@ -1345,7 +1345,6 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     while r < size_hints[1] and conditional_product(x, r) < target:
         r *= 2
 
-    cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
@@ -1353,8 +1352,29 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     default_num_warps = 4 if torch.version.hip else 8
     min_num_warps = 1 if torch.version.hip else 2
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
+
+    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
+    max_grid_x = 2147483647
+    warp_size = (
+        64 if torch.version.hip else 32
+    )  # TODO: query warp size once #129663 is merged
+    num_blocks = (size_hints[0] + x - 1) // x
+
+    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
+        x *= 2  # Scale up XBLOCK if grid exceeds limits
+        num_blocks = num_blocks // 2
+    while conditional_product(x, r) > target:
+        if r == 1:
+            break
+        r = r // 2
+
+    cfg = {"XBLOCK": x, "RBLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
+    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    assert (
+        num_blocks * num_warps * warp_size
+    ) <= max_grid_x, "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1793,3 +1813,42 @@ def split_scan_grid(xnumel, rnumel):
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
 
     return grid_fn
+
+
+def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+    """min_blocks is the minimal size of the grid x dimension"""
+    if not is_sequential:
+        # round robin dispatch
+        kernel_grid_fn = grid(*numels)
+    else:
+        # sequential dispatch
+        seq_numels = list(numels)
+        # x numels are not used here, just a place holder
+        seq_numels[-1] = 1024
+        kernel_grid_fn = grid(*seq_numels)
+
+    def get_grid_dim(numel, block):
+        if numel is None:
+            return 1
+        if block is None:
+            return numel
+        return ceildiv(numel, block)
+
+    def grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
+        return tuple(cuda_grid)
+
+    def seq_grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        # x <= 0 means this kernel's x grid is not tunable (x_no_dim is true)
+        x_grid = sum(
+            [
+                -x if x <= 0 else get_grid_dim(x, meta.get("XBLOCK", 1))
+                for x in numels[-1]
+            ]
+        )
+        cuda_grid[0] = x_grid
+        return tuple(cuda_grid)
+
+    return grid_fn if not is_sequential else seq_grid_fn
