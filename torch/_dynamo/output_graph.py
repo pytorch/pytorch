@@ -68,6 +68,7 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
+    _extract_tensor_dict,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -807,7 +808,7 @@ class OutputGraph:
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.proxy.node.meta
-                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+                vt.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
 
