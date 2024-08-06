@@ -60,9 +60,13 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 
+
 T = TypeVar("T")
 
-from _collections_abc import dict_keys  # noqa: TCH003
+
+if TYPE_CHECKING:
+    from collections.abc import KeysView
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -85,13 +89,25 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    CudagraphCachedInfo,
+    log_cudagraph_skip_and_bump_counter,
+)
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
-from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.utils import (
+    ALIGN_BYTES,
+    align_inputs_from_check_idxs,
+    BoxedBool,
+    clear_on_fresh_inductor_cache,
+    is_linux,
+    set_tracing_context_output_strides,
+)
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -780,6 +796,114 @@ def compiled_fx_graph_hash(
     return key, debug_lines
 
 
+def cudagraph_post_compile(
+    example_inputs: List[Any],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+) -> None:
+    """
+    Checks for any reasons not to run cudagraphs and then
+    runs it on compiled_graph.
+    Mutates the `compiled_graph.current_callable` and `cudagraphs`
+    """
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.cudagraph_info is not None
+    cached_info = compiled_graph.cudagraph_info
+    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
+    inputs_to_check = compiled_graph.inputs_to_check
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    if not cudagraph_fail_reasons:
+        fx_kwargs = compiled_graph.fx_kwargs
+        static_input_idxs = fx_kwargs["static_input_idxs"]
+
+        placeholders = cached_info.placeholders
+        stack_traces = cached_info.stack_traces
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
+        if (
+            boxed_forward_device_index is not None
+            and not is_inference
+            and not is_backward
+        ):
+            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+        from .compile_fx import cudagraphify
+
+        compiled_graph.current_callable = cudagraphify(
+            compiled_graph.current_callable,
+            static_input_idxs=static_input_idxs,
+            device_index=next(iter(compiled_graph.device_idxs)),
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=tuple(compiled_graph.constants.values()),
+            placeholders=placeholders,
+            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+        )
+
+    else:
+        BoxedBool.disable(cudagraphs)
+
+        # See [Backward Generation Handling]
+        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+        # know we are we running the backward even if we will not run it in cudagraphs
+        if is_backward and config.triton.cudagraph_trees:
+            assert boxed_forward_device_index is not None
+            assert boxed_forward_device_index.value is not None
+            compiled_graph_callable = compiled_graph.current_callable
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_forward_device_index.value, create_if_none_exists=False
+            )
+            # should already exist from forward
+            assert manager is not None
+
+            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
+                manager.set_to_running_backward()  # type: ignore[union-attr]
+                return compiled_graph_callable(new_inputs)
+
+            compiled_graph.current_callable = compiled_artifact
+
+        if "cuda" in compiled_graph.device_types:
+            # prefer better disable_cudagraphs_reason bc stack trace
+            # TODO: migrate all disable reasons to stack trace, refactor
+            if compiled_graph.disabled_cudagraphs_reason:
+                log_cudagraph_skip_and_bump_counter(
+                    compiled_graph.disabled_cudagraphs_reason
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+
+
+def maybe_realign_inputs(
+    ran_cudagraphs: BoxedBool,
+    compiled_graph: CompiledFxGraph,
+    inputs_to_check: Sequence[int],
+) -> None:
+    """
+    Realigns input strides from inputs_to_check if
+    we didn't end up running cudagraphs. Mutates
+    `compiled_graph.current_callable` if cudagraphs
+    was run. Otherwise, does nothing.
+    """
+    if not ran_cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
+
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
@@ -971,8 +1095,53 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-
         return graph
+
+    @staticmethod
+    def post_compile(
+        compiled_graph: CompiledFxGraph,
+        example_inputs: List[torch.Tensor],
+        cudagraphs: BoxedBool,
+    ) -> CompiledFxGraph:
+        """
+        Run a set of post processing steps after loading from the cache. These involve:
+         - Setting the tracing context output strides
+         - Running cudagraphs if enabled
+         - Realigning inputs
+
+        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
+        The results of this function are *not* saved in the cache itself.
+        """
+        set_tracing_context_output_strides(example_inputs, compiled_graph)
+
+        if cudagraphs:
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
+            if compiled_graph.disabled_cudagraphs_reason:
+                if "cuda" in compiled_graph.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            else:
+                cudagraph_post_compile(
+                    example_inputs,
+                    compiled_graph,
+                    cudagraphs,
+                )
+        inputs_to_check = compiled_graph.inputs_to_check
+        # cudagraphs could have been disabled from the earlier conditions
+        # so we still need to realign inputs if that happens
+        maybe_realign_inputs(
+            cudagraphs,
+            compiled_graph,
+            inputs_to_check,
+        )
+
+        return compiled_graph
 
     @staticmethod
     def _save_graph(
@@ -1121,7 +1290,9 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_miss"] += 1
                 cache_state = "miss"
                 start_time = time_ns()
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
                 time_taken_ns = time_ns() - start_time
                 FxGraphCache._save_graph(
                     key,
@@ -1140,8 +1311,10 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
             if not compiled_graph:
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
+        assert compiled_graph is not None
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -1152,7 +1325,10 @@ class FxGraphCache:
                 {"key": key, "cache_state": cache_state, "components": debug_lines}
             ),
         )
-
+        # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+        FxGraphCache.post_compile(
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
+        )
         return compiled_graph
 
     @staticmethod
@@ -1197,6 +1373,11 @@ class CompiledFxGraph:
     # ShapeEnv.produce_guards_expression()
     guards_expr: Optional[str]
 
+    cudagraph_info: Optional[CudagraphCachedInfo]
+    fx_kwargs: Dict[str, Any]
+    inputs_to_check: Sequence[int]
+    boxed_forward_device_index: Optional[BoxedDeviceIndex]
+
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
 
@@ -1215,9 +1396,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        self.device_types = graph.device_types
-        self.device_idxs = graph.device_idxs
-        self.mutated_inputs = graph.mutated_inputs
+        # TODO - ordered set
+        self.device_types = set(graph.device_types)
+        self.device_idxs = set(graph.device_idxs)
+        self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
@@ -1355,6 +1537,7 @@ def get_include_and_linking_paths(
         or vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or config.profiler_mark_wrapper_call
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
@@ -1464,6 +1647,7 @@ def get_include_and_linking_paths(
         # like aoti_torch_grad_mode_set_enabled
         if aot_mode and sys.platform == "linux" and not config.is_fbcode():
             libs += ["torch", "torch_cpu"]
+            lpaths += [cpp_extension.TORCH_LIB_PATH]
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
@@ -1620,7 +1804,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
+    def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
 
 
@@ -1690,11 +1874,16 @@ class AotCodeCompiler:
             payload_fn=lambda: source_code,
         )
 
+        # We use a file lock below to protect FS operations. The lock file
+        # is scoped to the 'key', so make sure the consts_path is protected
+        # by the same lock:
+        consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
+
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
                 consts,
                 "bin",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
 
             consts_o = os.path.splitext(consts_path)[0] + ".o"
@@ -1763,7 +1952,7 @@ class AotCodeCompiler:
                 _, _binary_constants_path = write(
                     consts,
                     "bin",
-                    specified_dir=os.path.split(input_path)[0],
+                    specified_dir=consts_specified_dir,
                 )
                 log.debug("binary constants path: %s", _binary_constants_path)
 
@@ -1786,7 +1975,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts_asm,
                 "S",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
             cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
@@ -2037,8 +2226,14 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
-@dynamo_timed
 def compile_file(
+    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+) -> None:
+    with dynamo_timed("compile_file"):
+        return _compile_file(input_path, output_path, cmd)
+
+
+def _compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
     input_paths = [input_path] if isinstance(input_path, str) else input_path
@@ -3236,7 +3431,7 @@ class DLLWrapper:
     def __init__(
         self,
         lib_path: str,
-    ):
+    ) -> None:
         self.lib_path = lib_path
         self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
@@ -3483,11 +3678,10 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ):
+    ) -> None:
         self.kernel = kernel
         self.future = future
 
-    # @dynamo_utils.dynamo_timed
     def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.
