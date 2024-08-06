@@ -166,7 +166,7 @@ std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
       return device_index;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace _internal {

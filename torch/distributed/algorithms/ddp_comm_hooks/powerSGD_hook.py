@@ -1,17 +1,17 @@
-from collections import defaultdict
+# mypy: allow-untyped-defs
 import logging
 import math
+from collections import defaultdict
 from typing import Dict
 
 import torch
 import torch.distributed as dist
-
-from . import default_hooks as default
 from torch.distributed import distributed_c10d
 
-__all__ = [
-    "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
-]
+from . import default_hooks as default
+
+
+__all__ = ["PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,12 @@ def _orthogonalize(matrices, epsilon=0):
             matrices,
             out=(
                 matrices,
-                torch.empty(num_matrices, rank, rank, device=matrices.device, dtype=dtype)
-            )
+                torch.empty(
+                    num_matrices, rank, rank, device=matrices.device, dtype=dtype
+                ),
+            ),
         )
+
 
 def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
@@ -102,14 +105,15 @@ def _should_compress(
 
 def _report_compression_stats(bucket, state):
     """Report compression stats at frequency of ``compression_stats_logging_frequency`` specified in PowerSGD state."""
-    if (
-        bucket.is_last()
-        and state.iter >= state.next_stats_report
-    ):
+    if bucket.is_last() and state.iter >= state.next_stats_report:
         stats = state.compression_stats()
         logger.info(
             "Compression stats: iter %s, total before compression %s, total after compression %s, "
-            "rate %s", state.iter, stats[1], stats[2], stats[0]
+            "rate %s",
+            state.iter,
+            stats[1],
+            stats[2],
+            stats[0],
         )
         state.next_stats_report = state.iter + state.compression_stats_logging_frequency
 
@@ -243,6 +247,7 @@ class PowerSGDState:
         # If the same random projection is used,
         # there will be differences between the gradients that are never synchronized.
         import numpy as np
+
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
@@ -279,7 +284,8 @@ class PowerSGDState:
         )
         return {
             slot: getattr(self, slot)
-            for slot in self.__slots__ if slot != "process_group"
+            for slot in self.__slots__
+            if slot != "process_group"
         }
 
     def __setstate__(self, state):
@@ -304,9 +310,7 @@ class PowerSGDState:
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
-            logger.info(
-                "Start to apply PowerSGD after %s iterations.", self.iter
-            )
+            logger.info("Start to apply PowerSGD after %s iterations.", self.iter)
 
     def compression_stats(self):
         r"""
@@ -419,7 +423,7 @@ def powerSGD_hook(
         else:
             logger.info(
                 "A zero tensor of length %s that represents local error is created.",
-                total_length
+                total_length,
             )
             state.error_dict[bucket_index] = torch.zeros(
                 total_length, device=device, dtype=dtype
@@ -477,7 +481,8 @@ def powerSGD_hook(
         if state.warm_start:
             logger.info(
                 "Allocating contiguous memory of length %s for Ps, and of length %s for Qs, respectively.",
-                total_Ps_size, total_Qs_size
+                total_Ps_size,
+                total_Qs_size,
             )
         state.p_memory_dict[bucket_index] = torch.empty(
             total_Ps_size, device=device, dtype=dtype
@@ -723,7 +728,7 @@ def batched_powerSGD_hook(
     state.total_numel_after_compression += (
         square_side_length * state.matrix_approximation_rank * 2
     )
-    padded_total_length = square_side_length ** 2
+    padded_total_length = square_side_length**2
     input_tensor.resize_(padded_total_length)
     input_tensor[total_length:padded_total_length].fill_(0)
 
@@ -738,7 +743,7 @@ def batched_powerSGD_hook(
         else:
             logger.info(
                 "A zero tensor of length %s that represents local error is created.",
-                padded_total_length
+                padded_total_length,
             )
             state.error_dict[bucket_index] = torch.zeros(
                 padded_total_length, device=device, dtype=input_tensor.dtype
@@ -758,7 +763,8 @@ def batched_powerSGD_hook(
         if state.warm_start:
             logger.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of %s x %s.",
-                square_side_length, state.matrix_approximation_rank
+                square_side_length,
+                state.matrix_approximation_rank,
             )
 
         def create_low_rank_tensor(fill_random_values, rng):

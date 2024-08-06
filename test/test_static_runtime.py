@@ -156,7 +156,7 @@ def output_graph(a, b, c, iters: int):
 
 
 class SubModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 11
         self.b = 2
@@ -166,7 +166,7 @@ class SubModule(nn.Module):
 
 
 class SubModule2(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 12
         self.b = 2
@@ -177,7 +177,7 @@ class SubModule2(nn.Module):
 
 
 class TestModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.sub1 = SubModule()
         self.sub2 = SubModule2()
@@ -330,7 +330,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     """
@@ -360,7 +360,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     def test_multihead_attention_layer(self):

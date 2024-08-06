@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import copy
 import json
@@ -47,6 +47,10 @@ from torch.distributed.distributed_c10d import (
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
     _sync_module_states,
+)
+from torch.profiler import (
+    ExecutionTraceObserver,
+    ProfilerActivity,
 )
 
 from torch.nn.parallel import DistributedDataParallel
@@ -103,7 +107,7 @@ else:
 
 
 class NetWithBuffers(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = nn.Linear(10, 10, bias=False)
         self.b = nn.Linear(10, 1, bias=False)
@@ -256,7 +260,7 @@ class DDPUnevenTestInput(NamedTuple):
 
 
 class _FC2(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc = nn.Linear(10, 50, bias=True)
         self.fc.bias.requires_grad = False
@@ -267,7 +271,7 @@ class _FC2(nn.Module):
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = _FC2()
@@ -285,7 +289,7 @@ class Net(nn.Module):
 
 
 class LargeNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1000, 2000, bias=False)
         self.fc2 = nn.Linear(2000, 500, bias=False)
@@ -297,7 +301,7 @@ class LargeNet(nn.Module):
 
 
 class Task(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.p = nn.Parameter(torch.ones(2, 2))
 
@@ -321,7 +325,7 @@ class BatchNormNet(nn.Module):
 
 
 class UnusedParamTwoLinLayerNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = nn.Linear(10, 10, bias=False)
         self.b = nn.Linear(10, 10, bias=False)
@@ -334,7 +338,7 @@ class UnusedParamTwoLinLayerNet(nn.Module):
 
 
 class DictOutputModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.module = UnusedParamTwoLinLayerNet()
 
@@ -348,7 +352,7 @@ class DictOutputModule(nn.Module):
 
 
 class TwoLinLayerNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = nn.Linear(10, 10, bias=False)
         self.b = nn.Linear(10, 1, bias=False)
@@ -379,7 +383,7 @@ class EmbeddingNetDifferentParams(nn.Module):
 
 
 class ControlFlowToyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin1 = nn.Linear(10, 10, bias=False)
         self.lin2 = nn.Linear(10, 10, bias=False)
@@ -585,7 +589,7 @@ class TestDistBackend(MultiProcessTestCase):
         return f"{FILE_SCHEMA}{self.file_name}"
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):
         if BACKEND == "nccl" and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
@@ -1736,8 +1740,8 @@ class DistributedTest:
             rank = dist.get_rank()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            recv_ranks = list()
-            irecv_ranks = list()
+            recv_ranks = []
+            irecv_ranks = []
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
@@ -4103,7 +4107,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        "destination rank: %d, my rank: %d" % (dest, rank)
+                        msg="destination rank: %d, my rank: %d" % (dest, rank)
                         + " (if you see this failure, please report in #14554)",
                     )
 
@@ -4404,7 +4408,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_zero_output_features(self):
             class ToyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.net1 = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
@@ -4418,7 +4422,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(BACKEND == "nccl", "Gloo-only test")
         def test_ddp_create_graph(self):
             class Model(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.p = nn.Parameter(torch.tensor(1.0))
 
@@ -4975,7 +4979,7 @@ class DistributedTest:
             mp_config = self._get_fp16_config()
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.m = torch.nn.Linear(1, 5)
                     self.register_buffer('buffer', torch.randn(1, 2))
@@ -6867,7 +6871,20 @@ class DistributedTest:
                     net.zero_grad()
                     torch.cuda.synchronize(device=self.rank)
 
-        def _test_ddp_profiling(self, profiler_ctx):
+        def _test_ddp_profiling(self, profiler_ctx, profiler_ctx2=None):
+            """Runs DDP based model training and captures profiles.
+            This test will do two profiler runs.
+            1. An inital basic run to check if profiler events are correctly captured.
+            2. A second profiling pass after running some iterations of DDP, to check robustness of thread local state.
+
+            args
+                profiler_ctx : Profiler context manager for pass 1
+                profiler_ctx2 : Profiler context manager for pass 2.
+                    This can be left out as None, in which case a deepcopy
+                    of profiler_ctx is used.
+            Returns:
+                prof: Instantiated profiler object that can be used for post analysis.
+            """
             batch = 3
             dim = 10
             num_iters = 6
@@ -6878,7 +6895,8 @@ class DistributedTest:
                 model.cuda(self.rank),
                 device_ids=[self.rank],
             )
-            profiler_ctx_copy = copy.deepcopy(profiler_ctx)
+            if profiler_ctx2 is None:
+                profiler_ctx2 = copy.deepcopy(profiler_ctx)
 
             with profiler_ctx as prof:
                 for i in range(num_iters):
@@ -6913,7 +6931,7 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
             # Now enable the profiler.
-            with profiler_ctx_copy as prof:
+            with profiler_ctx2 as prof:
                 loss = net(inp).sum()
                 loss.backward()
 
@@ -6970,6 +6988,90 @@ class DistributedTest:
             a1 = nccl_meta["allreduce"][1]
             self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
+
+        def _validate_execution_trace_nccl(self, et_file: str) -> None:
+            """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
+            We test for basic fields in theese nodes in the Execution Trace.
+            """
+            with open(et_file) as f:
+                et = json.load(f)
+            pg_cfg_node = [n for n in et["nodes"] if n["name"] == "## process_group:init ##"]
+            self.assertGreaterEqual(len(pg_cfg_node), 1)
+            nccl_meta_nodes = [n for n in et["nodes"] if n["name"] == "record_param_comms"]
+            self.assertEqual(len(nccl_meta_nodes), 3)
+            per_coll_meta = defaultdict(list)
+
+            # Sanity check NCCL metadata nodes
+            for n in nccl_meta_nodes:
+                attrs_list = n.get("attrs", [])
+                self.assertGreater(len(attrs_list), 0)
+                attrs = {a["name"]: a["value"] for a in attrs_list}
+
+                collname = attrs.get("collective_name", "")
+                self.assertNotEqual(collname, "")
+                self.assertNotEqual(attrs.get("dtype", ""), "")
+
+                per_coll_meta[collname].append(attrs)
+                if collname in {"wait"}:
+                    continue
+
+                self.assertEqual(attrs["pg_name"], "0")   # yes this is a string
+                self.assertEqual(attrs["pg_desc"], "default_pg")
+                self.assertEqual(attrs["pg_size"], 2)
+
+                self.assertGreaterEqual(attrs.get("in_msg_nelems", -1), 0)
+                self.assertGreaterEqual(attrs.get("out_msg_nelems", -1), 0)
+                self.assertTrue("in_split_size" in attrs.keys())
+                self.assertTrue("out_split_size" in attrs.keys())
+                self.assertEqual(attrs.get("global_rank_start", -1), 0)
+                self.assertEqual(attrs.get("global_rank_stride", -1), 1)
+
+            # print(per_coll_meta)
+            self.assertEqual(len(per_coll_meta["allreduce"]), 2)
+            self.assertEqual(len(per_coll_meta["wait"]), 1)
+
+            # check allreduce message sizes
+            a0 = per_coll_meta["allreduce"][0]
+            self.assertEqual(a0["out_msg_nelems"], 100, msg=f"{a0}")
+            self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
+            a1 = per_coll_meta["allreduce"][1]
+            self.assertEqual(a1["out_msg_nelems"], 1, msg=f"{a1}")
+            self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
+
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
+        @skip_but_pass_in_sandcastle_if(
+            IS_MACOS or IS_WINDOWS,
+            "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
+        )
+        @unittest.skipIf(BACKEND != "nccl", "Tests nccl metadata primarily.")
+        def test_ddp_profiling_execution_trace(self):
+            self.assertEqual(dist.get_backend(), "nccl")
+            # Create a temp file to save execution trace data
+            fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+            fp.close()
+            et_file = fp.name
+            et = ExecutionTraceObserver().register_callback(et_file)
+
+            # first profiler context need not have ET
+            torch_profiler_ctx1 = torch.profiler.profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            )
+            # collect ET in second profiler pass
+            torch_profiler_ctx2 = torch.profiler.profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                execution_trace_observer=et
+            )
+            prof = self._test_ddp_profiling(
+                profiler_ctx=torch_profiler_ctx1,
+                profiler_ctx2=torch_profiler_ctx2,
+            )
+
+            print(f"Execution trace saved at {fp.name}")
+            self._validate_execution_trace_nccl(et_file)
+
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
@@ -7139,7 +7241,7 @@ class DistributedTest:
             # for models with SyncBN or general collective comm when
             # throw_on_early_termination=True.
             class ModelWithComm(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.lin = nn.Linear(2, 40, bias=False)
 
@@ -7421,7 +7523,7 @@ class DistributedTest:
             error_str = "Intentional error"
 
             class ExceptionModule(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = nn.Parameter(torch.ones(1, requires_grad=True))
 
@@ -7629,7 +7731,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_ddp_unused_params_rebuild_buckets_exception(self):
             class ToyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10, bias=False)
@@ -7683,7 +7785,7 @@ class DistributedTest:
             # When find_unused_parameters=True, ensure we mark unused parameters
             # even if they share gradient accumulators.
             class ToyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     # net1, bias, and net1.bias are all unused params.
                     self.net1 = nn.Linear(10, 5, bias=False)
@@ -7764,16 +7866,16 @@ class DistributedTest:
             }
 
             class ToyModel(torch.nn.Module):
-                def __init__(_self):  # noqa: B902
+                def __init__(self_):  # noqa: B902
                     super().__init__()
-                    _self.lin = nn.Linear(10, 10, bias=False)
+                    self_.lin = nn.Linear(10, 10, bias=False)
 
-                def forward(_self, x, expected_type):  # noqa: B902
+                def forward(self_, x, expected_type):  # noqa: B902
                     # Similar to scatter, the recursive to in the single-device
                     # case does not move tensors if they are in a custom type.
                     self.assertTrue(isinstance(x, expected_type))
                     fwd_tensor = validators[expected_type](x)
-                    return _self.lin(fwd_tensor)
+                    return self_.lin(fwd_tensor)
 
             model = torch.nn.parallel.DistributedDataParallel(
                 ToyModel().to(self.rank), device_ids=[self.rank]
@@ -7827,11 +7929,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(_self):  # noqa: B902
+                def __init__(self_):  # noqa: B902
                     super().__init__()
-                    _self.lin = nn.Linear(10, 1)
+                    self_.lin = nn.Linear(10, 1)
 
-                def forward(_self, input, expected_type):  # noqa: B902
+                def forward(self_, input, expected_type):  # noqa: B902
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -7840,7 +7942,7 @@ class DistributedTest:
                     self.assertEqual(input._fields, EXPECTED_FIELDS)
                     self.assertEqual(a, input.a)
                     self.assertEqual(b, input.b)
-                    return _self.lin(torch.mul(input.a, input.b))
+                    return self_.lin(torch.mul(input.a, input.b))
 
             model = torch.nn.parallel.DistributedDataParallel(
                 NamedTupleModule().cuda(self.rank), device_ids=[self.rank]
@@ -8882,7 +8984,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_ddp_build_debug_param_to_name_mapping_requires_grad(self):
             class Net(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.lin = nn.Linear(10, 10)
                     # Is not tracked by DDP and should not show up in param to
@@ -8907,7 +9009,7 @@ class DistributedTest:
             debug_mode_off = dist.get_debug_level() == dist.DebugLevel.OFF
 
             class SubModule(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.embedding_net = EmbeddingNetDifferentParams(0)
                     self.lin = TwoLinLayerNet()
@@ -8923,7 +9025,7 @@ class DistributedTest:
                     return x
 
             class MyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.sub_module = SubModule()
 
@@ -9159,7 +9261,7 @@ class DistributedTest:
             torch.cuda.set_device(rank)
 
             class NestedOutputModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.lin = nn.Linear(100, 1, bias=False)
 
@@ -9245,7 +9347,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
 
             class MyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fc1 = nn.Linear(10, 10, bias=False)
                     self.fc2 = nn.Linear(10, 10, bias=False)
@@ -9282,7 +9384,7 @@ class DistributedTest:
         )
         def test_detect_ddp_is_actually_static(self):
             class ToyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10)
@@ -9328,7 +9430,7 @@ class DistributedTest:
         def _test_ddp_new_tensor_in_fwd(self, static_graph):
             # Test from https://github.com/pytorch/pytorch/issues/60733
             class MyModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fc1 = nn.Linear(10, 10, bias=False)
                     self.fc2 = nn.Linear(10, 10, bias=False)
@@ -9786,6 +9888,71 @@ class DistributedTest:
         def test_ddp_update_process_group_default_group(self):
             self._run_ddp_update_process_group(new_pg=False)
 
+        @skip_if_lt_x_gpu(4)
+        @require_world_size(4)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_update_process_group_grad_undefined(self):
+            class SimulateError(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input):
+                    return input
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    raise RuntimeError
+
+            class MyModel(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.fc1 = torch.nn.Linear(10, 10).cuda(device)
+                    self.fc2 = torch.nn.Linear(10, 10).cuda(device)
+                    self.fc3 = torch.nn.Linear(10, 10).cuda(device)
+
+                def forward(self, inp, error):
+                    if error:
+                        return self.fc3(self.fc2(self.fc1(SimulateError.apply(inp))))
+                    else:
+                        return self.fc2(self.fc1(inp))
+
+
+            input = torch.rand(10, 10, requires_grad=True).cuda(self.rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                MyModel(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+                bucket_cap_mb=1,
+            )
+
+            try:
+                ddp(input, True).sum().backward()
+            except RuntimeError:
+                ddp._update_process_group(_get_default_group())
+
+            # Reset grads.
+            for param in ddp.parameters():
+                param.grad = None
+
+            # Run ddp again.
+            ddp(input, False).sum().backward()
+
+        @skip_if_lt_x_gpu(4)
+        @require_world_size(4)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_update_process_group_no_find_unused(self):
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(10, 10).cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=False,
+            )
+            ddp._update_process_group(_get_default_group())
+
+
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -9798,7 +9965,7 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
 
             class NetWithBuffers(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.a = nn.Linear(10, 10, bias=False)
                     self.b = nn.Linear(10, 1, bias=False)
@@ -9835,7 +10002,7 @@ class DistributedTest:
         )
         def test_static_graph_multi_forward(self):
             class Net(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.lin = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
@@ -9917,7 +10084,7 @@ class DistributedTest:
         )
         def test_stateless_api_with_ddp(self):
             class MockModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.l1 = torch.nn.Linear(1, 1)
                     buffer = torch.ones(1)
@@ -9964,7 +10131,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         def test_ddp_forward_backward_hook(self):
             class DummyTestModel(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     torch.manual_seed(0)
                     self.fc = nn.Linear(2, 2)
@@ -10224,7 +10391,7 @@ class DistributedTest:
                     return func(*args, **kwargs)
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fc = torch.nn.Linear(10, 10)
 

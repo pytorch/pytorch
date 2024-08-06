@@ -11,12 +11,13 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
-fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
+fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.
@@ -24,7 +25,7 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 # but it is on by default for aot_eager.
 debug_assert = False
 
-debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
+debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
 # Today, if you are in a situation where there is "false aliasing"
 # (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
@@ -41,8 +42,11 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+
+enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+
 # When AOTAutograd regenerates aliased graph outputs,
-# attempte to use functionalization's view-replay logic
+# attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.
 # This can have some perf implications
 # (although for many models this will not matter).
@@ -59,7 +63,11 @@ cse = True
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
 
-view_replay_for_aliased_outputs = not is_fbcode()
+
+# View replay is currently not compatible with AOTAutogradCache, since
+# FunctionalTensors are not serializable. We'll need to make them
+# serializable before enabling warm cache with this config turned on.
+view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -87,7 +95,43 @@ ban_recompute_not_in_allowlist = True
 # the result of reductions is generally very small but recomputing reductions in
 # a fusion can be expensive.
 ban_recompute_reductions = True
+# Prevents the partitioner from ever saving views (i.e. always recompute them).
+# Generally a good idea since views are free to recompute.
+recompute_views = False
 
+# By default, the partitioner is purely trying to optimize for runtime (although
+# it should always use less memory than eager)
+# This knob controls the partitioner to make that tradeoff for you, choosing the
+# fastest option that saves less activations than the memory budget.
+# Specifically, 0.0 corresponds to the activation memory from applying
+# activation checkpointing to the full compiled region, and 1.0 corresponds to
+# the activation memory from the default runtime-optimized strategy.  So, 0.4
+# would result in a strategy that saves 40% of the activations compared to the
+# default strategy.
+# It solves a 0-1 knapsack to find the minimum recompute necessary to stay below
+# the activation memory budget.
+# NOTE: This *cannot* be treated as
+activation_memory_budget = 1.0
+
+# This controls how we estimate the runtime when deciding what the cheapest
+# operators to recompute are. The 3 options are
+# "flops": Bases it off of the flop count provided by torch.utils.flop_counter
+# "profile": Benchmarks each operator to come up with a runtime
+# "testing": Returns 1 for everything
+activation_memory_budget_runtime_estimator = "flops"
+
+# This controls the solver used for the 0-1 knapsack. By default we use a
+# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
+# (which has a scipy dependency).
+activation_memory_budget_solver = "dp"
+
+# This dumps out a png visualization of the expected runtime vs. activation
+# memory tradeoffs for all memory budget values from 0 to 1 in increments of
+# 0.5. See an example here:
+# https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
+visualize_memory_budget_pareto = (
+    os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
+)
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the
@@ -136,10 +180,24 @@ unlift_effect_tokens = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# This controls whether we collect donated buffer. This flag must be set
+# False if a user wants to retain_graph=True for backward.
+donated_buffer = False
+
+# Controls the default graph output format used by draw_graph
+# Supported formats are defined here https://graphviz.org/docs/outputs/
+torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
+# Error on BypassAOTAutogradCache instead of just a warning
+# Used for tests
+strict_autograd_cache = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])

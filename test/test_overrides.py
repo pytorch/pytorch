@@ -8,8 +8,9 @@ import pprint
 import pickle
 import collections
 import unittest
+import contextlib
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -148,13 +149,7 @@ class DiagonalTensor:
         return cls.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
-        if type(other) is type(self):
-            if self._N == other._N and self._i == other._i:
-                return True
-            else:
-                return False
-        else:
-            return False
+        return type(other) is type(self) and self._N == other._N and self._i == other._i
 
 @implements_diagonal(torch.mean)
 def mean(mat):
@@ -377,8 +372,29 @@ class TensorLike:
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._stack = contextlib.ExitStack()
+        if TEST_WITH_TORCHDYNAMO:
+            # Add classes to the wrapped tensor subclasses
+            @contextlib.contextmanager
+            def setup_subclasses():
+                old = set(torch._dynamo.config.traceable_tensor_subclasses)
+                torch._dynamo.config.traceable_tensor_subclasses.add(DiagonalTensor)
+                try:
+                    yield
+                finally:
+                    torch._dynamo.config.traceable_tensor_subclasses.clear()
+                    torch._dynamo.config.traceable_tensor_subclasses.update(old)
+
+            cls._stack.enter_context(setup_subclasses())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+
     def test_mean_semantics(self):
-        """Test that a function with one argument can be overrided"""
+        """Test that a function with one argument can be overridden"""
         t1 = DiagonalTensor(5, 2)
         t2 = SubTensor([[1, 2], [1, 2]])
         t3 = SubDiagonalTensor(5, 2)
@@ -394,7 +410,7 @@ class TestTorchFunctionOverride(TestCase):
             has_torch_function(object())
 
     def test_mm_semantics(self):
-        """Test that a function with multiple arguments can be overrided"""
+        """Test that a function with multiple arguments can be overridden"""
         t1 = DiagonalTensor(5, 2)
         t2 = torch.eye(5) * 2
         t3 = SubTensor([[1, 2], [1, 2]])
@@ -1120,24 +1136,29 @@ class TestResolveName(TestCase):
                 )
 
 class TestTorchFunctionWarning(TestCase):
-    def test_warn_on_invalid_torch_function(self):
-        class Bad1:
+    def test_warn_on_invalid_torch_function_standalone_class(self):
+        class StandaloneTorchFunctionClass:
             def __torch_function__(self, *args, **kwargs):
                 pass
+        a = StandaloneTorchFunctionClass()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # Function that handles torch_function on the python side
+            torch.nn.functional.dropout(a)
+        with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
+            # Function that handles torch_function in C++
+            torch.abs(a)
 
-        class Bad2(torch.Tensor):
+    def test_warn_on_invalid_torch_function_tensor_subclass(self):
+        class TensorSubclassTorchFunctionClass(torch.Tensor):
             def __torch_function__(self, *args, **kwargs):
                 pass
-
-        a = Bad1()
-        for a in (Bad1(), Bad2()):
-            with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
-                # Function that handles torch_function on the python side
-                torch.nn.functional.dropout(a)
-
-            with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
-                # Function that handles torch_function in C++
-                torch.abs(a)
+        b = TensorSubclassTorchFunctionClass()
+        with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            # Function that handles torch_function on the python side
+            torch.nn.functional.dropout(b)
+        with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
+            # Function that handles torch_function in C++
+            torch.abs(b)
 
 class TestDisabledUserWarnings(TestCase):
     def test_no_implicit_user_warning_for_deprecated_functions(self):

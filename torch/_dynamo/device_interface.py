@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
+
 
 get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
@@ -128,7 +130,9 @@ class DeviceGuard:
     The device is switched using the provided device interface.
     """
 
-    def __init__(self, device_interface: Type[DeviceInterface], index: Optional[int]):
+    def __init__(
+        self, device_interface: Type[DeviceInterface], index: Optional[int]
+    ) -> None:
         self.device_interface = device_interface
         self.idx = index
         self.prev_idx = -1

@@ -5,12 +5,13 @@ import sys
 import tempfile
 import unittest
 
+from model import get_custom_op_library_path, Model
+
 import torch
 import torch._library.utils as utils
-
-from model import get_custom_op_library_path, Model
 from torch import ops
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+
 
 torch.ops.import_module("pointwise")
 

@@ -1,10 +1,9 @@
+# mypy: allow-untyped-defs
 from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -19,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("while_loop")
 
     def __call__(
@@ -119,7 +118,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
-    additional_inputs: Tuple = tuple()
+    additional_inputs: Tuple = ()
     if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 

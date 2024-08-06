@@ -13,12 +13,12 @@ namespace lazy {
 
 std::optional<SourceLocation> GetPythonFrameTop() {
   if (!Py_IsInitialized()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
   if (frame == nullptr) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   SourceLocation loc;
   auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));

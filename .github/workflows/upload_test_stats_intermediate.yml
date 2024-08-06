@@ -1,0 +1,43 @@
+name: Upload test stats intermediate
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_id:
+        description: workflow_id of the run
+        required: true
+      workflow_run_attempt:
+        description: workflow_run_attempt of the run
+        required: true
+
+jobs:
+  intermediate_upload_test_stats:
+    name: Intermediate upload test stats for ${{ inputs.workflow_id }}
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
+
+      - name: Upload test stats
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ inputs.workflow_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ inputs.workflow_run_attempt }}
+        run: |
+          python3 -m tools.stats.upload_test_stats_intermediate \
+            --workflow-run-id "${WORKFLOW_RUN_ID}" \
+            --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" \

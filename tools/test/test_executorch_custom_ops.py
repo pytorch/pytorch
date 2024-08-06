@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import tempfile
 import unittest
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import ANY, Mock, patch
 
 import expecttest
@@ -13,10 +15,11 @@ from torchgen.model import Location, NativeFunction
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager
 
+
 SPACES = "    "
 
 
-def _get_native_function_from_yaml(yaml_obj: Dict[str, object]) -> NativeFunction:
+def _get_native_function_from_yaml(yaml_obj: dict[str, object]) -> NativeFunction:
     native_function, _ = NativeFunction.from_yaml(
         yaml_obj,
         loc=Location(__file__, 1),
@@ -33,7 +36,7 @@ class TestComputeNativeFunctionStub(expecttest.TestCase):
     """
 
     def _test_function_schema_generates_correct_kernel(
-        self, obj: Dict[str, Any], expected: str
+        self, obj: dict[str, Any], expected: str
     ) -> None:
         func = _get_native_function_from_yaml(obj)
 

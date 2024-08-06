@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """JIT-related state.
 
 This module stores various pieces of Python-global state relating to the JIT.
@@ -18,7 +19,7 @@ class EnabledProxy:
     This is just a wrapper for a bool, so that we get reference semantics
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.enabled = self.parse_env(
             "PYTORCH_JIT", True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED"
         )

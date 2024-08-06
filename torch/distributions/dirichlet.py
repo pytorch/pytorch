@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
+
 
 __all__ = ["Dirichlet"]
 

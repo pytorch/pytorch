@@ -2,13 +2,13 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <optional>
 
 #include <cstdint>
 #include <memory>
@@ -122,7 +122,7 @@ struct TORCH_API KernelSpec {
     std::lock_guard<std::mutex> guard{mutex_};
     const auto it = kernels_.find(arg_spec);
     if (it == kernels_.end())
-      return c10::nullopt;
+      return std::nullopt;
     return it->second;
   }
   void cacheKernel(const ArgSpec& arg_spec, std::shared_ptr<FusedKernel> kernel)

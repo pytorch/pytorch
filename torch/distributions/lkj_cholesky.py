@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This closely follows the implementation in NumPyro (https://github.com/pyro-ppl/numpyro).
 
@@ -13,6 +14,7 @@ import torch
 from torch.distributions import Beta, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
+
 
 __all__ = ["LKJCholesky"]
 

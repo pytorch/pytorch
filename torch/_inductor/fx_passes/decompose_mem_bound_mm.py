@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import List
 
@@ -6,9 +7,9 @@ from torch import Tensor
 from torch._dynamo.utils import counters
 
 from .. import config
-
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass
+
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)
@@ -19,12 +20,12 @@ MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 
 min_first_dimension_decomposition = MIN_FIRST_DIMENSION_DECOMPOSITION
 max_other_dimention_decomposition = MAX_OTHER_DIMENSION_DECOMPOSITION
-if "decompose_mem_bound_mm" in config.post_grad_fusion_options:
+if "decompose_mm_pass" in config.post_grad_fusion_options:
     min_first_dimension_decomposition = config.post_grad_fusion_options[
-        "decompose_mem_bound_mm"
+        "decompose_mm_pass"
     ].get("min_first_dimension_decomposition", MIN_FIRST_DIMENSION_DECOMPOSITION)
     max_other_dimention_decomposition = config.post_grad_fusion_options[
-        "decompose_mem_bound_mm"
+        "decompose_mm_pass"
     ].get("max_other_dimention_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
 
 

@@ -9,6 +9,7 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 
+
 _INTEGRAL_TYPES = [
     torch.uint8,
     torch.int8,
@@ -150,8 +151,9 @@ def make_tensor(
             warnings.warn(
                 "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
                 "is deprecated since 2.1 and will be removed in 2.3. "
-                "Use torch.full(...) instead.",
+                "Use `torch.full(...)` instead.",
                 FutureWarning,
+                stacklevel=3,
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")
