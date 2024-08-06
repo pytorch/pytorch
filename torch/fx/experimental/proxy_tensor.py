@@ -23,6 +23,7 @@ import weakref
 
 from ._backward_state import BackwardState
 from .sym_node import SymNode
+from torch.utils._thunk import Thunk
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext, AbstractContextManager, ExitStack
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._subclasses.fake_impls import fast_detach
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import Proxy
 from torch.fx import Tracer, GraphModule
 from torch.fx.graph_module import _assign_attr
@@ -44,8 +46,9 @@ from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
 from typing import (
-    Any, Callable, Dict, List, Optional, Tuple, Union, Mapping, Sequence, Generic,
-    TypeVar, Generator, Protocol, overload, Type, TYPE_CHECKING)
+    Any, Callable, Dict, List, Optional, Tuple, Union,
+    Mapping, Sequence, TypeVar, Generator, Protocol, overload, Type, TYPE_CHECKING
+)
 from typing_extensions import Concatenate, ParamSpec, Self
 from weakref import WeakKeyDictionary
 
@@ -175,24 +178,6 @@ def set_proxy_slot(
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
-
-
-class Thunk(Generic[R]):
-    f: Optional[Callable[[], R]]
-    r: Optional[R]
-
-    __slots__ = ['f', 'r']
-
-    def __init__(self, f: Callable[[], R]):
-        self.f = f
-        self.r = None
-
-    def force(self) -> R:
-        if self.f is None:
-            return self.r  # type: ignore[return-value]
-        self.r = self.f()
-        self.f = None
-        return self.r
 
 
 _PySymProxyType = Thunk[Proxy]
@@ -390,20 +375,18 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
             lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_size.int, (proxy, i), {}), x),
             i)
 
-    for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(
-            s,
-            lambda x, i: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x),
-            i)
+    if not is_sparse_any(tensor):
+        for i, s in enumerate(tensor.stride()):
+            try_set_proxy_slot(s, lambda x, i: set_meta(
+                tracer.create_proxy('call_function', torch.ops.aten.sym_stride.int, (proxy, i), {}), x), i)
 
     try_set_proxy_slot(
         tensor.numel(),
         lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_numel.default, (proxy,), {}), x)
     )
-    try_set_proxy_slot(
-        tensor.storage_offset(),
-        lambda x: set_meta(tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x)
-    )
+    if not is_sparse_any(tensor):
+        try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(
+            tracer.create_proxy('call_function', torch.ops.aten.sym_storage_offset.default, (proxy,)), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 _NestedProxys = Union[Proxy, Sequence["_NestedProxys"], Mapping[object, "_NestedProxys"]]
@@ -1770,6 +1753,12 @@ def make_fx(
         record_module_stack: bool = False,
         _allow_fake_constant: bool = False,
         _error_on_data_dependent_ops: bool = True) -> Callable[..., GraphModule]:
+
+    """
+    Given a function f, return a new function which when executed with valid
+    arguments to f, returns an FX GraphModule representing the set of operations that
+    were executed during the course of execution.
+    """
 
     assert tracing_mode in ["real", "fake", "symbolic"]
 
