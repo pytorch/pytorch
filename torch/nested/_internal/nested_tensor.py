@@ -5,6 +5,7 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -208,9 +209,6 @@ class NestedTensor(torch.Tensor):
     @property
     def _min_seqlen(self):
         return self._get_min_seqlen()
-
-    def data_ptr(self) -> int:
-        return self._values.data_ptr()
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
