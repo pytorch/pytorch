@@ -306,15 +306,6 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
-        def inner(*args: Any, **kwargs: Any) -> Any:
-            with DebugContext():
-                return fn(*args, **kwargs)
-
-        return wrap_compiler_debug(inner, compiler_name="inductor")
-
-    @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
         debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
