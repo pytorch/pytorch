@@ -167,6 +167,24 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_msvc_cl(cpp_compiler: str) -> bool:
+    if not _IS_WINDOWS:
+        return False
+
+    try:
+        output_msg = (
+            subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        return "Microsoft" in output_msg.splitlines()[0]
+    except FileNotFoundError as exc:
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -181,8 +199,12 @@ def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
+@functools.lru_cache(None)
+def is_msvc_cl() -> bool:
+    return _is_msvc_cl(get_cpp_compiler())
+
+
 def get_compiler_version_info(compiler: str) -> str:
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
     try:
