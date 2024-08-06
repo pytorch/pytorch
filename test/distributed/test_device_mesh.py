@@ -50,6 +50,23 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
     os.environ["RANK"] = f"{rank}"
 
 
+class DeviceMeshTestGlooBackend(DTensorTestBase):
+    @property
+    def backend(self):
+        return "gloo"
+
+    @with_comms
+    def test_device_mesh_reuse_default_group(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_group = mesh.get_group()
+        default_group = _get_default_group()
+        if torch.cuda.is_available():
+            self.assertNotEqual(mesh_group, default_group)
+            self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
+        else:
+            self.assertEqual(mesh_group, default_group)
+
+
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
@@ -169,11 +186,11 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_from_group_with_global_pg(self):
-        # Simple test: check `from_group` for a global PG vs. directly
+        # Simple test: check `from_group` from a mesh pg vs. directly
         # initializing via `init_device_mesh`
-        global_pg = _get_default_group()
-        ref_global_mesh = init_device_mesh("cuda", (self.world_size,))
-        global_mesh = DeviceMesh.from_group(global_pg, "cuda")
+        ref_global_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_pg = ref_global_mesh.get_group()
+        global_mesh = DeviceMesh.from_group(mesh_pg, self.device_type)
         self.assertEqual(ref_global_mesh, global_mesh)
         self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
         self.assertEqual(
