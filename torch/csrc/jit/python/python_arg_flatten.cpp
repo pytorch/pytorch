@@ -39,7 +39,7 @@ py::object cast_handle_sequence(std::vector<py::handle> objs) {
   for (const auto i : c10::irange(num_objs)) {
     sequence[i] = py::reinterpret_borrow<py::object>(objs[i]);
   }
-  return sequence;
+  return static_cast<py::object>(sequence);
 }
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
