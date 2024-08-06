@@ -56,7 +56,6 @@ from .common import (
     DataTypePropagation,
     DeferredLine,
     DTYPE_TO_COMPUTATION_DTYPE,
-    get_export_declaration,
     IndentedBuffer,
     Kernel,
     KernelArgs,
@@ -77,6 +76,12 @@ from .cpp_utils import (
 
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}

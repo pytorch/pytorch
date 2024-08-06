@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import re
-import sys
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -47,12 +46,6 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-_IS_WINDOWS = sys.platform == "win32"
-
-
-def get_export_declaration():
-    return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
 
 def data_type_logger(msg):
