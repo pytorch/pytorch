@@ -2140,15 +2140,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # run_decompositions() triggers same error as Dynamo below
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
-
-        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
-        # "symbolically traced variables cannot be used as inputs to control flow"
-        strict = False
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2174,9 +2167,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dim = torch.export.Dim("Dim", min=16, max=64)
         dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
 
-        exported_program = export(
-            model, inputs, dynamic_shapes=dynamic_shapes, strict=strict
-        )
+        exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
         self.assertEqual(exported_program.module()(*inputs), model(*inputs))
 
     def test_export_mod_constraints(self):
@@ -5463,7 +5454,8 @@ def forward(self, b_pred, b_t, x, y):
 def forward(self, b_t, x, y):
     submod_3 = self.submod_1
     add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
-    return (add_1,)""",
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)""",
         )
 
         self.assertExpectedInline(
@@ -5473,7 +5465,7 @@ def forward(self, x, b_t, y):
     sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
-    return add_1""",
+    return (add_1,)""",
         )
 
     def test_predispatch_grad_wrappers(self):
@@ -5786,7 +5778,7 @@ def forward(self, x, b_t, y):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
@@ -5798,7 +5790,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
@@ -5821,7 +5813,7 @@ def forward(self, x):
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
     cos_1 = torch.ops.aten.cos.default(x);  x = None
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
     return (cos_2,)""",
@@ -6030,7 +6022,7 @@ def forward(self, x):
     lt = item < 6
     _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
-    return foo_unbacked""",
+    return (foo_unbacked,)""",
         )
         ep_aot = ep_pre.run_decompositions()
         self.assertExpectedInline(

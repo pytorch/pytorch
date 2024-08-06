@@ -2370,14 +2370,14 @@ class CPUReproTests(TestCase):
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2558,7 +2558,7 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch(fx_graph_cache=False)
     def test_outer_loop_fusion(self):
@@ -2740,7 +2740,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
@@ -2764,13 +2764,13 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
             # Test argmin
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn2, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -3849,6 +3849,42 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_double_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_double_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_fp32_to_double_vec(self):
+        def fn(x):
+            return x.to(torch.double)
+
+        x = torch.randn(32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_double_to_fp32_vec(self):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
     def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
         # https://github.com/pytorch/pytorch/issues/115260
         p0 = torch.tensor([1.0879], dtype=torch.float16)
@@ -4061,6 +4097,24 @@ class CPUReproTests(TestCase):
                 2,
                 exactly=True,
             ).run(code)
+
+    def test_any_bool_vec(self):
+        def fn(x, y):
+            return torch.any(x), torch.any(y)
+
+        c = [False] * 64
+        input1 = torch.Tensor(c)
+        c[0] = True
+        input2 = torch.Tensor(c)
+        metrics.reset()
+        self.common(
+            fn,
+            (
+                input1,
+                input2,
+            ),
+        )
+        check_metrics_vec_kernel_count(2)
 
 
 if __name__ == "__main__":
