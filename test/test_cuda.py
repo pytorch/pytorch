@@ -4996,8 +4996,8 @@ class TestMemPool(TestCase):
         #include <torch/extension.h>
         extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          TORCH_API void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          TORCH_API void dummy_free(void* ptr) { }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
