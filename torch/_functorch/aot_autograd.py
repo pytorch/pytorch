@@ -970,17 +970,18 @@ def aot_module_simplified(
                 assert source not in seen_sources, source
                 seen_sources.add(source)
                 aot_autograd_arg_pos_to_source.append(source)
+                source_name = source.name() if source else str(source)
 
                 if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
                     "_dynamo_static_input_type", None
                 ):
                     static_inputs_log.debug(
-                        "Adding static input pos %s for source %s", pos, source.name()
+                        "Adding static input pos %s for source %s", pos, source_name
                     )
                     static_input_indices.append(pos)
                 else:
                     static_inputs_log.debug(
-                        "Non-static input pos %s for source %s", pos, source.name()
+                        "Non-static input pos %s for source %s", pos, source_name
                     )
 
     if aot_autograd_arg_pos_to_source is not None:
