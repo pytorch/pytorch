@@ -602,7 +602,7 @@ class SubclassMeta:
     # Optional field because we don't compute for inference graphs
     grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
 
