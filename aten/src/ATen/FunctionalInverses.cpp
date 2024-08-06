@@ -29,7 +29,7 @@ static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseRetur
 static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
   auto result = self;
   bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
-  int64_t nDims = sizes.size();
+  int64_t nDims = static_cast<int64_t>(sizes.size());
   for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
       need_alias = false;
@@ -328,6 +328,28 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
     return nt;
   } else {
     return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
+  // Mutated view is a jagged NT
+  auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return cpp_nt;
+  } else {
+    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
+  // Mutated view is a strided NT
+  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return python_nt;
+  } else {
+    return python_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 
