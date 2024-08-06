@@ -242,7 +242,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       run(plan_desc);
       execution_plan_cache[key] = plan_desc;
       return quantized_output.view(orig_sizes);
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {} catch(c10::CuDNNError &e) {}
   }
 
   TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
