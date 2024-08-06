@@ -10,7 +10,9 @@ from torch.distributed.pipelining import (
 )
 from torch.distributed.pipelining.schedules import (
     _format_pipeline_order,
+    _PipelineSchedule,
     _validate_pipeline_order,
+    get_schedule_class,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_utils import (
@@ -42,6 +44,32 @@ class MockPipelineStage(_PipelineStageBase):
 
     def _prepare_backward_infra(self, n_microbatches):
         pass
+
+
+class ScheduleTest(TestCase):
+    def test_get_schedule_class(self):
+        # List of all expected schedule names
+        schedule_names = [
+            "1F1B",
+            "Interleaved1F1B",
+            "GPipe",
+            "FlexibleInterleaved1F1B",
+            "LoopedBFS",
+            "PipelineScheduleSingle",
+            "PipelineScheduleMulti",
+        ]
+
+        # Test each schedule name
+        for name in schedule_names:
+            with self.subTest(name=name):
+                schedule_class = get_schedule_class(name)
+                self.assertIsNotNone(
+                    schedule_class, f"Class for {name} should not be None"
+                )
+                self.assertTrue(
+                    issubclass(schedule_class, _PipelineSchedule),
+                    f"{name} should be a subclass of _PipelineSchedule",
+                )
 
 
 class TestSchedulePlan(TestCase):
