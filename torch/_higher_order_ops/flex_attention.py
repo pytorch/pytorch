@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Callable, Tuple, Union
+from typing import Any, Callable, Dict, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -38,7 +38,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
 
 
 class FlexAttentionHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention")
 
     def __call__(
@@ -49,6 +49,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         score_mod: Callable,
         block_mask: Tuple,
         scale: float,
+        kernel_options: Dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -64,6 +65,7 @@ class FlexAttentionHOP(HigherOrderOperator):
             score_mod,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -74,7 +76,7 @@ flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("flex_attention_backward")
 
     def __call__(
@@ -89,6 +91,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         joint_graph: GraphModule,
         block_mask: Tuple,
         scale: float,
+        kernel_options: Dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -108,6 +111,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
             joint_graph,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -124,6 +128,7 @@ def _math_attention_inner(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -132,25 +137,19 @@ def _math_attention_inner(
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
-    hkv = torch.arange(0, scores.size(1), device=scores.device)
-    g = torch.arange(0, scores.size(2), device=scores.device)
-    h = hkv[:, None] * scores.size(2) + g[None, :]
-    m = torch.arange(0, scores.size(-2), device=scores.device)
-    n = torch.arange(0, scores.size(-1), device=scores.device)
+    h = torch.arange(0, scores.size(1), device=scores.device)
+    m = torch.arange(0, scores.size(2), device=scores.device)
+    n = torch.arange(0, scores.size(3), device=scores.device)
 
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
     # first input is score
-    score_mod = _vmap_for_bhqkv(
-        score_mod, prefix=(0,), suffix=captured_buffers_in_dim, group_dim=True
-    )
+    score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
     mask_mod = block_mask[-1]
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
-    mask_mod = _vmap_for_bhqkv(
-        mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers, group_dim=True
-    )
+    mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
 
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
@@ -170,6 +169,7 @@ def math_attention(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -186,11 +186,10 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
-    query = query.view(
-        query.size(0), key.size(1), -1, query.size(-2), query.size(-1)
-    )  # [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D], G=Hq//Hkv
-    key = torch.unsqueeze(key, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
-    value = torch.unsqueeze(value, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+    # broadcast query & key along head dim for GQA
+    G = query.size(1) // key.size(1)
+    value = torch.repeat_interleave(value, G, dim=1)
+    key = torch.repeat_interleave(key, G, dim=1)
 
     _, post_mod_scores = _math_attention_inner(
         query,
@@ -199,6 +198,7 @@ def math_attention(
         score_mod,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -209,12 +209,7 @@ def math_attention(
 
     post_mod_scores = post_mod_scores.softmax(dim=-1)
 
-    output = post_mod_scores.to(query.dtype) @ value
-
-    output = torch.flatten(output, 1, 2)
-    logsumexp = torch.flatten(logsumexp, 1, 2)
-
-    return output, logsumexp
+    return post_mod_scores.to(query.dtype) @ value, logsumexp
 
 
 @flex_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -225,6 +220,7 @@ def sdpa_dense(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -235,6 +231,7 @@ def sdpa_dense(
         score_mod,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -250,6 +247,7 @@ def trace_flex_attention(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -266,6 +264,7 @@ def trace_flex_attention(
         score_mod,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -294,6 +293,7 @@ def trace_flex_attention(
         score_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -315,6 +315,7 @@ def flex_attention_proxy_torch_dispatch_mode(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -328,6 +329,7 @@ def flex_attention_proxy_torch_dispatch_mode(
             score_mod,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -339,6 +341,7 @@ def flex_attention_proxy_torch_dispatch_mode(
             score_mod,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -353,6 +356,7 @@ def flex_attention_functionalize(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -405,6 +409,7 @@ def flex_attention_functionalize(
             functional_score_mod,
             block_mask_unwrapped,
             scale,
+            kernel_options,
             score_mod_other_buffers_unwrapped,
             mask_mod_other_buffers_unwrapped,
         )
@@ -420,6 +425,7 @@ def flex_attention_fake_tensor_mode(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -521,6 +527,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         joint_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -538,6 +545,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._KV_BLOCK_SIZE = block_mask[8]
         ctx._Q_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
+        ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
         with torch._C._AutoDispatchBelowAutograd():
             out, logsumexp = flex_attention(
@@ -547,6 +555,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 fw_graph,
                 block_mask,
                 scale,
+                kernel_options,
                 score_mod_other_buffers,
                 mask_mod_other_buffers,
             )
@@ -588,6 +597,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         KV_BLOCK_SIZE = ctx._KV_BLOCK_SIZE
         Q_BLOCK_SIZE = ctx._Q_BLOCK_SIZE
         scale = ctx.scale
+        kernel_options = ctx.kernel_options
         score_mod_other_buffers = tuple(
             other_buffers[: ctx._score_mod_other_buffers_len]
         )
@@ -595,7 +605,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             other_buffers[ctx._score_mod_other_buffers_len :]
         )
         # We have asserted that other_buffers do not require grad in the forward
-        none_grads = [None] * 6
+        none_grads = [None] * 7
         grad_query, grad_key, grad_value = flex_attention_backward(
             query,
             key,
@@ -619,6 +629,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 mask_graph,
             ),
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -633,6 +644,7 @@ def flex_attention_autograd(
     score_mod: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -655,6 +667,7 @@ def flex_attention_autograd(
             bw_graph,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -676,18 +689,13 @@ def sdpa_dense_backward(
     joint_graph: Callable,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D], G=Hq//Hkv
-    q_gqa_shape = (query.size(0), key.size(1), -1, query.size(-2), query.size(-1))
-    query = query.view(q_gqa_shape)
-    out = out.view(q_gqa_shape)
-    grad_out = grad_out.view(q_gqa_shape)
-    logsumexp = logsumexp.view(q_gqa_shape[:-1])
-
-    key = torch.unsqueeze(key, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
-    value = torch.unsqueeze(value, 2)  # [B, Hkv, Mkv, D] -> [B, Hkv, 1, Mkv, D]
+    G = query.size(1) // key.size(1)
+    key = torch.repeat_interleave(key, G, dim=1)
+    value = torch.repeat_interleave(value, G, dim=1)
 
     scores, post_mod_scores = _math_attention_inner(
         query,
@@ -696,6 +704,7 @@ def sdpa_dense_backward(
         fw_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -710,11 +719,9 @@ def sdpa_dense_backward(
     grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
-    hkv = torch.arange(0, scores.size(1), device=scores.device)
-    g = torch.arange(0, scores.size(2), device=scores.device)
-    h = hkv[:, None] * scores.size(2) + g[None, :]
-    m = torch.arange(0, scores.size(-2), device=scores.device)
-    n = torch.arange(0, scores.size(-1), device=scores.device)
+    h = torch.arange(0, scores.size(1), device=scores.device)
+    m = torch.arange(0, scores.size(2), device=scores.device)
+    n = torch.arange(0, scores.size(3), device=scores.device)
 
     mask_graph = block_mask[-1]
     # Gradient of the inline score_mod function, with respect to the scores
@@ -729,7 +736,6 @@ def sdpa_dense_backward(
         prefix=(0,),
         suffix=(0,) + captured_buffers_in_dim,
         out_dims=out_dims,
-        group_dim=True,
     )
     with TransformGetItemToIndex():
         grad_scores, *_ = joint_score_mod(
@@ -739,10 +745,7 @@ def sdpa_dense_backward(
     grad_scores = grad_scores.to(query.dtype)
 
     mask_mod = _vmap_for_bhqkv(
-        mask_graph,
-        prefix=(),
-        suffix=(None,) * len(mask_mod_other_buffers),
-        group_dim=True,
+        mask_graph, prefix=(), suffix=(None,) * len(mask_mod_other_buffers)
     )
     with TransformGetItemToIndex():
         mask_scores = mask_mod(b, h, m, n, *mask_mod_other_buffers)
@@ -753,8 +756,14 @@ def sdpa_dense_backward(
     grad_query = grad_scores @ key
     grad_key = grad_scores.transpose(-2, -1) @ query
 
-    # Flatten GQA dimensions. [Hkv, G] -> [Hq]
-    grad_query = torch.flatten(grad_query, 1, 2)
+    # Reduce DK, DV along broadcasted heads.
+    grad_key = grad_key.view(
+        grad_key.size(0), -1, G, grad_key.size(-2), grad_key.size(-1)
+    )
+    grad_value = grad_value.view(
+        grad_value.size(0), -1, G, grad_value.size(-2), grad_value.size(-1)
+    )
+
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
@@ -773,6 +782,7 @@ def trace_flex_attention_backward(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -788,6 +798,7 @@ def trace_flex_attention_backward(
         joint_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -822,6 +833,7 @@ def trace_flex_attention_backward(
         joint_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
@@ -851,6 +863,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -868,6 +881,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             joint_graph,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -883,6 +897,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
             joint_graph,
             block_mask,
             scale,
+            kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
@@ -901,6 +916,7 @@ def flex_attention_backward_functionalize(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -950,6 +966,7 @@ def flex_attention_backward_functionalize(
             functional_joint_graph,  # type: ignore[arg-type]
             block_mask_unwrapped,
             scale,
+            kernel_options,
             score_mod_other_buffers_unwrapped,
             mask_mod_other_buffers_unwrapped,
         )
@@ -970,6 +987,7 @@ def flex_attention_backward_fake_tensor_mode(
     joint_graph: GraphModule,
     block_mask: Tuple,
     scale: float,
+    kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
