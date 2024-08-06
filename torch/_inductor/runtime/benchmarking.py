@@ -171,6 +171,9 @@ class Benchmarker:
 
     @cached_property
     def gpu_queue_limit(self: Self) -> int:
+        """Experimentally calculate the GPU queue limit by queuing
+        CUDA event records until they become synchronous.
+        """
         counters["inductor"]["benchmarking_gpu_queue_limit"] += 1
         # ensures the queue is empty
         torch.cuda.synchronize()
@@ -198,6 +201,9 @@ class Benchmarker:
 
     @cached_property
     def cpu_launch_overhead_ms_per_event_record(self: Self) -> float:
+        """Experimentally calculate the CPU launch overhead, in milliseconds,
+        of a CUDA event record.
+        """
         counters["inductor"][
             "benchmarking_cpu_launch_overhead_ms_per_event_record"
         ] += 1
@@ -222,6 +228,9 @@ class Benchmarker:
     def cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear(
         self: Self,
     ) -> Tuple[float, float]:
+        """Experimentally calculate the CPU launch overhead, in milliseconds,
+        and the GPU time, in milliseconds, of an L2 cache clear.
+        """
         counters["inductor"][
             "benchmarking_cpu_launch_overhead_ms_and_gpu_time_ms_per_gpu_cache_clear"
         ] += 1
