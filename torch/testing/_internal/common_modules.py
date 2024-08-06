@@ -3856,8 +3856,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for Bilinear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # See #119108: tolerance issue
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
-                                device_type='mps', dtypes=[torch.float16]),)
+                   skipMPSVersionIfLessThan(15, 0),)
                ),
     ModuleInfo(torch.nn.LPPool1d,
                module_inputs_func=module_inputs_torch_nn_LPPool1d,
@@ -4073,11 +4072,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.Hardtanh,
@@ -4293,11 +4288,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.Tanhshrink,
@@ -4306,11 +4297,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.Threshold,
