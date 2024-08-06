@@ -1325,7 +1325,7 @@ def triton_config(
 
 
 def triton_config_reduction(
-    size_hints, x, r, num_stages=1, num_warps=None, is_persistent=False
+    size_hints, x, r, num_stages=1, num_warps=None, register_intensive=False
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -1354,7 +1354,7 @@ def triton_config_reduction(
     # therefore using half the number of warps here correspondingly.
     max_num_warps = 8 if torch.version.hip else 16
     # persistent reduction is register intensive
-    if is_persistent:
+    if register_intensive:
         max_num_warps = max_num_warps // 2
     min_num_warps = 1 if torch.version.hip else 2
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
@@ -1517,6 +1517,7 @@ def _reduction_configs(
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
 
+    register_intensive = False
     MAX_RBLOCK = 2048
     if (
         size_hints[0] >= 1024
@@ -1536,13 +1537,22 @@ def _reduction_configs(
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
         MAX_RBLOCK = 1024
+        register_intensive = True
 
     contiguous_config = triton_config_reduction(
-        size_hints, 1, (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK)
+        size_hints,
+        1,
+        (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK),
+        register_intensive=register_intensive,
     )
-    outer_config = triton_config_reduction(size_hints, 64, 8)
+    outer_config = triton_config_reduction(
+        size_hints, 64, 8, register_intensive=register_intensive
+    )
     tiny_config = triton_config_reduction(
-        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
+        size_hints,
+        2 * (256 // rnumel) if rnumel <= 256 else 1,
+        min(rnumel, MAX_RBLOCK),
+        register_intensive=register_intensive,
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
@@ -1611,7 +1621,7 @@ def persistent_reduction(
     xnumel, rnumel = size_hints
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel, is_persistent=True)
+        triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
         for xblock in (1, 8, 32, 128)
         if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
