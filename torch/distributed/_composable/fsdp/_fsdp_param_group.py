@@ -160,10 +160,15 @@ class FSDPParamGroup:
         # Holds the reshard-after-forward CUDA event when resharding to a
         # different world size, which should be waited on in the next unshard
         self._reshard_after_forward_event: Optional[torch.cuda.Event] = None
+        # Holds the reduce-scatter output/all-reduce output (same tensor),
+        # which we allocate in the default stream and must hold a reference to
+        # until the default stream waits on the post-reduce event
+        self._reduce_output: Optional[torch.Tensor] = None
 
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
+        self._save_partial_reduce_output: bool = True
 
         # TODO: remove this hook and hook register once 2D state dict is supported.
         def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
@@ -374,9 +379,11 @@ class FSDPParamGroup:
                 self.comm_ctx.reduce_scatter_state = None
             (
                 reduce_scatter_input,
+                self._reduce_output,
                 reduce_scatter_event,
                 self._post_reduce_event,
                 self._partial_reduce_output,
+                self._save_partial_reduce_output,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
@@ -398,6 +405,9 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
+            self._reduce_output = None
+            if not self._save_partial_reduce_output:
+                self._partial_reduce_output = None
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
