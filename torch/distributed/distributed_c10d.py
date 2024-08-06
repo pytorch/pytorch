@@ -126,6 +126,12 @@ __all__ = [
     "split_group",
 ]
 
+_communication_cache_enabled_backend =  [
+    'hccl',
+]
+
+_comm_ranks_bucket_cache = {}
+
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
@@ -1361,6 +1367,50 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
 @_exception_logger
 @_time_logger
 def init_process_group(
+    backend: Optional[str] = None,
+    init_method: Optional[str] = None,
+    timeout: Optional[timedelta] = None,
+    world_size: int = -1,
+    rank: int = -1,
+    store: Optional[Store] = None,
+    group_name: str = "",
+    pg_options: Optional[Any] = None,
+    device_id: Optional[torch.device] = None,
+) -> None:
+    global _comm_ranks_bucket_cache
+    if backend in _communication_cache_enabled_backend:
+        _comm_ranks_bucket_cache[backend] = {}
+        if len(_comm_ranks_bucket_cache[backend]) == 0:
+            _init_process_group_utils(
+                    backend,
+                    init_method,
+                    timeout,
+                    world_size,
+                    rank,
+                    store,
+                    group_name,
+                    pg_options,
+                    device_id
+                )
+            actual_world_size = get_world_size()
+            ranks_tuple = tuple(list(range(0, actual_world_size)))
+            if ranks_tuple not in _comm_ranks_bucket_cache[backend]:
+                _comm_ranks_bucket_cache[backend][ranks_tuple] = _get_default_group()
+    else:
+        return _init_process_group_utils(
+                backend,
+                init_method,
+                timeout,
+                world_size,
+                rank,
+                store,
+                group_name,
+                pg_options,
+                device_id
+            )
+
+
+def _init_process_group_utils(
     backend: Optional[str] = None,
     init_method: Optional[str] = None,
     timeout: Optional[timedelta] = None,
@@ -4555,15 +4605,23 @@ def new_group(
     multiple overlaping process groups. To avoid that, make sure all ranks follow the
     same global creation order.
     """
-    return _new_group_with_tag(
-        ranks,
-        timeout,
-        backend,
-        pg_options,
-        None,
-        use_local_synchronization=use_local_synchronization,
-        group_desc=group_desc,
-    )
+    global _comm_ranks_bucket_cache
+
+    if backend in _communication_cache_enabled_backend:
+        _comm_ranks_bucket_cache[backend] = {}
+        if ranks == None:
+            actual_world_size = get_world_size()
+            ranks_tuple = tuple(list(range(0, actual_world_size)))
+        else:
+            ranks_tuple = tuple(sorted(tuple(ranks)))
+        if ranks_tuple in _comm_ranks_bucket_cache[backend]:
+            return _comm_ranks_bucket_cache[backend][ranks_tuple]
+        else:
+            _comm_ranks_bucket_cache[backend][ranks_tuple] = _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+            return _comm_ranks_bucket_cache[backend][ranks_tuple]
+    else:
+        return _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+
 
 
 def _new_group_with_tag(
