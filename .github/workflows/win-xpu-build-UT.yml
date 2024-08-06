@@ -64,10 +64,10 @@ jobs:
     #     call pip install pyyaml
     #     call conda list
 
-  Build-whls:
-    runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Preparation]
-    steps:
+  # Build-whls:
+  #   runs-on: ["${{ inputs.win_runner }}"]
+  #   needs: [Preparation]
+  #   steps:
     # - name: Build Torch
     #   shell: cmd
     #   run: |
@@ -127,7 +127,7 @@ jobs:
 
   Unit-tests:
     runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Build-whls, Preparation]
+    needs: [Preparation]
     steps:
     - name: Run Unit Tests
       shell: cmd
@@ -139,7 +139,7 @@ jobs:
         )
         git clone https://github.com/intel/torch-xpu-ops.git C:\xpurepo
         cd C:\xpurepo\examples
-        git checkout %xpu_commit%
+        git checkout 47cbc58452e74f70afb5e7f108ff8d7ecc329f21
         pip install pytest expecttest
         python -m pytest -v
 
