@@ -264,7 +264,8 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            raise NotImplementedError from exc
+            msg = f"{exc!r} raised in eval('{self.source.name()}', {scope})"
+            raise NotImplementedError(msg) from exc
 
         if _input_associated_real_value is None:
             return
