@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import contextlib
 import copy
 import itertools
@@ -310,7 +312,7 @@ class _WrappedCall:
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)  # noqa: TRY200
+                raise e.with_traceback(None)  # noqa: B904
             else:
                 raise e
 
@@ -443,7 +445,8 @@ class GraphModule(torch.nn.Module):
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
         self._replace_hook = None
-        self._create_node_hook = None
+        self._create_node_hooks: List[Callable] = []
+        self._erase_node_hooks: List[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -800,7 +803,8 @@ class {module_name}(torch.nn.Module):
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
             "_replace_hook",
-            "_create_node_hook",
+            "_create_node_hooks",
+            "_erase_node_hooks"
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -818,12 +822,12 @@ class {module_name}(torch.nn.Module):
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True, include_stride=False, include_device=False):
+    def print_readable(self, print_output=True, include_stride=False, include_device=False, colored=False):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
         verbose_python_code = self._graph.python_code(
-            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device
+            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device, colored=colored
         )
         module_code = verbose_python_code.src
         module_code = module_code.lstrip("\n")
@@ -833,7 +837,12 @@ class {module_name}(torch.nn.Module):
         submodule_code_list = [""]
         for submodule in self.children():
             if isinstance(submodule, GraphModule):
-                submodule_code_list.append(submodule.print_readable(print_output=False))
+                submodule_code_list.append(submodule.print_readable(
+                    print_output=False,
+                    include_stride=include_stride,
+                    include_device=include_device,
+                    colored=colored
+                ))
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 
@@ -869,32 +878,37 @@ class {module_name}(torch.nn.Module):
         finally:
             self._replace_hook = prev
 
-    @contextlib.contextmanager
-    def _set_create_node_hook(self, f):
+    def _register_create_node_hook(self, f):
         """
         Takes a callable which will be called after we create a new node. The
         callable takes the newly created node as input and returns None.
         """
         assert callable(f), "create_node hook must be a callable."
-        prev = self._create_node_hook
+        self._create_node_hooks.append(f)
 
-        # Add the hook to all submodules
-        for m in self.modules():
-            if isinstance(m, GraphModule):
-                assert m._create_node_hook is prev, (
-                    "create_node_hook is not be the same for all submodules: "
-                    f"Found: {m._create_node_hook}. Previously: {prev}"
-                )
-                m._create_node_hook = f
+    def _unregister_create_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we create a node.
+        This function will unregister that callable so it is no longer invoked on node creation.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._create_node_hooks.remove(f)
 
-        try:
-            yield
-        finally:
-            # Restore hook for all submodules
-            for m in self.modules():
-                if isinstance(m, GraphModule):
-                    m._create_node_hook = prev
+    def _register_erase_node_hook(self, f):
+        """
+        Takes a callable which will be called after we erase a node. The
+        callable takes the node that is being erased as input and returns None.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.append(f)
 
+    def _unregister_erase_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after we erase a node.
+        This function will unregister that callable so it is no longer invoked on node erasure.
+        """
+        assert callable(f), "erase_node hook must be a callable."
+        self._erase_node_hooks.remove(f)
 
 # workarounds for issues in __torch_function__
 

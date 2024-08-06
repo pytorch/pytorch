@@ -5,15 +5,16 @@ import itertools
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor._collective_utils import shard_dim_alltoall
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
-
+from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 funcol = torch.ops.c10d_functional
 
@@ -105,7 +106,7 @@ class RedistributeTest(DTensorTestBase):
 
         with comm_mode:
             out = replica_tensor.redistribute(placements=[Replicate()]).to_local(
-                grad_placements=[_Partial()]
+                grad_placements=[Partial()]
             )
             out.backward(torch.ones_like(out))
 
@@ -168,7 +169,7 @@ class RedistributeTest(DTensorTestBase):
         # backward should work as expected
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         partial_local = torch.ones(12, 3, device=self.device_type, requires_grad=True)
-        partial_spec = [_Partial()]
+        partial_spec = [Partial()]
         replica_spec = [Replicate()]
 
         comm_mode = CommDebugMode()
@@ -199,14 +200,14 @@ class RedistributeTest(DTensorTestBase):
     def test_replicate_to_partial(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
-        partial_spec = _Partial()
+        partial_spec = Partial()
         replica_spec = Replicate()
         # 1) test replicate -> partial forward
         replica_tensor = distribute_tensor(local_tensor, device_mesh, [replica_spec])
-        with self.assertRaisesRegex(RuntimeError, "Can not redistribute to _Partial"):
+        with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
-        from torch.distributed._tensor.redistribute import Redistribute
+        from torch.distributed._tensor._redistribute import Redistribute
 
         comm_mode = CommDebugMode()
 
@@ -246,7 +247,7 @@ class RedistributeTest(DTensorTestBase):
     @with_comms
     def test_partial_to_shard(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        partial_spec = [_Partial()]
+        partial_spec = [Partial()]
         my_rank = device_mesh.get_rank()
 
         input_sizes_and_shard_dim = [
@@ -417,6 +418,18 @@ class RedistributeTest(DTensorTestBase):
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
 
+    @with_comms
+    def test_shard_dim_alltoall(self):
+        # init 2d mesh here so we can test when group_rank != global_rank
+        mesh = init_device_mesh(self.device_type, (2, 2))
+        tensor = torch.randn(12, self.world_size, device=self.device_type)
+        new_tensor = shard_dim_alltoall(tensor, 0, 1, mesh, 0)
+
+        meta_tensor = torch.randn(12, self.world_size, device="meta")
+        new_meta_tensor = shard_dim_alltoall(meta_tensor, 0, 1, mesh, 0)
+
+        self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
+
 
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
@@ -441,7 +454,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
             possibilities = [Replicate()] + [Shard(i) for i in range(full_tensor.ndim)]
             all_outputs = list(itertools.product(*(mesh_shape.ndim * [possibilities])))
             all_inputs = list(
-                itertools.product(*(mesh_shape.ndim * [possibilities + [_Partial()]]))
+                itertools.product(*(mesh_shape.ndim * [possibilities + [Partial()]]))
             )
 
             for inputs in all_inputs:

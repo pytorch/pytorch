@@ -5,11 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 import dis
 import inspect
-
 from dataclasses import dataclass
 from typing import Union
 
 from . import DimList
+
 
 _vmap_levels = []
 

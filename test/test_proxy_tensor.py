@@ -617,7 +617,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -670,7 +670,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -1008,7 +1008,7 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     sym_size_int = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = resize_ = None
     return None""")
 
     def test_broadcast_shapes(self):
@@ -1108,6 +1108,37 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
+    def test_mod_gcd_unbacked(self):
+        def f(_a, _b, _stride):
+            a = _a.item()
+            b = _b.item()
+            stride = _stride.item()
+            torch._check_is_size(a)
+            torch._check_is_size(b)
+            torch._check_is_size(stride)
+            ta = torch.randn(a * stride)
+            tb = torch.randn(b * stride)
+            r = torch.cat([ta, tb])
+            return r.view(a + b, stride)
+
+        _a = torch.tensor(30)
+        _b = torch.tensor(20)
+        _stride = torch.tensor(10)
+        r = str(make_fx(f, tracing_mode="symbolic")(_a, _b, _stride).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, _a_1, _b_1, _stride_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(_a_1);  _a_1 = None
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(_b_1);  _b_1 = None
+    _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(_stride_1);  _stride_1 = None
+    mul = _local_scalar_dense * _local_scalar_dense_2
+    randn = torch.ops.aten.randn.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    mul_1 = _local_scalar_dense_1 * _local_scalar_dense_2
+    randn_1 = torch.ops.aten.randn.default([mul_1], device = device(type='cpu'), pin_memory = False);  mul_1 = None
+    cat = torch.ops.aten.cat.default([randn, randn_1]);  randn = randn_1 = None
+    add = _local_scalar_dense + _local_scalar_dense_1;  _local_scalar_dense = _local_scalar_dense_1 = None
+    view = torch.ops.aten.view.default(cat, [add, _local_scalar_dense_2]);  cat = add = _local_scalar_dense_2 = None
+    return view""")
+
     def test_cumsum_unbacked(self):
         def f(x):
             y = x.item()
@@ -1170,7 +1201,9 @@ def forward(self, x_1):
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
-        self.assertEqual(len(gm.shape_env.guards), 0)
+        # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
+        # 1 ok)
+        self.assertEqual(len(gm.shape_env.guards), 1)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -1270,7 +1303,7 @@ def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
-    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
     return x_1"""  # noqa: B950
         )
 
@@ -1288,7 +1321,7 @@ def forward(self, gravity_1, mask_1):
     index = torch.ops.aten.index.Tensor(select, [mask_1]);  select = None
     mul = torch.ops.aten.mul.Tensor(index, -1);  index = None
     select_1 = torch.ops.aten.select.int(gravity_1, 1, 0);  gravity_1 = None
-    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
+    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = index_put_ = None
     return None""")
 
     def test_reflect_r_over_x(self):
@@ -1312,7 +1345,7 @@ def forward(self, crop_camera_1, mask_1):
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
-    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
+    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = copy_ = None
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
@@ -1326,7 +1359,7 @@ def forward(self, crop_camera_1, mask_1):
     view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
@@ -1379,7 +1412,7 @@ def forward(self, images_1, handedness_1, valid_1):
     eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
     index_2 = torch.ops.aten.index.Tensor(index, [eq])
     flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
-    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = None
+    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = index_put_ = None
     return None""")
 
     def test_neg_shape(self):
@@ -1423,6 +1456,7 @@ def forward(self, x_1, y_1):
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_view_divisibility_unbacked_relatively_prime(self):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
@@ -1432,7 +1466,7 @@ def forward(self, x_1, y_1):
             # be chosen such that 448 / 447 < 2 (which it is.)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
@@ -1447,10 +1481,11 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = zeros = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -1463,7 +1498,11 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"),
+            torch.tensor(10, device="cuda"),
+            torch.randn(10, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
         r = str(gm.code).strip()
@@ -1471,6 +1510,7 @@ def forward(self, x_1, y_1):
         #     r, """"""  # noqa: B950
         # )
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_unbacked_unify_dependency_violation(self):
         def f(x1, x2, x3, y):
             z1 = x1.item()
@@ -1484,14 +1524,25 @@ def forward(self, x_1, y_1):
             else:
                 return y + 3
 
-        # NB:
+        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # backed
 
-        gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(5), torch.tensor(5), torch.randn(1))
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
+            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
+        )
         insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
         gm.recompile()
-        self.assertEqual(gm(torch.tensor(12), torch.tensor(6), torch.tensor(6), torch.tensor([1.0])), torch.tensor([2.0]))
+        self.assertEqual(gm(
+            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
+            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
+            torch.tensor([2.0], device="cuda")
+        )
         with self.assertRaises(RuntimeError):
-            gm(torch.tensor(20), torch.tensor(10), torch.tensor(10), torch.tensor([1.0]))
+            gm(
+                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
+                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
+            )
 
 
     def test_split_unbacked_sizes(self):
@@ -1515,9 +1566,9 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1)
-    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2)
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size = None
+    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1);  sym_constrain_range_for_size_1 = None
+    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2);  sym_constrain_range_for_size_2 = None
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
@@ -1569,21 +1620,22 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
     def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 return x + 1
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 
@@ -1915,7 +1967,6 @@ make_fx_failures = {
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
-    xfail('narrow'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1930,6 +1981,14 @@ make_fx_failures = {
     skip('empty_strided', '', device_type='cpu'),
 }
 
+only_real_tensor_failures = {
+    xfail('narrow'),
+}
+
+only_fake_tensor_failures = {
+    xfail('narrow'),
+}
+
 fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
@@ -1940,15 +1999,12 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -1979,8 +2035,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
-    # decomp not implemented
-    xfail('unique', ''),
 }
 
 out_symbolic_tensor_failures = {
@@ -2009,7 +2063,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
     xfail('triangular_solve', ''),
-    xfail('view_copy', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),
@@ -2080,12 +2133,13 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
+             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 

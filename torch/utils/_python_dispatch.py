@@ -1,8 +1,11 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque
+from typing_extensions import TypeGuard
+from collections import deque
 
 import torch
 import torchgen
@@ -23,10 +26,10 @@ from torch._C import (
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
 _is_in_torch_dispatch_mode = False
+_is_in_non_infra_torch_dispatch_mode = False
 
-
-def is_in_torch_dispatch_mode() -> bool:
-    return _is_in_torch_dispatch_mode
+def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
+    return _is_in_torch_dispatch_mode if include_infra_modes else _is_in_non_infra_torch_dispatch_mode
 
 
 class TorchDispatchMode:
@@ -65,15 +68,32 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flag = False
+        self.old_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
+
+    def _lazy_init_old_dispatch_mode_flags(self):
+        if not hasattr(self, "old_dispatch_mode_flags"):
+            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+
+        if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
+            self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
-        self.old_dispatch_mode_flag = _is_in_torch_dispatch_mode
+        global _is_in_non_infra_torch_dispatch_mode
+        # Previously, there wasn't any state in this class' constructor
+        # super calls were added to existing modes, but for any new modes
+        # this will replicate the previous behavior of not strictly needing
+        # to call super().__init__()
+        self._lazy_init_old_dispatch_mode_flags()
+        self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
         _is_in_torch_dispatch_mode = True
+        self.old_non_infra_dispatch_mode_flags.append(_is_in_non_infra_torch_dispatch_mode)
+        _is_in_non_infra_torch_dispatch_mode = _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
         _push_mode(self)
         return self
 
@@ -84,7 +104,9 @@ class TorchDispatchMode:
             # We should probably revisit this.
             mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
         global _is_in_torch_dispatch_mode
-        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flag
+        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
+        global _is_in_non_infra_torch_dispatch_mode
+        _is_in_non_infra_torch_dispatch_mode = self.old_non_infra_dispatch_mode_flags.pop()
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -94,6 +116,11 @@ class TorchDispatchMode:
         )
         instance = cls(*args, **kwargs)
         return instance
+
+    @classmethod
+    def is_infra_mode(cls):
+        return False
+
 
 
 def _get_current_dispatch_mode():
@@ -264,7 +291,70 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 
-def is_traceable_wrapper_subclass(t):
+# Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
+class TensorWithFlatten(Protocol):
+    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
+        ...
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int) -> torch.Tensor:
+        ...
+
+    # It would be really nice to be able to say that the return of
+    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
+    # TensorWithFlatten] - but that doesn't exist.
+
+    shape: torch._C.Size
+
+    @overload
+    def stride(self, dim: None = None) -> Tuple[int, ...]:
+        ...
+
+    @overload
+    def stride(self, dim: int) -> int:
+        ...
+
+    def dim(self) -> int:
+        ...
+
+    @overload
+    def to(
+            self,
+            dtype: torch.types._dtype,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            device: Optional["torch._prims_common.DeviceLikeType"] = None,
+            dtype: Optional[torch.types._dtype] = None,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+    @overload
+    def to(
+            self,
+            other: torch.Tensor,
+            non_blocking: bool = False,
+            copy: bool = False,
+            *,
+            memory_format: Optional[torch.memory_format] = None
+    ) -> torch.Tensor:
+        ...
+
+
+
+
+def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
     is 'traceable' with torch.compile.

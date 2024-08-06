@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
 
+
 # Because we don't support free variables in comptime at the moment,
 # we have to communicate via globals.  This also means these tests cannot
 # be run in parallel in a single process (not that you'd... ever want
@@ -95,7 +96,7 @@ s0""",
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    y = l_x_ * 2;  l_x_ = None""",
+    y = l_x_ * 2;  l_x_ = y = None""",
         )
 
     def test_print_disas(self):
@@ -188,6 +189,43 @@ x = TensorVariable()
 y = TensorVariable()
 """,
         )
+
+    # Just make sure it doesn't crash
+    def test_print_direct(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x, z):
+            y = x * 2
+            lambda: z
+            comptime.print(z)
+            return y + 3
+
+        f(torch.randn(2), torch.randn(2))
+
+    # Just make sure it doesn't crash
+    def test_get_local_closure_variable(self):
+        global SELF
+        SELF = self
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x):
+            z = 3
+
+            def g():
+                @comptime
+                def _(ctx):
+                    r = ctx.get_local("z")
+                    SELF.assertEqual(repr(r), "3")
+
+                comptime.print(z)
+                return 2
+
+            y = x * g()
+            return y + 3
+
+        f(torch.randn(2))
 
     def test_print_bt(self):
         global FILE
@@ -354,7 +392,7 @@ y = TensorVariable()
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     y = l_x_ * 2;  l_x_ = None
-    add = y + 4;  y = None""",
+    add = y + 4;  y = add = None""",
         )
 
 

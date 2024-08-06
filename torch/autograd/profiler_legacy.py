@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import itertools
-from warnings import warn
+import warnings
+from typing_extensions import deprecated
 
 import torch
 import torch.cuda
-
 from torch.autograd import (
     _disable_profiler_legacy,
     _enable_profiler_legacy,
@@ -20,9 +21,15 @@ from torch.autograd.profiler_util import (
     MEMORY_EVENT_NAME,
 )
 
+
 __all__ = ["profile"]
 
 
+@deprecated(
+    "`torch.autograd.profiler_legacy.profile` is deprecated and will be removed in a future release. "
+    "Please use `torch.profiler` instead.",
+    category=None,  # TODO: change to `FutureWarning`
+)
 class profile:
     """DEPRECATED: use torch.profiler instead."""
 
@@ -51,7 +58,10 @@ class profile:
         self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
-            warn("CUDA is not available, disabling CUDA profiling")
+            warnings.warn(
+                "CUDA is not available, disabling CUDA profiling",
+                stacklevel=2,
+            )
             self.use_cuda = False
 
         if self.use_cuda:

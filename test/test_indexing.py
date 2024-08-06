@@ -2,15 +2,14 @@
 
 import operator
 import random
-
 import unittest
 import warnings
 from functools import reduce
 
 import numpy as np
+
 import torch
 from torch import tensor
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -28,6 +27,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 
@@ -689,9 +689,7 @@ class TestIndexing(TestCase):
             [[0, 2, 3], slice(None), [1, 3, 4]],
             # [...]
             # less dim, ellipsis
-            [
-                [0, 2],
-            ],
+            [[0, 2]],
             [[0, 2], slice(None)],
             [[0, 2], Ellipsis],
             [[0, 2], slice(None), Ellipsis],
@@ -776,9 +774,7 @@ class TestIndexing(TestCase):
             [[0], [1, 2, 4], slice(None)],
             [[0], [1, 2, 4], Ellipsis],
             [[0], [1, 2, 4], Ellipsis, slice(None)],
-            [
-                [1],
-            ],
+            [[1]],
             [[0, 2, 1], [3], [4]],
             [[0, 2, 1], [3], [4], slice(None)],
             [[0, 2, 1], [3], [4], Ellipsis],
@@ -951,21 +947,10 @@ class TestIndexing(TestCase):
         # and verifies consistency with CPU result
         t = torch.zeros((5, 2))
         t_dev = t.to(device)
-        indices = [
-            torch.tensor([0, 1, 2, 3]),
-            torch.tensor(
-                [
-                    1,
-                ]
-            ),
-        ]
+        indices = [torch.tensor([0, 1, 2, 3]), torch.tensor([1])]
         indices_dev = [i.to(device) for i in indices]
         values0d = torch.tensor(1.0)
-        values1d = torch.tensor(
-            [
-                1.0,
-            ]
-        )
+        values1d = torch.tensor([1.0])
 
         out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values0d, accumulate=True)
@@ -979,21 +964,13 @@ class TestIndexing(TestCase):
         t_dev = t.to(device)
 
         indices = [
-            torch.tensor(
-                [
-                    0,
-                ]
-            ),
+            torch.tensor([0]),
             torch.arange(3)[:, None],
             torch.arange(2)[None, :],
         ]
         indices_dev = [i.to(device) for i in indices]
         values1d = torch.tensor([-1.0, -2.0])
-        values2d = torch.tensor(
-            [
-                [-1.0, -2.0],
-            ]
-        )
+        values2d = torch.tensor([[-1.0, -2.0]])
 
         out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
         out_cpu = t.index_put_(indices, values1d, accumulate=True)
@@ -1012,9 +989,7 @@ class TestIndexing(TestCase):
         self.assertTrue(not t1.is_contiguous())
         self.assertTrue(not t2.is_contiguous())
 
-        indices = [
-            torch.tensor([0, 1]),
-        ]
+        indices = [torch.tensor([0, 1])]
         indices_dev = [i.to(device) for i in indices]
         value = torch.randn(2, 2)
         out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
@@ -1158,7 +1133,14 @@ class TestIndexing(TestCase):
         torch.cfloat, torch.cdouble, torch.float, torch.long, torch.bool, torch.bfloat16
     )
     @dtypesIfCUDA(
-        torch.cfloat, torch.cdouble, torch.half, torch.long, torch.bool, torch.bfloat16
+        torch.cfloat,
+        torch.cdouble,
+        torch.half,
+        torch.long,
+        torch.bool,
+        torch.bfloat16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     )
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -1784,6 +1766,8 @@ class NumpyTests(TestCase):
         a[b] = 1.0
         self.assertEqual(a, tensor([[1.0, 1.0, 1.0]], device=device))
 
+    # https://github.com/pytorch/pytorch/issues/127003
+    @xfailIfTorchDynamo
     def test_boolean_assignment_value_mismatch(self, device):
         # A boolean assignment should fail when the shape of the values
         # cannot be broadcast to the subscription. (see also gh-3458)

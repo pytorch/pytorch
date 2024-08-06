@@ -3,10 +3,12 @@
 import unittest
 
 import numpy as np
+
 import torch
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
+
 
 if __name__ == "__main__":
     raise RuntimeError(

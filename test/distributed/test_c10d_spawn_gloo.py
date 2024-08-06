@@ -6,10 +6,11 @@ import sys
 import tempfile
 
 import test_c10d_spawn
+from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
+
 import torch
 import torch.distributed as c10d
 import torch.nn as nn
-from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     create_device,
@@ -22,6 +23,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 if sys.version_info < (3, 9):

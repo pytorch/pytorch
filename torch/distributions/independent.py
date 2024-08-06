@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 from typing import Dict
 
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
+
 
 __all__ = ["Independent"]
 

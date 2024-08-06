@@ -22,7 +22,7 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
 * **TorchInductor** is the default ``torch.compile`` deep learning compiler
   that generates fast code for multiple accelerators and backends. You
   need to use a backend compiler to make speedups through ``torch.compile``
-  possible. For NVIDIA and AMD GPUs, it leverages OpenAI Triton as the key
+  possible. For NVIDIA, AMD and Intel GPUs, it leverages OpenAI Triton as the key
   building block.
 
 * **AOT Autograd** captures not only the user-level code, but also backpropagation,

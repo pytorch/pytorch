@@ -6,16 +6,18 @@
 #include <c10/core/Stream.h>
 #include <c10/util/Registry.h>
 
+#include <c10/core/Allocator.h>
+
+#include <c10/util/python_stub.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 class Context;
 }
 
 namespace at {
-
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
     "this error has occurred because you are trying "
@@ -27,7 +29,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 #define FAIL_MTIAHOOKS_FUNC(func) \
   TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
 
-  virtual ~MTIAHooksInterface() override = default;
+  ~MTIAHooksInterface() override = default;
 
   virtual void initMTIA() const {
     // Avoid logging here, since MTIA needs init devices first then it will know
@@ -40,7 +42,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual DeviceIndex deviceCount() const override {
+  DeviceIndex deviceCount() const override {
     return 0;
   }
 
@@ -52,25 +54,25 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     return false;
   }
 
-  virtual void setCurrentDevice(DeviceIndex device) const override {
+  void setCurrentDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
-    FAIL_MTIAHOOKS_FUNC(__func__);
-    return -1;
-  }
-
-  virtual DeviceIndex exchangeDevice(DeviceIndex device) const override {
+  DeviceIndex getCurrentDevice() const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
@@ -88,6 +90,20 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual void setCurrentStream(const c10::Stream& stream) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
+
+  virtual bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
+  virtual PyObject* memoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
@@ -101,3 +117,4 @@ TORCH_API const MTIAHooksInterface& getMTIAHooks();
 TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at
+C10_DIAGNOSTIC_POP()

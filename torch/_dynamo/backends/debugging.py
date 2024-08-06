@@ -5,14 +5,15 @@ import functools
 from importlib import import_module
 from typing import Any, List, Optional
 
-from functorch.compile import min_cut_rematerialization_partition
-
 import torch
+from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
+
 
 """
 This file contains TorchDynamo backends intended for debugging uses.
@@ -22,6 +23,21 @@ This file contains TorchDynamo backends intended for debugging uses.
 @register_backend
 def eager(gm, fake_tensor_inputs):
     return gm.forward
+
+
+@register_backend
+def eager_noexcept(gm, fake_tensor_inputs):
+    # This backend is intended to check that dynamo-generated GraphModules
+    # do not cause errors.
+    def inner(*args):
+        try:
+            return gm(*args)
+        except Exception as e:
+            raise torch._dynamo.exc.TorchDynamoException(
+                "Unexpected exception when running generated GraphModule"
+            ) from e
+
+    return inner
 
 
 @register_backend
@@ -187,7 +203,7 @@ class ExplainOutput:
     out_guards: Optional[List[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
         output += f"Op Count: {self.op_count}\n"
@@ -273,7 +289,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend):
+    def __init__(self, backend) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)

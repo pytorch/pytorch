@@ -13,20 +13,22 @@ from functools import reduce
 import torch
 import torch.distributed as c10d
 
+
 if not c10d.is_available() or not c10d.is_ucc_available():
     print("c10d UCC not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
-import torch.distributed as dist
-import torch.nn.functional as F
-import torch.testing._internal.common_utils as common
 from test_c10d_common import (
     gpus_for_rank,
     ModuleForDdpCommHook,
     SparseGradientModule,
     Task,
 )
+
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
@@ -415,7 +417,7 @@ class DistributedDataParallelTest(
         """
 
         class GlobalLocalUnusedParamModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
@@ -505,7 +507,7 @@ class DistributedDataParallelTest(
         """
 
         class FindUnusedParamModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
@@ -558,7 +560,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class IgnoredOutput(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -600,7 +602,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -667,7 +669,7 @@ class DistributedDataParallelTest(
         )
 
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -1042,65 +1044,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_ucc()
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="ucc")
-
-
-class CompilerTest(test_c10d_common.CompilerTest):
-    @property
-    def world_size(self):
-        return 2
-
-    def _get_default_group(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="ucc",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-        )
-        return dist.distributed_c10d._get_default_group()
-
-    @skip_if_lt_x_gpu(2)
-    def test_allreduce_work_wait_gpu(self):
-        self._test_allreduce_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_allgather_work_wait_gpu(self):
-        self._test_allgather_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast_work_wait_gpu(self):
-        self._test_broadcast_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
-
-    @skip_if_lt_x_gpu(2)
-    def test_nested_comm_tensor_wrapping_gpu(self):
-        self._test_nested_comm_tensor_wrapping(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_consecutive_comm_work_wait_gpu(self):
-        self._test_consecutive_comm_work_wait(
-            torch.ones(2, 2, device=self.rank) * self.rank
-        )
-
-    def test_allreduce_work_wait_cpu(self):
-        self._test_allreduce_work_wait(
-            torch.ones(2, 2) * self.rank,
-        )
-
-    def test_allgather_work_wait_cpu(self):
-        self._test_allgather_work_wait(torch.ones(2, 2) * self.rank)
-
-    def test_broadcast_work_wait_cpu(self):
-        self._test_broadcast_work_wait(torch.ones(2, 2) * self.rank)
-
-    def test_nested_comm_tensor_wrapping_cpu(self):
-        self._test_nested_comm_tensor_wrapping(torch.ones(2, 2) * self.rank)
-
-    def test_consecutive_comm_work_wait_cpu(self):
-        self._test_consecutive_comm_work_wait(torch.ones(2, 2) * self.rank)
 
 
 class UccProcessGroupWithDispatchedCollectivesTests(
