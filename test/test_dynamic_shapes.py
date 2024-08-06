@@ -202,14 +202,7 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
-    return cls(
-        SymNode(
-            symbol,
-            shape_env,
-            pytype,
-            hint=val,
-        )
-    )
+    return cls(SymNode(symbol, shape_env, pytype, hint=val))
 
 
 # TODO: default duck to False
@@ -816,12 +809,7 @@ def forward(self, x_1):
         self.assertTrue(
             cf(
                 torch.empty_strided(
-                    (
-                        2,
-                        3,
-                        1,
-                        u0,
-                    ),
+                    (2, 3, 1, u0),
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )
@@ -857,12 +845,7 @@ def forward(self, x_1):
         self.assertEqual(
             cf(
                 torch.empty_strided(
-                    (
-                        2,
-                        3,
-                        1,
-                        u0,
-                    ),
+                    (2, 3, 1, u0),
                     (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
                     device="meta",
                 )

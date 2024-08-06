@@ -2,14 +2,15 @@
 import functools
 import math
 import operator
+from typing import *  # noqa: F403
 
 import torch
+import torch.nn.functional as F
+from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
-from typing import *  # noqa: F403
-import torch.nn.functional as F
-from torch.fx.operator_schemas import normalize_function
+
 
 __all__: List[Any] = []
 
@@ -38,11 +39,15 @@ def _wrap_jagged_dim(
 
 def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
-    For NestedTensor operators that support multiple dimensions,
+    For NestedTensor operators,
     wraps dimensions to non-negative values,
     and returns metadata related to reduction dimension(s).
     """
     from torch._prims_common import canonicalize_dims
+
+    assert isinstance(
+        dims, (tuple, list)
+    ), f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -205,7 +210,18 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
-            check_schema("self: jt_all, ...", func, *args, **kwargs)
+            # Build up the check schema string. The first tensor arg is assumed to be
+            # an NJT and other args are sent through as-is.
+            schema_parts = []
+            for arg in func._schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    schema_parts.append(f"{arg.name}: jt_all")
+                    break
+                else:
+                    schema_parts.append(f"{arg.name}: any")
+            schema_parts.append("...")
+            check_schema_str = ", ".join(schema_parts)
+            check_schema(check_schema_str, func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
@@ -224,8 +240,11 @@ def extract_kwargs(arg):
 
 
 def jagged_unary_pointwise(func, *args, **kwargs):
+    # assume if we get here that there is a single NJT input in the args
+    njt = next(arg for arg in args if isinstance(arg, NestedTensor))
     return NestedTensor(
-        func(args[0]._values, *args[1:], **kwargs), **extract_kwargs(args[0])
+        func(*(arg._values if arg is njt else arg for arg in args), **kwargs),
+        **extract_kwargs(njt),
     )
 
 
@@ -502,16 +521,76 @@ def zero__default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten._softmax.default, "self: jt, dim: any, half_to_float: any"
+    torch.ops.aten._softmax.default, "self: jt_all, dim: any, half_to_float: any"
 )
 def _softmax_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
+    if isinstance(new_kwargs["dim"], tuple):
+        raise RuntimeError(
+            "softmax(): not supported for dimensions of type 'tuple' for NestedTensor"
+        )
+
     inp = new_kwargs.pop("input")
-    dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "softmax")
+
+    (
+        new_kwargs["dim"],
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        (new_kwargs["dim"],),
+        "softmax",
+        inp._ragged_idx,
+    )
+
+    if reduce_on_batch:
+        raise RuntimeError(
+            "softmax(): not supported when reducing across the batch dimension for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._ragged_idx > 1:
+        raise RuntimeError(
+            "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
+        )
+
+    if reduce_on_ragged and inp._lengths is not None:
+        raise RuntimeError(
+            "softmax(): not supported where lengths is not None "
+            + "if reducing across the ragged dimension for NestedTensor"
+        )
+
+    new_kwargs["dim"] = new_kwargs["dim"][
+        0
+    ]  # torch.softmax takes in the reduction dimension as an integer
+
+    if reduce_on_ragged:
+        padded_softmax_values = torch.nn.functional.softmax(
+            torch.ops.aten._jagged_to_padded_dense_forward(
+                inp._values.flatten(
+                    start_dim=inp._ragged_idx
+                ),  # values are required to be 2D tensors for j2pd
+                [inp._offsets],
+                max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+                padding_value=float("-inf"),  # e^-inf = 0
+            ),
+            dim=inp._ragged_idx,
+        )
+
+        softmax_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_softmax_values,
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        ).reshape(
+            -1, *inp._values.shape[1:]
+        )  # expand softmax_values back to original shape (inp._values.shape)
+
+        return NestedTensor(softmax_values, **extract_kwargs(inp))
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -884,7 +963,7 @@ def sum_dim_IntList(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
@@ -1058,7 +1137,7 @@ def view_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
-    "input: jt, normalized_shape: any, weight: any?, bias: any?, eps: any",
+    "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",
 )
 def native_layer_norm_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1066,12 +1145,91 @@ def native_layer_norm_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    normalized_shape = new_kwargs["normalized_shape"]
 
-    # Ensure we're not trying to normalize over the ragged dim
-    if inp.dim() < 3 or (inp.dim() - len(normalized_shape)) < 2:
+    if inp.dim() <= 2:
         raise RuntimeError(
-            "layer_norm(): normalizing over ragged dim not supported for nested tensors"
+            "layer_norm(): not supported for NestedTensor objects with 2 or fewer dimensions"
+        )
+
+    normalized_shape = new_kwargs["normalized_shape"]
+    ragged_size = inp.shape[inp._ragged_idx]
+
+    num_dims_not_normalized = inp.dim() - len(normalized_shape)
+
+    if (
+        num_dims_not_normalized == 0
+    ):  # error if trying to normalize over the batch dimension
+        raise RuntimeError(
+            "layer_norm(): not supported when normalizing over the batch dimension for NestedTensor"
+        )
+
+    if ragged_size in normalized_shape and inp._lengths is not None:
+        raise RuntimeError(
+            "layer_norm(): not supported where lengths is not None if operating on the ragged dimension for NestedTensor"
+        )
+
+    if (
+        ragged_size in normalized_shape
+    ):  # special handling for normalizing over the ragged dimension
+        padded_input = torch.ops.aten._jagged_to_padded_dense_forward(
+            inp._values.flatten(
+                start_dim=inp._ragged_idx
+            ),  # _jagged_to_padded_dense_forward requires values to be a 2D tensor
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        )
+
+        padded_mask = torch.ops.aten._jagged_to_padded_dense_forward(
+            torch.ones((inp._values.shape[0], 1), device=inp.device, dtype=inp.dtype),
+            [inp._offsets],
+            max_lengths=[inp._max_seqlen],  # max length of ragged dimension
+        ).expand(
+            padded_input.shape
+        )  # mask elements outside of the ragged dimension and expand to the same shape as padded input (3D dense tensor)
+
+        ragged_lengths = (
+            inp._offsets.diff().unsqueeze(1).unsqueeze(1) * padded_input.shape[2]
+        )  # ragged dim * inner dim, since we sum over dims (1, 2) (the layer on which we normalize)
+
+        mean = (
+            torch.sum(
+                padded_input,
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        padded_normalized = (
+            padded_input - mean
+        ) * padded_mask  # mask elements outside of the ragged dimension size for correct variance calculation
+
+        variance = (
+            torch.sum(
+                torch.square(padded_normalized),
+                dim=(1, 2),
+                keepdim=True,
+            )
+            / ragged_lengths
+        )  # a sum over (1, 2) ensures layer norm, whereas a sum over (1) would be an instance norm
+
+        std = torch.sqrt(variance + new_kwargs["eps"])
+        padded_layer_norm = padded_normalized / std
+
+        jagged_layer_norm_values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded_layer_norm,
+            [inp._offsets],
+            total_L=inp._values.shape[
+                0
+            ],  # providing this parameter helps avoid a GPU/CPU sync
+        ).unflatten(
+            -1, inp.shape[inp._ragged_idx + 1 :]
+        )  # unflatten last dimension back into original nested tensor shape, e.g. (B, *, WH) --> (B, *, W, H)
+
+        return (
+            NestedTensor(jagged_layer_norm_values, **extract_kwargs(inp)),
+            mean,
+            std,
         )
 
     output, mean, std = func(inp._values, **new_kwargs)
@@ -1167,7 +1325,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,  # noqa: UFMT
+        reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
