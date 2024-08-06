@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from functools import cached_property, lru_cache, partial, wraps
-from importlib import import_module
+from functools import cached_property, partial, wraps
 from random import randint
 from statistics import median
 from time import perf_counter
@@ -95,22 +94,19 @@ should_enable_early_pruning = partial(
 )
 
 
-def maybe_fallback_to_original_benchmarking(
-    original_fn_name: str,
+def maybe_fallback_generic(
+    fallback_check: Callable[[], bool],
+    fallback_fn_name: str,
+    counter: Optional[str] = None,
 ) -> Callable[..., Any]:
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(fn)
         def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
-            if should_fallback_to_original_benchmarking():
-                log.debug(
-                    "Falling back to original benchmarking function %s from %s.",
-                    original_fn_name,
-                    fn.__name__,
-                )
-                counters["inductor"][
-                    "benchmarking_fallback_to_original_benchmarking"
-                ] += 1
-                return getattr(self, original_fn_name)(*args, **kwargs)
+            if fallback_check():
+                log.debug("Falling back to %s from %s.", fallback_fn_name, fn.__name__)
+                if counter is not None:
+                    counters["inductor"][counter] += 1
+                return getattr(self, fallback_fn_name)(*args, **kwargs)
             return fn(self, *args, **kwargs)
 
         return wrapper
@@ -118,27 +114,16 @@ def maybe_fallback_to_original_benchmarking(
     return decorator
 
 
-def maybe_fallback_to_non_lazy_benchmarking(
-    non_lazy_fn_name: str,
-) -> Callable[..., Any]:
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(fn)
-        def wrapper(self: Benchmarker, *args: Any, **kwargs: Any) -> Any:
-            if not should_enable_lazy_benchmarking():
-                log.debug(
-                    "Falling back to non-lazy benchmarking function %s from %s.",
-                    non_lazy_fn_name,
-                    fn.__name__,
-                )
-                counters["inductor"][
-                    "benchmarking_fallback_to_non_lazy_benchmarking"
-                ] += 1
-                return getattr(self, non_lazy_fn_name)(*args, **kwargs)
-            return fn(self, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
+maybe_fallback_to_original_benchmarking = partial(
+    maybe_fallback_generic,
+    should_fallback_to_original_benchmarking,
+    counter="benchmarking_fallback_to_original_benchmarking",
+)
+maybe_fallback_to_non_lazy_benchmarking = partial(
+    maybe_fallback_generic,
+    lambda: not should_enable_lazy_benchmarking(),
+    counter="benchmarking_fallback_to_non_lazy_benchmarking",
+)
 
 
 class LazyBenchmark:
