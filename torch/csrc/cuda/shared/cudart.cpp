@@ -71,6 +71,7 @@ void initCudartBindings(PyObject* module) {
       "cuda"
       "HostRegister",
       [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
+        py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(
             cudaHostRegister((void*)ptr, size, flags));
       });
@@ -78,18 +79,21 @@ void initCudartBindings(PyObject* module) {
       "cuda"
       "HostUnregister",
       [](uintptr_t ptr) -> cudaError_t {
+        py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
       });
   cudart.def(
       "cuda"
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
+        py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
       });
   cudart.def(
       "cuda"
       "StreamDestroy",
       [](uintptr_t ptr) -> cudaError_t {
+        py::gil_scoped_release no_gil;
         return C10_CUDA_ERROR_HANDLED(cudaStreamDestroy((cudaStream_t)ptr));
       });
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
@@ -98,7 +102,8 @@ void initCudartBindings(PyObject* module) {
   cudart.def(
       "cuda"
       "ProfilerInitialize",
-      cudaProfilerInitialize);
+      cudaProfilerInitialize,
+      py::call_guard<py::gil_scoped_release>());
 #endif
   cudart.def(
       "cuda"
@@ -107,6 +112,7 @@ void initCudartBindings(PyObject* module) {
         c10::cuda::CUDAGuard guard(device);
         size_t device_free = 0;
         size_t device_total = 0;
+        py::gil_scoped_release no_gil;
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
       });
