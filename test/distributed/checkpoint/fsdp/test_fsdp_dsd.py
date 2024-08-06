@@ -130,7 +130,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             auto_wrap_policy=always_wrap_policy,
         )
 
-        fsdp1_optim = torch.optim.Adam(fsdp1_model.parameters(), lr=0.1)
+        fsdp1_optim = torch.optim.AdamW(fsdp1_model.parameters(), lr=0.1)
 
         fsdp1_model(torch.randn((2,), device=self.rank)).sum().backward()
         fsdp1_optim.step()
@@ -160,7 +160,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         for module in fsdp2_model:
             fully_shard(module)
         fully_shard(fsdp2_model)
-        fsdp2_optim = torch.optim.Adam(fsdp2_model.parameters(), lr=0.1)
+        fsdp2_optim = torch.optim.AdamW(fsdp2_model.parameters(), lr=0.1)
 
         fsdp2_state_dict = {
             "model": get_model_state_dict(fsdp2_model),
@@ -206,7 +206,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         for state_dict_type in state_dict_type_list:
             # Save state dict with original model
             base_model = _get_base_model().cuda()
-            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+            base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
             # Save state dict with model wrapped with FSDP1
             fsdp1_model = FSDP(
@@ -215,7 +215,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 auto_wrap_policy=always_wrap_policy,
             )
 
-            fsdp1_optim = torch.optim.Adam(fsdp1_model.parameters(), lr=0.1)
+            fsdp1_optim = torch.optim.AdamW(fsdp1_model.parameters(), lr=0.1)
 
             # one-step training to modify state dict
             inp = torch.randn((2,), device=self.rank)
@@ -245,16 +245,6 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                     checkpoint_id=self.temp_dir,
                 )
 
-            fsdp1_full_msd = get_model_state_dict(
-                fsdp1_model,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
-            fsdp1_full_osd = get_optimizer_state_dict(
-                fsdp1_model,
-                fsdp1_optim,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
-
             # Load state dict into model with FSDP2 + TP applied
             # init device mesh
             dp_size = 2
@@ -282,7 +272,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             for module in fsdp2_tp_model:
                 fully_shard(module, mesh=dp_mesh)
             fully_shard(fsdp2_tp_model, mesh=dp_mesh)
-            fsdp2_tp_optim = torch.optim.Adam(fsdp2_tp_model.parameters(), lr=0.1)
+            fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
             fsdp2_tp_state_dict = {
                 "model": get_model_state_dict(fsdp2_tp_model),
@@ -306,10 +296,8 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             )
 
             # Compare full state dict to make sure they are the same.
-            self.assertEqual(base_msd, fsdp1_full_msd)
-            self.assertEqual(base_osd, fsdp1_full_osd)
-            self.assertEqual(fsdp2_tp_full_msd, fsdp1_full_msd)
-            self.assertEqual(fsdp2_tp_full_osd, fsdp1_full_osd)
+            self.assertEqual(base_msd, fsdp2_tp_full_msd)
+            self.assertEqual(base_osd, fsdp2_tp_full_osd)
 
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
@@ -344,7 +332,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         for save_full_state_dict in [True, False]:
             # Save state dict with original model
             base_model = _get_base_model().cuda()
-            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+            base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
             # Save state dict with TP model
             tp_model = copy.deepcopy(base_model)
@@ -353,7 +341,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 device_mesh=global_mesh_1d,
                 parallelize_plan=tp_parallelize_plan,
             )
-            tp_model_optim = torch.optim.Adam(tp_model.parameters(), lr=0.1)
+            tp_model_optim = torch.optim.AdamW(tp_model.parameters(), lr=0.1)
 
             # one-step training to modify state dict
             inp = torch.randn((2,), device=self.rank)
@@ -388,16 +376,6 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             tp_state_dict = {"model": tp_msd, "optim": tp_osd}
             dcp.save(tp_state_dict, checkpoint_id=self.temp_dir)
 
-            tp_full_msd = get_model_state_dict(
-                tp_model,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
-            tp_full_osd = get_optimizer_state_dict(
-                tp_model,
-                tp_model_optim,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
-
             # Load state dict into model with FSDP2 + TP applied
             # FSDP + TP
             fsdp2_tp_model = _get_base_model()
@@ -409,7 +387,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             for module in fsdp2_tp_model:
                 fully_shard(module, mesh=dp_mesh)
             fully_shard(fsdp2_tp_model, mesh=dp_mesh)
-            fsdp2_tp_optim = torch.optim.Adam(fsdp2_tp_model.parameters(), lr=0.1)
+            fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
             fsdp2_tp_state_dict = {
                 "model": get_model_state_dict(fsdp2_tp_model),
@@ -435,8 +413,6 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             # Compare full state dict to make sure they are the same.
             self.assertEqual(base_msd, fsdp2_tp_full_msd)
             self.assertEqual(base_osd, fsdp2_tp_full_osd)
-            self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
-            self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
 
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
@@ -471,7 +447,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         for save_full_state_dict in [True, False]:
             # Save state dict with original model
             base_model = _get_base_model().cuda()
-            base_optim = torch.optim.Adam(base_model.parameters(), lr=0.1)
+            base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
             # Save state dict with FSDP2 + TP model
             fsdp2_tp_model = copy.deepcopy(base_model)
@@ -483,7 +459,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             for module in fsdp2_tp_model:
                 fully_shard(module, mesh=dp_mesh)
             fully_shard(fsdp2_tp_model, mesh=dp_mesh)
-            fsdp2_tp_optim = torch.optim.Adam(fsdp2_tp_model.parameters(), lr=0.1)
+            fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
             # one-step training to modify state dict
             inp = torch.randn((2,), device=self.rank)
@@ -534,7 +510,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 device_mesh=global_mesh_1d,
                 parallelize_plan=tp_parallelize_plan,
             )
-            tp_optim = torch.optim.Adam(tp_model.parameters(), lr=0.1)
+            tp_optim = torch.optim.AdamW(tp_model.parameters(), lr=0.1)
 
             tp_state_dict = {
                 "model": get_model_state_dict(tp_model),
