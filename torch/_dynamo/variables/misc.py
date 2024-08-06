@@ -886,10 +886,8 @@ class PythonModuleVariable(VariableTracker):
         return f"PythonModuleVariable({self.value})"
 
     def call_hasattr(self, tx: "InstructionTranslator", name):
-        if self.is_torch:
-            result = hasattr(self.value, name)
-            return variables.ConstantVariable.create(result)
-        return super().call_hasattr(tx, name)
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable.create(result)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
