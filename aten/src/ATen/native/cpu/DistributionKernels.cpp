@@ -18,8 +18,7 @@
 #include <limits>
 #include <type_traits>
 
-// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
-#if AT_MKL_ENABLED() && 0
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #include <cpuinfo.h>
 #endif
