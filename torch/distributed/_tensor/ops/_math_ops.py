@@ -36,7 +36,6 @@ from torch.distributed._tensor.placement_types import (
 )
 from torch.distributed.device_mesh import DeviceMesh
 
-
 aten = torch.ops.aten
 
 
@@ -1041,7 +1040,6 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
-
 
 @register_op_strategy(
     [aten._amp_foreach_non_finite_check_and_unscale_.default],
