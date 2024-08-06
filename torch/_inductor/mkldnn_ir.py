@@ -232,7 +232,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -303,7 +303,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         cpp_constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -391,7 +391,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         kernel_layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
 
@@ -492,7 +492,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -577,7 +577,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp]
@@ -747,7 +747,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         """
         Needs input/weight/output qparams
         if bias is not None
@@ -960,7 +960,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1018,7 +1018,7 @@ class LinearUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1084,7 +1084,7 @@ class LinearBinary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
@@ -1154,7 +1154,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         constant_args=(),
         has_bias=True,
         x_scale_zp_are_tensors=False,
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp]
@@ -1331,7 +1331,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         constant_args=(),
         has_bias=True,
         x_scale_zp_are_tensors=False,
-    ):
+    ) -> None:
         """
         if bias is not None
             - inputs = [x, w, b, weight_scale, weight_zp, x2]
@@ -1562,7 +1562,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-    ):
+    ) -> None:
         super().__init__(
             layout,
             inputs,
