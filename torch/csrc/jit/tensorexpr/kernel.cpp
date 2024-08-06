@@ -481,7 +481,7 @@ ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
   if (it == shapeSymbolToVar_.end()) {
     VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
-    return var;
+    return static_cast<ExprHandle>(var);
   }
   return it->second;
 }
