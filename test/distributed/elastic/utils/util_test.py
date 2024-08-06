@@ -133,6 +133,38 @@ class StoreUtilTest(TestCase):
             ],
         )
 
+    def test_barrier_timeout_rank_tracing(self):
+        N = 3
+
+        store = dist.HashStore()
+
+        def run_barrier_for_rank(i: int):
+            try:
+                store_util.barrier(
+                    store,
+                    N,
+                    key_prefix="test/store",
+                    barrier_timeout=0.1,
+                    rank=i,
+                    rank_tracing_decoder=lambda x: f"Rank {x} host",
+                    trace_timeout=0.01,
+                )
+            except Exception as e:
+                return str(e)
+            return ""
+
+        with ThreadPool(N - 1) as pool:
+            outputs: List[str] = pool.map(run_barrier_for_rank, range(N - 1))
+
+        self.assertTrue(any("missing_ranks=[Rank 2 host]" in msg for msg in outputs))
+
+        self.assertTrue(
+            any(
+                "check rank 0 (Rank 0 host) for missing rank info" in msg
+                for msg in outputs
+            )
+        )
+
     def test_barrier_hash_store(self) -> None:
         N = 4
 
