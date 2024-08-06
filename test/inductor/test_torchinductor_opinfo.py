@@ -322,6 +322,57 @@ torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
 )
 
 
+def argsort_equal_checker(
+    self: TestCase,
+    ref_inputs,
+    example_inputs,
+    correct,
+    actual,
+    *,
+    atol=None,
+    rtol=None,
+    exact_dtype=True,
+):
+    self.assertEqual(
+        ref_inputs[0][actual],
+        ref_inputs[0][correct],
+        atol=atol,
+        rtol=rtol,
+        equal_nan=True,
+        exact_dtype=exact_dtype,
+    )
+
+
+def sort_equal_checker(
+    self: TestCase,
+    ref_inputs,
+    example_inputs,
+    correct,
+    actual,
+    *,
+    atol=None,
+    rtol=None,
+    exact_dtype=True,
+):
+    self.assertEqual(
+        actual.values,
+        correct.values,
+        atol=atol,
+        rtol=rtol,
+        equal_nan=True,
+        exact_dtype=exact_dtype,
+    )
+
+    self.assertEqual(
+        ref_inputs[0][actual.indices],
+        ref_inputs[0][correct.indices],
+        atol=atol,
+        rtol=rtol,
+        equal_nan=True,
+        exact_dtype=exact_dtype,
+    )
+
+
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
     # the return value of empty is undefined
@@ -408,6 +459,8 @@ inductor_override_kwargs = {
     ("index_reduce.amax", "cuda", f32): {"check_gradient": False},
     ("index_reduce.amax", "cuda", f16): {"check_gradient": False},
     ("tanh", "cuda", f16): {"atol": 1e-4, "rtol": 1e-2},
+    ("argsort", "cpu"): {"equal_checker": argsort_equal_checker},
+    ("sort", "cpu"): {"equal_checker": sort_equal_checker},
 }
 
 
@@ -739,6 +792,7 @@ class TestInductorOpInfo(TestCase):
                                 "output_process_fn_grad": sample_input.output_process_fn_grad,
                                 "atol": atol,
                                 "rtol": rtol,
+                                "equal_checker": None,
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
@@ -760,6 +814,7 @@ class TestInductorOpInfo(TestCase):
                                 "check_gradient": False,
                                 "atol": atol,
                                 "rtol": rtol,
+                                "equal_checker": None,
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
