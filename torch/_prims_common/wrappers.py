@@ -2,7 +2,6 @@
 import inspect
 import warnings
 from functools import wraps
-
 from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
@@ -19,6 +18,7 @@ from torch._prims_common import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
