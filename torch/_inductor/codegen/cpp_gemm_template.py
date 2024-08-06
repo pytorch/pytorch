@@ -21,6 +21,7 @@ from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     DTYPE_TO_CPP,
     GemmBlocking,
+    get_export_declaration,
     get_gemm_template_output_and_compute_dtype,
 )
 
@@ -38,7 +39,7 @@ GEMM_TEMPLATE = r"""
 {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
 {%- endif %}
 
-extern "C"
+extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
@@ -824,6 +825,7 @@ class CppPackedGemmTemplate(CppTemplate):
             is_dynamic_M=self.is_dynamic_M,
             template=self,
             kernel=kernel,
+            export_declaration=get_export_declaration(),
             epilogue_nodes=epilogues,
             reindexers=reindexers,
             Y_2d=Y_2d,
