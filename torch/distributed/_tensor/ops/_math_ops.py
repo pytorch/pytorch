@@ -15,6 +15,7 @@ from torch.distributed._tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed._tensor.ops.utils import infer_broadcast_dims_map, map_placements_after_broadcast
 from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -35,7 +36,8 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed.device_mesh import DeviceMesh
-
+from torch.distributed._tensor.ops._pointwise_ops import common_pointwise_strategy
+from torch.distributed._tensor.placement_types import TensorMeta
 
 aten = torch.ops.aten
 
@@ -1041,7 +1043,6 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
-
 
 @register_op_strategy(
     [aten._amp_foreach_non_finite_check_and_unscale_.default],
