@@ -110,7 +110,7 @@ jobs:
         )
         pip install -r docs\requirements.txt > pip_install_vision_requirements_log.txt
         echo "INFO - Building torchvision wheel"
-        echo python setup.py bdist_wheel > build_vision_wheel_log.txt
+        python setup.py bdist_wheel > build_vision_wheel_log.txt
         echo "INFO - torchvision wheel built"
         for %%f in (C:\vision\dist\torchvision-*.whl) do (
           set "TORCH_WHL=%%f"
