@@ -354,7 +354,7 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     typing_extensions.assert_never(val)
 
 @contextmanager
-def enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
+def _enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
     """
     Enable thunkification inside the context manager.  Thunkification prevents
     SymNode computation from directly being traced into an FX graph; instead,
@@ -379,7 +379,7 @@ def enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
 def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
     proxy.node.meta['val'] = extract_val(val)
 
-    with enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
+    with _enable_thunkify(proxy.tracer):  # type: ignore[arg-type]
         # Best effort tensor_meta setting; prefer using val!
         if is_fake(val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -407,7 +407,7 @@ def track_tensor(tensor: Tensor, proxy: Proxy, *, constant: Optional[Tensor], tr
     ) -> None:
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
-            with enable_thunkify(tracer):
+            with _enable_thunkify(tracer):
                 set_proxy_slot(outer_s, tracer, thunkify(tracer, proxy_callable, outer_s, *args, **kwargs))
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -745,7 +745,7 @@ def proxy_call(
             # Adding an undefined attribute to Tensor?
             args[0].proxy = proxy_out  # type: ignore[attr-defined]
 
-    with enable_thunkify(proxy_mode.tracer):
+    with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor

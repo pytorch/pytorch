@@ -110,7 +110,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
-    "rebind_unbacked", "resolve_unbacked_bindings",
+    "rebind_unbacked", "resolve_unbacked_bindings", "is_accessor_node",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
