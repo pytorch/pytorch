@@ -190,7 +190,7 @@ def _get_first_tensor_in_node_list(
 
 def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argument]:
     # FIXME: node.target may not have a schema
-    torch_schema: torch.FunctionSchema = node.target._schema
+    torch_schema: torch.FunctionSchema = node.target._schema  # type: ignore[union-attr]
     node_args = {}
     for arg, schema_arg in zip(node.args, torch_schema.arguments):
         node_args[schema_arg.name] = arg
@@ -216,7 +216,7 @@ def get_matching_overload(
     # FIXME: node.target may and builtin and not have a schema
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
-        arg.name: arg for arg in node.target._schema.arguments
+        arg.name: arg for arg in node.target._schema.arguments  # type: ignore[union-attr]
     }
     failure_messages: list[str] = []
     for overload in overloads:
@@ -318,7 +318,7 @@ def dispatch(
         A tuple containing the matched ONNX function and a string describing the reason for failure or success.
     """
     # TODO: Handle when node does not have a target
-    decomp_metas = registry.get_decomps(node.target)
+    decomp_metas = registry.get_decomps(node.target)  # type: ignore[arg-type]
     # Determine if the node has complex inputs.
     is_complex = any(_arg_has_complex_dtype(arg) for arg in node.args) or any(
         _arg_has_complex_dtype(arg) for arg in node.kwargs.values()

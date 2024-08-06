@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Collection, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils import _pytree as pytree
@@ -77,37 +77,3 @@ def verify_onnx_program(
             )
         )
     return results
-
-
-def save_node_data_for_model_explorer(verification_infos: Collection[VerificationInfo]):
-    # https://github.com/google-ai-edge/model-explorer/wiki/4.-API-Guide#create-custom-node-data
-    # This API is unstable and may change in the future.
-    from model_explorer import node_data_builder as ndb
-
-    for field in ("absolute_difference", "relative_difference"):
-        # Populate values for the main graph in a model.
-        main_graph_results: dict[str, ndb.NodeDataResult] = {}
-        for info in verification_infos:
-            main_graph_results[f"[value] {info.name}"] = ndb.NodeDataResult(
-                value=getattr(info, field)
-            )
-
-        thresholds: list[ndb.ThresholdItem] = [
-            ndb.ThresholdItem(value=0.00001, bgColor="#388e3c"),
-            ndb.ThresholdItem(value=0.0001, bgColor="#8bc34a"),
-            ndb.ThresholdItem(value=0.001, bgColor="#c8e6c9"),
-            ndb.ThresholdItem(value=0.01, bgColor="#ffa000"),
-            ndb.ThresholdItem(value=1, bgColor="#ff5722"),
-            ndb.ThresholdItem(value=100, bgColor="#d32f2f"),
-        ]
-
-        # Construct the data for the main graph.
-        main_graph_data = ndb.GraphNodeData(
-            results=main_graph_results, thresholds=thresholds
-        )
-
-        # Construct the data for the model.
-        # "main_graph" is defined in _core.py
-        model_data = ndb.ModelNodeData(graphsData={"main_graph": main_graph_data})
-
-        model_data.save_to_file(f"{field}.json")

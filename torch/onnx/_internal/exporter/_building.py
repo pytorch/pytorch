@@ -64,8 +64,8 @@ def _construct_named_inputs_and_attrs(
     #   b. Depending on param.is_input, Record named_inputs[param.name] = arg or named_attrs[param.name] = arg
     #   c. Handle kwargs as well
     #   d. Fill in None if the input is not provided
-    named_inputs = {}
-    named_attrs = {}
+    named_inputs: dict[str, Any] = {}
+    named_attrs: dict[str, Any] = {}
     reversed_args_stack = list(reversed(args))
     for param in signature.params:
         if isinstance(param, _schemas.Parameter):
@@ -100,9 +100,9 @@ def _construct_named_inputs_and_attrs(
             ), f"Expected AttributeParameter, got {type(param)}"
             if reversed_args_stack:
                 # First exhaust the positional arguments
-                attribute = reversed_args_stack.pop()
+                attribute = reversed_args_stack.pop()  # type: ignore[assignment]
             elif param.name in kwargs:
-                attribute = kwargs[param.name]
+                attribute = kwargs[param.name]  # type: ignore[assignment]
             elif param.default is not None:
                 attribute = param.default
             else:
@@ -317,7 +317,7 @@ def _construct_node(
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
     """
-    inputs = []
+    inputs: list[ir.Value | None] = []
     # Flatten variadic inputs
     for value in named_inputs.values():
         if isinstance(value, Sequence):
