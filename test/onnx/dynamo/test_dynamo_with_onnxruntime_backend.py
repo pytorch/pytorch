@@ -353,7 +353,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)
@@ -690,7 +690,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         class MLP(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 4, bias=True)
                 self.fc2 = nn.Linear(4, 2, bias=True)

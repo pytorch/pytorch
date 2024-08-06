@@ -17,6 +17,14 @@ def fx_graph_remote_cache_default() -> Optional[bool]:
     return None
 
 
+def autotune_remote_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
 # add some debug printouts
 debug = False
 
@@ -41,7 +49,10 @@ fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 autotune_local_cache = True
 
 # enable autotune remote cache
-autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+# False: Disables the cache
+# True: Enables the cache
+# None: Not set -- Off for OSS, JustKnobs based for internal
+autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
@@ -337,7 +348,7 @@ coordinate_descent_search_radius = int(
 # Specify a list of comma separated optimizations to collect data for
 autoheuristic_collect = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_COLLECT", "")
 # Specify a list of comma separated optimizations to use learned heuristics for
-autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "")
+autoheuristic_use = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_USE", "mixed_mm")
 
 
 def run_autoheuristic(name: str) -> bool:
@@ -442,6 +453,15 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
+# Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
+# for all except for foreach, 2 - enable for all
+combo_kernel_allow_mixed_sizes = 1
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
@@ -523,7 +543,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode() and worker_start_method != "subprocess":
+    elif is_fbcode():
         return 1
     else:
         cpu_count = (
@@ -635,6 +655,12 @@ decompose_mem_bound_mm: bool = False
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
+
+# For the user-written Triton kernels compiled with the model, ignore the unsupported
+# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
+# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
+# set unless you know what you're doing.
+unsafe_ignore_unsupported_triton_autotune_args: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -952,10 +978,9 @@ class rocm:
     # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Enable for CDNA3 only for now
+    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"

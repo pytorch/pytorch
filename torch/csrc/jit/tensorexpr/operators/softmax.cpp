@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/softmax.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace torch::jit::tensorexpr;
 
@@ -161,6 +159,4 @@ Tensor computeSoftmax(
           {max.stmt(), e.stmt(), sum.stmt(), log_sum.stmt(), result.stmt()})));
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
