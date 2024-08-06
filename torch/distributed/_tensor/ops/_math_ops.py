@@ -20,7 +20,9 @@ from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
+    infer_broadcast_dims_map,
     is_tensor_evenly_shardable,
+    map_placements_after_broadcast,
     normalize_dim,
     normalize_dims,
     register_op_strategy,
@@ -1056,3 +1058,101 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
+
+
+@register_op_strategy(
+    [aten._amp_foreach_non_finite_check_and_unscale_.default],
+    schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+)
+def distribute_tensor_scale(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    assert len(op_schema.args_schema) == 3
+    (
+        scaled_grad,  # Shard(dim=0),
+        found_inf,  # Partial -> Replicate(),
+        inv_scale,  # Replicate(),
+    ) = op_schema.args_schema
+
+    maxPartial: List[Placement] = []
+    maxPartial.append(Partial("max"))
+    maxPartial = tuple(maxPartial)
+
+    normPartical: List[Placement] = []
+    normPartical.append(_NormPartial(norm_type="inf"))
+    normPartical = tuple(normPartical)
+
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = scaled_grad
+    common_shape = torch.broadcast_shapes(
+        *[arg.shape for arg in args_schema if isinstance(arg, OpStrategy)]
+    )
+    found_inf.strategies[0].output_specs.placements = tuple([Partial("max")])
+    assert isinstance(input_tuple_strategy, TupleStrategy)
+
+    output_tuple_strategy_childs: List[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.childs:
+        assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
+        reduce_dims = list(range(op_strategy.ndim))
+        output_strategy = common_reduction_strategy(
+            mesh,
+            op_strategy,
+            reduce_dims,
+            reduction_linear=True,
+            reduction_op=tuple([Shard(dim=0), _NormPartial(norm_type=2), Replicate()]),
+        )
+        output_strategy.strategies[0].input_specs = list(
+            output_strategy.strategies[0].input_specs
+        )
+        output_strategy.strategies[0].redistribute_cost = list(
+            output_strategy.strategies[0].redistribute_cost
+        )
+
+        input_arg = found_inf
+        input_arg_spec = input_arg.strategies[0].output_spec
+        input_arg_dims_map = infer_broadcast_dims_map(
+            common_shape, input_arg_spec.shape
+        )
+
+        input_target_placements = map_placements_after_broadcast(
+            tuple(output_strategy.strategies[0].output_specs.placements),
+            common_shape,
+            input_arg_dims_map,
+        )
+        input_arg_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple([_NormPartial(norm_type="inf")]),
+            tensor_meta=input_arg_spec.tensor_meta,
+        )
+        output_strategy.strategies[0].input_specs.append(input_arg_target_spec)
+        output_strategy.strategies[0].redistribute_cost.append(
+            generate_redistribute_costs(input_arg, input_arg_target_spec)
+        )
+
+        input_arg = inv_scale
+        input_arg_spec = input_arg.strategies[0].output_spec
+        input_arg_dims_map = infer_broadcast_dims_map(
+            common_shape, input_arg_spec.shape
+        )
+        input_target_placements = map_placements_after_broadcast(
+            tuple(output_strategy.strategies[0].output_specs.placements),
+            common_shape,
+            input_arg_dims_map,
+        )
+        input_arg_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple([Replicate()]),
+            tensor_meta=input_arg_spec.tensor_meta,
+        )
+        output_strategy.strategies[0].input_specs.append(input_arg_target_spec)
+        output_strategy.strategies[0].redistribute_cost.append(
+            generate_redistribute_costs(input_arg, input_arg_target_spec)
+        )
+        output_strategy.strategies[0].input_specs = tuple(
+            output_strategy.strategies[0].input_specs
+        )
+        output_strategy.strategies[0].redistribute_cost = tuple(
+            output_strategy.strategies[0].redistribute_cost
+        )
+
+        output_tuple_strategy_childs.append(output_strategy)
+
+    return TupleStrategy(output_tuple_strategy_childs)
