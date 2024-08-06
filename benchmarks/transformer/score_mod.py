@@ -451,7 +451,7 @@ def generate_experiment_configs(
         (q_heads, kv_heads),
         (q_seq_len, kv_seq_len),
         head_dim,
-        (score_mod,mask_mod),
+        (score_mod, mask_mod),
         dtype,
     ) in itertools.product(
         kv_cache_size if kv_cache_size else batch_sizes,
