@@ -1,4 +1,4 @@
-name: A-win-build-UT
+name: Win-xpu-build-UT
 on:
     workflow_dispatch:
       inputs:
@@ -7,22 +7,19 @@ on:
             type: choice
             options:
             - "icx-4434"
+            - "142497"
+            - "self-hosted"
         working_commit:
             description: 'Working commit to pass to xpu.txt'
             required: true
             type: string
-
 env:
-    home_dir: 'torch'
-    conda_env: torch_venv
-    conda_path: C:\Users\nrvalgo_jenkinsadm\miniforge3
+    home_dir: 't'
+    conda_env: 'torch_venv'
+    conda_path: 'C:\Users\nrvalgo_jenkinsadm\miniforge3'
     python_version: '3.10'
-    node_proxy: 'http://proxy-us.intel.com:911'
     USE_XPU: 1
     VS2022INSTALLDIR: 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools'
-    basekit_path: 'C:\Program Files (x86)\Intel\oneAPI'
-    PATH: 'C:\Program Files\Git\cmd;C:\Users\nrvalgo_jenkinsadm\miniforge3;C:\Users\nrvalgo_jenkinsadm\miniforge3\Scripts.'
-
 jobs:
   Preparation:
     runs-on: ["${{ inputs.win_runner }}"]
@@ -34,7 +31,6 @@ jobs:
         ref: main
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
-
     - name: Set conda environment
       shell: cmd
       run: |
@@ -42,11 +38,10 @@ jobs:
         call conda remove -n %conda_env% --all -y
         call conda create -n %conda_env% python=3.10 -y
         call conda activate %conda_env%
+        call conda install cmake==3.26.4 ninja -y
         call conda remove ucrt -y
-        call pip install pyyaml --force
-        call pip install cmake==3.26.4 --force
+        call pip install pyyaml
         call conda list
-
   Build-whls:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation]
@@ -54,60 +49,61 @@ jobs:
     - name: Build Torch
       shell: cmd
       run: |
-        call %conda_path%\Scripts\activate.bat activate %conda_env%
-        call "%basekit_path%\setvars.bat"
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-
-        if exist "%home_dir%\pytorch" (
-          rmdir /s /q "%home_dir%\pytorch"
+        call %conda_path%\Scripts\activate.bat %conda_env%
+        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        if exist "C:\pytorch" (
+          rmdir /s /q "C:\pytorch"
         )
-
-        git clone https://github.com/pytorch/pytorch.git %home_dir%\pytorch
-        cd %home_dir%\pytorch
-        git checkout 47cbc58452e74f70afb5e7f108ff8d7ecc329f21
-        echo ${{ inputs.working_commit }} > third_party/xpu.txt
-        python -u setup.py bdist_wheel > build.log
-
-  #   - name: Build TorchVision
-  #     shell: cmd
-  #     run: |
-  #       call %conda_path%\Scripts\activate.bat
-  #       call activate %conda_env%
-  #       if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
-  #       git clone https://github.com/pytorch/vision.git %home_dir%\vision
-  #       cd %home_dir%\vision
-  #       pip install -r docs/requirements.txt
-  #       if [ -e %home_dir%\pytorch\dist\torch-*.whl ]; then
-  #           pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
-  #       else
-  #           echo "No torch whl found."
-  #           exit
-  #       fi
-
-  #       python setup.py bdist_wheel
-
-  #       if [ -e %home_dir%\vision\dist\torchvision-*.whl ]; then
-  #           pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall
-  #       else
-  #           echo "No torchvision whl found."
-  #           exit
-  #       fi
-
-  # Unit-tests:
-  #   runs-on: ["${{ inputs.win_runner }}"]
-  #   needs: [Build-whls, Preparation]
-  #   steps:
-  #   - name: Run Unit Tests
-  #     shell: cmd
-  #     run: |
-  #       call %conda_path%\Scripts\activate.bat
-  #       call activate %conda_env%
-  #       if exist "%home_dir%\xpurepo" rmdir /s /q "%home_dir%\xpurepo"
-  #       git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
-  #       cd %home_dir%\xpurepo\examples
-  #       pip install pytest expecttest
-  #       python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
-
+        git clone https://github.com/pytorch/pytorch.git C:\pytorch > tmp_git_log.txt
+        cd C:\pytorch
+        git checkout c8626a4e1f0553c8a9af32515555409d151a00c0
+        set commit_number_arg=${{ inputs.working_commit }}
+        python -c "import os;commit_number = os.getenv('commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
+        call conda install conda-forge::rust -y
+        call conda install typing_extensions -y
+        python -m pip install -r requirements.txt > tmp_pip_install_requirements_log.txt
+        python setup.py bdist_wheel > tmp_log.txt
+    - name: Build TorchVision
+      shell: cmd
+      run: |
+        call %conda_path%\Scripts\activate.bat %conda_env%
+        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
+        call "%basekit_path%\setvars.bat"
+        if exist "%home_dir%\vision" rmdir /s /q "%home_dir%\vision"
+        git clone https://github.com/pytorch/vision.git %home_dir%\vision
+        cd %home_dir%\vision
+        git submodule update --init --recursive
+        pip install -r docs/requirements.txt
+        if exist %home_dir%\pytorch\dist\torch-*.whl (
+          pip install %home_dir%\pytorch\dist\torch-*.whl --force-reinstall
+        ) else (
+          echo "No torch whl found."
+          exit
+        )
+        python setup.py bdist_wheel
+        if exist %home_dir%\vision\dist\torchvision-*.whl (
+          pip install %home_dir%\vision\dist\torchvision-*.whl --force-reinstall        
+        ) else (
+          echo "No torchvision whl found."
+          exit         
+        )
+  Unit-tests:
+    runs-on: ["${{ inputs.win_runner }}"]
+    needs: [Build-whls, Preparation]
+    steps:
+    - name: Run Unit Tests
+      shell: cmd
+      run: |
+        call %conda_path%\Scripts\activate.bat activate %conda_env%
+        set "basekit_path=C:\Program Files (x86)\Intel\oneAPI"
+        call "%basekit_path%\setvars.bat"
+        if exist "%home_dir%\xpurepo" (
+          rmdir /s /q "%home_dir%\xpurepo"
+        )
+        git clone https://github.com/intel/torch-xpu-ops.git %home_dir%\xpurepo
+        cd %home_dir%\xpurepo\examples
+        pip install pytest expecttest
+        python -m pytest -v | tee "%home_dir%\mtl-bundle-uts.log"
   Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation, Build-whls]
@@ -116,10 +112,9 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: whls
-        path: ${{ env.home_dir }}\pytorch\dist
-
+        path: C:\pytorch\dist
     - name: Upload logs
       uses: actions/upload-artifact@v2
       with:
         name: logs
-        path: ${{ env.home_dir }}\pytorch\build.log
+        path: C:\pytorch\tmp_log.txt 
