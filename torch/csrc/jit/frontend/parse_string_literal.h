@@ -8,7 +8,10 @@ namespace torch::jit {
 inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
   // count checks from [start, start + len)
   return start + len <= str.size() &&
-      std::count(str.begin() + start, str.begin() + start + len, c) == len;
+      std::count(
+          str.begin() + static_cast<ptrdiff_t>(start),
+          str.begin() + static_cast<ptrdiff_t>(start + len),
+          c) == len;
 }
 
 inline std::optional<char> parseOctal(const std::string& str, size_t pos) {
@@ -17,8 +20,7 @@ inline std::optional<char> parseOctal(const std::string& str, size_t pos) {
     return std::nullopt;
   size_t c = 0;
   for (size_t i = 1, b = 64; i < 4; ++i, b /= 8) {
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    int d = str[pos + i];
+    auto d = str[pos + i];
     if (d < '0' || d > '7')
       return std::nullopt;
     c += b * (d - '0');
@@ -31,7 +33,7 @@ inline std::optional<char> parseOctal(const std::string& str, size_t pos) {
 inline std::string parseStringLiteral(
     const SourceRange& range,
     const std::string& str) {
-  int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
+  size_t quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
   auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
   size_t pos = ret_str.find('\\');
   while (pos != std::string::npos) {
@@ -63,17 +65,17 @@ inline std::string parseStringLiteral(
         c = '\t';
         break;
       case 'x':
-        throw ErrorReport(range) << "unsupported hex specifier";
+        throw(ErrorReport(range) << "unsupported hex specifier");
       case 'u':
       case 'U':
-        throw ErrorReport(range) << "unsupported unicode specifier";
+        throw(ErrorReport(range) << "unsupported unicode specifier");
       default:
         // octal value in format \nnn, n is [0-7]
         if (auto v = parseOctal(ret_str, pos)) {
           to_erase = 4;
           c = *v;
         } else {
-          throw ErrorReport(range) << " ill formed octal specifier";
+          throw(ErrorReport(range) << " ill formed octal specifier");
         }
     }
     ret_str.replace(pos, to_erase, /* num copies */ 1, c);

@@ -912,6 +912,18 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5], device=device))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_sum_list(self, device):
+        @torch.compile()
+        def f(xt):
+            xs = xt.tolist()
+            for x in xs:
+                torch._check_is_size(x)
+            y = sum(xs)
+            return torch.zeros(y, device=device)
+
+        f(torch.tensor([5] * 80))
+
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
