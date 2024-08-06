@@ -140,6 +140,7 @@ jobs:
         git clone https://github.com/intel/torch-xpu-ops.git C:\xpurepo
         cd C:\xpurepo\examples
         git checkout 47cbc58452e74f70afb5e7f108ff8d7ecc329f21
+        git switch -c new-branch
         pip install pytest expecttest
         python -m pytest -v
 
