@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+# Copyright (c) Meta Platforms, Inc. and affiliates
 # Usage of GradientEdge for splitting input and weights grads from https://github.com/pytorch/pytorch/pull/127766
 import collections
 import weakref

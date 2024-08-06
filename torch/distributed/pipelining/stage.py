@@ -125,7 +125,7 @@ class _PipelineStageBase(ABC):
         self.dw_builder = dw_builder
 
         # backward state
-        self.backward_state: Dict[int, []] = {}
+        self.backward_state: Dict[int, Tuple[Any, ...]] = {}
 
         # store dw_runner per microbatch_id
         self.dw_runner: Dict[int, Callable[[], None]] = {}

@@ -17,7 +17,6 @@ import linecache
 import logging
 import multiprocessing
 import operator
-import os
 import posixpath
 import random
 import re
@@ -35,20 +34,14 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    pass
-
 import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
-from ..utils import _config_module
+from torch.utils import _config_module
+
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
-
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
@@ -59,6 +52,13 @@ from .variables import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
 
 
 if typing.TYPE_CHECKING:
@@ -174,6 +174,7 @@ manual_torch_name_rule_map = {
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
+    "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
@@ -653,6 +654,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._is_alias_of",
         "torch._C._is_any_autocast_enabled",
         "torch._C._is_cached_tensor",
+        "torch._C._is_flash_attention_available",
         "torch._C._is_fwd_grad_enabled",
         "torch._C._is_key_in_tls",
         "torch._C._is_multithreading_enabled",
@@ -2393,6 +2395,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.enable_mem_efficient_sdp",
         "torch.backends.cuda.flash_sdp_enabled",
         "torch.backends.cuda.is_built",
+        "torch.backends.cuda.is_flash_attention_available",
         "torch.backends.cuda.math_sdp_enabled",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
@@ -2926,7 +2929,9 @@ class FunctionIdSet:
     function_ids: Optional[Set[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
-    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+    def __init__(
+        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+    ) -> None:
         self.lazy_initializer = lazy_initializer
 
     def __call__(self):
@@ -2954,7 +2959,7 @@ class FunctionIdSet:
         if idx in function_ids:
             function_ids.remove(idx)
 
-    def __contains__(self, idx: int):
+    def __contains__(self, idx: int) -> bool:
         return idx in self()
 
 
@@ -3104,7 +3109,6 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    os,
     posixpath,
     random,
     re,
@@ -3172,6 +3176,9 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch._higher_order_ops.cond",
+    "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
+    "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",

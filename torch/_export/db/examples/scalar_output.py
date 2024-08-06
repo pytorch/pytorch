@@ -11,7 +11,7 @@ class ScalarOutput(torch.nn.Module):
     Returning scalar values from the graph is supported, in addition to Tensor
     outputs. Symbolic shapes are captured and rank is specialized.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x):

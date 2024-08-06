@@ -3,17 +3,19 @@
 import collections
 import logging
 import weakref
-from typing import List, Optional
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set
 
 import torch
 from torch.autograd.graph import GradientEdge
+from torch.nn import Parameter
 
 from ._debug import map_debug_info
+
 
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t):
+def _get_grad_fn_or_grad_acc(t: torch.Tensor):
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
         return t.view_as(t).grad_fn.next_functions[0][0]
@@ -21,11 +23,11 @@ def _get_grad_fn_or_grad_acc(t):
         return t.grad_fn
 
 
-def reverse_closure(roots, target_nodes):
+def reverse_closure(roots: List[torch.Tensor], target_nodes: Set[torch.Tensor]):
     # Recurse until we reach a target node
     closure = set()
     actual_target_nodes = set()
-    q: Deque = collections.deque()
+    q: Deque[torch.Tensor] = collections.deque()
     for node in roots:
         if node is not None and node not in closure:
             closure.add(node)
@@ -52,15 +54,15 @@ def reverse_closure(roots, target_nodes):
 
 # Enable weak pointer
 class Holder:
-    def __init__(self, node):
+    def __init__(self, node: torch.Tensor):
         self.node = node
 
 
 # TODO: use weak references to avoid reference cycle
-def construct_reverse_graph(roots):
-    q: Deque = collections.deque()
-    root_seen = set()
-    reverse_graph_refs = []
+def construct_reverse_graph(roots: List[torch.Tensor]) -> List[Holder]:
+    q: Deque[torch.Tensor] = collections.deque()
+    root_seen: Set[torch.Tensor] = set()
+    reverse_graph_refs: List[Holder] = []
     for node in roots:
         if node is not None and node not in root_seen:
             q.append(node)
@@ -81,7 +83,9 @@ def construct_reverse_graph(roots):
     return reverse_graph_refs
 
 
-def get_param_groups(inputs, params):
+def get_param_groups(
+    inputs: List[torch.Tensor], params: List[torch.Tensor]
+) -> List[Dict[str, Any]]:
     inputs_closure, _ = reverse_closure(inputs, set())
     param_groups = dict()  # keyed on intermediates
     for i, param in enumerate(params):
@@ -116,9 +120,9 @@ def get_param_groups(inputs, params):
 
 
 def stage_backward_input(
-    stage_outputs,
-    stage_inputs,
-    weights,
+    stage_outputs: List[torch.Tensor],
+    stage_inputs: List[torch.Tensor],
+    weights: Iterator[Parameter],
 ):
     """
     compute the gradients for only the stage inputs with respect to the stage outputs
@@ -170,7 +174,9 @@ def stage_backward_input(
     return dinputs, param_groups
 
 
-def stage_backward_weight(weights, param_groups):
+def stage_backward_weight(
+    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
+) -> None:
     all_dweights = dict()
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
@@ -191,7 +197,6 @@ def stage_backward_weight(weights, param_groups):
         for w, dw in zip(param_group["params"], dweights):
             all_dweights[w] = dw
     # return grads in the original order weights were provided in
-    out = []
     for w in weights:
         grad_acc = _get_grad_fn_or_grad_acc(w)
         if grad_acc in all_dweights:

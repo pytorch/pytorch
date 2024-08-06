@@ -770,7 +770,7 @@ def _get_py3_code(code, fn_name):
         return fn
 
 class TensorExprTestOptions:
-    def __init__(self):
+    def __init__(self) -> None:
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
 
