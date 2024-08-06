@@ -3992,11 +3992,9 @@ class TestAutograd(TestCase):
 
         with torch.inference_mode():
             a = torch.rand(5, requires_grad=True)
-            # does not error
+        msg = "update to inference tensor outside InferenceMode"
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.autograd.graph.increment_version(a)
-
-        # does not error
-        torch.autograd.graph.increment_version(a)
 
     def test_no_grad_input(self):
         class MyFunction(Function):
