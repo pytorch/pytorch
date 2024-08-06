@@ -1029,8 +1029,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 return SourcelessBuilder.create(tx, subobj)
 
-        options = {"source": source}
-        return variables.GetAttrVariable(self, name, **options)
+        # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
+        unimplemented(f"getattr({self}, {name})")
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
