@@ -1678,13 +1678,12 @@ class SIMDScheduling(BaseScheduling):
             ]
             node_ranges = [node.get_ranges()[0] for node in scheduler_nodes]
             new_tilings = set()
-            for range_ in node_ranges:
+            for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
-                extra_dims = max(0, len(node_ranges) - config.triton.max_tiles)
-                leading_dim = (
-                    [sympy_product(range_[:extra_dims])] if extra_dims > 0 else []
-                )
-                tiling = leading_dim + range_[extra_dims:]
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling = [collapsed_leading_dim] + node_range[first_trailing_dim:]
                 new_tilings.add(tuple(tiling))
 
             # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
