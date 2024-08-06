@@ -2597,7 +2597,13 @@ class CppVecKernel(CppKernel):
                 assert horizontal_reduction is not None
                 t_extra = f", {str(horizontal_reduction).lower()}"
                 arg_extra = f", {index}"
-            return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
+            if self.tail_size:
+                return (
+                    f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
+                    f"({var}, {next_value}{arg_extra}, {self.tail_size})"
+                )
+            else:
+                return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
         elif reduction_type == "any":
             return f"{var} | {next_value}"
         else:
