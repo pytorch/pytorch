@@ -149,7 +149,7 @@ extern "C" {{export_declaration}}
                 }
                 {%- if maybe_k_slicing %}
                 if (num_k_slices > 1) {
-                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
                     local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
                 } else
                 {%- endif %}
@@ -185,7 +185,7 @@ extern "C" {{export_declaration}}
                     const int64_t n_start = nc * N0;
                     const int64_t n_end = std::min((nc + 1) * N0, N);
                     const int64_t n_size = n_end - n_start;
-                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
                     auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
                     for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
                         auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
@@ -280,6 +280,14 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = math.ceil(self.k / register_blocking.block_k)
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        if config.cpp.gemm_thread_factors is not None:
+            factors = [int(i) for i in config.cpp.gemm_thread_factors.split(",")]
+            assert len(factors) == 3
+            assert math.prod(factors) == self.num_threads
+            return get_blocking(
+                factors[0], factors[1], factors[2], m_blocks, n_blocks, k_blocks
+            )
 
         # we favor square-sized thread blocks for good data reuse
         def get_better_blocking(blocking, best_blocking):
