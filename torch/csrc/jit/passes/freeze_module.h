@@ -16,7 +16,6 @@
  * produces a cloned frozen module.
  */
 
-
 namespace torch::jit {
 
 TORCH_API Module freeze_module(
@@ -33,4 +32,3 @@ TORCH_API void freeze_module_inplace(
     bool freezeInterfaces = true,
     bool preserveParameters = false);
 } // namespace torch::jit
-

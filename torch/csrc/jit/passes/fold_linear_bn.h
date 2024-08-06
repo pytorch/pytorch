@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-
 namespace torch::jit {
 
 struct TORCH_API LinearBNParameters {
@@ -26,4 +25,3 @@ TORCH_API std::tuple<at::Tensor, at::Tensor> computeUpdatedLinearWeightAndBias(
     const LinearBNParameters& p);
 
 } // namespace torch::jit
-

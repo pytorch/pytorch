@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Transposes the weight matrix for frozen linear modules.
@@ -10,4 +9,3 @@ namespace torch::jit {
 TORCH_API bool FrozenLinearTranspose(std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

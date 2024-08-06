@@ -5,7 +5,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 /** \brief Match the at::linear pattern and fuse it into a single at::linear
@@ -21,4 +20,3 @@ TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void SwapFunctionalLinear(Module& module);
 } // namespace torch::jit
-

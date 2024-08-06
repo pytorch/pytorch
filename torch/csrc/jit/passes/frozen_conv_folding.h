@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Fuses Convolution -> Batchnorm into a single Convolution by
@@ -21,4 +20,3 @@ TORCH_API bool FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph);
 TORCH_API bool FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

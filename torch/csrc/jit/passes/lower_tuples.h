@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // removes tuples where TupleConstruct and TupleUnpack are matched
@@ -17,4 +16,3 @@ TORCH_API void LowerAllTuples(const std::shared_ptr<Graph>& graph);
 TORCH_API void LowerSimpleTuples(Block* block);
 
 } // namespace torch::jit
-

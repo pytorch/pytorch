@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
@@ -19,4 +18,3 @@ TORCH_API std::pair<std::shared_ptr<Graph>, std::vector<IValue>> LowerGraph(
     const ModulePtr& self);
 
 } // namespace torch::jit
-

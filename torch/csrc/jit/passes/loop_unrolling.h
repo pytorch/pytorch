@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // return true if graph is modified
@@ -33,4 +32,3 @@ struct TORCH_API LoopsPeeler {
   size_t num_iterations_ = 1;
 };
 } // namespace torch::jit
-

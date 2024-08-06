@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Fuses Linear -> BatchNormNd into a single Linear by
@@ -11,4 +10,3 @@ namespace torch::jit {
 TORCH_API bool FoldFrozenLinearBatchnorm(std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // A map which stores if an activation operator can perform type promotion
@@ -60,4 +59,3 @@ TORCH_API bool FunctionalToInplaceActivation(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

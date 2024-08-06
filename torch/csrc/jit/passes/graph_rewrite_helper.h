@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-
-
 namespace torch::jit::graph_rewrite_helper {
 
 std::string getFuncName(Value* func_value);
@@ -50,5 +48,3 @@ struct PatternInfo {
 };
 
 } // namespace torch::jit::graph_rewrite_helper
-
-

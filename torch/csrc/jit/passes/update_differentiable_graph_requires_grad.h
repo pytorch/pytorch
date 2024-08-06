@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Because differentiable graphs detach the gradients of input Tensors,
@@ -17,4 +16,3 @@ TORCH_API void UpdateDifferentiableGraphRequiresGrad(
     std::optional<bool> new_requires_grad);
 
 } // namespace torch::jit
-

@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Find the valid upgrader graph for the upgrader and cache the result
@@ -13,4 +12,3 @@ std::shared_ptr<Graph> getUpgraderGraph(const std::string& upgrader_name);
 TORCH_API void ReplaceOldOperatorsWithUpgraders(std::shared_ptr<Graph> graph);
 
 } // namespace torch::jit
-

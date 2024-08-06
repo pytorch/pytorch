@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Try to replace an op that takes a list input with another op that takes a
@@ -28,4 +27,3 @@ TORCH_API bool RemoveListMutationAndUseVariadicStack(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

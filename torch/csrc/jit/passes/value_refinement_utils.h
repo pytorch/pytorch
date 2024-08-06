@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-
 namespace torch::jit {
 
 // Refine from Value of type List -> len of list
@@ -78,4 +77,3 @@ TORCH_API bool handleCommonRefinentOperators(
     std::unordered_map<Value*, BooleanRefinementMapping>& info);
 
 } // namespace torch::jit
-

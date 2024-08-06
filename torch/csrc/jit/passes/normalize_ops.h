@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // This pass converts aten ops to a normalized form. It is
@@ -15,4 +14,3 @@ TORCH_API void NormalizeOps(const std::shared_ptr<Graph>& graph);
 const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap();
 
 } // namespace torch::jit
-

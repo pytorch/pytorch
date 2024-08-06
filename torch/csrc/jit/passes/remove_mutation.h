@@ -7,7 +7,6 @@
 
 #include <utility>
 
-
 namespace torch::jit {
 
 struct TORCH_API MutationRemover {
@@ -80,4 +79,3 @@ TORCH_API bool InplaceToFunctionalActivation(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

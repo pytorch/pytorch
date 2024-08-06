@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Concats multiple linear ops with the same Tensor input
@@ -10,4 +9,3 @@ namespace torch::jit {
 TORCH_API bool FrozenConcatLinear(std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

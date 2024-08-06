@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Inline Fork and Wait calls. This is used, for example, in ONNX export, where
@@ -13,4 +12,3 @@ namespace torch::jit {
 TORCH_API void InlineForkWait(const std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

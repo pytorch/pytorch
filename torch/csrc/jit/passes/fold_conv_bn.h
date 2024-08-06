@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-
 namespace torch::jit {
 
 /** \brief Fold Conv2d-BatchNorm2d into Conv2d in all methods of this
@@ -34,4 +33,3 @@ TORCH_API std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
     const ConvBNParameters& p);
 
 } // namespace torch::jit
-

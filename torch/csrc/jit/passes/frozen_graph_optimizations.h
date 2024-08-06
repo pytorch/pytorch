@@ -11,7 +11,6 @@
  * - FoldFrozenLinearBatchnorm
  */
 
-
 namespace torch::jit {
 
 TORCH_API void OptimizeFrozenGraph(
@@ -19,4 +18,3 @@ TORCH_API void OptimizeFrozenGraph(
     bool optimize_numerics = true);
 
 } // namespace torch::jit
-

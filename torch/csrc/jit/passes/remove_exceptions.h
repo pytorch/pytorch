@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Considering prim::RaiseException nodes unreachable, simplify prim::If nodes
@@ -20,4 +19,3 @@ namespace torch::jit {
 TORCH_API void EliminateExceptions(std::shared_ptr<Graph>& graph);
 
 } // namespace torch::jit
-

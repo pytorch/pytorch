@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-
 namespace torch::jit {
 
 // Remove ops that do nothing on the forward pass (like aten::detach).
@@ -14,4 +13,3 @@ TORCH_API bool EliminateNoOps(
     std::unordered_set<c10::Symbol> custom_ops = {});
 
 } // namespace torch::jit
-
