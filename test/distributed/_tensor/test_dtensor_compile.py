@@ -526,11 +526,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(fw_graph_cell[0]).strip(),
             """\
-def forward(self, primals_1):
-    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
-    sin = torch.ops.aten.sin.default(wait_tensor)
-    sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return (sin_1, primals_1, wait_tensor)""",
+def forward(self, primals_1, primals_2):
+    with_effects = torch._higher_order_ops.effects.with_effects(primals_1, torch.ops._c10d_functional.wait_tensor.default, primals_2);  primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    sin_1 = torch.ops.aten.sin.default(sin)
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    return (getitem, sin_1, primals_2, cos)""",
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -621,7 +624,7 @@ def forward(self, primals_1):
         FileCheck().check(
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
-            "extern_kernels.mm(buf0,"
+            "extern_kernels.mm(buf"
         ).run(
             code
         )
