@@ -94,31 +94,26 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
       double U = standard_uniform(generator) - 0.5;
       double V = standard_uniform(generator);
       double us = 0.5 - std::fabs(U);
-      int64_t k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
+      auto k = std::floor((2 * a / us + b) * U + lambda + 0.43);
       if ((us >= 0.07) && (V <= vr)) {
-        return k;
+        return static_cast<int64_t>(k);
       }
       if ((k < 0) || ((us < 0.013) && (V > us))) {
         continue;
       }
       if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
-          (-lambda + k * loglam - std::lgamma((double)k + 1))) {
-        return k;
+          (-lambda + k * loglam - std::lgamma(k + 1))) {
+        return static_cast<int64_t>(k);
       }
     }
   } else if (lambda == 0) {
     return 0;
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t X;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    double prod, U, enlam;
-
-    enlam = std::exp(-lambda);
-    X = 0;
-    prod = 1.0;
+    auto enlam = std::exp(-lambda);
+    int64_t X = 0;
+    auto prod = 1.0;
     while (true) {
-      U = standard_uniform(generator);
+      auto U = standard_uniform(generator);
       prod *= U;
       if (prod > enlam) {
         X += 1;
@@ -594,8 +589,7 @@ Tensor& multinomial_out(const Tensor& self,
     TORCH_CHECK(
         is_valid.to<bool>(),
         "probability tensor contains either `inf`, `nan` or element < 0");
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool zero_prob_condition;
+    bool zero_prob_condition = false;
     if (self.dim() == 1){
       zero_prob_condition = (self.sum() == 0).item().to<bool>();
     } else {
