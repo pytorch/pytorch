@@ -2925,13 +2925,13 @@ def does_not_override_dict_iter_methods(user_cls):
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
 def _extract_tensor_dict(t):
-    tensor_dict = {}
-
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
+        "tag",
     ]
-    for key in KEYS_TO_COPY:
-        if key in t.__dict__:
-            tensor_dict[key] = copy.copy(t.__dict__[key])
+
+    tensor_dict = {
+        key: copy.copy(t.__dict__[key]) for key in KEYS_TO_COPY if key in t.__dict__
+    }
 
     return tensor_dict
