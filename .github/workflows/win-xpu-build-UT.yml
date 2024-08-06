@@ -67,7 +67,7 @@ jobs:
         cd C:\pytorch
         git checkout %pytorch_commit_number_arg%
         set xpu_commit_number_arg=${{ inputs.xpu_commit }}
-        python -c "import os;commit_number = os.getenv('xpu-commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
+        python -c "import os;commit_number = os.getenv('xpu_commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
         call conda install conda-forge::rust -y
         call conda install typing_extensions -y
         python -m pip install -r requirements.txt > pip_install_pytorch_requirements_log.txt
