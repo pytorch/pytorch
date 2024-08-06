@@ -64,10 +64,10 @@ jobs:
     #     call pip install pyyaml
     #     call conda list
 
-  # Build-whls:
-  #   runs-on: ["${{ inputs.win_runner }}"]
-  #   needs: [Preparation]
-  #   steps:
+  Build-whls:
+    runs-on: ["${{ inputs.win_runner }}"]
+    needs: [Preparation]
+    steps:
     # - name: Build Torch
     #   shell: cmd
     #   run: |
@@ -86,44 +86,44 @@ jobs:
     #     python -m pip install -r requirements.txt > pip_install_pytorch_requirements_log.txt
     #     python setup.py bdist_wheel > build_torch_wheel_log.txt
 
-    # - name: Build TorchVision
-    #   shell: cmd
-    #   run: |
-    #     call %conda_path%\Scripts\activate.bat %conda_env%
-    #     call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
-    #     set DISTUTILS_USE_SDK=1
-    #     if exist "C:\vision" (
-    #       rmdir /s /q "C:\vision"
-    #     )
-    #     git clone https://github.com/pytorch/vision.git C:\vision > git_vision_repo_log.txt
-    #     cd C:\vision
-    #     for %%f in (C:\pytorch\dist\torch-*.whl) do (
-    #       set "TORCH_WHL=%%f"
-    #       echo "INFO - torch whl found"
-    #     )
-    #     if defined TORCH_WHL (
-    #       pip install %TORCH_WHL% --force-reinstall
-    #       echo "INFO - torch whl installed"
-    #     ) else (
-    #       echo "INFO - No torch whl found."
-    #       exit /b 1
-    #     )
-    #     pip install -r docs\requirements.txt > pip_install_vision_requirements_log.txt
-    #     echo "INFO - Building torchvision wheel"
-    #     python setup.py bdist_wheel > build_vision_wheel_log.txt
-    #     echo "INFO - torchvision wheel built"
-    #     for %%f in (C:\vision\dist\torchvision-*.whl) do (
-    #       set "TORCH_WHL=%%f"
-    #       echo "INFO - torchvision whl found"
-    #     )
-    #     if defined TORCH_WHL (
-    #       pip install %TORCH_WHL% --force-reinstall
-    #       echo "INFO - torchvision whl installed"
-    #     ) else (
-    #       echo "No torchvision whl found."
-    #       exit /b 1
-    #     )
-    #     conda list
+    - name: Build TorchVision
+      shell: cmd
+      run: |
+        call %conda_path%\Scripts\activate.bat %conda_env%
+        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+        set DISTUTILS_USE_SDK=1
+        if exist "C:\vision" (
+          rmdir /s /q "C:\vision"
+        )
+        git clone https://github.com/pytorch/vision.git C:\vision > git_vision_repo_log.txt
+        cd C:\vision
+        for %%f in (C:\pytorch\dist\torch-*.whl) do (
+          set "TORCH_WHL=%%f"
+          echo "INFO - torch whl found"
+        )
+        if defined TORCH_WHL (
+          pip install %TORCH_WHL% --force-reinstall --no-deps
+          echo "INFO - torch whl installed"
+        ) else (
+          echo "INFO - No torch whl found."
+          exit /b 1
+        )
+        pip install -r docs\requirements.txt > pip_install_vision_requirements_log.txt
+        echo "INFO - Building torchvision wheel"
+        echo python setup.py bdist_wheel > build_vision_wheel_log.txt
+        echo "INFO - torchvision wheel built"
+        for %%f in (C:\vision\dist\torchvision-*.whl) do (
+          set "TORCH_WHL=%%f"
+          echo "INFO - torchvision whl found"
+        )
+        if defined TORCH_WHL (
+          pip install %TORCH_WHL% --force-reinstall
+          echo "INFO - torchvision whl installed"
+        ) else (
+          echo "No torchvision whl found."
+          exit /b 1
+        )
+        conda list
 
   Unit-tests:
     runs-on: ["${{ inputs.win_runner }}"]
@@ -134,7 +134,6 @@ jobs:
       run: |
         call %conda_path%\Scripts\activate.bat %conda_env%
         call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
-        set USE_XPU=1
         if exist "C:\xpurepo" (
           rmdir /s /q "C:\xpurepo"
         )
