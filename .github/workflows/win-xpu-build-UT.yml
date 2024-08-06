@@ -99,25 +99,31 @@ jobs:
         cd C:\vision
         for %%f in (C:\pytorch\dist\torch-*.whl) do (
           set "TORCH_WHL=%%f"
+          echo "INFO - torch whl found"
         )
         if defined TORCH_WHL (
           pip install %TORCH_WHL% --force-reinstall
+          echo "INFO - torch whl installed"
         ) else (
-          echo "No torch whl found."
+          echo "INFO - No torch whl found."
           exit /b 1
         )
         pip install -r docs\requirements.txt > pip_install_vision_requirements_log.txt
+        echo "INFO - Building torchvision wheel"
         python setup.py bdist_wheel > build_vision_wheel_log.txt
-
+        echo "INFO - torchvision wheel built"
         for %%f in (C:\vision\dist\torchvision-*.whl) do (
           set "TORCH_WHL=%%f"
+          echo "INFO - torchvision whl found"
         )
         if defined TORCH_WHL (
           pip install %TORCH_WHL% --force-reinstall
+          echo "INFO - torchvision whl installed"
         ) else (
           echo "No torchvision whl found."
           exit /b 1
         )
+        conda list
 
   Unit-tests:
     runs-on: ["${{ inputs.win_runner }}"]
@@ -134,7 +140,7 @@ jobs:
         git clone https://github.com/intel/torch-xpu-ops.git C:\xpurepo
         cd C:\xpurepo\examples
         pip install pytest expecttest
-        python -m pytest -v > ut.log
+        python -m pytest -v
 
   Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
