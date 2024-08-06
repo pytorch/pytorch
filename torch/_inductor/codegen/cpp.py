@@ -1544,7 +1544,7 @@ class CppKernel(Kernel):
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, dtype=dtype)};",
+                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, src_dtype=dtype)};",
                 "}",
             ],
         )
