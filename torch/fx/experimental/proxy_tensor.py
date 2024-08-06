@@ -17,7 +17,7 @@ import typing_extensions
 import warnings
 import weakref
 from collections import defaultdict
-from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
+from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -622,12 +622,6 @@ def track_tensor_tree(
     return inner_res
 
 
-def maybe_disable_fake_tensor_mode() -> AbstractContextManager:
-    # TODO: figure out if this API generally makes sense and bake it into the
-    # library
-    return unset_fake_temporarily()
-
-
 @dataclass
 class _ProxyTensor:
     proxy: Proxy
@@ -786,7 +780,7 @@ def proxy_call(
             const_args, const_kwargs = pytree.tree_unflatten(
                 const_flat_args_kwargs, spec
             )
-            with maybe_disable_fake_tensor_mode():
+            with unset_fake_temporarily():
                 return func(*const_args, **const_kwargs)
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
         # incorrectly burn in constants by allowing this access.  Raise
@@ -913,7 +907,7 @@ def proxy_call(
         func is torch.ops.aten.lift_fresh_copy.default
         and out.numel() <= CONSTANT_NUMEL_LIMIT
     ):
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             assert isinstance(args[0], (Proxy, Tensor)), type(args[0])
             constant = args[0].clone()
     elif (
@@ -923,7 +917,7 @@ def proxy_call(
         and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)
     ):
         # NB: do NOT include factories as constants
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             const_flat_args_kwargs = [
                 t.constant if isinstance(t, _ProxyTensor) else t
                 for t in f_flat_args_kwargs
