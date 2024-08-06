@@ -1616,7 +1616,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_saved_dynamic(self):
+    def test_autograd_cpp_node_saved_dynamic_tensor(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1670,6 +1670,75 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 yield x.grad
 
         # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_autograd_cpp_node_saved_dynamic_float(self):
+        cpp_source = """
+torch::Tensor my_op(const torch::Tensor& x, const torch::Tensor& floatTensor);
+
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x,
+      float y) {
+    ctx->save_for_backward({x});
+    ctx->saved_data["float"] = torch::tensor(y);
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 1);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor y = ctx->saved_data["float"].toTensor();
+
+    torch::autograd::variable_list grad_inputs(2);
+    std::cout << "calling custom op" << std::endl;
+    static auto my_custom_op = torch::Dispatcher::singleton()
+        .findSchemaOrThrow("test_autograd_cpp_node_saved_dynamic_float::my_op", "")
+        .typed<decltype(my_op)>();
+    grad_inputs[0] = my_custom_op.call(x, y);
+
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, double y) {
+  return CustomOpAutogradFunction::apply(x, y);
+}
+
+torch::Tensor my_op(const torch::Tensor& x, const torch::Tensor& floatTensor) {
+    return x + floatTensor.item();
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_float, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+    m.def("my_op", my_op);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_autograd_cpp_node_saved_dynamic_float",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for i in [1.1, 1.2]:#, 1.3]:
+                x = torch.ones(10, 10, requires_grad=True)
+                out = torch.ops.test_autograd_cpp_node_saved_dynamic_float.custom_op_backed_by_autograd_fn(
+                    x, i
+                )
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        # compiles for 1.1 (static) and 1.2 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_data_dependent(self):
