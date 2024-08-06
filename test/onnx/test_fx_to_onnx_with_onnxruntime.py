@@ -539,7 +539,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        error_message="at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED"
+        error_message="at::functionalization::impl::isFunctionalTensor(t) INTERNAL ASSERT FAILED"
     )
     def test_expand_as_fill_separate_tensor(self):
         class Model(torch.nn.Module):
