@@ -117,7 +117,7 @@ jobs:
           echo "INFO - torchvision whl found"
         )
         if defined TORCH_WHL (
-          pip install %TORCH_WHL%
+          pip install %TORCH_WHL% --force-reinstall --no-deps
           echo "INFO - torchvision whl installed"
         ) else (
           echo "No torchvision whl found."
