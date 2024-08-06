@@ -413,7 +413,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     if arg.op == "get_attr":
                         for entry in torch.fx.proxy._COPY_META_FIELDS:
                             if entry in meta:
-                                params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+                                params_buffers_to_node_meta[arg.target][entry] = meta[
+                                    entry
+                                ]
+
         with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
             _preserve_ops,
             decomp_table,
