@@ -217,7 +217,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # may be deleted when the first torch.compile invocation is deleted)
         # We mangle it based off of the output_graph's id.
         compile_id = tx.output.compile_id
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{compile_id}"
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
