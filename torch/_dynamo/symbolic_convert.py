@@ -471,13 +471,12 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             try:
                 x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
-            except exc.ObservedException:
+            except exc.ObservedAttributeError:
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                try:
                     x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
+                except exc.ObservedAttributeError:
+                    x = None
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
