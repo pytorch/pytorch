@@ -246,14 +246,14 @@ class ConvolutionUnary(ExternKernelAlloc):
             at::Tensor(
                 const at::Tensor& input_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 at::IntArrayRef padding,
                 at::IntArrayRef stride,
                 at::IntArrayRef dilation,
                 int64_t groups,
                 c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                torch::List<std::optional<at::Scalar>> scalars,
+                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -319,16 +319,16 @@ class ConvolutionBinary(ExternKernelAlloc):
                 const at::Tensor& input_t,
                 const at::Tensor& other_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 at::IntArrayRef padding,
                 at::IntArrayRef stride,
                 at::IntArrayRef dilation,
                 int64_t groups,
                 c10::string_view binary_attr,
-                c10::optional<at::Scalar> alpha,
-                c10::optional<c10::string_view> unary_attr,
-                torch::List<c10::optional<at::Scalar>> unary_scalars,
-                c10::optional<c10::string_view> unary_algorithm)"""
+                std::optional<at::Scalar> alpha,
+                std::optional<c10::string_view> unary_attr,
+                torch::List<std::optional<at::Scalar>> unary_scalars,
+                std::optional<c10::string_view> unary_algorithm)"""
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
@@ -411,16 +411,16 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 at::Tensor& other_t,
                 const at::Tensor& input_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 at::IntArrayRef padding,
                 at::IntArrayRef stride,
                 at::IntArrayRef dilation,
                 int64_t groups,
                 c10::string_view binary_attr,
-                c10::optional<at::Scalar> alpha,
-                c10::optional<c10::string_view> unary_attr,
-                torch::List<c10::optional<at::Scalar>> unary_scalars,
-                c10::optional<c10::string_view> unary_algorithm)"""
+                std::optional<at::Scalar> alpha,
+                std::optional<c10::string_view> unary_attr,
+                torch::List<std::optional<at::Scalar>> unary_scalars,
+                std::optional<c10::string_view> unary_algorithm)"""
 
         self.mutation_outputs = [
             MutationOutput(NoneLayout(inputs[0].get_device()), inputs[0], self),
@@ -506,15 +506,15 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             at::Tensor(
                 const at::Tensor& input_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 at::IntArrayRef padding,
                 at::IntArrayRef output_padding,
                 at::IntArrayRef stride,
                 at::IntArrayRef dilation,
                 int64_t groups,
                 c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                torch::List<std::optional<at::Scalar>> scalars,
+                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -606,17 +606,17 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
+                std::optional<at::Tensor> bias,
                 torch::List<int64_t> stride,
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
                 double output_scale,
                 int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
+                std::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                torch::List<std::optional<at::Scalar>> scalars,
+                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -782,19 +782,19 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
+                std::optional<at::Tensor> bias,
                 torch::List<int64_t> stride,
                 torch::List<int64_t> padding,
                 torch::List<int64_t> dilation,
                 int64_t groups,
                 double output_scale,
                 int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
+                std::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
-                c10::optional<at::Scalar> alpha,
-                c10::optional<c10::string_view> attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                std::optional<at::Scalar> alpha,
+                std::optional<c10::string_view> attr,
+                torch::List<std::optional<at::Scalar>> scalars,
+                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -975,7 +975,7 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const at::Tensor& self,
                 const at::Tensor& mkl_weight_t,
                 const at::Tensor& origin_weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
@@ -1032,10 +1032,10 @@ class LinearUnary(ExternKernelAlloc):
             at::Tensor(
                 const at::Tensor& input_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                torch::List<std::optional<at::Scalar>> scalars,
+                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -1100,7 +1100,7 @@ class LinearBinary(ExternKernelAlloc):
                 const at::Tensor& input_t,
                 const at::Tensor& other_t,
                 const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
+                const std::optional<at::Tensor>& bias_opt,
                 c10::string_view attr)
         """
 
@@ -1194,12 +1194,12 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
+                std::optional<at::Tensor> bias,
                 double output_scale,
                 int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
+                std::optional<c10::ScalarType> output_dtype,
                 c10::string_view post_op_name,
-                torch::List<c10::optional<at::Scalar>> post_op_args,
+                torch::List<std::optional<at::Scalar>> post_op_args,
                 c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
@@ -1373,17 +1373,17 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> other,
-                c10::optional<at::Tensor> bias,
+                std::optional<at::Tensor> other,
+                std::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
+                std::optional<c10::ScalarType> output_dtype,
                 double other_scale,
                 int64_t other_zero_point,
                 c10::string_view binary_post_op,
                 double binary_alpha,
                 c10::string_view unary_post_op,
-                torch::List<c10::optional<at::Scalar>> unary_post_op_args,
+                torch::List<std::optional<at::Scalar>> unary_post_op_args,
                 c10::string_view unary_post_op_algorithm)"""
 
     def codegen(self, wrapper):
