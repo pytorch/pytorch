@@ -11,7 +11,6 @@
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>
 #include <vector>
-#include <ATen/ops/tensor.h>
 
 // see [Note: Compiled Autograd]
 
@@ -277,10 +276,6 @@ class CompiledNodeArgs {
       }
     } else if (iv.isTensor()) {
       collect(iv.toTensor());
-    } else if (iv.isInt()) {
-      collect(at::tensor(iv.toInt()));
-    } else if (iv.isDouble()) {
-      collect(at::tensor(iv.toDouble()));
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
