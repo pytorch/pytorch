@@ -1351,6 +1351,8 @@ class SIMDScheduling(BaseScheduling):
         kernel.buf_accesses = buf_accesses
         tmp_args = []
         for node in node_schedule:
+            if node in (EnableReduction, DisableReduction):
+                continue
             for read in node.read_writes.reads:
                 tmp_args.append(read.name)
             for write in node.read_writes.writes:
