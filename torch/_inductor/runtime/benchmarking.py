@@ -158,64 +158,6 @@ class LazyBenchmark:
     def __float__(self: Self) -> float:
         return float(self.timing_ms)
 
-    def __format__(self: Self, format_spec: str) -> str:
-        return format(self.timing_ms, format_spec)
-
-    def __str__(self: Self) -> str:
-        return str(self.timing_ms)
-
-    def __lt__(self: Self, other: Any) -> bool:
-        return self.timing_ms < other
-
-    def __le__(self: Self, other: Any) -> bool:
-        return self.timing_ms <= other
-
-    def __gt__(self: Self, other: Any) -> bool:
-        return self.timing_ms > other
-
-    def __ge__(self: Self, other: Any) -> bool:
-        return self.timing_ms >= other
-
-    def __add__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return self.timing_ms + other
-        return LazyBenchmark(lambda: self.timing_ms + other)
-
-    def __radd__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return other + self.timing_ms
-        return LazyBenchmark(lambda: other + self.timing_ms)
-
-    def __sub__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return self.timing_ms - other
-        return LazyBenchmark(lambda: self.timing_ms - other)
-
-    def __rsub__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return other - self.timing_ms
-        return LazyBenchmark(lambda: other - self.timing_ms)
-
-    def __mul__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return self.timing_ms * other
-        return LazyBenchmark(lambda: self.timing_ms * other)
-
-    def __rmul__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return other * self.timing_ms
-        return LazyBenchmark(lambda: other * self.timing_ms)
-
-    def __truediv__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return self.timing_ms / other
-        return LazyBenchmark(lambda: self.timing_ms / other)
-
-    def __rtruediv__(self: Self, other: Any) -> Any:
-        if not hasattr(self, "benchmark"):
-            return other / self.timing_ms
-        return LazyBenchmark(lambda: other / self.timing_ms)
-
 
 def is_cpu_device(inputs: List[Any]) -> bool:
     return all(
