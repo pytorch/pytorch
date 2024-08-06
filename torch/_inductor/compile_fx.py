@@ -12,7 +12,6 @@ import warnings
 from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
-from torch._dynamo.repro.after_aot import wrap_compiler_debug
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -24,6 +23,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
@@ -457,11 +457,17 @@ def compile_fx_inner(*args, **kwargs):
     with contextlib.ExitStack() as stack:
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
-        stack.enter_context(dynamo_utils.dynamo_timed("compile_fx_inner", phase_name="inductor_compile", fwd_only=False))
+        stack.enter_context(
+            dynamo_utils.dynamo_timed(
+                "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+            )
+        )
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
 
-        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(*args, **kwargs)
+        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+            *args, **kwargs
+        )
 
 
 @time_and_log(attr="compilation time (in seconds)")
