@@ -4196,7 +4196,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       skipMPSVersionIfLessThan(15)
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.LeakyReLU,
@@ -4234,7 +4234,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       skipMPSVersionIfLessThan(15)
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.LogSigmoid,
