@@ -10,6 +10,7 @@
 
 #include <cstddef>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
@@ -18,7 +19,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   #define FAIL_MPSHOOKS_FUNC(func) \
     TORCH_CHECK(false, "Cannot execute ", func, "() without MPS backend.");
 
-  virtual ~MPSHooksInterface() override = default;
+  ~MPSHooksInterface() override = default;
 
   // Initialize the MPS library state
   virtual void initMPS() const {
@@ -57,6 +58,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getDriverAllocatedMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual size_t getRecommendedMaxMemory() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
@@ -87,7 +91,13 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+  virtual Allocator* getPinnedMemoryAllocator() const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   #undef FAIL_MPSHOOKS_FUNC
@@ -104,3 +114,4 @@ TORCH_API const MPSHooksInterface& getMPSHooks();
 
 } // namespace detail
 } // namespace at
+C10_CLANG_DIAGNOSTIC_POP()

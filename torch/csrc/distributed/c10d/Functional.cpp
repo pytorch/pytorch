@@ -3,6 +3,7 @@
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
@@ -65,23 +66,19 @@ class WorkRegistry {
 
 static WorkRegistry process_registry;
 
+} // namespace
+
+namespace c10d {
+
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  if (c10d::get_thread_isolation_mode()) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
-  } else {
-    process_registry.register_work(tensor, work);
-  }
+  RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
-c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-  if (c10d::get_thread_isolation_mode()) {
-    return c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  } else {
-    return process_registry.pop_work(tensor);
-  }
-}
+} // namespace c10d
+
+namespace {
 
 const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
     {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
@@ -115,7 +112,7 @@ at::Tensor& all_reduce_(
   std::vector<at::Tensor> inputs{input};
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce(inputs, opts);
-  c10d::RankLocal<WorkRegistry>::get().register_work(input, work);
+  c10d::register_work(input, work);
   return input;
 }
 
@@ -139,7 +136,7 @@ std::vector<at::Tensor> all_reduce_coalesced_(
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce_coalesced(inputs, opts);
   for (const auto& tensor : inputs) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return inputs;
 }
@@ -182,7 +179,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
   for (const auto& tensor : outputs) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return outputs;
 }
@@ -199,13 +196,13 @@ at::Tensor all_gather_into_tensor(
 at::Tensor& all_gather_into_tensor_out(
     at::Tensor& input,
     int64_t group_size,
-    std::string group_name,
+    const std::string& group_name,
     at::Tensor& output) {
   c10d::AllgatherOptions opts;
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->_allgather_base(output, input, opts);
-  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -242,7 +239,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
+    c10d::register_work(tensor, work);
   }
   return outputs;
 }
@@ -275,7 +272,7 @@ at::Tensor all_to_all_single(
       const_cast<at::Tensor&>(input),
       output_split_sizes,
       input_split_sizes);
-  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -287,7 +284,7 @@ at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->broadcast(inputs, opts);
-  c10d::RankLocal<WorkRegistry>::get().register_work(input, work);
+  c10d::register_work(input, work);
   return input;
 }
 
@@ -463,9 +460,9 @@ class ReduceScatterTensor
   static torch::autograd::Variable forward(
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
-      std::string reduce_op,
+      const std::string& reduce_op,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     TORCH_CHECK(reduce_op == "sum", "Only sum reduce op is supported");
 
     ctx->saved_data["group_size"] = group_size;
@@ -510,9 +507,9 @@ class ReduceScatterTensor
 
 at::Tensor reduce_scatter_tensor_autograd(
     const at::Tensor& input,
-    std::string reduce_op,
+    const std::string& reduce_op,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return ReduceScatterTensor::apply(input, reduce_op, group_size, group_name);
 }
 
@@ -523,7 +520,7 @@ class AllGatherIntoTensor
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     ctx->saved_data["group_size"] = group_size;
     ctx->saved_data["group_name"] = group_name;
 
@@ -566,7 +563,7 @@ class AllGatherIntoTensor
 at::Tensor all_gather_into_tensor_autograd(
     const at::Tensor& input,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return AllGatherIntoTensor::apply(input, group_size, group_name);
 }
 
@@ -607,7 +604,7 @@ at::Tensor shard_dim_alltoall(
     const at::Tensor& input,
     int64_t gather_dim,
     int64_t shard_dim,
-    std::string group_name) {
+    const std::string& group_name) {
   auto group = c10d::resolve_process_group(group_name);
   auto group_size = group->getSize();
   std::vector<int64_t> output_sizes = input.sizes().vec();
@@ -619,12 +616,14 @@ at::Tensor shard_dim_alltoall(
   }
   output_sizes[shard_dim] = output_sizes[shard_dim] / group_size;
   std::vector<at::Tensor> inputs;
+  inputs.reserve(group_size);
   auto length = output_sizes[shard_dim];
   for (int i = 0; i < group_size; i++) {
     inputs.push_back(input.narrow(shard_dim, i * length, length).contiguous());
   }
   // allocate outputs
   std::vector<at::Tensor> outputs;
+  outputs.reserve(group_size);
   for (int i = 0; i < group_size; i++) {
     outputs.push_back(input.new_empty(output_sizes).contiguous());
   }

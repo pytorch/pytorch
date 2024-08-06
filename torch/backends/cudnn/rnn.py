@@ -1,4 +1,6 @@
+# mypy: allow-untyped-defs
 import torch.cuda
+
 
 try:
     from torch._C import _cudnn

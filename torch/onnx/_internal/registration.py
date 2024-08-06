@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Module for handling symbolic function registration."""
 
 import warnings
@@ -14,7 +15,7 @@ from typing import (
 )
 
 from torch.onnx import _constants, errors
-from torch.onnx._internal import _beartype
+
 
 OpsetVersion = int
 
@@ -61,14 +62,14 @@ _K = TypeVar("_K")
 _V = TypeVar("_V")
 
 
-class OverrideDict(Generic[_K, _V], Collection[_K]):
+class OverrideDict(Collection[_K], Generic[_K, _V]):
     """A dictionary that merges built-in and custom symbolic functions.
 
     It supports overriding and un-overriding built-in symbolic functions with custom
     ones.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._base: Dict[_K, _V] = {}
         self._overrides: Dict[_K, _V] = {}
         self._merged: Dict[_K, _V] = {}
@@ -264,7 +265,6 @@ class SymbolicRegistry:
         return set(self._registry)
 
 
-@_beartype.beartype
 def onnx_symbolic(
     name: str,
     opset: Union[OpsetVersion, Sequence[OpsetVersion]],
@@ -313,7 +313,6 @@ def onnx_symbolic(
     return wrapper
 
 
-@_beartype.beartype
 def custom_onnx_symbolic(
     name: str,
     opset: Union[OpsetVersion, Sequence[OpsetVersion]],

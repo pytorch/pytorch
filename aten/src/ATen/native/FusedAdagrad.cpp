@@ -10,9 +10,9 @@
 #include <ATen/ops/_fused_adagrad.h>
 #include <ATen/ops/_fused_adagrad_native.h>
 #endif
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 void _fused_adagrad_kernel_cpu_(
     at::TensorList params,
@@ -24,8 +24,8 @@ void _fused_adagrad_kernel_cpu_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   const float* found_inf_ptr =
@@ -55,5 +55,4 @@ void _fused_adagrad_kernel_cpu_(
 
 DEFINE_DISPATCH(fused_adagrad_stub);
 
-}
 }

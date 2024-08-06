@@ -335,11 +335,13 @@ class class_ : public ::torch::detail::class_base {
 
     // type validation
     auto getstate_schema = classTypePtr->getMethod("__getstate__").getSchema();
+#ifndef STRIP_ERROR_MESSAGES
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
       return ss.str();
     };
+#endif
     TORCH_CHECK(
         getstate_schema.arguments().size() == 1,
         "__getstate__ should take exactly one argument: self. Got: ",

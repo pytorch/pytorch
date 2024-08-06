@@ -15,7 +15,6 @@ collection support for PyTorch APIs.
 import functools
 import sys
 import types
-import warnings
 from typing import (
     Any,
     Callable,
@@ -28,15 +27,12 @@ from typing import (
     TypeVar,
     Union,
 )
-
-import torch
-
-if torch._running_with_deploy():  # type: ignore[no-untyped-call]
-    raise ImportError("C++ pytree utilities do not work with torch::deploy.")
+from typing_extensions import deprecated
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
+import torch.utils._pytree as _pytree
 from torch.utils._pytree import KeyEntry
 
 
@@ -167,6 +163,11 @@ def register_pytree_node(
     )
 
 
+@deprecated(
+    "`torch.utils._cxx_pytree._register_pytree_node` is deprecated. "
+    "Please use `torch.utils._cxx_pytree.register_pytree_node` instead.",
+    category=FutureWarning,
+)
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -207,11 +208,6 @@ def _register_pytree_node(
             original context. This is used for json deserialization, which is being used in
             :mod:`torch.export` right now.
     """
-    warnings.warn(
-        "torch.utils._cxx_pytree._register_pytree_node is deprecated. "
-        "Please use torch.utils._cxx_pytree.register_pytree_node instead.",
-        stacklevel=2,
-    )
 
     _private_register_pytree_node(
         cls,
@@ -273,7 +269,7 @@ def tree_flatten(
     >>> from collections import OrderedDict
     >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', *), ('d', *)]), NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -1004,3 +1000,8 @@ def keystr(kp: KeyPath) -> str:
 def key_get(obj: Any, kp: KeyPath) -> Any:
     """Given an object and a key path, return the value at the key path."""
     raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+_pytree._cxx_pytree_imported = True
+for args, kwargs in _pytree._cxx_pytree_pending_imports:
+    _private_register_pytree_node(*args, **kwargs)

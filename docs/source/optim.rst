@@ -122,8 +122,14 @@ Base class
 
     Optimizer.add_param_group
     Optimizer.load_state_dict
+    Optimizer.register_load_state_dict_pre_hook
+    Optimizer.register_load_state_dict_post_hook
     Optimizer.state_dict
+    Optimizer.register_state_dict_pre_hook
+    Optimizer.register_state_dict_post_hook
     Optimizer.step
+    Optimizer.register_step_pre_hook
+    Optimizer.register_step_post_hook
     Optimizer.zero_grad
 
 Algorithms
@@ -134,6 +140,7 @@ Algorithms
     :nosignatures:
 
     Adadelta
+    Adafactor
     Adagrad
     Adam
     AdamW
@@ -164,10 +171,10 @@ horizontally and fused implementations as fusing vertically on top of that.
 In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
 So when applicable, we default to foreach over for-loop. Applicable means the foreach
 implementation is available, the user has not specified any implementation-specific kwargs
-(e.g., fused, foreach, differentiable), and all tensors are native and on CUDA. Note that
-while fused should be even faster than foreach, the implementations are newer and we would
-like to give them more bake-in time before flipping the switch everywhere. You are welcome
-to try them out though!
+(e.g., fused, foreach, differentiable), and all tensors are native. Note that while fused
+should be even faster than foreach, the implementations are newer and we would like to give
+them more bake-in time before flipping the switch everywhere. We summarize the stability status
+for each implementation on the second table below, you are welcome to try them out though!
 
 Below is a table showing the available and default implementations of each algorithm:
 
@@ -177,7 +184,8 @@ Below is a table showing the available and default implementations of each algor
     :delim: ;
 
     :class:`Adadelta`;foreach;yes;no
-    :class:`Adagrad`;foreach;yes;no
+    :class:`Adafactor`;for-loop;no;no
+    :class:`Adagrad`;foreach;yes;yes (cpu only)
     :class:`Adam`;foreach;yes;yes
     :class:`AdamW`;foreach;yes;yes
     :class:`SparseAdam`;for-loop;no;no
@@ -188,7 +196,29 @@ Below is a table showing the available and default implementations of each algor
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
     :class:`Rprop`;foreach;yes;no
-    :class:`SGD`;foreach;yes;no
+    :class:`SGD`;foreach;yes;yes
+
+Below table is showing the stability status for fused implementations:
+
+.. csv-table::
+    :header: "Algorithm", "CPU", "CUDA", "MPS"
+    :widths: 25, 25, 25, 25
+    :delim: ;
+
+    :class:`Adadelta`;unsupported;unsupported;unsupported
+    :class:`Adafactor`;unsupported;unsupported;unsupported
+    :class:`Adagrad`;beta;unsupported;unsupported
+    :class:`Adam`;beta;stable;beta
+    :class:`AdamW`;beta;stable;beta
+    :class:`SparseAdam`;unsupported;unsupported;unsupported
+    :class:`Adamax`;unsupported;unsupported;unsupported
+    :class:`ASGD`;unsupported;unsupported;unsupported
+    :class:`LBFGS`;unsupported;unsupported;unsupported
+    :class:`NAdam`;unsupported;unsupported;unsupported
+    :class:`RAdam`;unsupported;unsupported;unsupported
+    :class:`RMSprop`;unsupported;unsupported;unsupported
+    :class:`Rprop`;unsupported;unsupported;unsupported
+    :class:`SGD`;beta;beta;beta
 
 How to adjust learning rate
 ---------------------------

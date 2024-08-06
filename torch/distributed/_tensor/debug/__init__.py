@@ -1,5 +1,5 @@
+# mypy: allow-untyped-defs
 from torch.distributed._tensor.api import DTensor
-
 from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 
 

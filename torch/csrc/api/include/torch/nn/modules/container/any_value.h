@@ -40,7 +40,8 @@ class AnyValue {
   template <typename T>
   // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit AnyValue(T&& value)
-      : content_(std::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {
+      : content_(
+            std::make_unique<Holder<std::decay_t<T>>>(std::forward<T>(value))) {
   }
 
   /// Returns a pointer to the value contained in the `AnyValue` if the type

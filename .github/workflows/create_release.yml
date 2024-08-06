@@ -5,6 +5,11 @@ on:
     branches:
       - main
       - release/*
+    tags:
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
   release:
     types: [published]
   pull_request:
@@ -18,6 +23,8 @@ jobs:
     # https://github.com/softprops/action-gh-release?tab=readme-ov-file#permissions
     permissions:
       contents: write
+    outputs:
+      pt_release_name: ${{ steps.release_name.outputs.pt_release_name }}
     steps:
       - uses: malfet/checkout@silent-checkout
         with:
@@ -49,11 +56,44 @@ jobs:
             # Create archive
             tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
             echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
-      - name: Upload source distribution
+      - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
+      - name: Upload source distribution to GHA artifacts for release tags
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.PT_RELEASE_FILE }}
+          path: ${{ env.PT_RELEASE_FILE }}
+      - name: Set output
+        id: release_name
+        run: echo "::set-output name=pt_release_name::${{ env.PT_RELEASE_NAME }}.tar.gz"
+
+  upload_source_code_to_s3:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+    runs-on: linux.2xlarge
+    environment: sourcecode-upload
+    name: Upload source code to S3 for release tags
+    permissions:
+      id-token: write
+    needs: release
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: ${{ needs.release.outputs.pt_release_name }}
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
+          aws-region: us-east-1
+      - uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-bucket: pytorch
+          s3-prefix: source_code/test
+          if-no-files-found: warn
+          path: ${{ needs.release.outputs.pt_release_name }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}

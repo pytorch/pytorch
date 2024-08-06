@@ -10,12 +10,8 @@ import parameterized
 import PIL
 import pytorch_test_common
 import test_models
-
-import torch
 import torchvision
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import nn
-from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -26,6 +22,10 @@ from torchvision.models.detection import (
     rpn,
     transform,
 )
+
+import torch
+from torch import nn
+from torch.testing._internal import common_utils
 
 
 def exportTest(
@@ -347,7 +347,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
                 self.rpn = _init_test_rpn()

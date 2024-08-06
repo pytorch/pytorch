@@ -35,10 +35,10 @@ from collections import namedtuple
 from itertools import product
 from random import shuffle
 
-import torch
-import torch.autograd.forward_ad as fwAD
 from packaging import version
 
+import torch
+import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -116,6 +116,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1839,6 +1840,21 @@ class TestDistributions(DistributionsTestCase):
             Multinomial(total_count, s).sample(),
             torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64),
         )
+
+    def test_multinomial_sequential_draw(self):
+        # Adapted after script mentioned in https://github.com/pytorch/pytorch/issues/132395
+        torch.manual_seed(0xDE0B6B3A764007E8)
+        prob = torch.ones(26)
+        dups_mult = 0
+        perm_counts_mult = {}
+        for _ in range(300_000):
+            p = tuple(torch.multinomial(prob, prob.numel(), replacement=False).tolist())
+            if p in perm_counts_mult:
+                dups_mult += 1
+                perm_counts_mult[p] += 1
+            else:
+                perm_counts_mult[p] = 1
+        self.assertLess(dups_mult, 10)
 
     @set_default_dtype(torch.double)
     def test_categorical_1d(self):

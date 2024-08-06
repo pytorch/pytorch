@@ -1,8 +1,11 @@
-from typing import List, Optional
+# mypy: allow-untyped-defs
+r"""Implementation for Stochastic Gradient Descent optimizer."""
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -14,14 +17,15 @@ from .optimizer import (
     Optimizer,
 )
 
+
 __all__ = ["SGD", "sgd"]
 
 
-class SGD(Optimizer):
+class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params,
-        lr: float = 1e-3,
+        lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
@@ -31,7 +35,9 @@ class SGD(Optimizer):
         foreach: Optional[bool] = None,
         differentiable: bool = False,
         fused: Optional[bool] = None,
-    ):
+    ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
@@ -72,7 +78,7 @@ class SGD(Optimizer):
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("nesterov", False)
@@ -99,7 +105,7 @@ class SGD(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -185,7 +191,7 @@ SGD.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        lr (float, Tensor, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
@@ -208,7 +214,7 @@ SGD.__doc__ = (
 
     .. note::
         The implementation of SGD with Momentum/Nesterov subtly differs from
-        Sutskever et. al. and implementations in some other frameworks.
+        Sutskever et al. and implementations in some other frameworks.
 
         Considering the specific case of Momentum, the update can be written as
 
@@ -221,7 +227,7 @@ SGD.__doc__ = (
         where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
-        This is in contrast to Sutskever et. al. and
+        This is in contrast to Sutskever et al. and
         other frameworks which employ an update of the form
 
         .. math::
@@ -263,7 +269,6 @@ def sgd(
 
     See :class:`~torch.optim.SGD` for details.
     """
-
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -429,7 +434,7 @@ def _multi_tensor_sgd(
 
         if not device_has_sparse_grad:
             # handle internal item() call if lr is a tensor
-            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+            if isinstance(lr, torch.Tensor) and torch.compiler.is_compiling():
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:

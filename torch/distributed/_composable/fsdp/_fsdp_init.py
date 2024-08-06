@@ -4,10 +4,10 @@ from typing import List, Optional, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
 
@@ -70,8 +70,9 @@ def _get_device_from_mesh(mesh: DeviceMesh) -> torch.device:
     return torch.device(mesh.device_type, device_handle.current_device())
 
 
-def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
+def _get_managed_modules(root_modules: Tuple[nn.Module, ...]) -> List[nn.Module]:
     modules: List[nn.Module] = []
+    root_modules_set = set(root_modules)
     # Track visisted modules to avoid visiting shared modules multiple times
     visited_modules: Set[nn.Module] = set()
 
@@ -82,7 +83,10 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
         """
         if not _is_composable_with_fsdp(module):
             return
-        elif module is not root_module and _get_module_fsdp_state(module) is not None:
+        elif (
+            module not in root_modules_set
+            and _get_module_fsdp_state(module) is not None
+        ):
             return  # nested `fully_shard` module
         visited_modules.add(module)
         for submodule in module.children():
@@ -90,7 +94,8 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
                 dfs(submodule)
         modules.append(module)
 
-    dfs(root_module)
+    for root_module in root_modules:
+        dfs(root_module)
     return modules
 
 
@@ -140,7 +145,8 @@ def _move_states_to_device(
             raise AssertionError(
                 f"Expects DTensor to be moved to {dtensor_mesh_type} but got {tensor.device}"
             )
-        if is_traceable_wrapper_subclass(tensor):
+        tensor_ = tensor
+        if is_traceable_wrapper_subclass(tensor_):
             with torch.no_grad():  # avoid autograd increasing C++ refcount by 1
                 tensor_on_device = nn.Parameter(tensor.to(device))
             torch.utils.swap_tensors(tensor, tensor_on_device)

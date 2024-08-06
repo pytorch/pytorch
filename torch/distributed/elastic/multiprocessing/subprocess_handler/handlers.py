@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -10,6 +11,7 @@ from typing import Dict, Tuple
 from torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler import (
     SubprocessHandler,
 )
+
 
 __all__ = ["get_subprocess_handler"]
 

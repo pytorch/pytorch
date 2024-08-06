@@ -48,7 +48,7 @@ DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
 namespace {
 
 template <typename dest_t, typename src_t>
-static inline dest_t
+inline dest_t
 safe_downcast(src_t v)
 {
   TORCH_CHECK(std::numeric_limits<dest_t>::min() <= v && v <= std::numeric_limits<dest_t>::max(),
@@ -58,7 +58,7 @@ safe_downcast(src_t v)
 }
 
 template<typename T>
-static inline T pooling_output_shape_pad_lr(
+inline T pooling_output_shape_pad_lr(
         T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
         bool ceil_mode) {
     T outputSize = div_rtn<T>(
@@ -75,7 +75,7 @@ static inline T pooling_output_shape_pad_lr(
 }
 
 template<typename T>
-static inline T pooling_output_shape(
+inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
@@ -117,16 +117,18 @@ inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
 }
 
 // AveragePool2d/DilatedMaxPool2d (forward)
-static inline void
+inline void
 pool2d_shape_check(
   const Tensor& input,
-  int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
+  int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW, int64_t dilationH, int64_t dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
   int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   const int64_t ndim = input.ndimension();
+#ifndef STRIP_ERROR_MESSAGES
   const int64_t nOutputPlane = nInputPlane;
+#endif
 
   TORCH_CHECK(kW > 0 && kH > 0,
               "kernel size should be greater than zero, but got ",
@@ -164,7 +166,7 @@ pool2d_shape_check(
 }
 
 // DilatedMaxPool2d (backward)
-static inline void
+inline void
 max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -192,7 +194,7 @@ max_pool2d_backward_shape_check(
 }
 
 // AveragePool2d (backward)
-static inline void
+inline void
 avg_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -218,7 +220,7 @@ avg_pool2d_backward_shape_check(
 }
 
 // AveragePool3d/DilatedMaxPool3d (forward)
-static inline void
+inline void
 pool3d_shape_check(
   const Tensor& input,
   int64_t nslices,
@@ -280,7 +282,7 @@ pool3d_shape_check(
               "Output size is too small");
 }
 
-static inline void
+inline void
 max_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -317,7 +319,7 @@ max_pool3d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-1, owidth);
 }
 
-static inline void
+inline void
 avg_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,

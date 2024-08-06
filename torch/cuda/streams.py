@@ -1,8 +1,9 @@
+# mypy: allow-untyped-defs
 import ctypes
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
-from .._utils import _dummy_type
+from torch._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):

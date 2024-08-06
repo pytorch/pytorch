@@ -38,6 +38,11 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
 
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                        \
+  TORCH_WARN_ONCE(                                                        \
+      "Environment variable " + deprecated_env + " is deprecated; use " + \
+      new_env + " instead");
+
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
@@ -102,9 +107,7 @@ inline std::string getCvarString(
     if (val == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     ret = val;
@@ -129,9 +132,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
     if (val == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
@@ -160,9 +161,7 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
     if (val_ == nullptr) {
       continue;
     } else if (i) {
-      TORCH_WARN(
-          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
-          " instead");
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     std::string val = std::string(val_);
@@ -441,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -648,7 +647,7 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
     }
 
     bytesToSend -= bytesSent;
@@ -670,7 +669,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(ECONNRESET));
+      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
     }
 
     bytesToReceive -= bytesReceived;

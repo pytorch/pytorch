@@ -4,7 +4,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
@@ -82,12 +81,30 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (!text.empty() && islower(text[0])) {
+    if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
     }
-    throw ErrorReport(tok.range) << "unknown type specifier";
+    if (text == "double") {
+      throw(
+          ErrorReport(tok.range)
+          << "Use `float` instead of `double` in an operator's schema string. "
+             "`float` in schema corresponds to the double type in C++");
+    }
+    if (text == "int64_t") {
+      throw(
+          ErrorReport(tok.range)
+          << "Use `SymInt` or `int` instead of `int64_t` in an operator's schema string. "
+             "`SymInt` corresponds to c10::SymInt in C++ while `int` in schema corresponds "
+             "to the int64_t type in C++.");
+    }
+    throw(
+        ErrorReport(tok.range)
+        << "unknown type specifier. Common valid schema types include "
+           "Tensor, SymInt, int, float, bool, Scalar; "
+           "for a full list, please see "
+           "https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/README.md#func ");
   }
   return it->second;
 }
@@ -141,7 +158,7 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   return alias_info;
@@ -154,11 +171,12 @@ std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   static std::unordered_map<std::string, at::ScalarType> type_map = {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
+#undef DEFINE_SCALAR_TYPE
   auto type = type_map.find(dtype);
   if (type != type_map.end()) {
     return type->second;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
@@ -174,15 +192,14 @@ std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     if (L.cur().kind == ':') {
       L.expect(':');
       const std::string& num = L.expect(TK_NUMBER).text();
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::string::size_type num_len;
       try {
-        device_idx = std::stoi(num, &num_len);
+        device_idx = static_cast<c10::DeviceIndex>(std::stoi(num));
       } catch (const std::invalid_argument& e) {
-        throw ErrorReport(L.cur())
-            << "Device index cannot be converted to integer";
+        throw(
+            ErrorReport(L.cur())
+            << "Device index cannot be converted to integer");
       } catch (const std::out_of_range& e) {
-        throw ErrorReport(L.cur()) << "Device index is too long";
+        throw(ErrorReport(L.cur()) << "Device index is too long");
       }
     }
     if (dev == "cuda") {
@@ -192,22 +209,20 @@ std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
     }
   }
 
-  throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
+  throw(ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n");
 }
 
 std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::string::size_type num_len;
-
   try {
-    return (bool)std::stoi(num, &num_len);
+    return (bool)std::stoi(num);
   } catch (const std::invalid_argument& e) {
-    throw ErrorReport(L.cur())
-        << "Field requires_grad cannot be converted to integer";
+    throw(
+        ErrorReport(L.cur())
+        << "Field requires_grad cannot be converted to integer");
   } catch (const std::out_of_range& e) {
-    throw ErrorReport(L.cur()) << "Field requires_grad is too long";
+    throw(ErrorReport(L.cur()) << "Field requires_grad is too long");
   }
 }
 
@@ -238,7 +253,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         auto parsed_device = tryToParseDeviceType();
         if (parsed_device.has_value()) {
           if (device.has_value()) {
-            throw ErrorReport(L.cur()) << "'device' is specified twice";
+            throw(ErrorReport(L.cur()) << "'device' is specified twice");
           }
           device = parsed_device;
         }
@@ -248,7 +263,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         auto parsed_requires_grad = tryToParseRequiresGrad();
         if (parsed_requires_grad.has_value()) {
           if (requires_grad.has_value()) {
-            throw ErrorReport(L.cur()) << "'requires_grad' is specified twice";
+            throw(ErrorReport(L.cur()) << "'requires_grad' is specified twice");
           }
           requires_grad = parsed_requires_grad;
         }
@@ -259,34 +274,35 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         L.expect('=');
         parseList('[', ',', ']', [&] {
           const std::string& num = L.expect(TK_NUMBER).text();
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          std::string::size_type num_len;
           try {
-            auto stride = std::stoll(num, &num_len);
+            auto stride = std::stoll(num);
             strides.push_back(stride);
           } catch (const std::invalid_argument& e) {
-            throw ErrorReport(L.cur())
-                << "The stride value cannot be converted to int";
+            throw(
+                ErrorReport(L.cur())
+                << "The stride value cannot be converted to int");
           } catch (const std::out_of_range& e) {
-            throw ErrorReport(L.cur()) << "The stride is too big";
+            throw(ErrorReport(L.cur()) << "The stride is too big");
           }
         });
         return;
       }
-      throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'");
     }
     if (device.has_value() || requires_grad.has_value()) {
-      throw ErrorReport(L.cur())
-          << "'device' and 'requires_grad' should come after dimensions in the type specification";
+      throw(
+          ErrorReport(L.cur())
+          << "'device' and 'requires_grad' should come after dimensions in the type specification");
     }
 
     // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
     // ranks
     if (L.cur().kind == '*') {
-      dims.emplace_back(c10::nullopt);
+      dims.emplace_back(std::nullopt);
       L.next();
       if (L.cur().kind == ':') {
-        throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
+        throw(
+            ErrorReport(L.cur()) << "Strides for unsized ranks not supported");
       }
       return;
     }
@@ -298,15 +314,13 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       shape_symbol = true;
     }
     const std::string& num = L.expect(TK_NUMBER).text();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::string::size_type num_len;
     int64_t dim = 0;
     try {
-      dim = std::stoll(num, &num_len);
+      dim = std::stoll(num);
     } catch (const std::invalid_argument& e) {
-      throw ErrorReport(L.cur()) << "The number can't be converted to int";
+      throw(ErrorReport(L.cur()) << "The number can't be converted to int");
     } catch (const std::out_of_range& e) {
-      throw ErrorReport(L.cur()) << "Number is too big";
+      throw(ErrorReport(L.cur()) << "Number is too big");
     }
     if (shape_symbol) {
       L.expect(')');
@@ -319,8 +333,9 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     if (strides.size() != dims.size()) {
       // note: mixing unsized ranks and ranks with strides will always trigger
       // this
-      throw ErrorReport(L.cur())
-          << "Strides info is specified for some but not for all dimensions";
+      throw(
+          ErrorReport(L.cur())
+          << "Strides info is specified for some but not for all dimensions");
     }
     ptr = at::TensorType::create(
         dtype,
@@ -422,14 +437,16 @@ SchemaTypeParser::parseFakeAndRealType() {
     L.expect('.');
     auto torch_tok = L.expect(TK_IDENT);
     if (torch_tok.text() != "torch") {
-      throw ErrorReport(torch_tok.range)
-          << "Expected classes namespace but got " << torch_tok.text();
+      throw(
+          ErrorReport(torch_tok.range)
+          << "Expected classes namespace but got " << torch_tok.text());
     }
     L.expect('.');
     auto classes_tok = L.expect(TK_IDENT);
     if (classes_tok.text() != "classes") {
-      throw ErrorReport(classes_tok.range)
-          << "Expected classes namespace but got " << classes_tok.text();
+      throw(
+          ErrorReport(classes_tok.range)
+          << "Expected classes namespace but got " << classes_tok.text());
     }
     L.expect('.');
     auto ns_tok = L.expect(TK_IDENT);
@@ -439,10 +456,10 @@ SchemaTypeParser::parseFakeAndRealType() {
         std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
         class_tok.text());
     if (!fake_value) {
-      throw ErrorReport(class_tok.range)
-          << "Unknown custom class type "
-          << ns_tok.text() + "." + class_tok.text()
-          << ". Please ensure it is registered.";
+      throw(
+          ErrorReport(class_tok.range) << "Unknown custom class type "
+                                       << ns_tok.text() + "." + class_tok.text()
+                                       << ". Please ensure it is registered.");
     }
   } else {
     real_value = parseBaseType();

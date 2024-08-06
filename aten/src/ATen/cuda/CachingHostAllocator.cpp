@@ -161,7 +161,7 @@ struct CUDACachingHostAllocatorImpl
         cudaHostRegister((void*)ptr, (size_t)size, cudaHostRegisterDefault));
 
     // If host and device pointer don't match, give a warning and exit
-    void* devptr;
+    void* devptr = nullptr;
     AT_CUDA_CHECK(cudaHostGetDevicePointer(&devptr, (void*)ptr, 0));
     TORCH_CHECK(
         (void*)devptr == (void*)ptr,

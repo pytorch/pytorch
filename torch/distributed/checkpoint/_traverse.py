@@ -17,6 +17,7 @@ from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
+
 PATH_ITEM = Union[str, int]
 OBJ_PATH = Tuple[PATH_ITEM, ...]
 T = TypeVar("T")

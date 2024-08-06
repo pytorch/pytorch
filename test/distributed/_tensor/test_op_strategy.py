@@ -5,19 +5,18 @@ from itertools import chain
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor._collective_utils import redistribute_cost
-from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
-from torch.distributed._tensor.ops.basic_strategy import (
+from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed._tensor.ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Replicate,
     Shard,
     TensorMeta,
 )
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 
@@ -139,7 +138,7 @@ class TestCostModel(DTensorOpTestBase):
         mesh_1d = self.build_device_mesh()
         shard_placement = (Shard(0),)
         replica_placement = (Replicate(),)
-        partial_placement = (_Partial(),)
+        partial_placement = (Partial(),)
 
         global_tensor = torch.randn(10, 10)
         global_tensor_meta = self._extract_tensor_meta(global_tensor)
@@ -170,11 +169,11 @@ class TestCostModel(DTensorOpTestBase):
 
     def test_redistribute_cost_latency(self):
         # test cost model on addmm op
-        from torch.distributed._tensor.ops.matrix_ops import addmm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import addmm_strategy
 
         mesh = self.build_device_mesh()
         shard0_placement = (Shard(0),)
-        partial_placement = (_Partial(),)
+        partial_placement = (Partial(),)
         shard1_placement = (Shard(1),)
 
         shard0_tensor_meta = self._extract_tensor_meta(torch.randn(8))
@@ -220,7 +219,7 @@ class TestCostModel(DTensorOpTestBase):
         )
         shard_placement = (Shard(0), Shard(0))
         replica_placement = (Replicate(), Replicate())
-        partial_placement = (_Partial(), _Partial())
+        partial_placement = (Partial(), Partial())
 
         global_tensor = torch.randn(8, 8)
         global_tensor_meta = self._extract_tensor_meta(global_tensor)
@@ -247,7 +246,7 @@ class TestCostModel(DTensorOpTestBase):
         self.assertTrue(allreduce_cost > reduce_scatter_cost)
 
     def test_mm_strategies(self):
-        from torch.distributed._tensor.ops.matrix_ops import mm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import mm_strategy
 
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(6, 8)
@@ -293,7 +292,7 @@ class TestCostModel(DTensorOpTestBase):
             self.assertFalse(output_sharding.needs_redistribute)
 
     def test_bmm_strategies(self):
-        from torch.distributed._tensor.ops.matrix_ops import bmm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import bmm_strategy
 
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(8, 6, 8)

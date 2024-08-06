@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -14,8 +15,8 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
-
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -44,7 +45,7 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name):
+    def __init__(self, kernel_name) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -156,7 +157,7 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -179,9 +180,9 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=False,
+            arg_types=arg_types,
         )
         if node.get_workspace_size() > 0:
             wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
@@ -330,7 +331,7 @@ class CUDATemplateCaller(ChoiceCaller):
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
-    ):
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
@@ -348,7 +349,7 @@ class CUDATemplateCaller(ChoiceCaller):
             *args, output_tensor=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
 
     def call_name(self) -> str:

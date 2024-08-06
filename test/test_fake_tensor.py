@@ -31,6 +31,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     unset_fake_temporarily,
     UnsupportedOperatorException,
+    _CacheKeyState
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -619,6 +620,15 @@ class FakeTensorTest(TestCase):
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
+    def test_parameter_view(self):
+        x = torch.nn.Parameter(torch.randn(4))
+        x_view = x.view(4)
+        mode = FakeTensorMode()
+        fake_x_view = mode.from_tensor(x_view)
+        fake_x = mode.from_tensor(x)
+        self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
+        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
+
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
@@ -699,7 +709,7 @@ class FakeTensorTest(TestCase):
         check_copy(mod, mod_copied)
 
         class ModuleNew(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.rand([10, 2])
                 self.b = self.a
@@ -771,7 +781,7 @@ class FakeTensorTest(TestCase):
     )
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
@@ -1027,7 +1037,7 @@ class FakeTensorConstHandling(TestCase):
 make_propagate_real_tensors_cls(FakeTensorConstHandling)
 
 
-def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
+def contains_type(type: torch.Type, maybe_contained_type: torch.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
@@ -1313,7 +1323,7 @@ class FakeTensorOperatorInvariants(TestCase):
     )
     def test_flash_attention(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
@@ -1368,7 +1378,7 @@ class FakeTensorOperatorInvariants(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
@@ -1398,7 +1408,7 @@ class FakeTensorOperatorInvariants(TestCase):
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 0
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1420,7 +1430,7 @@ make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = torch.nn.Linear(4, 3)
                 self.layer2 = torch.nn.Linear(3, 2)
@@ -1476,7 +1486,7 @@ class FakeTensorPropTest(TestCase):
 
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = torch.nn.Linear(4, 3)
                 self.layer2 = torch.nn.Linear(3, 2)
@@ -1536,7 +1546,7 @@ class FakeTensorPropTest(TestCase):
 
     def test_torch_load_with_fake_mode(self):
         class TheModelClass(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
 
@@ -1602,9 +1612,10 @@ class FakeTensorDispatchCache(TestCase):
         cache keys for inputs x and y are the same, but z is different.
         """
         func = aten.add.Tensor
-        key_x = fm._cache_key(func, [x], {})
-        key_y = fm._cache_key(func, [y], {})
-        key_z = fm._cache_key(func, [z], {})
+        state = _CacheKeyState()
+        key_x = fm._cache_key(state, func, [x], {})
+        key_y = fm._cache_key(state, func, [y], {})
+        key_z = fm._cache_key(state, func, [z], {})
 
         self.assertEqual(key_x, key_y)
         self.assertNotEqual(key_x, key_z)

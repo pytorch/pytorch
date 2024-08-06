@@ -1,17 +1,17 @@
+from __future__ import annotations
+
 import os
 import platform
 import shutil
 from glob import glob
-from typing import Dict, Optional
 
 from setuptools import distutils  # type: ignore[import]
 
 from .setup_helpers.cmake import CMake, USE_NINJA
-
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
 
 
-def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
+def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
     vc_arch = "x64" if IS_64BIT else "x86"
 
     if platform.machine() == "ARM64":
@@ -34,7 +34,7 @@ def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
                 "emulation is enabled!"
             )
 
-    vc_env: Dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    vc_env: dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.
@@ -47,7 +47,7 @@ def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
     return vc_env
 
 
-def _create_build_env() -> Dict[str, str]:
+def _create_build_env() -> dict[str, str]:
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
     # you should NEVER add something to this list. It is bad practice to
@@ -72,8 +72,8 @@ def _create_build_env() -> Dict[str, str]:
 
 
 def build_caffe2(
-    version: Optional[str],
-    cmake_python_library: Optional[str],
+    version: str | None,
+    cmake_python_library: str | None,
     build_python: bool,
     rerun_cmake: bool,
     cmake_only: bool,

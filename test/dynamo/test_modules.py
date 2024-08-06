@@ -3,6 +3,8 @@
 import collections
 import copy
 import itertools
+import os
+import tempfile
 import traceback
 import types
 import unittest
@@ -12,15 +14,16 @@ from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
+from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 
 try:
     from . import test_functions
@@ -39,7 +42,7 @@ def update_global():
 
 
 class BasicModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.scale = torch.randn(1, 10)
@@ -49,7 +52,7 @@ class BasicModule(torch.nn.Module):
 
 
 class FnMember(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.activation = F.relu
@@ -77,7 +80,7 @@ class FnMemberCmp(torch.nn.Module):
 
 
 class SubmoduleExample(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = BasicModule()
@@ -90,7 +93,7 @@ class SubmoduleExample(torch.nn.Module):
 
 
 class IsTrainingCheck(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.linear2 = torch.nn.Linear(10, 10)
@@ -105,13 +108,13 @@ class IsTrainingCheck(torch.nn.Module):
 
 
 class IsEvalCheck(IsTrainingCheck):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.train(False)
 
 
 class ModuleMethodCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = BasicModule()
@@ -128,7 +131,7 @@ class ModuleMethodCall(torch.nn.Module):
 
 
 class UnsupportedMethodCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.scale = torch.randn(1, 10)
@@ -144,7 +147,7 @@ class UnsupportedMethodCall(torch.nn.Module):
 
 
 class UnsupportedModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.scale = torch.randn(1, 10)
@@ -155,7 +158,7 @@ class UnsupportedModule(torch.nn.Module):
 
 
 class UnsupportedModuleCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mod = UnsupportedModule()
 
@@ -170,7 +173,7 @@ class ModuleWithStaticForward(torch.nn.Module):
 
 
 class ModuleCallModuleWithStaticForward(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mod = ModuleWithStaticForward()
 
@@ -179,7 +182,7 @@ class ModuleCallModuleWithStaticForward(torch.nn.Module):
 
 
 class ModuleStaticMethodCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = BasicModule()
@@ -197,7 +200,7 @@ class ModuleStaticMethodCall(torch.nn.Module):
 
 
 class ModuleClassMethodCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = BasicModule()
@@ -215,7 +218,7 @@ class ModuleClassMethodCall(torch.nn.Module):
 
 
 class ModuleProperty(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.scale = torch.randn(1, 10)
 
@@ -228,7 +231,7 @@ class ModuleProperty(torch.nn.Module):
 
 
 class NestedModuleList(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ModuleList([])
         for _ in range(3):
@@ -248,7 +251,7 @@ class NestedModuleList(torch.nn.Module):
 
 
 class ConstLoop(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.count = 3
@@ -260,7 +263,7 @@ class ConstLoop(torch.nn.Module):
 
 
 class ViaModuleCall(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
 
@@ -269,7 +272,7 @@ class ViaModuleCall(torch.nn.Module):
 
 
 class IsNoneLayer(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = torch.nn.Linear(10, 10)
         self.layer2 = None
@@ -284,7 +287,7 @@ class IsNoneLayer(torch.nn.Module):
 
 
 class LayerList(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = [
             torch.nn.Linear(10, 10),
@@ -299,7 +302,7 @@ class LayerList(torch.nn.Module):
 
 
 class ModuleList(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ModuleList(
             [
@@ -333,7 +336,7 @@ class ModuleList(torch.nn.Module):
 
 
 class CustomGetItemModuleList(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ModuleList(
             [
@@ -358,7 +361,7 @@ class CustomGetItemModuleList(torch.nn.Module):
 
 
 class ModuleDict(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ModuleDict(
             {
@@ -373,7 +376,7 @@ class ModuleDict(torch.nn.Module):
 
 
 class ParameterDict(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ParameterDict(
             {
@@ -387,7 +390,7 @@ class ParameterDict(torch.nn.Module):
 
 
 class CustomGetItemParameterDict(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ParameterDict(
             {
@@ -404,7 +407,7 @@ class CustomGetItemParameterDict(torch.nn.Module):
 
 
 class CustomGetItemModuleDict(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.ModuleDict(
             {
@@ -421,7 +424,7 @@ class CustomGetItemModuleDict(torch.nn.Module):
 
 
 class TensorList(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = (
             torch.randn((1, 10)),
@@ -437,7 +440,7 @@ class TensorList(torch.nn.Module):
 
 
 class Children(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(10, 10)
         self.l2 = torch.nn.ReLU()
@@ -451,7 +454,7 @@ class Children(torch.nn.Module):
 
 
 class NamedChildren(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = torch.nn.Linear(10, 10)
         self.l2 = torch.nn.ReLU()
@@ -465,7 +468,7 @@ class NamedChildren(torch.nn.Module):
 
 
 class IntArg(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = torch.nn.Linear(10, 10)
 
@@ -475,7 +478,7 @@ class IntArg(torch.nn.Module):
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -489,13 +492,13 @@ class Seq(torch.nn.Module):
 
 
 class Cfg:
-    def __init__(self):
+    def __init__(self) -> None:
         self.val = 0.5
         self.count = 3
 
 
 class CfgModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.cfg = Cfg()
         self.layer = torch.nn.Linear(10, 10)
@@ -507,7 +510,7 @@ class CfgModule(torch.nn.Module):
 
 
 class StringMember(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.mode = "some_string"
@@ -542,7 +545,7 @@ class _DenseBlock(torch.nn.ModuleDict):
 
 
 class DenseNetBlocks(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = _DenseBlock()
 
@@ -556,7 +559,7 @@ class MaterializedModule(torch.nn.Module):
 
     param: Parameter
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.register_parameter("param", None)
 
@@ -568,7 +571,7 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
     param: UninitializedParameter
     cls_to_become = MaterializedModule
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.param = UninitializedParameter()
 
@@ -579,7 +582,7 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
 
 
 class LazyMLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = torch.nn.LazyLinear(10)
         self.relu1 = torch.nn.ReLU()
@@ -598,7 +601,7 @@ class MyInput(NamedTuple):
 
 
 class LazyLayerWithNamedTupleInput(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def initialize_parameters(self, input):
@@ -616,7 +619,7 @@ class LazyLayerWithNamedTupleInput(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyModuleWithNamedTupleInput(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer = LazyLayerWithNamedTupleInput()
 
@@ -625,7 +628,7 @@ class LazyModuleWithNamedTupleInput(torch.nn.Module):
 
 
 class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def initialize_parameters(self, input):
@@ -640,7 +643,7 @@ class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyModuleWithListInput(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer = LazyLayerWithListInput()
 
@@ -649,7 +652,7 @@ class LazyModuleWithListInput(torch.nn.Module):
 
 
 class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def initialize_parameters(self, input):
@@ -661,7 +664,7 @@ class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyLayerWithInputs(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def initialize_parameters(self, x, y):
@@ -680,7 +683,7 @@ class LazyLayerWithInputs(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def initialize_parameters(self, *args, **kwargs):
@@ -692,7 +695,7 @@ class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def impl(self, x):
@@ -700,7 +703,7 @@ class LazyParentModule(LazyModuleMixin, torch.nn.Module):
 
 
 class LazyChildModuleNoClsToBecome(LazyParentModule):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x):
@@ -721,7 +724,7 @@ def requires_grad2(module: torch.nn.Module, recurse: bool = False) -> bool:
 
 
 class ParametersModule1(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
         self.scale = torch.nn.Parameter(torch.randn(1, 10))
@@ -745,6 +748,27 @@ class ParametersModule3(ParametersModule1):
     def forward(self, x):
         ones = torch.ones(10, dtype=next(self.parameters()).dtype)
         return F.relu(self.linear1(x)) * self.scale + ones
+
+
+class ParametersModule4(ParametersModule1):
+    def forward(self, x):
+        ones = torch.ones(10, dtype=next(self.parameters(recurse=False)).dtype)
+        return F.relu(self.linear1(x)) * self.scale + ones
+
+
+class ParametersModule5(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear1 = torch.nn.Linear(10, 10)
+        self.scale = torch.nn.Parameter(torch.randn(10, 10))
+        self.scale_dup = self.scale
+
+    def forward(self, x):
+        counter = 0
+        for param in self.parameters():
+            counter += 1
+
+        return x * self.scale * counter
 
 
 class SuperModule(BasicModule):
@@ -777,7 +801,7 @@ class SuperChildCallsClassMethod(ComplicatedSuperParent):
 
 
 class HasAttrModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.scale = torch.nn.Parameter(torch.randn(1, 10))
 
@@ -825,7 +849,7 @@ class AccessByKeys(torch.nn.ModuleDict):
 
 
 class CallForwardDirectly(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = torch.nn.Linear(10, 10)
@@ -837,7 +861,7 @@ class CallForwardDirectly(torch.nn.Module):
 
 
 class ConvCallForwardDirectly(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer = torch.nn.Conv2d(3, 64, 3, 1, 1, bias=False)
 
@@ -846,7 +870,7 @@ class ConvCallForwardDirectly(torch.nn.Module):
 
 
 class ConvTransposeCallForwardDirectly(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer = torch.nn.ConvTranspose2d(4, 4, 4)
 
@@ -896,7 +920,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
 
 
 class ModuleNameString(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear1 = torch.nn.Linear(10, 10)
 
@@ -928,7 +952,7 @@ class ModuleAttributePrecedenceBase(torch.nn.Module):
 
 
 class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.activation = torch.nn.ReLU()
         self.linear = torch.nn.Linear(10, 10)
@@ -950,7 +974,7 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
 
 
 class ModuleForwardHasGraphBreak(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = BasicModule()
         self.layer2 = BasicModule()
@@ -1005,7 +1029,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
     # corresponding guard value. Some guard names come from source(module path)
     # where special symbols are valid. But they are not valid python identifier,
     # we should identify these pattern and rewrite them with getattr.
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         for i in range(2):
             self.add_module("l@yer-%d" % (i + 1), BasicModule())
@@ -1018,7 +1042,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
 
 class SequentialWithDuplicatedModule(torch.nn.Module):
     # Sequential module(self.layer) contains three duplicated ReLU module.
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
@@ -1035,7 +1059,7 @@ class SequentialWithDuplicatedModule(torch.nn.Module):
 
 
 class SequentialWithDuplicatedModule2(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
@@ -1056,7 +1080,7 @@ class SequentialWithDuplicatedModule2(torch.nn.Module):
 
 
 class ModuleComparison(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer0 = torch.nn.Linear(10, 10)
         self.layer1 = torch.nn.Linear(10, 10)
@@ -1096,7 +1120,7 @@ class UnspecNonInlinableModule(torch.nn.Module):
 
 
 class UnspecNonInlinableToplevelModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.m = UnspecNonInlinableModule()
 
@@ -1157,6 +1181,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
+    test_parameters4 = make_test(ParametersModule4())
+    test_parameters5 = make_test(ParametersModule5())
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
     test_access_by_keys = make_test(AccessByKeys())
@@ -1212,7 +1238,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
-        self.assertEqual(cnt.frame_count, 3)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """2""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
@@ -1533,7 +1562,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
@@ -1585,11 +1614,11 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class MockModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.relu = torch.nn.ReLU()
         self.linear = torch.nn.Linear(10, 10)
-        self.register_buffer("buf0", torch.randn(10, 10))
+        self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
     def forward(self, x):
         return self.relu(self.linear(x) + self.buf0)
@@ -1609,7 +1638,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 3
 
@@ -1623,7 +1652,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 raise RuntimeError("Should not be called")
 
         class MyMod(Mod):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(11, 11)
                 self.a = 2
@@ -1680,7 +1709,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_param_order(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param1 = torch.nn.Parameter(torch.ones([1]))
                 self.param2 = torch.nn.Parameter(torch.ones([2]))
@@ -1718,10 +1747,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_buffer_order(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("b1", torch.ones([1]))
-                self.register_buffer("b2", torch.ones([2]))
+                self.b1 = torch.nn.Buffer(torch.ones([1]))
+                self.b2 = torch.nn.Buffer(torch.ones([2]))
 
             def forward(self, x):
                 return x
@@ -1756,7 +1785,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_module_order(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(3, 3)
                 self.linear2 = torch.nn.Linear(10, 10)
@@ -1799,10 +1828,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_attr(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.buf0 = torch.nn.Buffer(torch.randn(10, 10))
 
             def forward(self, x):
                 return self.r(torch.sin(x)) + self.buf0
@@ -1826,10 +1855,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_dir(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
-                self.register_buffer("buf0", torch.randn(10, 10))
+                self.buf0 = torch.nn.Buffer(torch.nn.Buffer(torch.randn(10, 10)))
                 self.register_parameter(
                     name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
                 )
@@ -1857,7 +1886,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(*size)
 
@@ -1866,7 +1895,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.linear(a)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mods = [SubModule() for _ in range(num_submodules)]
                 self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
@@ -1892,6 +1921,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
+    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
+    def test_recompile_limit_on_freed_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(x, mod):
+            return mod(x)
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_mod = torch.compile(fn, backend=cnts)
+        for i in range(8):
+            mod = Mod()
+            opt_mod(torch.randn(5, 5), mod)
+
+        # fn compiles twice, and forward twice
+        # (since forward is inlined when fn is compiled)
+        self.assertEqual(cnts.frame_count, 4)
+
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
@@ -1900,7 +1953,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(*size)
 
@@ -1909,7 +1962,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.linear(a)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mods = [SubModule() for _ in range(num_submodules)]
                 self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
@@ -1938,7 +1991,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -1947,7 +2000,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.relu(a)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mods = [SubModule() for _ in range(num_submodules)]
                 self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
@@ -1989,7 +2042,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_composition(self):
         class InnerModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -1999,7 +2052,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_inner_mod = InnerModule()
 
         class OuterModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = opt_inner_mod
 
@@ -2017,7 +2070,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -2029,7 +2082,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_inner_mod = torch._dynamo.optimize(cnt)(inner_mod)
 
         class OuterModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = opt_inner_mod
 
@@ -2171,7 +2224,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
+        self.assertRegex(failure_reason, r"___check_obj_id\(L\['m'\]._forward_hooks")
 
     @patch.object(torch._dynamo.config, "guard_nn_modules", False)
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
@@ -2225,8 +2278,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        compiled_activations = dict()
-        eager_activations = dict()
+        compiled_activations = {}
+        eager_activations = {}
         activations = None
 
         def save_activations(name, mod, inp, out):
@@ -2268,7 +2321,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_hooks_allowed_modules(self):
         # this test shouldn't care whether hook guards are enabled or not
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Sequential(
                     *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
@@ -2283,7 +2336,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_hooks_allowed_modules_compiles(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Sequential(
                     *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
@@ -2317,7 +2370,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Sequential(
                     *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
@@ -2363,7 +2416,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10000)
 
@@ -2386,7 +2439,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return torch.mm(x, self.weight)
 
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net = torch.nn.Sequential(
                     *[CustomLinear(10, 10)]
@@ -2453,7 +2506,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.module(x)
 
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -2467,7 +2520,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_module_dict_iter_name(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.activations = torch.nn.ModuleDict(
                     [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
@@ -2489,7 +2542,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.activations = torch.nn.ModuleDict(
                     [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
@@ -2509,6 +2562,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_module_setattr(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        models[0].abc = False
+
+        def run():
+            models[0].abc = True
+            x = torch.randn(1, 3)
+            return models(x)
+
+        run = torch.compile(run, fullgraph=True)
+        run()
+        self.assertTrue(models[0].abc)
+
     def test_assign_does_not_exist(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -2521,7 +2587,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_module_dict_iter_values(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.activations = torch.nn.ModuleDict(
                     [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
@@ -2556,7 +2622,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_no_op_assignment(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer = torch.rand([4])
 
@@ -2606,11 +2672,99 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         expected = mod(x)
         self.assertEqual(actual, expected)
 
-    def test_no_guard_on_torch_nn_modules(self):
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_previously_seen_tensor(self):
+        # This test verifies that dynamo will mark
+        # the buffers/params of a module as static
+        # even if this param was previously seen
+        # (ex. as a different input)
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n for n in gm.graph.nodes if n.op == "placeholder" and n.name == "l_b_"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, buf) -> None:
+                super().__init__()
+                # Changing this one to nn.Buffer fails because `nn.Buffer` does a .detach()
+                # so the value in self.tx.output.side_effects will no longer evaluate to True
+                self.register_buffer("buf", buf)
+
+            def forward(self, x):
+                return self.buf * x
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x, b, mod):
+            z = b + 1
+            return z * mod(x)
+
+        buf = torch.ones(2, 2)
+        inp = torch.ones(2)
+        mod = TestModule(buf)
+        fn(inp, buf, mod)
+        self.assertEqual(num_compiles, 1)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    @torch._inductor.config.patch("freezing", True)
+    @torch.no_grad()
+    def test_mark_static_with_freezing(self):
+        # This test verifies that dynamo will
+        # add buffers/params as attributes of the
+        # graph w/ guards if freezing is enabled
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n for n in gm.graph.nodes if n.op == "placeholder" and n.name == "l_b_"
+            ]
+            self.assertEqual(len(input_nodes), 0)
+            self.assertEqual(len(list(gm.buffers())), 1)
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, buf) -> None:
+                super().__init__()
+                self.buf = torch.nn.Buffer(buf)
+
+            def forward(self, x):
+                return self.buf * x
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x, mod):
+            return mod(x)
+
+        buf = torch.ones(2, 2)
+        inp = torch.ones(2)
+        mod = TestModule(buf)
+        fn(inp, mod)
+        self.assertEqual(num_compiles, 1)
+        mod.buf = torch.rand_like(buf)
+        fn(inp, mod)
+        self.assertEqual(num_compiles, 2)
+
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_guard_on_torch_nn_modules(self):
         # https://github.com/pytorch/pytorch/issues/110048
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
                 self.multiplier = 10
@@ -2681,6 +2835,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # other file.
         self.assertEqual(test_functions._variable, 1)
         self.assertEqual(res, 3 * torch.ones(10))
+
+    @unittest.skipIf(
+        "inductor" not in torch._dynamo.list_backends(),
+        "inductor backend is not available",
+    )
+    def test_save_and_load_inductor(self):
+        mod = MockModule()
+        opt_mod = torch.compile(mod, backend="inductor")
+        inp = torch.randn(10, 10)
+        opt_mod(inp)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+        loaded_model(inp)
+        self.assertTrue(same_two_models(loaded_model, mod, [inp]))
+        self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+
+        torch._dynamo.reset()  # force recompiles
+        torch._inductor.metrics.generated_kernel_count = 0
+        loaded_model(inp)
+        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_save_and_load_all_backends(self):
+        mod = MockModule()
+        inp = torch.randn(10, 10)
+        for backend in torch._dynamo.list_backends():
+            try:
+                opt_mod = torch.compile(mod, backend=backend)
+                with tempfile.TemporaryDirectory() as tmpdirname:
+                    torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                torch._dynamo.reset()  # force recompiles
+                torch._inductor.metrics.generated_kernel_count = 0
+                opt_mod(inp)
+                opt_success = torch._inductor.metrics.generated_kernel_count == 0
+                torch._dynamo.reset()  # force recompiles
+                torch._inductor.metrics.generated_kernel_count = 0
+                loaded_model(inp)
+                loaded_success = torch._inductor.metrics.generated_kernel_count == 0
+                self.assertEqual(opt_success, loaded_success)
+            except torch._dynamo.exc.BackendCompilerFailed:
+                pass
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):

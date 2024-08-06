@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import observer, ObserverOrFakeQuantize, QConfigMapping
-
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
     float_qparams_weight_only_qconfig,
@@ -13,7 +12,6 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     weight_observer_range_neg_127_to_127,
 )
-
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
@@ -42,7 +40,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 from torch.fx import Node
-
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -1181,15 +1178,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    @parametrize("dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
-    def test_quantization_dtype(self, dtype):
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("quant_dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
+    def test_quantization_dtype(self, dtype, quant_dtype):
         class DtypeActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                info_fun = torch.iinfo if dtype == torch.int16 else torch.finfo
+                info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
                 activate_qspec = QuantizationSpec(
-                    dtype=dtype,
-                    quant_min=int(info_fun(dtype).min),
-                    quant_max=int(info_fun(dtype).max),
+                    dtype=quant_dtype,
+                    quant_min=int(info_fun(quant_dtype).min),
+                    quant_max=int(info_fun(quant_dtype).max),
                     qscheme=torch.per_tensor_affine,
                     is_dynamic=False,
                     observer_or_fake_quant_ctr=observer.default_observer,
@@ -1214,9 +1212,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 pass
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dtype):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv = torch.nn.Conv2d(3, 3, 3, dtype=dtype)
 
             def forward(self, x):
                 return self.conv(x)
@@ -1233,14 +1231,45 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        self._test_quantizer(
-            M().eval(),
+        example_inputs = (torch.randn(1, 3, 3, 3, dtype=dtype),)
+        m = self._test_quantizer(
+            M(dtype).eval(),
             example_inputs,
             quantizer,
             node_occurrence,
             node_list,
         )
+
+        def verify_quant_dequant_iotypes(m):
+            for node in m.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target.__name__ == "dequantize_per_tensor.default"
+                ):
+                    # Check dequantize node
+                    dequant_node = node
+                    dequant_in_dtype = dequant_node.args[5]
+                    dequant_out_dtype = torch.float32
+                    if "out_dtype" in dequant_node.kwargs:
+                        dequant_out_dtype = dequant_node.kwargs["out_dtype"]
+
+                    # Check preceding quantize node
+                    # Depending on fold_quantize flag, quantize node may be absent
+                    quant_node = node.args[0]
+                    if (
+                        quant_node.op == "call_function"
+                        and quant_node.target.__name__ == "quantize_per_tensor.default"
+                    ):
+                        quant_in_dtype = torch.float32
+                        if "val" in quant_node.args[0].meta:
+                            quant_in_dtype = quant_node.args[0].meta["val"].dtype
+                        quant_out_dtype = quant_node.args[5]
+                        assert (
+                            quant_in_dtype == dequant_out_dtype
+                            and quant_out_dtype == dequant_in_dtype
+                        ), "quant dequant io dtype check failed!"
+
+        verify_quant_dequant_iotypes(m)
 
     def test_input_edge_sanity_check(self):
         class M(torch.nn.Module):
@@ -1321,7 +1350,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
                 self.dont_fold_me = torch.nn.Parameter(torch.randn(2, 2))
@@ -1360,7 +1389,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(2, 2)
 
@@ -1391,7 +1420,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1786,7 +1815,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
@@ -1852,7 +1881,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
 
@@ -1920,7 +1949,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_allow_exported_model_train_eval(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
                 self.dropout = torch.nn.Dropout(0.5)
@@ -2221,7 +2250,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             return model
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -2277,6 +2306,47 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
+    def test_multi_users_without_output_observer(self):
+        """
+        Test the case in which a node is used by multiple users,
+        and had its output observer removed.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x, x + 1
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = M()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(),
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+
+        # Remove output observer
+        observer_to_remove = None
+        for n in m.graph.nodes:
+            if n.op == "output":
+                observer_to_remove = n.args[0][0]
+                assert observer_to_remove.op == "call_module"
+                assert observer_to_remove.target.startswith("activation_post_process_")
+                break
+        assert observer_to_remove is not None
+        observer_to_remove.replace_all_uses_with(observer_to_remove.args[0])
+        m.graph.erase_node(observer_to_remove)
+        m.recompile()
+
+        # Convert should succeed
+        m = convert_pt2e(m)
+        m(*example_inputs)
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)
