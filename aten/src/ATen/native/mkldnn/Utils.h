@@ -36,7 +36,7 @@ void check_mkldnn_binary_fusion_inputs(
     const Tensor& weight,
     const Tensor& bias);
 
-static inline std::vector<int64_t> padding_r(
+inline std::vector<int64_t> padding_r(
     IntArrayRef padding, IntArrayRef output_padding)
 {
   // ConvTranpose padding adjustment
@@ -60,7 +60,7 @@ static inline std::vector<int64_t> padding_r(
 // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
 // For example, for tensor of size = [1, 1280], stride = [0, 1], we'll convert it to size = [1, 1280], stride = [1280, 1]
 // before calling oneDNN for better performance.
-static inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
+inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
   auto input_size = input.sizes().vec();
   auto input_stride = input.strides().vec();
   auto input_default_contiguous_strides = c10::contiguous_strides(input_size);

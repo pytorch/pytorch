@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -33,6 +34,9 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#else
+// For calc_erfinv
+#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
@@ -113,6 +117,14 @@ Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w
   return result;
 }
 
+template <typename T>
+struct IndexValue {
+  int64_t index;
+  T value;
+  IndexValue(int64_t idx, T val) :index(idx), value(val) {};
+  IndexValue() {};
+};
+
 // Refer to https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
 // aten/src/ATen/native/SharedReduceOps.h#L419-L445
 template <typename scalar_t>
@@ -139,7 +151,184 @@ inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
   return (a == b) ? idx_a < idx_b : (a < b);
 }
 
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(less_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(greater_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, const IndexValue<T>& next){
+  return argmin_combine(a, next.value, next.index);
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, const IndexValue<T>& next){
+  return argmax_combine(a, next.value, next.index);
+}
+
 #if INDUCTOR_USE_VECTOR_TYPES()
+
+template <typename T, int NV, int NI>
+struct IndexValueVec {
+  at::vec::VectorizedN<T, NV> value;
+  at::vec::VectorizedN<int64_t, NI> index;
+
+  IndexValueVec(const T _value) {
+    value = at::vec::VectorizedN<T, NV>(_value);
+    index = at::vec::VectorizedN<int64_t, NI>(0);
+  };
+
+  IndexValueVec() {};
+};
+
+
+template <typename T, int NV, int NI,
+          typename std::enable_if_t<at::vec::is_floating_point_v<T>, int> = 0>
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
+  const at::vec::VecMask<T, NV>& vmask,
+  const IndexValueVec<T, NV, NI>& a,
+  const at::vec::VectorizedN<T, NV>& value,
+  const at::vec::VectorizedN<int64_t, NI>& index
+){
+  /*
+  vec impl for less_or_nan and greater_or_nan
+  example for argmin:
+  a.value = [NaN, NaN, 0, 2, 1, 0]
+  value = [NaN, 0, 0, 1, 2, NaN]
+  vmask = [false, false, false, false, true, false]
+  all_nan_or_equal = [true, false, true, false, false, false]
+  imask = [a.index[0] < index[0], ..., a.index[-1] < index[-1]]
+  iv_mask = blendv (vmask, imask, all_nan_or_equal)
+          [a.index[0] < index[0], false, a.index[2] < index[2], false, true, false]
+  a_nan_b_not: [false, false, false, false, false, true]
+  mask = iv_mask | a_nan_b_not
+          [a.index[0] < index[0], false, a.index[2] < index[2], false, true, true]
+  */
+  using v_t = at::vec::VecMask<T, NV>;
+  using i_t = at::vec::VecMask<int64_t, NI>;
+  i_t vmask_itype = vmask.template cast<int64_t, NI>();
+  // use itype here since there is vec impl for operator~ for itype
+  // while there may not vec impl for vtype
+  v_t isnan_a = a.value.isnan();
+  i_t isnan_a_itype = isnan_a.template cast<int64_t, NI>();
+  v_t isnan_b = value.isnan();
+  i_t isnan_b_type = isnan_b.template cast<int64_t, NI>();
+  i_t all_nan_mask = isnan_a_itype & isnan_b_type;
+  v_t equal_mask = (a.value == value);
+  i_t equal_mask_itype = equal_mask.template cast<int64_t, NI>();
+  i_t all_nan_or_equal = all_nan_mask | equal_mask_itype;
+  i_t imask(a.index < index);
+  i_t iv_mask = i_t::blendv(vmask_itype, imask, all_nan_or_equal);
+  i_t isnan_a_notnan_b = isnan_a_itype & (~isnan_b_type);
+  return iv_mask | isnan_a_notnan_b;
+}
+
+template <typename T, int NV, int NI,
+          typename std::enable_if_t<!at::vec::is_floating_point_v<T>, int> = 0>
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
+  const at::vec::VecMask<T, NV>& vmask,
+  const IndexValueVec<T, NV, NI>& a,
+  const at::vec::VectorizedN<T, NV>& value,
+  const at::vec::VectorizedN<int64_t, NI>& index
+){
+  using v_t = at::vec::VecMask<T, NV>;
+  using i_t = at::vec::VecMask<int64_t, NI>;
+  i_t vmask_itype = vmask.template cast<int64_t, NI>();
+  v_t equal_mask = (a.value == value);
+  i_t imask(a.index < index);
+  return i_t::blendv(vmask_itype, imask, equal_mask);
+}
+
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index){
+  at::vec::VecMask<T, NV> vmask(a.value < value);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
+  a.value = at::vec::minimum(a.value, value);
+  a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
+  return a;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index){
+  at::vec::VecMask<T, NV> vmask(a.value > value);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
+  a.value = at::vec::maximum(a.value, value);
+  a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
+  return a;
+}
+
+template <typename T, int NI, bool horizontal>
+inline at::vec::VectorizedN<int64_t, NI> create_index(int64_t next_index){
+  at::vec::VectorizedN<int64_t, NI> next_idx;
+  if constexpr (horizontal) {
+    next_idx = at::vec::VectorizedN<int64_t, NI>::arange(next_index, 1);
+  } else {
+    next_idx = at::vec::VectorizedN<int64_t, NI>(next_index);
+  }
+  return next_idx;
+}
+
+template <typename T, int NV, int NI, bool horizontal>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(IndexValueVec<T, NV, NI>& a, at::vec::VectorizedN<T, NV> next_value, int64_t next_index){
+  auto next_idx = create_index<T, NI, horizontal>(next_index);
+  return argmin_vec_impl(a, next_value, next_idx);
+}
+
+template <typename T, int NV, int NI, bool horizontal>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(IndexValueVec<T, NV, NI>& a, at::vec::VectorizedN<T, NV> next_value, int64_t next_index){
+  auto next_idx = create_index<T, NI, horizontal>(next_index);
+  return argmax_vec_impl(a, next_value, next_idx);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValue<T> argmin_vec_reduce_all(const IndexValueVec<T, NV, NI>& vec){
+  constexpr int len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
+  IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
+  for (int i = 1; i < len; i++){
+    res = argmin_combine(res, tmpval[i], tmpidx[i]);
+  }
+  return res;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValue<T> argmax_vec_reduce_all(const IndexValueVec<T, NV, NI>& vec){
+  constexpr int len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
+  IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
+  for (int i = 1; i < len; i++){
+    res = argmax_combine(res, tmpval[i], tmpidx[i]);
+  }
+  return res;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(IndexValueVec<T, NV, NI>& vec_a, const IndexValueVec<T, NV, NI>& vec_b){
+  return argmin_vec_impl(vec_a, vec_b.value, vec_b.index);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(IndexValueVec<T, NV, NI>& vec_a, const IndexValueVec<T, NV, NI>& vec_b){
+  return argmax_vec_impl(vec_a, vec_b.value, vec_b.index);
+}
+
 template <typename scalar_t>
 inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
@@ -213,6 +402,21 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   result.index = acc.index;
 
   return result;
+}
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 2>> acc) {
+  auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[0],
+    acc.m2[0],
+    acc.index
+  };
+  auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
+    acc.mean[1],
+    acc.m2[1],
+    acc.index
+  };
+  return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
 }
 #endif
 
@@ -309,3 +513,182 @@ atomic_add(volatile T *addr, T offset) {
   std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
+
+void mm_get_thread_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t M0,
+    int64_t N0,
+    int64_t K0,
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  // see NOTE [Thread blocking in Cpp GEMM] for heuristics
+  // TODO(jgong5): cache thread blocking results
+  Mt = Nt = Kt = 0;
+
+  auto get_factors = [](int64_t number) {
+    int count = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        count += 2;
+      }
+    }
+    auto factors = std::make_unique<int64_t[]>(count);
+    int index = 0;
+    for (int64_t i = std::sqrt(number); i > 0; --i) {
+      if (number % i == 0) {
+        factors[index++] = number / i;
+        factors[index++] = i;
+      }
+    }
+    return std::make_tuple(std::move(factors), count);
+  };
+
+  auto get_blocking = [](int64_t num_threads,
+                         int64_t factor,
+                         int64_t m_blocks,
+                         int64_t n_blocks,
+                         int64_t k_blocks) {
+    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
+    int64_t cofactor = num_threads / factor;
+    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
+    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+  };
+
+  auto is_better_blocking = [=](int64_t Mt_,
+                              int64_t Nt_,
+                              int64_t Kt_,
+                              int64_t Mt,
+                              int64_t Nt,
+                              int64_t Kt) {
+    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+  };
+
+  int64_t m_blocks = (M + M0 - 1) / M0;
+  int64_t n_blocks = (N + N0 - 1) / N0;
+  int64_t k_blocks = (K + K0 - 1) / K0;
+
+  auto [factors, count] = get_factors(num_threads);
+  assert(count > 0);
+
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    if (n_blocks >= factor &&
+        m_blocks >= num_threads / factor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
+    }
+  }
+
+  if (Mt != 0) {
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    int64_t factor = factors[i];
+    int64_t cofactor = num_threads / factor;
+    if (n_blocks >= factor || m_blocks >= cofactor) {
+      auto [Mt_, Nt_, Kt_] = get_blocking(
+          num_threads, factor, m_blocks, n_blocks, k_blocks);
+      if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+        std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+      }
+    }
+  }
+
+  assert(Mt != 0);
+}
+
+inline void mm_get_thread_blocks(
+    int thread_id,
+    int64_t M_blocks,
+    int64_t N_blocks,
+    int64_t K_blocks,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& m_block_start,
+    int64_t& m_block_end,
+    int64_t& n_block_start,
+    int64_t& n_block_end,
+    int64_t& k_block_start,
+    int64_t& k_block_end) {
+  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
+  k_block_start = (thread_id % num_Kt) * Kt_blocks;
+  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
+  thread_id /= num_Kt;
+  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
+  n_block_start = (thread_id % num_Nt) * Nt_blocks;
+  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
+  thread_id /= num_Nt;
+  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
+  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
+}
+
+struct amx_tilecfg {
+  uint8_t palette_id;
+  uint8_t start_row;
+  uint8_t reserved_0[14];
+  uint16_t colsb[16];
+  uint8_t rows[16];
+};
+
+class AMXState {
+ private:
+  amx_tilecfg tilecfg_;
+  uint8_t rows_;
+  uint16_t colsb_;
+  uint8_t num_tile_rows_;
+  uint8_t num_tile_columns_;
+
+ public:
+  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
+    memset(&tilecfg_, 0, sizeof(tilecfg_));
+  }
+
+  inline void configure(
+      uint8_t rows,
+      uint16_t colsb,
+      uint8_t num_tile_rows,
+      uint8_t num_tile_columns,
+      void (*loadconfig)(const amx_tilecfg&)) {
+    if (tilecfg_.palette_id == 1 && rows_ == rows && colsb_ == colsb &&
+        num_tile_rows_ == num_tile_rows &&
+        num_tile_columns_ == num_tile_columns) {
+      return;
+    }
+    tilecfg_.palette_id = 1;
+    rows_ = rows;
+    colsb_ = colsb;
+    num_tile_rows_ = num_tile_rows;
+    num_tile_columns_ = num_tile_columns;
+    const auto num_c_tiles = num_tile_rows * num_tile_columns;
+    // For C
+    for (int i = 0; i < num_c_tiles; i++) {
+      tilecfg_.rows[i] = rows;
+      tilecfg_.colsb[i] = 64;
+    }
+    // For A
+    for (int i = 0; i < num_tile_rows; i++) {
+      tilecfg_.rows[i + num_c_tiles] = rows;
+      tilecfg_.colsb[i + num_c_tiles] = colsb;
+    }
+    // For B
+    for (int i = 0; i < num_tile_columns; i++) {
+      tilecfg_.rows[i + num_c_tiles + num_tile_rows] = colsb / 4;
+      tilecfg_.colsb[i + num_c_tiles + num_tile_rows] = 64;
+    }
+    loadconfig(tilecfg_);
+  }
+
+  inline void release(void (*tile_release)()) {
+    tilecfg_.palette_id = 0;
+    tile_release();
+  }
+};

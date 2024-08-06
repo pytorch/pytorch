@@ -2,7 +2,7 @@
 import unittest
 from collections import deque
 from functools import partial
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import torch
 import torch._dynamo
@@ -23,9 +23,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils.hooks import RemovableHandle
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -77,13 +79,13 @@ def forward(self, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
     with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default((getitem_2,));  getitem_2 = _sink_tokens_default = None
     return (add,)""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
@@ -109,9 +111,9 @@ def forward(self, arg0_1, arg1_1):
 
     def test_print_with_buffer_mutations(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.ones(3))
+                self.buf = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 torch.ops.aten._print("moo")
@@ -144,7 +146,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_print_with_input_mutations(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -197,6 +199,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_compile_inductor_external_op_return_none(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::inplace_add",
+                "(Tensor input, Tensor(a!) output) -> ()",
+                lib=lib,
+            )
+
+            def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
+                assert input.device == output.device
+                output.add_(input)
+
+            lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")
+
+            def f(x):
+                out = torch.empty(3)
+                out = torch.zeros_like(out)
+                torch.ops.mylib.inplace_add(x, out)
+                return out
+
+            inputs = (torch.randn(3),)
+
+            res = torch.compile(f, backend="inductor")(*inputs)
+            self.assertTrue(torch.allclose(res, f(*inputs)))
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
@@ -278,7 +307,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     return torch.nn.functional.linear(x, self.weight, self.bias)
 
             class MockModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.linear = MyLinear(10, 10)
                     self.register_buffer(

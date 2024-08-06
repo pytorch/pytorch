@@ -16,14 +16,16 @@ from torch.distributed._composable.fsdp.fully_shard import (
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.pipelining import ManualPipelineStage
-from torch.distributed.pipelining.PipelineSchedule import (
+from torch.distributed.pipelining import PipelineStage
+from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
+    ScheduleInterleaved1F1B,
+    ScheduleLoopedBFS,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -57,7 +59,16 @@ class ComposabilityTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["DDP", "FSDP"])
-    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleFlexibleInterleaved1F1B,
+        ],
+    )
     def test_manual_with_data_parallel(self, dp_type, ScheduleClass):
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
@@ -127,14 +138,13 @@ class ComposabilityTest(MultiProcContinousTest):
         def build_stage(stage_idx, num_stages):
             partial_model, offset = get_stage_module(stage_idx, num_stages)
             dp_model = apply_dp(partial_model, dp_type)
-            stage = ManualPipelineStage(
+            stage = PipelineStage(
                 dp_model,
                 stage_idx,
                 num_stages,
                 self.device,
                 group=pp_group,
                 input_args=input_mb[0],
-                num_microbatches=num_microbatches,
             )
             return stage, offset
 

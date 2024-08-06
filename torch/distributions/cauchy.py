@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number
 
@@ -6,6 +7,7 @@ from torch import inf, nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
+
 
 __all__ = ["Cauchy"]
 

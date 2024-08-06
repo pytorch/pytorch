@@ -5,6 +5,7 @@ from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
 
+
 """
 TODO:
 Need to add ability to handle tuple, OrderedDict, NamedTuple.

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from contextlib import contextmanager
 
@@ -11,6 +12,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.fx.node import has_side_effect
 from torch.utils import _pytree as pytree
+
 
 log = logging.getLogger(__name__)
 
@@ -93,17 +95,31 @@ def inner(mode, *args, **kwargs):
                 class_name,
             )
 
-        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+        ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+        if "val" not in out_proxy.node.meta:
+            assert out is None or isinstance(
+                out, (int, float, bool)
+            ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
+            out_proxy.node.meta["val"] = out
+        return ret
     else:
         return call_torchbind(*args, **kwargs)
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
+# When tracing with fake script object, the call_torchbind op will return a fake tensor
+# When tracing with real script object, the call_torchbind op may return a real tensor,
+# we need to convert it to fake tensor mannually. Dynamic shape is surpported.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
-        return call_torchbind_impl(*args, **kwargs)
+        out = call_torchbind_impl(*args, **kwargs)
+        return pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: mode.from_tensor(x, static_shapes=True)
+            if not isinstance(x, torch._subclasses.fake_tensor.FakeTensor)
+            else x,
+            out,
+        )
 
 
 call_torchbind.py_impl(DispatchKey.Autograd)(
@@ -113,6 +129,8 @@ call_torchbind.py_impl(DispatchKey.Autograd)(
 
 @call_torchbind.py_functionalize_impl
 def call_torchbind_func(ctx, *args, **kwargs):
-    args = ctx.unwrap_tensors(args)
-    with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(call_torchbind(*args, **kwargs))
+    from torch._higher_order_ops.effects import handle_effects
+
+    return handle_effects(
+        ctx.mode._allow_token_discovery, ctx.mode._tokens, call_torchbind, args, kwargs
+    )

@@ -145,15 +145,15 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:indexSelectPSO];
       [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
-      [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
-      [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
+      mtl_setBytes(computeEncoder, index_size, 1);
+      mtl_setBytes(computeEncoder, index_stride, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
       mtl_setBuffer(computeEncoder, inputTensor, 4);
       mtl_setBuffer(computeEncoder, outputTensor, 5);
-      [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
+      mtl_setBytes(computeEncoder, num_indices, 6);
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       if (serial_index_put) {
-        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
+        mtl_setBytes(computeEncoder, numIters, 7);
         gridSize = MTLSizeMake(1, 1, 1);
         numThreads = 1;
       }
@@ -217,7 +217,7 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
   at::index_out(result,
                 *std::get<1>(mask_self_expanded),
-                c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+                c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
 
   return result;
 }
@@ -241,23 +241,23 @@ static void index_put_kernel_mps(TensorIterator& iter,
 } // namespace mps
 
 static Tensor nonzero_fallback(const Tensor& self) {
-  return at::nonzero(self.to("cpu")).clone().to("mps");
+  return at::nonzero(self.to("cpu")).to("mps");
 }
 
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 13.0. ",
+    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
                     "Falling back on CPU. This may have performance implications.");
     Tensor out_fallback = nonzero_fallback(self);
     at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback.to("mps"));
+    out_.copy_(out_fallback);
     return out_;
   } else if (self.is_complex()) {
     TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes. ",
                     "Falling back on CPU. This may have performance implications.");
     Tensor out_fallback = nonzero_fallback(self);
     at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback.to("mps"));
+    out_.copy_(out_fallback);
     return out_;
   }
 
@@ -302,7 +302,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   bool contiguous_output = !needsGather(out_);
   Tensor out = out_;
   if (!contiguous_output) {
-    out = at::empty(out_.sizes(), out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    out = at::empty(out_.sizes(), out_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   }
 
   @autoreleasepool {
@@ -331,7 +331,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
 Tensor nonzero_mps(const Tensor& self) {
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 13.0. ",
+    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
                     "Falling back on CPU. This may have performance implications.");
     return nonzero_fallback(self);
   } else if (self.is_complex()) {
@@ -358,7 +358,7 @@ Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& re
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   using namespace mps;
 
-  Tensor result = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
@@ -512,7 +512,7 @@ Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
 
   IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
 
-  Tensor result = at::empty(output_shape, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(output_shape, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   index_select_out_mps(self, dim, index, result);
   return result;
@@ -643,6 +643,14 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
 
+  bool needs_output_copy = false;
+
+  Tensor output;
+  if (needsGather(self)) {
+    output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+    needs_output_copy = true;
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -692,8 +700,11 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
         Placeholder(cachedGraph->inputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/true, inputDataType);
     Placeholder maskPlaceholder =
         Placeholder(cachedGraph->maskTensor_, *b_mask, /*mpsShape*/ nil, /*gatherTensorData=*/true, maskDataType);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/false, inputDataType);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                needs_output_copy ? output : self,
+                                                /*mpsShape*/ nil,
+                                                /*gatherTensorData=*/false,
+                                                inputDataType);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -704,6 +715,11 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+
+  if (needs_output_copy) {
+    self.copy_(output);
+  }
+
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
@@ -731,7 +747,7 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
   c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
   Tensor outgoing_gradient = at::empty(
-      IntArrayRef(outgoing_gradient_shape), grad_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+      IntArrayRef(outgoing_gradient_shape), grad_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   if (outgoing_gradient.numel() == 0) {
     return outgoing_gradient;
@@ -817,7 +833,7 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
   auto indices =
       at::native::expandTensors(*std::get<1>(mask_self_expanded),
-                                c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+                                c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
   // next broadcast all index tensors together
   try {
     indices = at::expand_outplace(indices);
@@ -829,7 +845,7 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
     return self;
   }
 
-  c10::List<c10::optional<Tensor>> final_indices;
+  c10::List<std::optional<Tensor>> final_indices;
   final_indices.reserve(indices.size());
 
   for (const auto index : indices) {

@@ -8,12 +8,12 @@ from typing import Callable
 import torch
 import torch.fx as fx
 import torch.nn as nn
-
 from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -278,7 +278,7 @@ class NoChangeTestCase(TestCase):
         # Test to repro issue with fx_graph_cse when
         # hash((primals_2, 1.0)) == hash((primals_2, 1))
 
-        if torch._dynamo.is_compiling():
+        if torch.compiler.is_compiling():
             self.skipTest("Unsupported if test run is compiled")
 
         def f(inpt, osize):

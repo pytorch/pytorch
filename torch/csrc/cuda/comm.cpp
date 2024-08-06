@@ -11,9 +11,9 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
+#include <optional>
 
 #include <cstddef>
 #include <vector>

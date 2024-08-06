@@ -54,11 +54,6 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-template <class... B>
-using conjunction = std::conjunction<B...>;
-template <class... B>
-using disjunction = std::disjunction<B...>;
-
 #if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
 template <class F, class Tuple>

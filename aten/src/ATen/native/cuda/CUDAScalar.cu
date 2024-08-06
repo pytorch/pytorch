@@ -22,10 +22,10 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
         auto value = at::detail::empty_cpu(
           {1}, /* size */
           c10::CppTypeToScalarType<scalar_t>(), /* dtype */
-          c10::nullopt, /* layout */
-          c10::nullopt, /* device */
+          std::nullopt, /* layout */
+          std::nullopt, /* device */
           true, /* pin_memory */
-          c10::nullopt /* memory format */
+          std::nullopt /* memory format */
         );
         cudaStream_t stream = at::cuda::getCurrentCUDAStream();
         at::cuda::memcpy_and_sync((void *)value.const_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream);

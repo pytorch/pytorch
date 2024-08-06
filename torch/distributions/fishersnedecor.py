@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
@@ -6,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
+
 
 __all__ = ["FisherSnedecor"]
 

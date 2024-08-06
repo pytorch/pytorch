@@ -1,8 +1,38 @@
+# mypy: allow-untyped-defs
+import contextlib
+import copy
+import functools
 import math
+import sys
+from collections import namedtuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from unittest.mock import patch
+
+import sympy
 
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import ValueRanges
 
-from .common import ExprPrinter
+from .. import ir
+from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
+from ..virtualized import ops, OpsValue, V
+from .common import (
+    CSEVariable,
+    deduce_output_dtype_by_name,
+    ExprPrinter,
+    Kernel,
+    KernelArgs,
+    OptimizationContext,
+)
+
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -58,12 +88,148 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+_IS_WINDOWS = sys.platform == "win32"
+
+INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
+
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
+
+
+def get_promote_dtype(args):
+    return (
+        functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [n.dtype for n in args if isinstance(n, CppCSEVariable)],
+        )
+        if all(n.dtype is not None for n in args if isinstance(n, CppCSEVariable))
+        else None  # not enough info to calculate the promote dtype
+    )
+
+
+def promote_args(new_args):
+    def promote_arg(arg, promote_type):
+        if (
+            isinstance(arg, CppCSEVariable)
+            and arg.dtype
+            and promote_type
+            and arg.dtype != promote_type
+        ):
+            arg = ops.to_dtype(arg, promote_type)
+            arg = arg.value if isinstance(arg, OpsValue) else arg
+            arg.dtype = promote_type
+        return arg
+
+    promote_type = get_promote_dtype(new_args)
+    promote_fn = functools.partial(
+        promote_arg,
+        promote_type=promote_type,
+    )
+    if (
+        all(
+            new_arg.dtype is not None
+            for new_arg in new_args
+            if isinstance(new_arg, CppCSEVariable)
+        )
+        and promote_type
+    ):
+        new_args = list(map(promote_fn, new_args))
+    return new_args
+
+
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
+def get_current_node_opt_ctx() -> OptimizationContext:
+    assert V.interpreter.current_node
+    return get_opt_ctx(V.interpreter.current_node)
+
+
+def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
+    if (
+        output_dtype := deduce_output_dtype_by_name(
+            name,
+            *args,
+            **kwargs,
+        )
+    ) is not None:
+        return output_dtype
+    elif name == "masked":
+        # <TODO> Leslie: perhaps we can also deduce the masked dtype by
+        # inputs' CppCseVariable like other. Let's check it if any
+        # unexpected failures.
+        assert (
+            hasattr(V.interpreter, "current_node")
+            and V.interpreter.current_node.target.startswith("masked_subblock")
+            and get_current_node_opt_ctx() is not None
+        )
+        return get_current_node_opt_ctx().dtype
+    else:
+        # deduce output dtype by inputs' dtype
+        assert all(
+            arg.dtype is not None for arg in args if isinstance(arg, CppCSEVariable)
+        )
+        return functools.reduce(
+            torch.promote_types,  # type: ignore[arg-type]
+            [arg.dtype for arg in args if isinstance(arg, CppCSEVariable)],
+        )
+
+
+class CppCSEVariable(CSEVariable):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+        super().__init__(name, bounds)
+        self.is_vec = False
+        self.dtype: Optional[torch.dtype] = None
+        self.dependent_itervars: Set[sympy.Symbol] = set()
+
+    def __repr__(self) -> str:
+        return (
+            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
+            f"dependent_itervars: {self.dependent_itervars})"
+        )
+
+    def update_on_args(self, name, args, kwargs):
+        if name == "load":
+            # args[2] is index
+            self._set_dependent_itervars(args[2])
+        else:
+            # propagate relevant itervars and is_vec from args
+            self.dependent_itervars.update(
+                *[
+                    arg.dependent_itervars
+                    for arg in args
+                    if isinstance(arg, CppCSEVariable)
+                ]
+            )
+            if name == "index_expr":
+                self._set_dependent_itervars(args[0])
+            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
+                self.is_vec = True
+        # NOTE [Deduce dtype of CppCSEVariable at runtime]
+        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        assert self.dtype is not None
+
+    def _set_dependent_itervars(self, index: sympy.Expr):
+        """
+        Set the relevant itervars for this variable based on the `index` expression.
+        This includes the itervars directly used in the `index` as well as relevant itervars
+        of other cse variables used in the `index`.
+        """
+        for s in index.free_symbols:
+            if s in V.kernel.itervars:
+                self.dependent_itervars.add(s)  # type: ignore[arg-type]
+            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
+                self.dependent_itervars.update(
+                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
+                )
+
+    def depends_on(self, itervar: sympy.Symbol):
+        return itervar in self.dependent_itervars
 
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
@@ -96,10 +262,53 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<{INDEX_TYPE}>({r})"
+
+    def _print_TruncToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"std::trunc({self._print(expr.args[0])})"
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"static_cast<double>({self._print(expr.args[0])})"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        # TODO: This is only accurate up to 2**53
+        return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
+
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    def _print_FloatPow(self, expr):
+        base, exp = expr.args
+        return f"std::pow({self._print(base)}, {self._print(exp)})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -131,6 +340,11 @@ class CppPrinter(ExprPrinter):
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
@@ -196,8 +410,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
@@ -237,3 +452,242 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+def rewrite_index_for_function(
+    localize_buffer_handler: "LocalizeBufferHandler",
+    index: sympy.Expr,
+    global_buf_name: str,
+):
+    # Local buffer at the inner dimensions
+    snode = V.graph.scheduler.name_to_buf[global_buf_name].defining_op
+    local_buf = localize_buffer_handler.global_to_local[global_buf_name]
+    scheduler_nodes = snode.get_nodes()
+    _, (group, reduction_group) = max(
+        scheduler_nodes, key=lambda x: int(x.is_reduction())
+    ).group
+    call_ranges = tuple(group) + tuple(reduction_group)
+    indices_to_keep = [
+        f"x{len(call_ranges) - (idx + 1)}"
+        for idx in range(len(local_buf.get_layout().size))
+    ]
+    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+    replacements = {}
+    for x in sorted_symbols:
+        if x.name.startswith("x") and x.name not in indices_to_keep:  # type: ignore[attr-defined]
+            # Only keep index used by local buffer
+            replacements[x] = sympy.core.numbers.Zero()
+    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+    return index
+
+
+def rewrite_index_for_nodes(
+    localize_buffer_handler: "LocalizeBufferHandler",
+    index: sympy.Expr,
+    global_buf_name: str,
+):
+    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    index_vars = []
+    local_buf = localize_buffer_handler.global_to_local[global_buf_name]
+    for i in range(len(local_buf.get_size())):
+        var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
+        index_vars.append(var if var in used_vars else 0)
+    index = local_buf.layout.make_indexer()(index_vars)
+    return index
+
+
+class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
+    def __init__(
+        self,
+        inner,
+        global_to_local: Dict[str, ir.Buffer],
+        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
+    ) -> None:
+        super().__init__(inner)
+        self.global_to_local = global_to_local
+        self.rewrite_index = rewrite_index
+
+    def localize(self, name: str, index: sympy.Expr):
+        if self.global_to_local and name in self.global_to_local:
+            assert self.rewrite_index is not None
+            index = self.rewrite_index(self, index, name)
+            name = self.global_to_local[name].get_name()
+        return name, index
+
+    def load(self, name: str, index: sympy.Expr):
+        return self._inner.load(*self.localize(name, index))
+
+    def store(self, name, index, value, mode=None):
+        local_buffer_name, local_buffer_index = self.localize(name, index)
+        res = self._inner.store(local_buffer_name, local_buffer_index, value, mode)
+        if (
+            self.global_to_local
+            and name in self.global_to_local
+            and isinstance(V.kernel, Kernel)
+        ):
+            # Remove name of local buffer from Kernel.store_buffer_names
+            # local_buffer_name is added to Kernel.store_buffer_names in Kernel.CSEProxy.store.
+            V.kernel.store_buffer_names.discard(local_buffer_name)
+        return res
+
+    def store_reduction(self, name, index, value):
+        return self._inner.store_reduction(*self.localize(name, index), value)
+
+
+class LocalBufferContext:
+    """
+    This class creates a context that helps to generate code involving Inductor IR with
+    function local buffers. These buffers are constructed during the codegen process and
+    are used to store intermediate results such as local accumulators. We do not want to
+    add them to `V.graph` since they are not global and we do not want to add them as
+    function arguments either. So we patch the codegen processes under this scope to support
+    these buffers without exposure to the outside world.
+    """
+
+    def __init__(self, kernel_args: KernelArgs) -> None:
+        self.kernel_args = kernel_args
+        self.exit_stack = contextlib.ExitStack()
+        # map local buffer name to local buffer
+        self.local_buffers: Dict[str, ir.Buffer] = {}
+        # map global buffer name to global buffer
+        self.global_buffers: Dict[str, ir.Buffer] = {}
+        # map global buffer name to local buffer
+        self.global_to_local: Dict[str, ir.Buffer] = {}
+
+    def __enter__(self):
+        self.exit_stack.__enter__()
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name):
+            if name in self.local_buffers:
+                return self.local_buffers[name].get_dtype()
+            return original_get_dtype(name)
+
+        self.exit_stack.enter_context(patch.object(V.graph, "get_dtype", get_dtype))
+
+        original_input = self.kernel_args.input
+
+        def input(name):
+            if name in self.local_buffers:
+                return name
+            return original_input(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel_args, "input", input))
+
+        original_output = self.kernel_args.output
+
+        def output(name):
+            if name in self.local_buffers:
+                return name
+            return original_output(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel_args, "output", output))
+
+        # Set current LocalBufferContext into V
+        self.exit_stack.enter_context(V.set_local_buffer_context(self))
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.local_buffers.clear()
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def add_local_buffer(
+        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
+    ):
+        assert local_buffer.get_name() not in self.local_buffers
+        self.local_buffers[local_buffer.get_name()] = local_buffer
+        if global_buffers:
+            for global_buffer in global_buffers:
+                global_buffer_name = global_buffer.get_name()
+                assert (
+                    global_buffer_name not in self.global_buffers
+                    and global_buffer_name not in self.global_to_local
+                )
+                self.global_buffers[global_buffer_name] = global_buffer
+                self.global_to_local[global_buffer_name] = local_buffer
+                V.graph.removed_buffers.add(global_buffer_name)
+
+    def localize_function(
+        self,
+        fn: Callable[..., Any],
+        rewrite_index: Callable[
+            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+        ] = rewrite_index_for_function,
+    ):
+        def inner(node, *index_vars):
+            with V.set_ops_handler(
+                LocalizeBufferHandler(
+                    V.get_ops_handler(),
+                    global_to_local=self.global_to_local,
+                    rewrite_index=rewrite_index,
+                )
+            ):
+                return fn(node, *index_vars)
+
+        return inner
+
+    def localize_nodes(
+        self,
+        nodes: List[ir.IRNode],
+        rewrite_index: Callable[
+            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+        ] = rewrite_index_for_nodes,
+    ) -> List[ir.IRNode]:
+        """
+        Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
+        though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
+        for the given `nodes` and returns a new list of IR nodes that work on `local_buf`
+        instead of `global_buf`, i.e., all the loads and stores are redirected to
+        `local_buf`. This helps the fused loops to work on smaller-sized local buffers
+        for better data locality.
+
+        The the data access of `local_buf` is assumed to be contiguous with the
+        same order as the `global_buf`.
+        """
+        assert len(nodes) > 0
+
+        def wrap_inner_fn_for_node(node: ir.IRNode):
+            loops = node.data if isinstance(node, ir.ComputedBuffer) else node
+            assert isinstance(loops, ir.Loops)
+            new_loops = copy.copy(loops)
+            if isinstance(node, ir.ComputedBuffer):
+                new_node = ir.ComputedBuffer(
+                    node.get_name(), node.get_layout(), new_loops
+                )
+            else:
+                new_node = new_loops  # type: ignore[assignment]
+
+            new_loops.inner_fn = self.localize_function(
+                new_loops.inner_fn,
+                rewrite_index,
+            )
+            return new_node
+
+        return [wrap_inner_fn_for_node(node) for node in nodes]
+
+
+def unify_mask_base_type(
+    buffer: IndentedBuffer,
+    vars: Tuple[CSEVariable, ...],
+    dtype=torch.float,
+):
+    """
+    Given list of cse variables,
+    Cast each to new mask base dtype and return casted cse variable.
+    """
+    new_vars = (
+        V.kernel.cse.generate(
+            buffer,
+            f"{V.kernel._get_mask_cast(var, dtype)}",
+        )
+        for var in vars
+    )
+    return new_vars
+
+
+def get_gemm_template_output_and_compute_dtype(input_dtype):
+    if input_dtype == torch.uint8:
+        return (torch.int32, torch.int32)
+    else:
+        return (torch.float32, torch.float32)

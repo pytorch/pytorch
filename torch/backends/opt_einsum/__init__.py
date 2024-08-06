@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import warnings
 from contextlib import contextmanager
@@ -5,6 +6,7 @@ from functools import lru_cache as _lru_cache
 from typing import Any
 
 from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+
 
 try:
     import opt_einsum as _opt_einsum  # type: ignore[import]

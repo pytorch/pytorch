@@ -9,6 +9,7 @@ import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
 
+
 try:
     from extension_backends.cpp.extension_codegen_backend import (
         ExtensionCppWrapperCodegen,
@@ -23,7 +24,7 @@ except ImportError:
     )
 
 import torch._inductor.config as config
-from torch._inductor import codecache, metrics
+from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen import cpp_utils
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
@@ -31,6 +32,7 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+
 
 try:
     try:
@@ -146,7 +148,7 @@ class ExtensionBackendTests(TestCase):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                if codecache.valid_vec_isa_list():
+                if cpu_vec_isa.valid_vec_isa_list():
                     load_expr = "loadu"
                 else:
                     load_expr = " = in_ptr0[static_cast<long>(i0)];"

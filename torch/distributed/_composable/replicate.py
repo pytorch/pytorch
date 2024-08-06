@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import weakref
 from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 
@@ -7,6 +9,7 @@ from torch.distributed._composable_state import _State
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
+
 
 _ROOT_MODULE_PREFIX = ""
 
@@ -64,7 +67,7 @@ class _ReplicateState(_State):
             assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
-            self._init_args = tuple()
+            self._init_args = ()
             self._init_kwargs = {}
 
         _lazy_init()

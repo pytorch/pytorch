@@ -72,7 +72,7 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 ///   static variable_list forward(AutogradContext *ctx, int n, Variable var) {
 ///      // Save data for backward in context
 ///      ctx->saved_data["n"] = n;
-///      var.mul_(2);
+///      var.mul_(n);
 ///      // Mark var as modified by inplace operation
 ///      ctx->mark_dirty({var});
 ///      return {var};
@@ -444,8 +444,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += c10::to_string(num_forward_inputs) + ", got ";
-    msg += c10::to_string(num_outputs) + ")";
+    msg += std::to_string(num_forward_inputs) + ", got ";
+    msg += std::to_string(num_outputs) + ")";
     throw std::runtime_error(msg);
   }
 
@@ -458,8 +458,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
         std::string msg("function ");
         msg += name() +
             " returned a gradient different that is defined at position ";
-        msg += c10::to_string(i + 1) +
-            ", but the corresponding forward input was not a Variable";
+        msg += std::to_string(i + 1) +
+            ", std the corresponding forward input was not a Variable";
         throw std::runtime_error(msg);
       }
       continue;

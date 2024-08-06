@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import itertools
 import operator
@@ -7,7 +8,6 @@ from functools import partial, reduce
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
 
 import torch
-
 import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
@@ -33,6 +33,7 @@ from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -328,6 +329,21 @@ def _make_prim(
     _prim = _prim_packet.default
     if tags:
         _prim._tags = tags
+    elif aten_packet := getattr(torch.ops.aten, name, None):
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
+        tags_intersection = set(overload_tags[0])
+        tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        tags_intersection.discard(torch.Tag.core)
+        # causes errors with python ref executor tests, none of the
+        # data dependent pytorch ops actually decompose to prims
+        tags_intersection.discard(torch.Tag.data_dependent_output)
+
+        # iter over first tags for determinism
+        _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 

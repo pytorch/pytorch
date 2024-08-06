@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Optional, Sequence
 
@@ -8,7 +9,12 @@ import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.ops.utils import normalize_to_torch_size
-from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.optim.optimizer import (
     _foreach_supported_types as _optim_foreach_supported_types,
@@ -27,6 +33,7 @@ __all__ = [
     "init_device_mesh,",
     "Shard",
     "Replicate",
+    "Partial",
 ]
 
 
@@ -46,6 +53,8 @@ def _dtensor_init_helper(
     placements=None,
     **kwargs,
 ) -> DTensor:
+    from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
@@ -71,8 +80,6 @@ def _dtensor_init_helper(
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
         tensor_meta = TensorMeta(size, (0,), dtype)
         spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
 
@@ -85,13 +92,19 @@ def _dtensor_init_helper(
     else:
         local_tensor = init_op(local_shape, **kwargs)
 
+    spec = DTensorSpec(
+        device_mesh,
+        tuple(placements),
+        tensor_meta=TensorMeta(
+            size,
+            torch_stride,
+            local_tensor.dtype,
+        ),
+    )
+
     return DTensor(
-        local_tensor=local_tensor,
-        device_mesh=device_mesh,
-        placements=tuple(placements),
-        shape=size,
-        dtype=local_tensor.dtype,
-        stride=torch_stride,
+        local_tensor,
+        spec,
         requires_grad=kwargs["requires_grad"],
     )
 

@@ -121,13 +121,6 @@ class DeterminationTest(TestCase):
             ],
         )
 
-    def test_caffe2_file(self):
-        """Caffe2 files trigger dependent tests"""
-        self.assertEqual(self.determined_tests(["caffe2/python/brew_test.py"]), [])
-        self.assertEqual(
-            self.determined_tests(["caffe2/python/context.py"]), self.TESTS
-        )
-
     def test_new_folder(self):
         """New top-level Python folder triggers all tests"""
         self.assertEqual(self.determined_tests(["new_module/file.py"]), self.TESTS)
