@@ -886,6 +886,7 @@ def _compile(
                 ]
             },
         )
+        torch._dynamo.compile_metrics.reset()
         start_time = time.time()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -997,6 +998,7 @@ def _compile(
                 restart_reasons,
                 dynamo_time_before_restart,
                 guarded_code is not None,
+                torch._dynamo.compile_metrics.possibly_missed_reinplacing_opportunities,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

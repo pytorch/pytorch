@@ -742,6 +742,7 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: bool
+    possibly_missed_reinplacing_opportunities: int
 
 
 @dataclasses.dataclass
