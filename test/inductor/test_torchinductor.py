@@ -11938,8 +11938,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(fn, inp)
             fn(inp)
             self.assertTrue("Graph fragment" in code)
-            self.assertTrue("sin = torch.ops.aten.sin.default" in code)
-            self.assertTrue("relu = torch.ops.aten.relu.default" in code)
+            self.assertTrue("%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]" in code)
+            self.assertTrue("%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]" in code)
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

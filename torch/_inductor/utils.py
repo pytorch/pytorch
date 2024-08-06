@@ -529,8 +529,13 @@ def get_kernel_metadata(node_schedule, wrapper):
     graph = None
     if len(inductor_nodes):
         graph = inductor_nodes[0].graph
-        if all(n for n in inductor_nodes if n in graph.nodes):
-            inductor_nodes = [n for n in graph.nodes if n in inductor_nodes]
+        # create a map of idx -> node and cache it
+        if not hasattr(graph, '_inductor_kernel_metadata_node_to_idx_map'):
+            node_to_idx_map = {}
+            for idx, n in enumerate(graph.nodes):
+                node_to_idx_map[n] = idx
+            graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map
+        inductor_nodes.sort(key=lambda n: graph._inductor_kernel_metadata_node_to_idx_map[n])
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
@@ -554,17 +559,10 @@ def get_kernel_metadata(node_schedule, wrapper):
     # print the aot_autograd graph fragment
     if graph is not None:
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-        node_names = {node.name for node in inductor_nodes}
-        # A bit hacky: get the parent graph generated code and only keep the
-        # lines corresponding to the variables we care about. This allows us
-        # to reuse the Python codegen code.
-        for line in graph.python_code("").src.split("\n"):
-            # Extract the "clamp_min_4" node name from a line such as
-            #   clamp_min_4 = torch.ops.aten.clamp_min.default(max_3, 1e-12);  max_3 = None
-            maybe_node_name = re.match("    ([a-z_0-9]+) = .*", line)
-            if not maybe_node_name or maybe_node_name.group(1) not in node_names:
-                continue
-            detailed_metadata.append(f"{wrapper.comment} {line}")
+        for n in inductor_nodes:
+            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
+            # generate python code for graph fragments
+            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
 
     return metadata, "\n".join(detailed_metadata)
 
