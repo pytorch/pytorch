@@ -359,8 +359,12 @@ test_inductor_shard() {
 test_inductor_aoti() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-   BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # We need to hipify before building again
+    python3 tools/amd_build/build_amd.py
+  fi
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
 test_inductor_cpp_wrapper_abi_compatible() {
