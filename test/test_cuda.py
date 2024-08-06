@@ -4996,7 +4996,7 @@ class TestMemPool(TestCase):
         #include <torch/extension.h>
         extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return (void*)123; }
           C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
@@ -5017,6 +5017,13 @@ class TestMemPool(TestCase):
 
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
+
+        with torch.cuda.use_mem_pool(pool):
+            out = torch.randn(1, device="cuda")
+
+        # out.data_ptr() should be 123 if dummy_alloc was used to allocate
+        # out tensor
+        self.assertEqual(out.data_ptr(), 123)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
