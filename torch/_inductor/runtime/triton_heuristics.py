@@ -267,6 +267,7 @@ class CachingAutotuner(KernelInterface):
                 and self.size_hints is not None
                 # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
                 and device_prop.type in ["cuda", "hip"]
+                and device_prop.major
                 and (device_prop.major >= 8 or torch.version.hip)
                 and device_prop.regs_per_multiprocessor != None
             ):
