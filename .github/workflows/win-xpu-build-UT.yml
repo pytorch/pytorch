@@ -127,7 +127,7 @@ jobs:
 
   Unit-tests:
     runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Preparation]
+    needs: [Preparation,Build-whls]
     steps:
     - name: Run Unit Tests
       shell: cmd
@@ -145,7 +145,7 @@ jobs:
 
   Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Preparation,Unit-tests]
+    needs: [Preparation,Build-whls,Unit-tests]
     steps:
     - name: Upload pytorch wheel
       uses: actions/upload-artifact@v2
