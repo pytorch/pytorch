@@ -1580,7 +1580,6 @@ class SIMDScheduling(BaseScheduling):
                     # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
                     for n in nodes:
                         n.last_usage = OrderedSet()
-
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -1792,6 +1791,7 @@ class SIMDScheduling(BaseScheduling):
                 mutations=mutations,
                 index_dtype=index_dtype,
             )
+
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             with config.patch(
                 "benchmark_kernel", benchmark_kernel
