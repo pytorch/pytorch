@@ -11,6 +11,9 @@ from torch._inductor.utils import InputType
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 OutputType = List[Optional[Union[int, torch.Tensor]]]
@@ -136,6 +139,11 @@ def check_for_mutation(
     else:
         mutation_indices = func.mutated_input_idxs
 
+    static_inputs_log.debug(
+        "check mutation static input indices: %s", func.static_input_idxs
+    )
+    static_inputs_log.debug("check mutation mutation indices: %s", mutation_indices)
+
     return (
         get_mutation_stack_trace(func.placeholders, mutation_indices)
         if mutation_indices
@@ -240,7 +248,7 @@ class CheckInvariantStatus(Enum):
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.name == "CudagraphManagedIdxMismatch":
             return "cudagraph managed tensor data pointer changed"
         elif self.name == "StaticInputIdxMismatch":
