@@ -570,13 +570,12 @@ bool is_flash_attention_available() {
 }
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
-  if (!is_flash_attention_available()) {
-    if (debug) {
-      TORCH_WARN("Torch was not compiled with flash attention.");
-    }
-    return false;
+#ifndef USE_FLASH_ATTENTION
+  if (debug) {
+    TORCH_WARN("Torch was not compiled with flash attention.");
   }
-
+  return false;
+#else // defined(USE_FLASH_ATTENTION)
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
@@ -618,6 +617,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
     }
   }
   return true;
+#endif // defined(USE_FLASH_ATTENTION)
 }
 
 bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
