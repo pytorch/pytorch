@@ -13,6 +13,7 @@ from torch import _C
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
+    CustomObjArgument,
     InputKind,
     InputSpec,
     OutputKind,
@@ -161,7 +162,7 @@ def ir_name_to_func_name(name: str) -> str:
     return "convert_" + "_".join(name_list)
 
 
-def get_node_for_param_and_buffer(fx_graph, name, is_top_level_graph):
+def get_node_as_placeholder_or_get_attr(fx_graph, name, is_top_level_graph):
     if is_top_level_graph:
         return fx_graph.get_attr(name)
     return fx_graph.placeholder(name)
@@ -366,6 +367,7 @@ class TS2FXGraphConverter:
         name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
+        name_to_constant: Dict[str, Any],
     ):
         self.ts_graph = ts_graph
         self.name_to_param = name_to_param
@@ -378,12 +380,10 @@ class TS2FXGraphConverter:
         self.name_to_node: Dict[
             str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
         ] = {}
-        self.constant_map: Dict[str, Any] = {}
+        self.name_to_constant: Dict[str, Any] = name_to_constant
 
         # Mapping from torchscript node output name to attribute fully qualified name
         self.name_to_attribute_fqn: Dict[str, str] = {}
-
-        self.name_to_tensor_constants: Dict[str, torch.Tensor] = {}
 
         # Mapping from fully qualified name to real values or a fx graph node
         # During convert, this represents the current value of a non-tensor attribute
@@ -415,6 +415,16 @@ class TS2FXGraphConverter:
                 lambda node: self._convert_standard_operators(node),
             )
 
+    def _is_get_attr_node(self, fqn):
+        return (
+            fqn in self.name_to_buffer
+            or fqn in self.name_to_param
+            or (
+                fqn in self.name_to_constant
+                and isinstance(self.name_to_constant[fqn], torch.ScriptObject)
+            )
+        )
+
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
 
@@ -440,8 +450,10 @@ class TS2FXGraphConverter:
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
-        elif value_name in self.constant_map:
-            return self.constant_map[value_name]
+        elif value_name in self.name_to_constant:
+            if isinstance(self.name_to_constant[value_name], torch.ScriptObject):
+                return self.fx_graph.get_attr(value_name)
+            return self.name_to_constant[value_name]
         else:
             raise ValueError(f"Input {value_name} not found")
 
@@ -459,8 +471,8 @@ class TS2FXGraphConverter:
                 **self.subgraphs,
                 **self.name_to_param,
                 **self.name_to_buffer,
-                **self.name_to_tensor_constants,
                 **self.name_to_non_tensor_attribute,
+                **self.name_to_constant,
             },
             self.fx_graph,
         )
@@ -484,7 +496,7 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
-                fx_node = get_node_for_param_and_buffer(
+                fx_node = get_node_as_placeholder_or_get_attr(
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_buffer:
@@ -497,9 +509,30 @@ class TS2FXGraphConverter:
                         persistent=True,
                     )
                 )
-                fx_node = get_node_for_param_and_buffer(
+                fx_node = get_node_as_placeholder_or_get_attr(
                     self.fx_graph, name, self.is_top_level_graph()
                 )
+            elif name in self.name_to_constant:
+                assert isinstance(
+                    self.name_to_constant[name], torch.ScriptObject
+                ), "Input conversion only handles ScriptObject"
+                normalized_name = normalize_name(name)
+                self.input_specs.append(
+                    InputSpec(
+                        InputKind.CUSTOM_OBJ,
+                        arg=CustomObjArgument(
+                            name=normalized_name, class_fqn=normalized_name
+                        ),
+                        target=name,
+                        persistent=False,
+                    )
+                )
+                fx_node = get_node_as_placeholder_or_get_attr(
+                    self.fx_graph, name, self.is_top_level_graph()
+                )
+            elif isinstance(graph_input.type(), torch.ClassType):
+                # Directly skip inputs that are ScriptObject but not used in the graph.
+                continue
             else:
                 normalized_name = normalize_name(name, prefix="input")
                 self.input_specs.append(
@@ -576,8 +609,8 @@ class TS2FXGraphConverter:
                     f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
                 )
                 fx_node = self.fx_graph.get_attr(alias_name)
-                self.name_to_tensor_constants[alias_name] = node.t("value")
-                value = fx_node
+                self.name_to_node[name] = fx_node
+                name, value = alias_name, node.t("value")
             elif constant_kind == "ival":
                 value = node.ival("value")
             else:
@@ -585,14 +618,22 @@ class TS2FXGraphConverter:
         else:
             value = None
 
-        self.constant_map[name] = value
+        self.name_to_constant[name] = value
+
+    def convert_prim_CallMethod(self, node: torch._C.Node):
+        inp_list = [self.get_fx_value(inp) for inp in node.inputs()]  # noqa: C416
+        fx_node = self.fx_graph.call_method(
+            node.s("name"),
+            tuple(inp_list),
+        )
+        self.name_to_node[node.output().debugName()] = fx_node
 
     def convert_prim_device(self, node: torch._C.Node):
         input_type = node.input().type()
         if input_type.isSubtypeOf(torch._C.TensorType.get()):
             device = input_type.device()  # type: ignore[attr-defined]
             output_name = node.output().debugName()
-            self.constant_map[output_name] = device
+            self.name_to_constant[output_name] = device
         else:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
@@ -602,9 +643,8 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_attribute_fqn[output_name] = attr_fqn
 
-        attr_value = node.output()
         if self.is_top_level_graph():
-            if attr_value.type().annotation_str == "Tensor":
+            if self._is_get_attr_node(attr_fqn):
                 # We insert a get_attr node due to two reasons.
                 # First, ts graph does not lift tensor constants as input nodes. So
                 # tensor constants may be ignored by in convert_graph_inputs().
@@ -622,14 +662,14 @@ class TS2FXGraphConverter:
         else:
             # Special support for if blocks which do not allow SetAttr TorchScript
             # node and get_attr FX Graph Node.
-            if attr_value.type().annotation_str == "Tensor":
+            if self._is_get_attr_node(attr_fqn):
                 self.name_to_node[output_name] = self.name_to_node[attr_fqn]
 
     def convert_prim_SetAttr(self, node: torch._C.Node):
         attr_fqn = get_attribute_fqn_from_ts_node(self.name_to_attribute_fqn, node)
         attr_value = tuple(node.inputs())[1]
         ts_graph_tensor_input = self.get_fx_value(attr_value)
-        if attr_value.type().annotation_str == "Tensor":
+        if self._is_get_attr_node(attr_fqn):
             fx_attr_node = self.fx_graph.get_attr(attr_fqn)
             self.fx_graph.call_function(
                 torch.Tensor.copy_, (fx_attr_node, ts_graph_tensor_input)
@@ -764,11 +804,13 @@ class TS2FXGraphConverter:
         # as aten.div.Scalar_mode(x, tensor_constant.item())
         if schema.overload_name == "Tensor_mode":
             arg1_name = args[1].name
-            if arg1_name in self.name_to_tensor_constants:
-                tensor_constant = self.name_to_tensor_constants[arg1_name]
+            if arg1_name in self.name_to_constant and isinstance(
+                self.name_to_constant[arg1_name], torch.Tensor
+            ):
+                tensor_constant = self.name_to_constant[arg1_name]
                 if tensor_constant.numel() == 1:
                     updated_args = list(args)
-                    updated_args[1] = self.name_to_tensor_constants[arg1_name].item()
+                    updated_args[1] = self.name_to_constant[arg1_name].item()
 
                     fx_node = self.fx_graph.call_function(
                         torch.ops.aten.div.Scalar_mode,
@@ -909,9 +951,13 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, {}, {}, self.blocks_to_lifted_attrs, {}
+                block,
+                self.name_to_param,
+                self.name_to_buffer,
+                self.blocks_to_lifted_attrs,
+                {},
+                self.name_to_constant,
             )
-            subgraph_converter.constant_map = self.constant_map
             subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
 
             for block_arg in arguments:
@@ -1008,7 +1054,7 @@ class TS2FXGraphConverter:
         # breaks, continues, and returns.
         # So we add a dummy constant to the graph.
         output_name = node.output().debugName()
-        self.constant_map[output_name] = torch.Tensor()
+        self.name_to_constant[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
@@ -1058,13 +1104,13 @@ class TS2FXGraphConverter:
                         target=output_name,
                     )
                 )
-            elif output_name in self.constant_map:
-                args.append(self.constant_map[output_name])
+            elif output_name in self.name_to_constant:
+                args.append(self.name_to_constant[output_name])
                 self.output_specs.append(
                     OutputSpec(
                         OutputKind.USER_OUTPUT,
                         arg=ConstantArgument(
-                            name=output_name, value=self.constant_map[output_name]
+                            name=output_name, value=self.name_to_constant[output_name]
                         ),
                         target=output_name,
                     )
@@ -1114,6 +1160,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
         name_to_buffer: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
+        name_to_constant: Dict[str, Any],
     ):
         super().__init__(
             ts_graph,
@@ -1121,6 +1168,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             name_to_buffer,
             blocks_to_lifted_attrs,
             name_to_non_tensor_attribute,
+            name_to_constant,
         )
 
         # Data to keep track of unsupported nodes.
@@ -1197,8 +1245,9 @@ class TS2EPConverter:
                     self.name_to_buffer[k] = tensor
 
         self.name_to_non_tensor_attributes: Dict[str, Any] = {}
+        self.name_to_constant: Dict[str, Any] = {}
 
-        self.lift_tensor_constants_to_buffer()
+        self.lift_get_attr()
 
     def convert(self) -> ExportedProgram:
         log.info(
@@ -1222,12 +1271,14 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
+            self.name_to_constant,
         )
         gm = graph_converter.convert()
         log.info("GraphModule: %s", gm.print_readable(print_output=False))
 
         ep = self.retrace_as_exported_program(
-            gm, graph_converter.name_to_tensor_constants
+            gm,
+            graph_converter.name_to_constant,
         )
         log.info("%s", ep)
 
@@ -1254,6 +1305,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             self.name_to_buffer,
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
+            self.name_to_constant,
         )
         graph_converter.explain()
         if len(graph_converter.unsupported_node_list) > 0:
@@ -1268,7 +1320,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         return explain_str
 
     def retrace_as_exported_program(
-        self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
+        self,
+        gm: torch.fx.GraphModule,
+        name_to_constant: Dict[str, Any],
     ):
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
@@ -1282,24 +1336,40 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
         # treat them as buffers. We need to set them again here.
-        ep._constants = {**ep._constants, **tensor_constants}
-        for k in tensor_constants:
+        ep._constants.update(
+            {
+                k: v
+                for k, v in name_to_constant.items()
+                if isinstance(v, (torch.Tensor, torch.ScriptObject))
+            }
+        )
+        for k in name_to_constant:
             ep.state_dict.pop(k, None)
-        for spec in ep.graph_signature.input_specs:
+
+        for i, spec in enumerate(ep.graph_signature.input_specs):
             # Mark as constant tensors for erroneously traced buffers.
-            if spec.kind == InputKind.BUFFER and spec.target in tensor_constants:
+            if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
+                assert isinstance(
+                    name_to_constant[spec.target], torch.Tensor
+                ), f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 spec.kind = InputKind.CONSTANT_TENSOR
         ep.verifier().check(ep)
 
         return ep
 
-    def lift_tensor_constants_to_buffer(self):
-        # This function lifts tensor constants attributes (e.g., self.data = torch.tensor([2,3]))
-        # to buffers. Currently, when there are tensor constants, export
-        # would error and ask users to register tensor constants as buffers.
-        # Since it is hard to manually do so for TorchScript models
-        # (e.g., source code is missing), this function automatically
-        # lifts tensor constants to be buffers.
+    def lift_get_attr(self):
+        # This function lifts multiple data types.
+
+        #     1. Tensor constants attributes (e.g., self.data = torch.tensor([2,3]))
+        #     to buffers. Currently, when there are tensor constants, export
+        #     would error and ask users to register tensor constants as buffers.
+        #     Since it is hard to manually do so for TorchScript models
+        #     (e.g., source code is missing), this function automatically
+        #     lifts tensor constants to be buffers.
+
+        #     2. ScriptObbject to constant. It will then be converted to getattr in
+        #     in the fx graph.
+        #
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
         # which is not accessable in TS2FXGraphConverter. It is similar to where
@@ -1335,6 +1405,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                         if attr_fqn not in self.name_to_buffer:
                             # Lift tensor constants to be a buffer
                             self.name_to_buffer[attr_fqn] = value
+                    elif isinstance(value, torch.ScriptObject):
+                        if attr_fqn not in self.name_to_constant:
+                            self.name_to_constant[attr_fqn] = value
                     else:
                         self.name_to_non_tensor_attributes[attr_fqn] = value
 
