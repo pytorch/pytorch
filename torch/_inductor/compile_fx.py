@@ -95,6 +95,9 @@ else:
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 # copy_ fails when trying to write to tensors with memory overlap,
@@ -448,17 +451,23 @@ def with_fresh_cache_if_config(fn):
     return wrapper
 
 
+def compile_fx_inner(*args, **kwargs):
+    with torch.utils._python_dispatch._disable_current_modes(), _use_lazy_graph_module(
+        dynamo_config.use_lazy_graph_module
+    ), dynamo_utils.dynamo_timed(
+        "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+    ):
+        return _compile_fx_inner(*args, **kwargs)
+
+
 @DebugContext.wrap
-@torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
-@_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 @with_fresh_cache_if_config
-@dynamo_utils.dynamo_timed(phase_name="inductor_compile", fwd_only=False)
-def compile_fx_inner(
+def _compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs: Optional[BoxedBool] = None,
@@ -489,6 +498,8 @@ def compile_fx_inner(
 
     if static_input_idxs is None:
         static_input_idxs = []
+
+    static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
 
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
@@ -936,7 +947,6 @@ def get_input_idxs_to_check(
     return ids_to_check
 
 
-@dynamo_utils.dynamo_timed
 def cudagraphify(
     model: Callable[..., Any],
     static_input_idxs: Sequence[int] = (),
@@ -973,7 +983,9 @@ def cudagraphify(
     def run(new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
-            with dynamo_utils.preserve_rng_state():
+            with dynamo_utils.dynamo_timed(
+                "cudagraphify"
+            ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
@@ -1311,8 +1323,15 @@ def compile_fx(
         decompositions if decompositions is not None else select_decomp_table()
     )
 
-    @dynamo_utils.dynamo_timed
     def fw_compiler_base(
+        model: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        is_inference: bool,
+    ):
+        with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
+            return _fw_compiler_base(model, example_inputs, is_inference)
+
+    def _fw_compiler_base(
         model: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         is_inference: bool,
@@ -1409,27 +1428,27 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-        user_visible_outputs = {}
+        with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            user_visible_outputs = {}
 
-        if config.bw_outputs_user_visible:
-            model_outputs_node = output_node(model)
-            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-            user_visible_outputs = dict.fromkeys(
-                n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+            if config.bw_outputs_user_visible:
+                model_outputs_node = output_node(model)
+                model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+                user_visible_outputs = dict.fromkeys(
+                    n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+                )
+            fixed = count_tangents(model)
+            return inner_compile(
+                model,
+                example_inputs,
+                static_input_idxs=list(range(fixed)),
+                cudagraphs=cudagraphs,
+                is_backward=True,
+                graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
+                user_visible_outputs=user_visible_outputs,
             )
-        fixed = count_tangents(model)
-        return inner_compile(
-            model,
-            example_inputs,
-            static_input_idxs=list(range(fixed)),
-            cudagraphs=cudagraphs,
-            is_backward=True,
-            graph_id=graph_id,
-            boxed_forward_device_index=forward_device,
-            user_visible_outputs=user_visible_outputs,
-        )
 
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
