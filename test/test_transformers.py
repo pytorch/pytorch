@@ -2182,7 +2182,7 @@ class TestSDPA(NNTestCase):
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("fill_val", [float("inf")])
-    def test_non_masked_rows_grad_pops(self, device, dtype, fill_val):
+    def test_non_masked_rows_nan_props(self, device, dtype, fill_val):
         query = torch.randn(1, 2, 4, 16, device=device, dtype=dtype)
         # a single NaN in the query input
         query[0, 1, 2, 3] = fill_val
