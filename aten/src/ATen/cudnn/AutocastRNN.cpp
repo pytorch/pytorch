@@ -9,8 +9,8 @@
 #include <ATen/native/cudnn/RNNUtils.h>
 #endif
 
-namespace at {
-namespace autocast {
+
+namespace at::autocast {
 
 /********************************************************************************
 Autocast wrapper for CuDNN RNNs (the weight reflattening needs special attention)
@@ -125,5 +125,4 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
 }
 } // anonymous namespace
 
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast

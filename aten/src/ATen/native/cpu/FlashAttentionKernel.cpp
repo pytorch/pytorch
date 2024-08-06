@@ -654,7 +654,11 @@ void cpu_flash_attention_backward(
               fill_stub(row_ptr + last_col + 1, static_cast<accum_t>(0), kvBlockSize - last_col - 1);
             }
           }
+#ifdef _MSC_VER
           if (is_reduced_type) {
+#else
+          if constexpr (is_reduced_type) {
+#endif
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
                 attn_data + row * kvBlockSize,
@@ -706,7 +710,11 @@ void cpu_flash_attention_backward(
               grad_attn_data + row * kvBlockSize,
               kvBlockSize);
           }
+#ifdef _MSC_VER
           if (is_reduced_type) {
+#else
+          if constexpr (is_reduced_type) {
+#endif
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
                 grad_attn_data + row * kvBlockSize,
