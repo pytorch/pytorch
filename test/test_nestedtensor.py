@@ -366,31 +366,19 @@ class TestNestedTensor(NestedTensorTestCase):
 
     @torch.inference_mode()
     def test_unbind_0(self):
-        self._test_unbind_case(
-            torch.tensor([1, 2]),
-            torch.tensor([7, 8]),
-        )
+        self._test_unbind_case(torch.tensor([1, 2]), torch.tensor([7, 8]))
 
     @torch.inference_mode()
     def test_unbind_1(self):
-        self._test_unbind_case(
-            torch.tensor([1]),
-            torch.tensor([7]),
-        )
+        self._test_unbind_case(torch.tensor([1]), torch.tensor([7]))
 
     @torch.inference_mode()
     def test_unbind_3(self):
-        self._test_unbind_case(
-            torch.tensor([1.0]),
-            torch.tensor([]),
-        )
+        self._test_unbind_case(torch.tensor([1.0]), torch.tensor([]))
 
     @torch.inference_mode()
     def test_unbind_4(self):
-        self._test_unbind_case(
-            torch.tensor([]),
-            torch.tensor([]),
-        )
+        self._test_unbind_case(torch.tensor([]), torch.tensor([]))
 
     @torch.inference_mode()
     def test_unbind_dim(self):
@@ -582,9 +570,16 @@ class TestNestedTensor(NestedTensorTestCase):
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
-    def test_to(self):
+    @parametrize(
+        "layout",
+        [torch.strided, torch.jagged],
+        name_fn=lambda l: f"_with_{layout_name(l)}_layout",
+    )
+    def test_to(self, layout):
         ntensors = 4
-        nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
+        nt = random_nt_from_dims(
+            (7, None, 10), torch.device("cpu"), torch.float32, layout=layout
+        )
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -658,6 +653,15 @@ class TestNestedTensor(NestedTensorTestCase):
                     )
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
+
+        # Jagged <-> strided
+        new_layout = torch.jagged if layout == torch.strided else torch.strided
+        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
+        self.assertIs(new_layout_nt.layout, new_layout)
+        self.assertEqual(new_layout_nt.device, nt.device)
+        self.assertEqual(new_layout_nt.size(2), nt.size(2))
+        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
+        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -2702,13 +2706,7 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
     # does not support the stack op therefore we turn it off for these tests
     def _create_leaf_nested_tensor_from_list(self, tensor_device, requires_grad=False):
         return torch.nested.nested_tensor(
-            [
-                torch.randn(
-                    1,
-                    2,
-                ),
-                torch.randn(7, 8),
-            ],
+            [torch.randn(1, 2), torch.randn(7, 8)],
             requires_grad=requires_grad,
             device=tensor_device,
         )
@@ -4836,11 +4834,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         if get_op_name(func) == "mean" and not keepdim:
             return
 
-        reduce_dims = (
-            (1,),
-            (2,),
-            (2, 3),
-        )
+        reduce_dims = ((1,), (2,), (2, 3))
 
         lengths = torch.randint(5, 10, (20,), device=device)
         offsets = torch.zeros((21,), device=device, dtype=torch.int)
@@ -4885,11 +4879,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         Softmax on NestedTensor fails when trying to reduce a nested tensor with lengths,
         i.e. a nested tensor with holes, if reducing on the ragged dimension.
         """
-        reduce_dims = (
-            1,
-            2,
-            3,
-        )
+        reduce_dims = (1, 2, 3)
 
         lengths = torch.randint(5, 10, (20,), device=device)
         offsets = torch.zeros((21,), device=device, dtype=torch.int)
@@ -4996,11 +4986,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = (
-            (0, 1),
-            (2, 3),
-            (2, 3, 4),
-        )
+        reduce_dims = ((0, 1), (2, 3), (2, 3, 4))
 
         for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
             nt = torch.nested.nested_tensor(
@@ -5036,11 +5022,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = (
-            (1,),
-            (2,),
-            (3,),
-        )
+        reduce_dims = ((1,), (2,), (3,))
 
         for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
             nt = torch.nested.nested_tensor(
@@ -5182,16 +5164,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_batch_size = len(tensor_list)
             expected_contiguous = True
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
@@ -5231,16 +5209,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_batch_size = len(tensor_list)
             expected_contiguous = True
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
@@ -5278,16 +5252,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             expected_dim = torch.as_tensor(tensor_list[0]).dim() + 1
             expected_batch_size = len(tensor_list)
             expected_min_seqlen = min(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             expected_max_seqlen = max(
-                [
-                    (torch.tensor(t) if isinstance(t, list) else t).shape[0]
-                    for t in tensor_list
-                ]
+                (torch.tensor(t) if isinstance(t, list) else t).shape[0]
+                for t in tensor_list
             )
             self._validate_nt(
                 nt,
@@ -5623,9 +5593,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         for tensor_list in self._get_example_tensor_lists():
             nt = torch.nested.nested_tensor(
                 tensor_list, layout=torch.jagged, device=device
-            ).transpose(
-                1, -1
-            )  # set ragged_idx = last dimension
+            ).transpose(1, -1)  # set ragged_idx = last dimension
             out = nt.unbind()
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
@@ -6025,10 +5993,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             # we eventually stop recompiling as shape changes.
             nt = torch.nested.nested_tensor_from_jagged(values, offsets)
 
-            self.assertEqual(
-                ref_fn(values, like_values),
-                res_fn(values, like_values),
-            )
+            self.assertEqual(ref_fn(values, like_values), res_fn(values, like_values))
 
         def fn(values, same_size):
             return values + same_size
@@ -6523,10 +6488,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertIsNotNone(values.grad)
 
         context_fn = partial(
-            create_selective_checkpoint_contexts,
-            [
-                torch.ops.aten.cumsum.default,
-            ],
+            create_selective_checkpoint_contexts, [torch.ops.aten.cumsum.default]
         )
 
         values.grad = None
@@ -6895,6 +6857,40 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad = torch.zeros_like(nt)
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
+
+    def test_layout_conversion(self, device):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+        )
+        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
+        self.assertEqual(strided_nt.unbind(), nt.unbind())
+        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
+
+        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
+        self.assertEqual(jagged_nt.unbind(), nt.unbind())
+        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
+
+    def test_layout_conversion_backward(self, device):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 4, device=device),
+                torch.randn(5, 4, device=device),
+                torch.randn(3, 4, device=device),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
+        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
+
+        jagged_nt.backward(torch.ones_like(jagged_nt))
+        expected_grad = torch.ones_like(nt)
+        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
 
 
 FORWARD_FAILURES = {
