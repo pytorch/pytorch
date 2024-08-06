@@ -154,6 +154,12 @@ static void check_shape_forward(const Tensor& input,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
+static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
+  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16" &&
+      mkldnn_bf16_device_check();
+}
+
+
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
    auto memory_format =  at::MemoryFormat::Contiguous;
    if (is_channels_last) {
@@ -162,7 +168,7 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-static void _mkldnn_convolution_out (
+static void _mkldnn_convolution_out(
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& bias,
@@ -252,6 +258,10 @@ static Tensor _mkldnn_convolution(
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
+  }
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      input_t.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   _mkldnn_convolution_out(
       input_t,
@@ -425,6 +435,10 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
     op_attr.set_post_ops(po);
 
+    if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+    }
+
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
       ideep::convolution_forward::compute_binary(
@@ -557,6 +571,10 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     } else {
       op_attr = ideep::attr_t::fuse_sum();
     }
+    if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+        input_t.scalar_type() == at::kFloat) {
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+    }
     _mkldnn_convolution_out(
         input_t,
         weight_t,
@@ -671,6 +689,10 @@ Tensor _mkldnn_convolution_transpose(
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
+  }
+
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
 
   if (bias.defined()) {
