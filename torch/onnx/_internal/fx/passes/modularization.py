@@ -2,18 +2,16 @@
 from __future__ import annotations
 
 import abc
-
 import collections
 import copy
 import operator
-
 from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
 
 import torch
 import torch.fx
-
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _pytree as pytree
+
 
 _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
 """Legacy type of item from `node.meta["nn_module_stack"].items()` produced by FX symbolic tracer."""
@@ -795,7 +793,7 @@ class Modularize(_pass.Transform):
         >>> from torch.onnx._internal.diagnostics import infra
         >>>
         >>> class CustomModule(torch.nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.embedding = torch.nn.Embedding(10, 32)
         >>>         self.relu = torch.nn.ReLU()
@@ -806,7 +804,7 @@ class Modularize(_pass.Transform):
         >>>         return out
         >>>
         >>> class TestModule(torch.nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.layer = CustomModule()
         >>>         self.linear = torch.nn.Linear(32, 10)
