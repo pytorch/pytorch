@@ -142,7 +142,6 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-    for (int i = 0; i < N; ++i) {
       if (count > 0) {
         result.values[i] = Vectorized<T>::set(
             a.values[i],
@@ -150,6 +149,7 @@ class VectorizedN {
             std::min(count, (int64_t)Vectorized<T>::size()));
         count -= Vectorized<T>::size();
       } else {
+        result.values[i] = a.values[i];
       }
     }
     return result;
