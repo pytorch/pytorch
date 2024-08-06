@@ -27,6 +27,7 @@ from collections import defaultdict
 from contextlib import contextmanager, nullcontext, AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from torch import SymInt, SymBool, Tensor
+import torch._ops
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
@@ -55,7 +56,10 @@ if TYPE_CHECKING:
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_proxy_mode"]
+__all__ = [
+    "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter",
+    "py_sym_types", "get_innermost_proxy_mode", "get_proxy_mode", "handle_sym_dispatch"
+]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
 
@@ -1064,6 +1068,45 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         with set_original_aten_op(func):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
+    def __enter__(self) -> Self:
+        # Stash and store the previous proxy mode (there may or may not be one)
+        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
+        self.enter_stack.append(maybe_prev_proxy_mode)
+        return super().__enter__()
+
+    def __exit__(
+            self,
+            exc_type: Optional[Type[BaseException]],
+            exc_value: Optional[BaseException],
+            traceback: Optional[types.TracebackType]
+    ) -> Optional[bool]:
+        b = super().__exit__(exc_type, exc_value, traceback)
+
+        # Re-enable the previous proxy mode, if there was one.
+        mb_previous_proxy_mode = self.enter_stack.pop()
+        if mb_previous_proxy_mode is not None:
+            _push_mode(mb_previous_proxy_mode)
+
+        return b
+
+    def inner_torch_dispatch(
+            self,
+            func: OpOverload,
+            types: Tuple[torch._C._TensorMeta, ...],
+            args: Tuple[object, ...] = (),
+            kwargs: Optional[Dict[str, object]] = None
+    ) -> object:
+        kwargs = kwargs or {}
+
+        if func in (prim.device.default,):
+            return func(*args, **kwargs)
+
+        return proxy_call(self, func, self.pre_dispatch, args, kwargs)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
+
     def _compute_proxy(self, func: OpOverload, args: Tuple[object, ...], out: PySymType) -> Proxy:
         n_args = tuple(
             get_proxy_slot(a, self.tracer).force().node if isinstance(a, py_sym_types) else a
@@ -1107,46 +1150,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out
-
-    def __enter__(self) -> Self:
-        # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
-        self.enter_stack.append(maybe_prev_proxy_mode)
-        return super().__enter__()
-
-    def __exit__(
-            self,
-            exc_type: Optional[Type[BaseException]],
-            exc_value: Optional[BaseException],
-            traceback: Optional[types.TracebackType]
-    ) -> Optional[bool]:
-        b = super().__exit__(exc_type, exc_value, traceback)
-
-        # Re-enable the previous proxy mode, if there was one.
-        mb_previous_proxy_mode = self.enter_stack.pop()
-        if mb_previous_proxy_mode is not None:
-            _push_mode(mb_previous_proxy_mode)
-
-        return b
-
-
-    def inner_torch_dispatch(
-            self,
-            func: OpOverload,
-            types: Tuple[torch._C._TensorMeta, ...],
-            args: Tuple[object, ...] = (),
-            kwargs: Optional[Dict[str, object]] = None
-    ) -> object:
-        kwargs = kwargs or {}
-
-        if func in (prim.device.default,):
-            return func(*args, **kwargs)
-
-        return proxy_call(self, func, self.pre_dispatch, args, kwargs)
-
-    @classmethod
-    def is_infra_mode(cls) -> bool:
-        return True
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
@@ -1799,12 +1802,21 @@ def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
 def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     """
     Current the currently active proxy tracing mode, or None if
-    we are not currently tracing.
+    we are not currently tracing.  This includes pre-dispatch proxy
+    tracing.
     """
-    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    pre_dispatch_mode = torch._ops._get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+    mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    assert pre_dispatch_mode is None or mode is None, f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}"
+    return pre_dispatch_mode or mode
 
 
 def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs) -> R:
+    """
+    Call into the currently active proxy tracing mode to do a
+    SymInt/SymFloat/SymBool dispatch trace on a function that operates on
+    these arguments.
+    """
     mode = get_proxy_mode()
     assert mode
     # Have to do it manually, because we're not doing the normal torch
