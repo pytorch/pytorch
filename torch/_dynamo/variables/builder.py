@@ -1448,17 +1448,14 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        # Reject sparse, but not coo.
-        # TODO: remove this altogether when non-coo sparsity propagation is ready
-        if is_sparse_any(value) and not value.is_sparse:
-            unimplemented(
-                f"torch.compile does not support sparse Tensor with {value.layout} layout"
-            )
-
         # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
-        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
-            # A hot fix for sparse tensors + torch.compile. There is some
-            # support for export + coo tensor. We need to create
+        if (
+            isinstance(value, torch.Tensor)
+            and is_sparse_any(value)
+            and (not self.tx.export or not config.capture_sparse_compute)
+        ):
+            # A hot fix for sparse tensors + torch.compile. Support for
+            # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
 
@@ -2369,7 +2366,8 @@ def _automatic_dynamic(
         tx.output.frame_state[name] = frame_state_entry
 
     if (st := tx.distributed_state) is None:
-        update_frame_state(e.size(), e.stride())
+        stride = e.stride() if not is_sparse_any(e) else ()
+        update_frame_state(e.size(), stride)
         frame_state_entry = tx.output.frame_state[name]
     elif st.all_states is None:
         # Preflight, always pretend as if it's static
