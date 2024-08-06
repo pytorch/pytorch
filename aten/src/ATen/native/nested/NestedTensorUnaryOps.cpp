@@ -14,7 +14,6 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
-
 namespace at {
 namespace native {
 
@@ -29,6 +28,7 @@ Tensor& NestedTensor_abs_(Tensor& self) {
   at::abs_(buffer);
   return self;
 }
+
 
 Tensor NestedTensor_sgn(const Tensor& self) {
   return map_nt(self, at::sgn);
