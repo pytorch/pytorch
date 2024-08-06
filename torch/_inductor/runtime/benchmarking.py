@@ -152,6 +152,9 @@ def is_cpu_device(inputs: List[Any]) -> bool:
     )
 
 
+MILLISECONDS_PER_SECOND = 1000
+
+
 class Benchmarker:
     def __init__(self: Self) -> None:
         self.memory_cache: Dict[str, float] = {}
@@ -175,16 +178,17 @@ class Benchmarker:
         # current queue limit on my machine (A100) is stable at ~1000, and
         # in the event that we do artificially cap the queue limit to 2500
         # we really shouldn't see any significant slowdowns
+        max_gpu_queue_limit = 2500
         torch.cuda._sleep(
             int(
-                (self.cpu_launch_overhead_ms_per_event_record * 2500)
+                (self.cpu_launch_overhead_ms_per_event_record * max_gpu_queue_limit)
                 / self.gpu_time_ms_per_gpu_clock_cycle
             )
         )
-        for idx in range(2500):
+        for idx in range(max_gpu_queue_limit):
             start_time_s = perf_counter()
             torch.cuda.Event(enable_timing=True).record()
-            elapsed_time_ms = (perf_counter() - start_time_s) * 1000
+            elapsed_time_ms = (perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND
             # recording an event is near instantaneous, unless we have hit
             # the queue limit, so 1ms seems like a good enough upper bound
             if elapsed_time_ms > 1:
@@ -200,10 +204,11 @@ class Benchmarker:
         # ensures the queue is empty
         torch.cuda.synchronize()
         start_time_s = perf_counter()
-        for _ in range(100):
+        num_iters = 100
+        for _ in range(num_iters):
             torch.cuda.Event(enable_timing=True).record()
         torch.cuda.synchronize()
-        return ((perf_counter() - start_time_s) * 1000) / 100
+        return ((perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND) / num_iters
 
     @cached_property
     def cpu_launch_overhead_ms_per_gpu_cache_clear(self: Self) -> float:
@@ -229,11 +234,12 @@ class Benchmarker:
         start_event.record()
         start_time_s = perf_counter()
         # 100 buffer zeroes is long enough to reduce uncertainty
-        for _ in range(100):
+        num_iters = 100
+        for _ in range(num_iters):
             buffer.zero_()
         cpu_launch_overhead_ms_per_gpu_cache_clear = (
-            (perf_counter() - start_time_s) * 1000
-        ) / 100
+            (perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND
+        ) / num_iters
         end_event.record()
         torch.cuda.synchronize()
         # explicitly delete the buffer, sometimes helps memory
@@ -241,7 +247,7 @@ class Benchmarker:
         del buffer
         return (
             cpu_launch_overhead_ms_per_gpu_cache_clear,
-            start_event.elapsed_time(end_event) / 100,
+            start_event.elapsed_time(end_event) / num_iters,
         )
 
     @cached_property
@@ -254,10 +260,11 @@ class Benchmarker:
         start_event.record()
         # sleeping for 1000000 clock cycles is long enough
         # to average out most of the uncertainty
-        torch.cuda._sleep(1000000)
+        num_clock_cycles = 1000000
+        torch.cuda._sleep(num_clock_cycles)
         end_event.record()
         torch.cuda.synchronize()
-        return start_event.elapsed_time(end_event) / 1000000
+        return start_event.elapsed_time(end_event) / num_clock_cycles
 
     @maybe_fallback_to_original_benchmarking("original_do_bench")
     def benchmark(
@@ -309,7 +316,7 @@ class Benchmarker:
         for _ in range(benchmark_iters):
             start_time_s = perf_counter()
             _callable()
-            timings_ms.append((perf_counter() - start_time_s) * 1000)
+            timings_ms.append((perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND)
         return median(timings_ms)
 
     def original_do_bench_cpu(
@@ -327,7 +334,7 @@ class Benchmarker:
             t0 = perf_counter()
             fn()
             t1 = perf_counter()
-            durations.append((t1 - t0) * 1000)
+            durations.append((t1 - t0) * MILLISECONDS_PER_SECOND)
         # return the median time
         sorted_durations = sorted(durations)
         if times % 2 == 0:
@@ -395,7 +402,7 @@ class Benchmarker:
         # before we synchronize we want to measure the cpu-side cost of our buffer
         # zero, launching the callable, and the associated event records
         cpu_launch_overhead_ms_per_iter = (
-            (perf_counter() - start_time_s) * 1000
+            (perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND
         ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timing_ms = self.get_min_timing_ms(event_pairs)
@@ -595,7 +602,7 @@ class Benchmarker:
                 _callable()
                 end_event.record()
         cpu_launch_overhead_ms_per_iter = (
-            (perf_counter() - start_time_s) * 1000
+            (perf_counter() - start_time_s) * MILLISECONDS_PER_SECOND
         ) / estimation_iters
         torch.cuda.synchronize()
         estimated_timings_ms = self.get_interleaved_min_timings_ms(
