@@ -47,7 +47,7 @@ def find_node_with_regex(nodes, pattern):
 
 
 class SimpleNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(10, 5)
         self.fc2 = nn.Linear(5, 2)

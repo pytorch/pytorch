@@ -1551,6 +1551,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -1708,6 +1709,7 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+  THCPMemPool_init(module);
 #endif
 
 #ifdef USE_XPU
@@ -1953,24 +1955,16 @@ Call this whenever a new thread is created in order to propagate values from
                        at::Tensor const& value,
                        std::optional<at::Tensor> attn_mask,
                        double dropout,
-                       bool is_causal,
-                       bool enable_gqa) {
+                       bool is_causal) {
         return sdp::sdp_params{
-            query,
-            key,
-            value,
-            std::move(attn_mask),
-            dropout,
-            is_causal,
-            enable_gqa};
+            query, key, value, std::move(attn_mask), dropout, is_causal};
       }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)
       .def_readonly("value", &sdp::sdp_params::value)
       .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
       .def_readonly("dropout", &sdp::sdp_params::dropout)
-      .def_readonly("is_causal", &sdp::sdp_params::is_causal)
-      .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
 
   py::enum_<sdp::SDPBackend>(
       py_module,
