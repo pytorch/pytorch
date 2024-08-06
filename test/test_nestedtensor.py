@@ -6523,6 +6523,17 @@ BACKWARD_FAILURES = {
     "special.i1e",
     # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
     "sum",
+    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
+    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
+    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
+    "clone",
+}
+
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
 }
 
 COMPILE_BACKWARD_FAILURES = {
@@ -6591,7 +6602,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
