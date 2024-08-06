@@ -1,4 +1,3 @@
-from typing import Optional
 # Global information for the purposes of adding to CompilationMetrics
 
 # From Inductor's reinplacing pass: the number of Tensors that we failed to reinplace.
