@@ -1498,7 +1498,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
 
 
 class SkipModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False)
 
