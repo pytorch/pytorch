@@ -6,6 +6,8 @@
 
 import logging
 
+import sys
+
 from .api import (
     rendezvous_handler_registry as handler_registry,
     RendezvousHandler,
@@ -13,7 +15,6 @@ from .api import (
 )
 from .dynamic_rendezvous import create_handler
 
-import sys
 if sys.version_info < (3, 10):
     from importlib_metadata import entry_points
 else:
@@ -58,24 +59,21 @@ def _register_default_handlers() -> None:
     handler_registry.register("c10d", _create_c10d_handler)
     handler_registry.register("static", _create_static_handler)
 
+
 def _register_out_of_tree_handlers() -> None:
-    discovered_handler_generators = entry_points(group='torchrun.handlers')    
+    discovered_handler_generators = entry_points(group="torchrun.handlers")
 
     for handler_generator in discovered_handler_generators:
         get_handler = discovered_handler_generators[handler_generator.name].load()
-        try:            
-            handler_registry.register(
-                handler_generator.name,
-                get_handler()
-            )
+        try:
+            handler_registry.register(handler_generator.name, get_handler())
         except Exception:
             log.warning(
-            "Exception while registering out of tree plugin %s: ",
-            handler_generator.name,
-            exc_info=True
-        )
+                "Exception while registering out of tree plugin %s: ",
+                handler_generator.name,
+                exc_info=True,
+            )
 
-        
 
 def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
     """
