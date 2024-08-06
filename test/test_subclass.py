@@ -130,7 +130,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p1 = nn.Parameter(create_fn())
 
@@ -179,7 +179,7 @@ class TestSubclass(TestCase):
         create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(create_fn())
 
@@ -206,7 +206,7 @@ class TestSubclass(TestCase):
             self.fail('dummy fail for base tensor until the test passes for subclasses')
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = nn.UninitializedParameter()
 
