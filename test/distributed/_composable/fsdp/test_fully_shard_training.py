@@ -993,6 +993,8 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
+                # TODO change "mlp_dim" back to [3, 16, 17] when uneven sharding
+                # is supported for FSDP+TP
                 "mlp_dim": [4, 16, 20],
                 "foreach": [False],
             },
