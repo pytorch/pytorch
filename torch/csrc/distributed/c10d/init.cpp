@@ -1552,7 +1552,12 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)");
+          R"(Returns True if it's using the libuv backend.)")
+      .def(
+          "__repr__",
+          &::c10d::TCPStore::repr,
+          R"(Returns a string representation of the TCPStore.)",
+          py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -2706,6 +2711,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_add_ephemeral_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const std::chrono::milliseconds& timeout) {
+                self->addEphemeralTimeout(timeout);
+              },
+              py::arg("timeout"))
+          .def(
+              "_verify_work_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const c10::intrusive_ptr<::c10d::Work> work,
+                 const std::chrono::milliseconds& timeout) {
+                return self->verifyWorkTimeoutForTest(work, timeout);
+              },
+              py::arg("work"),
+              py::arg("timeout"))
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
@@ -2923,13 +2944,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           [](::c10d::Work& work) -> std::vector<at::Tensor> {
             // Deprecation reason:
             // Work.result() returns a vector of tensors. This signature is
-            // problematic as some collectives may just return one tensor (e.g
-            // all-reduce), while some others may return multiple tensors (e.g.
-            // all-gather).
-            // Deprecating work.result() would also allow us to remove the
-            // `outputs_` field in the Work class, avoiding an "artificial"
-            // reference to the tensors, which could potentially hold up the
-            // tensors' memory.
+            // problematic as some collectives may just return one tensor
+            // (e.g all-reduce), while some others may return multiple
+            // tensors (e.g. all-gather).
+            // Deprecating work.result() would
+            // also allow us to remove the `outputs_` field in the Work
+            // class, avoiding an "artificial" reference to the tensors,
+            // which could potentially hold up the tensors' memory.
             TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
             return work.result();
           })
