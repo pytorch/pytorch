@@ -168,6 +168,7 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
+        self._save_partial_reduce_output: bool = True
 
         # TODO: remove this hook and hook register once 2D state dict is supported.
         def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
@@ -382,6 +383,7 @@ class FSDPParamGroup:
                 reduce_scatter_event,
                 self._post_reduce_event,
                 self._partial_reduce_output,
+                self._save_partial_reduce_output,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
                 unsharded_grads,
@@ -404,6 +406,8 @@ class FSDPParamGroup:
             torch.cuda.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
             self._reduce_output = None
+            if not self._save_partial_reduce_output:
+                self._partial_reduce_output = None
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()

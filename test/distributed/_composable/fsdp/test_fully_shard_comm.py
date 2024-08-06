@@ -253,6 +253,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_event,
             post_reduce_event,
             _,
+            _,
         ) = foreach_reduce(
             fsdp_params,
             unsharded_grads,

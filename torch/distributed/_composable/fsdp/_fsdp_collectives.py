@@ -245,6 +245,7 @@ def foreach_reduce(
     torch.cuda.Event,
     torch.cuda.Event,
     Optional[torch.Tensor],
+    bool,
 ]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
@@ -300,6 +301,7 @@ def foreach_reduce(
                     reduce_scatter_event,
                     post_reduce_stream.record_event(),
                     partial_reduce_output,
+                    True,  # `save_partial_output=True`
                 )
             if partial_reduce_output is not None:
                 reduce_output += partial_reduce_output
@@ -366,7 +368,8 @@ def foreach_reduce(
         reduce_output,
         reduce_scatter_event,
         post_reduce_event,
-        None,
+        partial_reduce_output,
+        False,  # `save_partial_output=False`
     )
 
 
