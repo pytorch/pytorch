@@ -163,7 +163,7 @@ class CudaReproTests(TestCase):
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self):
@@ -284,7 +284,7 @@ class CudaReproTests(TestCase):
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight1 = torch.nn.Parameter(
                     torch.randn(10, 20, requires_grad=True)
@@ -334,7 +334,7 @@ class CudaReproTests(TestCase):
 
     def test_accuracy_issue1(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features=768, out_features=2, bias=True
@@ -599,7 +599,7 @@ class CudaReproTests(TestCase):
             return (x > 0) - (x < 0)
 
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 nheads = 16
                 start = math.log2(0.5)
@@ -676,7 +676,7 @@ class CudaReproTests(TestCase):
 
     def test_issue_103924(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.temperature = 1
                 self.layer = torch.nn.Softmax(dim=1)
@@ -780,7 +780,7 @@ class CudaReproTests(TestCase):
     # https://github.com/pytorch/pytorch/issues/96406
     def test_linear_cpu_input(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(4, 4)
 
@@ -795,7 +795,7 @@ class CudaReproTests(TestCase):
     @config.patch({"fallback_random": True, "triton.cudagraphs": True})
     def test_xlnet_lm_stride_repro(self):
         class Repro(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = nn.Dropout(p=0.1, inplace=False)
 
@@ -838,7 +838,7 @@ class CudaReproTests(TestCase):
 
     def test_issue100806(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(10, 20)
                 self.linear2 = torch.nn.Linear(20, 30)
@@ -1241,7 +1241,7 @@ class CudaReproTests(TestCase):
 
     def test_epilogue_fusion_with_view(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
                 self.linear = torch.nn.Linear(262144, 100)
