@@ -1668,15 +1668,22 @@ class SIMDScheduling(BaseScheduling):
         # Optionally, prefer tiling into as many dimensions as possible.
         # This can simplify index expressions, and create more opportunities for block
         # pointers.
-        prefer_tiling = True #TODO make this a config
+        prefer_tiling = True  # TODO make this a config
         if prefer_tiling:
             # Get candidate tilings from the node ranges.
+            scheduler_nodes = [
+                node
+                for node in node_schedule
+                if isinstance(node, scheduler.SchedulerNode)
+            ]
             node_ranges = [node.get_ranges()[0] for node in scheduler_nodes]
             new_tilings = set()
             for range_ in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 extra_dims = max(0, len(node_ranges) - config.triton.max_tiles)
-                leading_dim = [sympy_product(range_[:extra_dims])] if extra_dims > 0 else []
+                leading_dim = (
+                    [sympy_product(range_[:extra_dims])] if extra_dims > 0 else []
+                )
                 tiling = leading_dim + range_[extra_dims:]
                 new_tilings.add(tuple(tiling))
 
