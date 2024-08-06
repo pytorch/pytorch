@@ -9,7 +9,7 @@ import math
 import operator
 from contextlib import nullcontext
 from enum import Enum
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -23,6 +23,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
+
 
 __all__ = [
     "BlockMask",
@@ -771,6 +772,25 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
+def _apply_kernel_options(query, key, value, kernel_options):
+    kernel_options = {} if kernel_options is None else kernel_options
+
+    if "ROWS_GUARANTEED_SAFE" not in kernel_options:
+        kernel_options["ROWS_GUARANTEED_SAFE"] = False
+    if "PRESCALE_QK" not in kernel_options:
+        kernel_options["PRESCALE_QK"] = False
+
+    # If foward kernel needs to return logsumexp is decided by this rule internally.
+    assert "OUTPUT_LOGSUMEXP" not in kernel_options
+    any_inputs_require_grad = (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    )
+    output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
+    kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+
+    return kernel_options
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -779,6 +799,7 @@ def flex_attention(
     block_mask: Optional[BlockMask] = None,
     scale: Optional[float] = None,
     enable_gqa: bool = False,
+    kernel_options: Optional[Dict[str, Any]] = None,
 ) -> Tensor:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -810,10 +831,11 @@ def flex_attention(
         key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`.
         value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
-        block_mask (BlockMask): BlockMask object that controls the blocksparsity pattern of the attention.
+        block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If
         none, the default value is set to :math`\frac{1}{\sqrt{E}}`
         enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
+        kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
@@ -861,13 +883,21 @@ def flex_attention(
         block_mask = _create_empty_block_mask(query, key)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
+
+    kernel_options = _apply_kernel_options(
+        query,
+        key,
+        value,
+        kernel_options,
+    )
+
     if torch.compiler.is_dynamo_compiling():
         # mark head_dim and number of heads to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, _ = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale=scale
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
         )
         return out
 
@@ -879,5 +909,13 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
                     flex_attention_hop, backend="eager", fullgraph=True
-                )(query, key, value, score_mod, block_mask.as_tuple(), scale=scale)
+                )(
+                    query,
+                    key,
+                    value,
+                    score_mod,
+                    block_mask.as_tuple(),
+                    scale,
+                    kernel_options,
+                )
                 return out

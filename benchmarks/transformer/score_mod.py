@@ -140,9 +140,12 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
     )
 
+    kwargs = {}
+    if get_func_name(config.mask_mod) == "causal":
+        kwargs["is_causal"] = True
+
     def eager_sdpa(query, key, value, attn_mask):
-        flattened_query = query.reshape(batch_size, kv_heads, -1, head_dim)
-        out = F.scaled_dot_product_attention(flattened_query, key, value, attn_mask)
+        out = F.scaled_dot_product_attention(query, key, value, attn_mask, **kwargs)
         return out.reshape(batch_size, q_heads, q_seq_len, head_dim)
 
     if max_autotune:
@@ -162,14 +165,17 @@ def run_single_experiment(
     else:
         block_mask = _create_empty_block_mask(query, key)
 
-    if mask_mod:
+    if mask_mod and get_func_name(mask_mod) != "causal":
         attn_mask = create_mask(mask_mod, 1, 1, query.shape[-2], key.shape[-2])
-        attn_mask = attn_mask.repeat_interleave(q_heads // kv_heads, dim=-2)
     else:
         attn_mask = None
 
+    # Broadcast query/key for eager.
+    b_key = torch.repeat_interleave(key, q_heads // kv_heads, dim=1)
+    b_value = torch.repeat_interleave(value, q_heads // kv_heads, dim=1)
+
     forward_eager_time = benchmark_torch_function_in_microseconds(
-        eager_sdpa, query, key, value, attn_mask
+        eager_sdpa, query, b_key, b_value, attn_mask
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
         compiled_sdpa,
@@ -181,15 +187,21 @@ def run_single_experiment(
         enable_gqa=True,
     )
 
-    out_eager = eager_sdpa(query, key, value, attn_mask)
+    out_eager = eager_sdpa(query, b_key, b_value, attn_mask)
     out_compile = compiled_sdpa(
-        query, key, value, score_mod=score_mod, block_mask=block_mask, enable_gqa=True
+        query,
+        b_key,
+        b_value,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=True,
     )
 
-    torch.testing.assert_close(out_eager, out_compile, atol=1e-2, rtol=1e-2)
+    if score_mod is None:
+        torch.testing.assert_close(out_eager, out_compile, atol=1e-2, rtol=1e-2)
 
     if config.calculate_bwd_time:
-        out_eager = eager_sdpa(query, key, value, score_mod)
+        out_eager = eager_sdpa(query, b_key, b_value, score_mod)
         dOut = torch.randn_like(out_eager)
         backward_eager_time = benchmark_torch_function_in_microseconds(
             out_eager.backward, dOut, retain_graph=True
@@ -270,10 +282,15 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 
 
 def get_func_name(func):
-    if func:
-        return func.__name__.split("<locals>.")[-1].split(" at ")[0]
+    if func is None:
+        return "None"
+    func_str = str(func)
+    if "<locals>" in func_str:
+        # For locally defined functions
+        return func_str.split("<locals>.")[-1].split(" at ")[0]
     else:
-        return "noop"
+        # For regular functions
+        return func.__name__
 
 
 def set_func_name(func, name):
@@ -375,7 +392,7 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable | None]:
         return score + 2 * h
 
     function_dict = {
-        "noop": noop,
+        "noop": None,
         "causal": None,
         "offset": None,
         "rel": relative_bias,
@@ -434,16 +451,14 @@ def generate_experiment_configs(
         (q_heads, kv_heads),
         (q_seq_len, kv_seq_len),
         head_dim,
-        score_mod,
-        mask_mod,
+        (score_mod,mask_mod),
         dtype,
     ) in itertools.product(
         kv_cache_size if kv_cache_size else batch_sizes,
         num_heads,
         q_kv_seq_lens,
         head_dims,
-        score_mods,
-        mask_mods,
+        zip(score_mods, mask_mods),
         dtypes,
     ):
         if kv_cache_size:
@@ -489,7 +504,7 @@ def main(args):
             args.mods,
             args.decoding,
             args.kv_cache_size,
-            args.cal_bandwidth,
+            args.throughput,
         )
     ):
         results.append(
@@ -570,7 +585,7 @@ Ignores -b batch size and calculate batch size from kv_cache size instead when s
 """,
     )
     parser.add_argument(
-        "--cal-bandwidth",
+        "--throughput",
         action="store_true",
         help="Calculate kernel memory bandwidth & computational throughput. ",
     )
