@@ -198,92 +198,105 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
             base_model = nn.Sequential(MLP(mlp_dim), MLP(mlp_dim), MLP(mlp_dim))
             return base_model
 
-        state_dict_type_list = [
-            StateDictType.FULL_STATE_DICT,
-            StateDictType.SHARDED_STATE_DICT,
-        ]
+        # init device mesh
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda",
+            (dp_size, self.world_size // dp_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
-        for state_dict_type in state_dict_type_list:
-            # Save state dict with original model
-            base_model = _get_base_model().cuda()
-            base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
+        # Save state dict with original model
+        base_model = _get_base_model().cuda()
+        base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
-            # Save state dict with model wrapped with FSDP1
-            fsdp1_model = FSDP(
-                copy.deepcopy(base_model),
-                use_orig_params=True,
-                auto_wrap_policy=always_wrap_policy,
-            )
+        # Save state dict with model wrapped with FSDP1
+        fsdp1_model = FSDP(
+            copy.deepcopy(base_model),
+            device_mesh=global_mesh,
+            use_orig_params=True,
+            auto_wrap_policy=always_wrap_policy,
+        )
 
-            fsdp1_optim = torch.optim.AdamW(fsdp1_model.parameters(), lr=0.1)
+        fsdp1_optim = torch.optim.AdamW(fsdp1_model.parameters(), lr=0.1)
 
-            # one-step training to modify state dict
-            inp = torch.randn((2,), device=self.rank)
-            base_model(inp).sum().backward()
-            base_optim.step()
-            fsdp1_model(inp).sum().backward()
-            fsdp1_optim.step()
+        # one-step training to modify state dict
+        inp = torch.randn((2,), device=self.rank)
+        base_model(inp).sum().backward()
+        base_optim.step()
+        fsdp1_model(inp).sum().backward()
+        fsdp1_optim.step()
 
-            # obtain the unsharded state dict
-            base_msd = get_model_state_dict(
-                base_model,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
-            base_osd = get_optimizer_state_dict(
-                base_model,
-                base_optim,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
+        # obtain the full state dict
+        base_msd = get_model_state_dict(
+            base_model,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        base_osd = get_optimizer_state_dict(
+            base_model,
+            base_optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
 
-            with FSDP.state_dict_type(fsdp1_model, state_dict_type):
-                fsdp1_state_dict = {
-                    "model": fsdp1_model.state_dict(),
-                    "optim": FSDP.sharded_optim_state_dict(fsdp1_model, fsdp1_optim),
-                }
-                dcp.save(
-                    fsdp1_state_dict,
-                    checkpoint_id=self.temp_dir,
-                )
+        # obtain the sharded state dict
+        fsdp1_msd = get_model_state_dict(
+            fsdp1_model,
+            options=StateDictOptions(full_state_dict=False),
+        )
+        fsdp1_osd = get_optimizer_state_dict(
+            fsdp1_model,
+            fsdp1_optim,
+            options=StateDictOptions(full_state_dict=False),
+        )
 
-            # Load state dict into model with FSDP2 + TP applied
-            # init device mesh
-            dp_size = 2
-            global_mesh = init_device_mesh(
-                "cuda",
-                (dp_size, self.world_size // dp_size),
-                mesh_dim_names=("dp", "tp"),
-            )
-            dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        # save state dict to temp dir
+        source_state_dict = {
+            "model_full": base_msd,
+            "optim_full": base_osd,
+            "model_sharded": fsdp1_msd,
+            "optim_sharded": fsdp1_osd,
+        }
+        dcp.save(
+            source_state_dict,
+            checkpoint_id=self.temp_dir,
+        )
 
-            # FSDP + TP
-            fsdp2_tp_model = _get_base_model()
-            fsdp2_tp_model = parallelize_module(
-                fsdp2_tp_model,
-                device_mesh=tp_mesh,
-                parallelize_plan={
-                    "0.in_proj": ColwiseParallel(),
-                    "0.out_proj": RowwiseParallel(),
-                    "1.in_proj": ColwiseParallel(),
-                    "1.out_proj": RowwiseParallel(),
-                    "2.in_proj": ColwiseParallel(),
-                    "2.out_proj": RowwiseParallel(),
-                },
-            )
-            for module in fsdp2_tp_model:
-                fully_shard(module, mesh=dp_mesh)
-            fully_shard(fsdp2_tp_model, mesh=dp_mesh)
-            fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
+        # FSDP + TP
+        fsdp2_tp_model = _get_base_model()
+        fsdp2_tp_model = parallelize_module(
+            fsdp2_tp_model,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for module in fsdp2_tp_model:
+            fully_shard(module, mesh=dp_mesh)
+        fully_shard(fsdp2_tp_model, mesh=dp_mesh)
 
+        fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
+
+        # Load state dict into model with FSDP2 + TP applied
+        for src_state_dict_type in ["full", "sharded"]:
+            msd_name = f"model_{src_state_dict_type}"
+            osd_name = f"optim_{src_state_dict_type}"
             fsdp2_tp_state_dict = {
-                "model": get_model_state_dict(fsdp2_tp_model),
-                "optim": get_optimizer_state_dict(fsdp2_tp_model, fsdp2_tp_optim),
+                msd_name: get_model_state_dict(fsdp2_tp_model),
+                osd_name: get_optimizer_state_dict(fsdp2_tp_model, fsdp2_tp_optim),
             }
+            # load state dict from temp dir
             dcp.load(
                 fsdp2_tp_state_dict,
                 checkpoint_id=self.temp_dir,
             )
-            fsdp2_tp_model.load_state_dict(fsdp2_tp_state_dict["model"])
-            fsdp2_tp_optim.load_state_dict(fsdp2_tp_state_dict["optim"])
+            fsdp2_tp_model.load_state_dict(fsdp2_tp_state_dict[msd_name])
+            fsdp2_tp_optim.load_state_dict(fsdp2_tp_state_dict[osd_name])
 
             fsdp2_tp_full_msd = get_model_state_dict(
                 fsdp2_tp_model,
@@ -329,76 +342,87 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
         )
         dp_mesh, tp_mesh = global_mesh_2d["dp"], global_mesh_2d["tp"]
 
-        for save_full_state_dict in [True, False]:
-            # Save state dict with original model
-            base_model = _get_base_model().cuda()
-            base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
+        # Save state dict with original model
+        base_model = _get_base_model().cuda()
+        base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
-            # Save state dict with TP model
-            tp_model = copy.deepcopy(base_model)
-            tp_model = parallelize_module(
-                tp_model,
-                device_mesh=global_mesh_1d,
-                parallelize_plan=tp_parallelize_plan,
-            )
-            tp_model_optim = torch.optim.AdamW(tp_model.parameters(), lr=0.1)
+        # Save state dict with TP model
+        tp_model = copy.deepcopy(base_model)
+        tp_model = parallelize_module(
+            tp_model,
+            device_mesh=global_mesh_1d,
+            parallelize_plan=tp_parallelize_plan,
+        )
+        tp_model_optim = torch.optim.AdamW(tp_model.parameters(), lr=0.1)
 
-            # one-step training to modify state dict
-            inp = torch.randn((2,), device=self.rank)
-            base_model(inp).sum().backward()
-            base_optim.step()
-            tp_model(inp).sum().backward()
-            tp_model_optim.step()
+        # one-step training to modify state dict
+        inp = torch.randn((2,), device=self.rank)
+        base_model(inp).sum().backward()
+        base_optim.step()
+        tp_model(inp).sum().backward()
+        tp_model_optim.step()
 
-            # obtain the unsharded state dict
-            base_msd = get_model_state_dict(
-                base_model,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
+        # obtain the full state dict
+        base_msd = get_model_state_dict(
+            base_model,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        base_osd = get_optimizer_state_dict(
+            base_model,
+            base_optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
 
-            base_osd = get_optimizer_state_dict(
-                base_model,
-                base_optim,
-                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
-            )
+        # obtain sharded state dict
+        tp_msd = get_model_state_dict(
+            tp_model,
+            options=StateDictOptions(full_state_dict=False),
+        )
+        tp_osd = get_optimizer_state_dict(
+            tp_model,
+            tp_model_optim,
+            options=StateDictOptions(full_state_dict=False),
+        )
 
-            # obtain TP state dict
-            tp_msd = get_model_state_dict(
-                tp_model,
-                options=StateDictOptions(full_state_dict=save_full_state_dict),
-            )
-            tp_osd = get_optimizer_state_dict(
-                tp_model,
-                tp_model_optim,
-                options=StateDictOptions(full_state_dict=save_full_state_dict),
-            )
+        # save state dict to temp dir
+        source_state_dict = {
+            "model_full": base_msd,
+            "optim_full": base_osd,
+            "model_sharded": tp_msd,
+            "optim_sharded": tp_osd,
+        }
+        dcp.save(
+            source_state_dict,
+            checkpoint_id=self.temp_dir,
+        )
 
-            tp_state_dict = {"model": tp_msd, "optim": tp_osd}
-            dcp.save(tp_state_dict, checkpoint_id=self.temp_dir)
+        # FSDP + TP
+        fsdp2_tp_model = _get_base_model()
+        fsdp2_tp_model = parallelize_module(
+            fsdp2_tp_model,
+            device_mesh=tp_mesh,
+            parallelize_plan=tp_parallelize_plan,
+        )
+        for module in fsdp2_tp_model:
+            fully_shard(module, mesh=dp_mesh)
+        fully_shard(fsdp2_tp_model, mesh=dp_mesh)
+        fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
 
-            # Load state dict into model with FSDP2 + TP applied
-            # FSDP + TP
-            fsdp2_tp_model = _get_base_model()
-            fsdp2_tp_model = parallelize_module(
-                fsdp2_tp_model,
-                device_mesh=tp_mesh,
-                parallelize_plan=tp_parallelize_plan,
-            )
-            for module in fsdp2_tp_model:
-                fully_shard(module, mesh=dp_mesh)
-            fully_shard(fsdp2_tp_model, mesh=dp_mesh)
-            fsdp2_tp_optim = torch.optim.AdamW(fsdp2_tp_model.parameters(), lr=0.1)
-
+        # Load state dict into model with FSDP2 + TP applied
+        for src_state_dict_type in ["full", "sharded"]:
+            msd_name = f"model_{src_state_dict_type}"
+            osd_name = f"optim_{src_state_dict_type}"
             fsdp2_tp_state_dict = {
-                "model": get_model_state_dict(fsdp2_tp_model),
-                "optim": get_optimizer_state_dict(fsdp2_tp_model, fsdp2_tp_optim),
+                msd_name: get_model_state_dict(fsdp2_tp_model),
+                osd_name: get_optimizer_state_dict(fsdp2_tp_model, fsdp2_tp_optim),
             }
+            # load state dict from temp dir
             dcp.load(
                 fsdp2_tp_state_dict,
                 checkpoint_id=self.temp_dir,
             )
-            fsdp2_tp_model.load_state_dict(fsdp2_tp_state_dict["model"])
-            fsdp2_tp_optim.load_state_dict(fsdp2_tp_state_dict["optim"])
+            fsdp2_tp_model.load_state_dict(fsdp2_tp_state_dict[msd_name])
+            fsdp2_tp_optim.load_state_dict(fsdp2_tp_state_dict[osd_name])
 
             fsdp2_tp_full_msd = get_model_state_dict(
                 fsdp2_tp_model,
