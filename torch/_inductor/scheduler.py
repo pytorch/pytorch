@@ -3064,6 +3064,7 @@ class Scheduler:
         for node in self.nodes:
             if (
                 node.node
+                and not isinstance(node.node, MultiOutput)
                 and node.node.get_device().type == "cpu"
                 and hasattr(node.node, "get_size")
                 and node.node.get_size() == []

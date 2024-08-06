@@ -160,7 +160,7 @@ class CUDATemplateKernel(CUDAKernel):
         _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
+            if V.graph.is_zero_dim_cpu_tensor(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
                 call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
