@@ -3209,6 +3209,8 @@ CPU_TEST_FAILURES = {
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
+    # https://github.com/pytorch/pytorch/issues/122980
+    "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),

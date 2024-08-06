@@ -4,6 +4,8 @@
 // interface. Note also that #includes should go into interface.cpp
 // for simplicity of maintenance.
 
+#include <iostream>
+
 namespace torch {
 namespace aot_inductor {
 template <typename T>
@@ -36,8 +38,8 @@ void convert_handle_to_arrayref_tensor(
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle, &data_ptr));
   int64_t dim;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(handle, &dim));
-  int64_t storage_numel;
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_storage_numel(handle, &storage_numel));
+  int64_t numel;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(handle, &numel));
   int64_t* sizes;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle, &sizes));
   int64_t* strides;
@@ -50,8 +52,10 @@ void convert_handle_to_arrayref_tensor(
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_device_index(handle, &device_index));
 
+  std::cout << "convert_handle_to_arrayref_tensor device " << device_type << std::endl;
+
   input = ArrayRefTensor<T>(
-      MiniArrayRef<T>(reinterpret_cast<T*>(data_ptr), storage_numel),
+      MiniArrayRef<T>(reinterpret_cast<T*>(data_ptr), numel),
       MiniArrayRef<const int64_t>(sizes, dim),
       MiniArrayRef<const int64_t>(strides, dim),
       device_type,
