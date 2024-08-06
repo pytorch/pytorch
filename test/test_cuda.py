@@ -4984,7 +4984,6 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    @unittest.skipIf(IS_WINDOWS, "fails in periodic")
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
@@ -5008,7 +5007,7 @@ class TestMemPool(TestCase):
                 build_directory=tempdir,
             )
             allocator = torch.cuda.memory.CUDAPluggableAllocator(
-                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
+                dummy_allocator,
                 "dummy_alloc",
                 "dummy_free",
             )
