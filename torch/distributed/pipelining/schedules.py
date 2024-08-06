@@ -1609,3 +1609,24 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
                 f"Non zero bubbles added: {total_bubbles_added=} {bubbles_added=}"  # noqa: G004
             )
         return result
+
+
+def get_schedule_class(schedule_name: str):
+    """
+    Maps a schedule name to its corresponding class object.
+
+    Args:
+        schedule_name (str): The name of the schedule.
+    """
+    schedule_map = {
+        "1F1B": Schedule1F1B,
+        "Interleaved1F1B": ScheduleInterleaved1F1B,
+        "GPipe": ScheduleGPipe,
+        "FlexibleInterleaved1F1B": ScheduleFlexibleInterleaved1F1B,
+        "LoopedBFS": ScheduleLoopedBFS,
+        "PipelineScheduleSingle": PipelineScheduleSingle,
+        "PipelineScheduleMulti": PipelineScheduleMulti,
+    }
+    if schedule_name not in schedule_map:
+        raise ValueError(f"Unknown schedule name: {schedule_name}")
+    return schedule_map[schedule_name]
