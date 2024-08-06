@@ -11,8 +11,8 @@
 
 #endif // AT_MKLDNN_ENABLED()
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -30,5 +30,5 @@ const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
 
 void FuseConvWithEltwise(std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+

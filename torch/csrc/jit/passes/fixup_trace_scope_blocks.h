@@ -3,8 +3,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 // Directly after tracing, we have an ill-formed graph with blocks inserted.
 // Example:
@@ -43,5 +43,5 @@ TORCH_API void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
     Module* self);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
