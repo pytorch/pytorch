@@ -572,6 +572,9 @@ class FSDPParamGroup:
             return f"{label} ({self._module_fqn})"
         return label
 
+    def __repr__(self):
+        return f"FSDPParamGroup(fqn={self._module_fqn})"
+
 
 def _get_param_module_infos(
     params: List[nn.Parameter], modules: Tuple[nn.Module, ...]

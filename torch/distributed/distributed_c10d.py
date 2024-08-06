@@ -434,7 +434,7 @@ class _reduce_op:
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # __members__ is a dict storing key-value pairs for enum classes
         for k, v in ReduceOp.RedOpType.__members__.items():
             setattr(self, k, v)
@@ -568,7 +568,7 @@ class _World:
        of c10d and is subject to change..
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[_CollOp]] = {}
         self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
@@ -1286,6 +1286,33 @@ def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
         "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
         "assuming you are not running in a multi-device context and want the code to run locally instead."
     )
+
+
+def _add_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
+    """
+    This API adds an ephemeral timeout extension for all PGs locally
+    on one rank. The timeout gets reset when the first collective issued
+    after API called finished.
+    NOTE: We only support to set timeout for cuda backends for now.
+    NOTE: While this feature
+    provides flexibility in specific scenarios, it introduces statefulness
+    to timeout setting. Therefore, it is advisable to use this API sparingly
+    and consider alternative approaches, such as directly setting the timeout
+    or utilizing a barrier collective (one can set any timeout to the barrier),
+    whenever feasible.
+
+    Args:
+        timeout (timedelta): The delta of timeout to extend.
+
+    Returns:
+        None.
+    """
+    for pg in _world.pg_map.keys():
+        devices = pg._device_types
+        if torch.device("cuda") in devices:
+            backend = pg._get_backend(torch.device("cuda"))
+            if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+                backend._add_ephemeral_timeout(timeout)
 
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
@@ -2194,7 +2221,7 @@ class _IllegalWork(Work):
 
 
 class _CoalescingManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.works: List[Work] = []
 
     def append(self, work: Work):
