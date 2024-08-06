@@ -676,7 +676,7 @@ class ExportedProgram:
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
-        self._validate()
+        self.validate()
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1091,6 +1091,11 @@ class ExportedProgram:
             input_placeholders, flat_args_with_path, self.range_constraints
         )
 
+    @compatibility(is_backward_compatible=False)
+    def validate(self):
+        self._validate()
+
+    # TODO: remove this
     @final
     def _validate(self):
         assert (
