@@ -56,18 +56,19 @@ def blaslt_supported_device():
     return False
 
 def set_tunableop_defaults():
-    if torch.cuda.is_available():
-        # disables TunableOp and restore to default values
-        ordinal = torch.cuda.current_device()
-        filename = f"tunableop_results{ordinal}.csv"
-        torch.cuda.tunable.enable(False)
-        torch.cuda.tunable.tuning_enable(True)
-        torch.cuda.tunable.set_filename(filename)  # reset back to default filename for next unit test
-        torch.cuda.tunable.set_max_tuning_duration(30)
-        torch.cuda.tunable.set_max_tuning_iterations(100)
-    else:
+    if not torch.cuda.is_available():
         # TunableOp not supported on CPU at this time.
-        pass
+        return
+
+    # disable TunableOp and restore to default values
+    ordinal = torch.cuda.current_device()
+    filename = f"tunableop_results{ordinal}.csv"
+    torch.cuda.tunable.enable(False)
+    torch.cuda.tunable.tuning_enable(True)
+    torch.cuda.tunable.set_filename(filename)  # reset back to default filename for next unit test
+    torch.cuda.tunable.set_max_tuning_duration(30)
+    torch.cuda.tunable.set_max_tuning_iterations(100)
+
 
 class TestLinalg(TestCase):
     def setUp(self):
