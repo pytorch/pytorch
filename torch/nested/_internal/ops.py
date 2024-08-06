@@ -474,7 +474,6 @@ def copy_default(func, *args, **kwargs):
     )
     inp = new_kwargs.pop("input")
     src = new_kwargs.pop("src")
-    # check_ragged_dim_same(func, inp, "self", src, "src")
     if inp._size != src._size:
         raise RuntimeError(
             "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
