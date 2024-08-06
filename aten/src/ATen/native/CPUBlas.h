@@ -8,8 +8,9 @@
 #include <c10/core/Scalar.h>
 
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))) && (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2))
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
+#include <oneapi/dnnl/dnnl.hpp>
 #endif
 
 namespace at::native::cpublas {
@@ -191,7 +192,7 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))) && (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2))
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 template <typename key_t, typename value_t>
 struct Kernel_Cache {
   using kstore_t = std::unordered_map<key_t, std::shared_ptr<value_t>>;
@@ -304,7 +305,7 @@ struct PackKey {
   }
 };
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))) && (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2))
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 // Helper struct for convenient brgemm configuration
 struct GemmHelper {
   GemmHelper(
@@ -463,6 +464,12 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
     static thread_local std::shared_ptr<GemmHelper> current;
     return current;
   }
+
+  static inline bool fp16_device_check() {
+    static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16 ||
+      dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+    return fp16_support;
+  }
 };
 
 using pack_t = dnnl::ukernel::brgemm_pack_B;
@@ -573,7 +580,7 @@ bool need_pack(ScalarType dt_in, ScalarType dt_out);
 
 } // namespace at::native::cpublas
 
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))) && (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2))
+#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
 namespace std {
 template <>
 struct hash<at::native::cpublas::BrgemmKey> {
