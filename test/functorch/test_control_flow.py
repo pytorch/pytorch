@@ -135,7 +135,7 @@ def _while_loop_tests():
             return while_loop(cond_fn, body_fn, (ci, cj, a, b))
 
     class SimpleWithLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(2, 2)
             self.dec = torch.nn.Buffer(torch.tensor(1))
@@ -150,7 +150,7 @@ def _while_loop_tests():
             return while_loop(cond_fn, body_fn, (iter, x))
 
     class NestedWithLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.mod = SimpleWithLinear()
             self.outer_linear = torch.nn.Linear(2, 2)
@@ -834,7 +834,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_autograd_user_nn_module(self):
         class User_nn_module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, input):
@@ -2964,7 +2964,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_parameter(
                     "param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False)
@@ -3504,6 +3504,45 @@ def forward(self, l_inp_, l_tmp_):
     """,
         )
         self.assertEqual(out, f(inp, tmp))
+
+    def test_two_hops_not_sharing_code_obj(self):
+        pred, args = torch.tensor(True), (torch.ones(3, 3),)
+
+        def fn1(x):
+            return x + 1
+
+        def fn2(x):
+            return x - 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        # Tests rely on automatic_dynamic = True
+        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
+            cnt = CompileCounter()
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            args = (torch.randn(3, 3),)
+            # No recompilation
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            def cond_fn(x):
+                return x.sum() > 0
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            # recompilation
+            self.assertEqual(cnt.frame_count, 2)
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            self.assertEqual(cnt.frame_count, 2)
+
+            # With recompilation due to automatic dynamic
+            # This also proves that while_loop doesn't share code obj with cond
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, (torch.randn(4, 4),))
+            self.assertEqual(cnt.frame_count, 3)
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)

@@ -772,7 +772,7 @@ class ExecutionTraceObserver(_ITraceObserver):
     incurring any overheads.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the default states.
         """
