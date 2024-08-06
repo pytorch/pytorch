@@ -106,7 +106,7 @@ jobs:
           echo "No torch whl found."
           exit /b 1
         )
-        pip install -r docs/requirements.txt > pip_install_vision_requirements_log.txt
+        pip install -r docs\requirements.txt > pip_install_vision_requirements_log.txt
         python setup.py bdist_wheel > build_vision_wheel_log.txt
 
         for %%f in (C:\vision\dist\torchvision-*.whl) do (
