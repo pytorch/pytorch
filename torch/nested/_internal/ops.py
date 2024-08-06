@@ -480,7 +480,20 @@ def _to_copy_default(func, *args, **kwargs):
 
     # Copy to a new Python subclass NestedTensor
     new_offsets = inp._offsets.to(device=new_values.device)
-    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import (
+        FunctionalTensor,
+        mb_unwrap_functional_tensor,
+    )
+
+    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
+        # Temporary hack until we have the union find
+        tgt = mb_unwrap_functional_tensor(new_offsets)
+        src = mb_unwrap_functional_tensor(inp._offsets)
+        tgt.nested_int_memo = src.nested_int_memo
+    else:
+        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
 
@@ -538,6 +551,23 @@ def _nested_jagged_to_strided(func, *args, **kwargs):
         nested_strides=nested_strides.cpu(),
         offsets=nested_offsets.cpu(),
     )
+
+
+@register_jagged_func(
+    torch.ops.aten.copy_.default, "self: jt_all, src: jt_all, non_blocking: any?"
+)
+def copy_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    if inp._size != src._size:
+        raise RuntimeError(
+            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
+        )
+    inp.values().copy_(src.values())
+    return inp
 
 
 register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
