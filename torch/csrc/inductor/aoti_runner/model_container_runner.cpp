@@ -181,5 +181,12 @@ std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
   return {in_spec, out_spec};
 }
 
+std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+getAOTIModelRunnerRegistry() {
+  static std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
+      aoti_model_runner_registry_;
+  return aoti_model_runner_registry_;
+}
+
 } // namespace torch::inductor
 #endif
