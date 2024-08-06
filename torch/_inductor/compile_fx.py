@@ -23,6 +23,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
@@ -51,6 +52,7 @@ from torch._inductor.utils import (
     count_tangents,
     fresh_inductor_cache,
     InputType,
+    is_gpu,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -371,11 +373,11 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
     """
-    has_cuda = any(
-        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
+    has_gpu = any(
+        is_gpu(t.device.type) for t in example_inputs if isinstance(t, torch.Tensor)
     )
 
-    if config.comprehensive_padding and not has_cuda:
+    if config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
         return config.patch(comprehensive_padding=False)
     else:
@@ -921,8 +923,8 @@ def get_input_idxs_to_check(
         if not isinstance(input, torch.Tensor):
             # non-tensors don't need alignment
             continue
-        if input.device.type != "cuda":
-            # right now we only care for cuda tensors
+        if not is_gpu(input.device.type):
+            # right now we only care for gpu tensors
             continue
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
@@ -1565,7 +1567,8 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
     def warn_and_skip(device) -> None:
         from torch._dynamo.exc import SkipFrame
 
-        device_props = torch.cuda.get_device_properties(device)
+        device_interface = get_interface_for_device(device.type)
+        device_props = device_interface.get_device_properties(device)
         warnings.warn(
             f"{device_props.name} does not support bfloat16 compilation natively, skipping"
         )
@@ -1573,20 +1576,22 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
     for inp in graph.graph_inputs.values():
         device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
+        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        device_interface = get_interface_for_device(device.type)
+        if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(device)
 
     for out in graph.graph_outputs:
         device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if device.type != "cuda" or out.get_dtype() != torch.bfloat16:
+        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        device_interface = get_interface_for_device(device.type)
+        if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(device)
