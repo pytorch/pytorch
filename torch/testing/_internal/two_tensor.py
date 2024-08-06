@@ -31,7 +31,7 @@ class TwoTensor(torch.Tensor):
         assert a.storage_offset() == b.storage_offset()
         return out
 
-    def __init__(self, a, b, **_kwargs):
+    def __init__(self, a, b, *, requires_grad=False):
         self.a = a
         self.b = b
 
