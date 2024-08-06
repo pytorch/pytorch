@@ -2224,7 +2224,7 @@ class DimConstraints:
                     'For more information, run with TORCH_LOGS="+dynamic".\n'
                 )
                 for s, val in forced_specializations.items():
-                    buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
+                    buf += f"  - solving the guards generated for {s} resulted in a specialized value of {val}.\n"
 
             self._process_derived_dim_roots(results, name_to_dim)
 
