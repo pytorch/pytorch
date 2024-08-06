@@ -801,7 +801,8 @@ def create_micro_gemm(
                 # The output_dtype here is the output dtype of the micro-kernel.
                 # In some cases, the actual output dtype of the op for which the micro-kernel
                 # is being created would be same as that of the activation, but the micro-kernels
-                # computes output in Float, which is converted in the GEMM template.
+                # compute output in Float/int32, which is converted in the GEMM template. This is
+                # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
                     config, m, n, k, alpha, num_threads
