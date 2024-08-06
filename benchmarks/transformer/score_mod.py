@@ -201,7 +201,7 @@ def run_single_experiment(
         torch.testing.assert_close(out_eager, out_compile, atol=1e-2, rtol=1e-2)
 
     if config.calculate_bwd_time:
-        out_eager = eager_sdpa(query, b_key, b_value, score_mod)
+        out_eager = eager_sdpa(query, b_key, b_value, attn_mask)
         dOut = torch.randn_like(out_eager)
         backward_eager_time = benchmark_torch_function_in_microseconds(
             out_eager.backward, dOut, retain_graph=True
