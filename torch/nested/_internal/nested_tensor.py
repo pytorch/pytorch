@@ -5,7 +5,6 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -201,6 +200,9 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
+    def data_ptr(self) -> int:
+        return self._values.data_ptr()
+
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -259,6 +261,8 @@ class NestedTensor(torch.Tensor):
         # Note that we cannot simply check if is_fake(values) because
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
+        from torch.fx.experimental.symbolic_shapes import has_free_symbols
+
         ragged_source = offsets if lengths is None else lengths
         if has_free_symbols(ragged_source) or has_free_symbols(values):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
