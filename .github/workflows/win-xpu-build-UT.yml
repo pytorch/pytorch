@@ -38,40 +38,39 @@ jobs:
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
 
-    - name: Set conda environment
-      shell: cmd
-      run: |
-        call %conda_path%\Scripts\activate.bat
-        call conda remove -n %conda_env% --all -y
-        call conda create -n %conda_env% python=%python_version% -y
-        call conda activate %conda_env%
-        call conda install cmake==3.26.4 ninja -y
-        call conda remove ucrt -y
-        call pip install pyyaml
-        call conda list
+    # - name: Set conda environment
+    #   shell: cmd
+    #   run: |
+    #     call %conda_path%\Scripts\activate.bat
+    #     call conda remove -n %conda_env% --all -y
+    #     call conda create -n %conda_env% python=%python_version% -y
+    #     call conda activate %conda_env%
+    #     call conda install cmake==3.26.4 ninja -y
+    #     call conda remove ucrt -y
+    #     call pip install pyyaml
+    #     call conda list
 
   Build-whls:
     runs-on: ["${{ inputs.win_runner }}"]
     needs: [Preparation]
     steps:
-    - name: Build Torch
-      shell: cmd
-      run: |
-        call %conda_path%\Scripts\activate.bat %conda_env%
-        call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
-        if exist "C:\pytorch" (
-          rmdir /s /q "C:\pytorch"
-        )
-        set pytorch_commit_number_arg=${{ inputs.pytorch_commit }}
-        git clone https://github.com/pytorch/pytorch.git C:\pytorch > git_pytorch_repo_log.txt
-        cd C:\pytorch
-        git checkout %pytorch_commit_number_arg%
-        set xpu_commit_number_arg=${{ inputs.xpu_commit }}
-        python -c "import os;commit_number = os.getenv('xpu_commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
-        call conda install conda-forge::rust -y
-        call conda install typing_extensions -y
-        python -m pip install -r requirements.txt > pip_install_pytorch_requirements_log.txt
-        python setup.py bdist_wheel > build_torch_wheel_log.txt
+    # - name: Build Torch
+    #   shell: cmd
+    #   run: |
+    #     call %conda_path%\Scripts\activate.bat %conda_env%
+    #     call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat"
+    #     if exist "C:\pytorch" (
+    #       rmdir /s /q "C:\pytorch"
+    #     )
+    #     git clone https://github.com/pytorch/pytorch.git C:\pytorch > git_pytorch_repo_log.txt
+    #     cd C:\pytorch
+    #     git checkout %pytorch_commit%
+    #     set commit_number_arg=${{ inputs.xpu_commit }}
+    #     python -c "import os;commit_number = os.getenv('commit_number_arg');f=open('third_party/xpu.txt', 'w');f.write(commit_number);f.close()"
+    #     call conda install conda-forge::rust -y
+    #     call conda install typing_extensions -y
+    #     python -m pip install -r requirements.txt > pip_install_pytorch_requirements_log.txt
+    #     python setup.py bdist_wheel > build_torch_wheel_log.txt
 
     - name: Build TorchVision
       shell: cmd
@@ -84,18 +83,26 @@ jobs:
         git clone https://github.com/pytorch/vision.git C:\vision > git_vision_repo_log.txt
         cd C:\vision
         pip install -r docs/requirements.txt > pip_install_vision_requirements_log.txt
-        if exist C:\pytorch\dist\torch-*.whl (
-          pip install C:\pytorch\dist\torch-*.whl --force-reinstall
+        for %%f in (C:\pytorch\dist\torch-*.whl) do (
+          set "TORCH_WHL=%%f"
+        )
+        if defined TORCH_WHL (
+          pip install %TORCH_WHL% --force-reinstall
         ) else (
           echo "No torch whl found."
-          exit
+          exit /b 1
         )
+
         python setup.py bdist_wheel > build_vision_wheel_log.txt
-        if exist C:\vision\dist\torchvision-*.whl (
-          pip install C:\vision\dist\torchvision-*.whl --force-reinstall        
+
+        for %%f in (C:\vision\dist\torchvision-*.whl) do (
+          set "TORCH_WHL=%%f"
+        )
+        if defined TORCH_WHL (
+          pip install %TORCH_WHL% --force-reinstall
         ) else (
           echo "No torchvision whl found."
-          exit         
+          exit /b 1
         )
 
   Unit-tests:
@@ -117,7 +124,7 @@ jobs:
 
   Upload-artifacts:
     runs-on: ["${{ inputs.win_runner }}"]
-    needs: [Preparation, Build-whls,Unit-tests]
+    needs: [Preparation, Build-whls]
     steps:
     - name: Upload pytorch wheel
       uses: actions/upload-artifact@v2
