@@ -102,6 +102,7 @@ VECTORIZABLE_RTYPES = {
     "welford_combine",
     "argmin",
     "argmax",
+    "any",
 }
 
 PYTHON_TO_CPP = {
@@ -2261,7 +2262,10 @@ class CppVecKernel(CppKernel):
             )
         else:
             assert dtype == src_dtype
-        assert dtype in [torch.float64, torch.float, torch.int64]
+        if reduction_type == "any":
+            assert dtype == torch.bool
+        else:
+            assert dtype in [torch.float64, torch.float, torch.int64]
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
 
@@ -2349,8 +2353,11 @@ class CppVecKernel(CppKernel):
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+                is_any = reduction_type == "any"
+                # we are using at::vec::VecMask<float, N> for bool
+                vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
+                vec = f"at::vec::Vectorized<{vec_dtype}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2426,6 +2433,7 @@ class CppVecKernel(CppKernel):
 
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
+
         if reduction_type in {"argmin", "argmax"}:
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
@@ -2442,6 +2450,10 @@ class CppVecKernel(CppKernel):
                     else f"std::numeric_limits<{cdtype}>::min()"
                 )
             return f"{acc_type}({val})"
+
+        if reduction_type == "any":
+            return f"{self._get_mask_type()}::from(0)"
+
         scalar_init = reduction_init(reduction_type, dtype)
         return f"{vec_type}({scalar_init})"
 
@@ -2454,6 +2466,8 @@ class CppVecKernel(CppKernel):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
+        if reduction_type == "any":
+            return f"{self._get_mask_type()}"
         return vec_type
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
@@ -2510,6 +2524,8 @@ class CppVecKernel(CppKernel):
                 t_extra = f", {str(horizontal_reduction).lower()}"
                 arg_extra = f", {index}"
             return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
+        elif reduction_type == "any":
+            return f"{var} | {next_value}"
         else:
             raise NotImplementedError
 
@@ -2820,6 +2836,7 @@ class CppVecKernelChecker(CppVecKernel):
             argmin_argmax_vec = True
         if not (
             argmin_argmax_vec
+            or (src_dtype == torch.bool and reduction_type == "any")
             or (dtype == torch.float and src_dtype == torch.float)
             or (dtype == torch.double and src_dtype == torch.double)
             or (dtype == torch.int64 and src_dtype == torch.int64)
