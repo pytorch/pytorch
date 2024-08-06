@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
-from torch._dynamo import compile_metrics
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -550,9 +549,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             tensors_to_clone,
             possibly_missed_reinplacing_opportunities,
         )
-        compile_metrics.possibly_missed_reinplacing_opportunities += len(
-            possibly_missed_reinplacing_opportunities
-        )
+        torch._dynamo.utils.counters["inductor"][
+            "possibly_missed_reinplacing_opportunities"
+        ] += len(possibly_missed_reinplacing_opportunities)
         return tensors_to_clone
 
     for node in graph.nodes:
