@@ -1023,7 +1023,7 @@ ExprHandle TensorExprKernel::getStrideArg(
         kLong);
     strideArgToVar_[std::pair<size_t, size_t>(
         tensor_input_index, stride_index)] = var;
-    return var;
+    return static_cast<ExprHandle>(var);
   }
   return it->second;
 }
