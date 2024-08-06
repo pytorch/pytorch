@@ -3373,6 +3373,9 @@ class TestDistributions(DistributionsTestCase):
         test_duplicated_permutations(
             lambda x: x.exponential_(), torch.double, 100, 1024 * 1024 * 2, 10240
         )
+        test_duplicated_permutations(
+            lambda x: x.bernoulli_(), torch.int32, 100, 1024 * 1024 * 2, 10240
+        )
 
     @set_default_dtype(torch.double)
     def test_laplace(self):

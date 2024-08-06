@@ -37,8 +37,7 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
-#if !AT_MKL_ENABLED() || 1
+#if !AT_MKL_ENABLED()
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
@@ -50,11 +49,12 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
 #else
 void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  int64_t seed;
+  uint32_t params[2];
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    seed = generator->random();
+    params[0] = generator->random();
+    params[1] = generator->random();
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
@@ -75,7 +75,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
       int64_t len = end - begin;
       if (len > 0) {
         VSLStreamStatePtr stream;
-        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+        vslNewStreamEx(&stream, VSL_BRNG_PHILOX4X32X10, 2, params);
         vslSkipAheadStream(stream, begin);
         viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
           sample_int_ptr + begin, p);
