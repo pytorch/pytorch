@@ -1246,7 +1246,6 @@ exclude_patterns = [
     'torch/fx/experimental/normalize.py',
     'torch/fx/experimental/optimization.py',
     'torch/fx/experimental/partitioner_utils.py',
-    'torch/fx/experimental/proxy_tensor.py',
     'torch/fx/experimental/refinement_types.py',
     'torch/fx/experimental/rewriter.py',
     'torch/fx/experimental/schema_type_annotation.py',
