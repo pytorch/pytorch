@@ -422,14 +422,12 @@ def mse_loss_backward(
 
 
 @register_decomposition(aten._safe_softmax)
-def _safe_softmax(self, dim, dtype=None):
-    torch._check(
-        self.is_floating_point(),
-        lambda: f"Expected softmax matrix to be floating point, but got {self.dtype}",
-    )
-    out = torch.softmax(self, dim, dtype)
-    out = torch.nan_to_num(out)
-    return out
+def safe_softmax(self, dim, dtype=None):
+    out = torch.softmax(self, dim=dim, dtype=dtype)
+    masked = self.eq(float('-inf'))
+    masked_rows = torch.all(masked, dim=dim, keepdim=True)
+    zeros = torch.zeros_like(out)
+    return torch.where(masked_rows, zeros, out)
 
 
 @register_decomposition(aten.smooth_l1_loss)
