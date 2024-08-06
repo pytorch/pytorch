@@ -223,7 +223,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     eg. DDP based Multi Process Test cases, Mesh() etc.
 
     current_device = torch.device('cuda:0')
-    torch.randn(5, device=current_device)
+    tensor_ = torch.randn(5, device=current_device)
     get_backend_from_device(tensor_.device) -> returns 'nccl'
 '''
 def get_backend_from_device(device) -> str:

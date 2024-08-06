@@ -279,7 +279,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
     def test_nccl_dist_backend_error(self):
-        current_device = torch.device('cuda:2')
+        current_device = torch.device('cuda')
         tensor_ = torch.randn(5, device=current_device)
         backend = dist.get_backend_from_device(tensor_.device)
         assert (backend == 'nccl')
