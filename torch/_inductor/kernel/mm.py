@@ -222,7 +222,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
         if not torch._inductor.config.collect_autoheuristic(name):
             if ah_choices is not None and len(ah_choices) > 0:
-                choices = ah_choices
+                # the order in which autoheuristic returns choices is not the same as
+                # as the order of choices, which affects things like epilogue fusion.
+                # once epilogue fusion benchmarks choices in sorted order, I think we can
+                # just use the order returned by autoheuristic
+                choices = [choice for choice in choices if choice in ah_choices]
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
