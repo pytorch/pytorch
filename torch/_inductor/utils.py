@@ -529,12 +529,14 @@ def get_kernel_metadata(node_schedule, wrapper):
     if len(inductor_nodes):
         graph = inductor_nodes[0].graph
         # create a map of idx -> node and cache it
-        if not hasattr(graph, '_inductor_kernel_metadata_node_to_idx_map'):
+        if not hasattr(graph, "_inductor_kernel_metadata_node_to_idx_map"):
             node_to_idx_map = {}
             for idx, n in enumerate(graph.nodes):
                 node_to_idx_map[n] = idx
             graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map
-        inductor_nodes.sort(key=lambda n: graph._inductor_kernel_metadata_node_to_idx_map[n])
+        inductor_nodes.sort(
+            key=lambda n: graph._inductor_kernel_metadata_node_to_idx_map[n]
+        )
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
