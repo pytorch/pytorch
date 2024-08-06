@@ -19,6 +19,7 @@ from .stage import _PipelineStageBase
 
 
 __all__ = [
+    "get_schedule_class",
     "PipelineScheduleSingle",
     "PipelineScheduleMulti",
     "Schedule1F1B",

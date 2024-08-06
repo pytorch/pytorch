@@ -91,7 +91,7 @@ class _PipelineStageBase(ABC):
         num_stages: int,
         device: torch.device,
         group: Optional[dist.ProcessGroup] = None,
-        dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
+        dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         """
         Args:
@@ -102,7 +102,7 @@ class _PipelineStageBase(ABC):
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
-            dw_builder (Optional[Callable[[], Callable[[], None]]): If provided, dw_runner is a builder function
+            dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_runner is a builder function
                 that will build a new dw_runner function that will run parts of module backward that were intentionally
                 skipped during the module's actual backward pass.  builder must be invoked by stage after stage runs
                 model backwards, and stage should save the latest dw_runner to run during weight pass.
@@ -128,7 +128,7 @@ class _PipelineStageBase(ABC):
         self.backward_state: Dict[int, Tuple[Any, ...]] = {}
 
         # store dw_runner per microbatch_id
-        self.dw_runner: Dict[int, Callable[[], None]] = {}
+        self.dw_runner: Dict[int, Callable[..., None]] = {}
 
         # `group_rank` is rank in process group `group`.
         self.group_rank = dist.get_rank(self.group)
@@ -574,13 +574,9 @@ class _PipelineStageBase(ABC):
         If full_backward is True (the default), the full backward pass including weight and input gradients will be run,
         and it is an error to call `backward_weight_one_chunk` for this bwd_chunk_id.
 
-        If full_backward is False, it is required that `dw_runner` was provided to the PipelineStage at __init__ time,
+        If full_backward is False, it is optional that `dw_runner` was provided to the PipelineStage at __init__ time,
         and a subsequent call to `backward_weight_one_chunk` is required to invoke dw_runner and complete the backward.
         """
-
-        # if not full_backward:
-        #     assert self.dw_builder, "Must provide dw_builder to run partial backward"
-
         self._check_chunk_id(bwd_chunk_id)
 
         (
@@ -609,38 +605,40 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        # self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-        # logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
+        if full_backward:
+            self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
+            logger.debug(
+                f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}"
+            )  # noqa: G004
+        else:
+            # perform the partial backwards for the inputs
+            # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
+            if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
-        if not full_backward:
-            if not self.dw_builder:
-                logger.info("IN LOGGGSS")
-                # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
-                # if "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
-                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
+            dinputs, param_groups = stage_backward_input(
+                bwd_kwargs["stage_output"],
+                bwd_kwargs["input_values"],
+                self.submod.parameters(),
+            )
+            # TODO: we dont need to save this, add to dw_runner?
+            self.backward_state[bwd_chunk_id] = (
+                dinputs,
+                input_values,
+                param_groups,
+            )
+            self.grads_input = dinputs
 
-                # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
-                dinputs, param_groups = stage_backward_input(
-                    bwd_kwargs["stage_output"],
-                    bwd_kwargs["input_values"],
-                    self.submod.parameters(),
-                )
-                self.backward_state[bwd_chunk_id] = (
-                    dinputs,
-                    input_values,
-                    param_groups,
-                )
-                self.grads_input = dinputs
-            else:
+            if self.dw_builder:
                 assert bwd_chunk_id not in self.dw_runner, (
                     f"{self.log_prefix} Attempted to run partial backward for chunk {bwd_chunk_id}"
                     " repeatedly without calling `backward_weight_one_chunk`"
                 )
                 dw_runner = self.dw_builder()
-                self.dw_runner[bwd_chunk_id] = dw_runner
-        elif self.dw_builder:
-            self.dw_builder()()
+            else:
+                # create a dw_runner with the `stage_backward_weight` function
+                dw_runner = stage_backward_weight
+            self.dw_runner[bwd_chunk_id] = dw_runner
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
         if self.dw_builder is not None:
@@ -650,9 +648,8 @@ class _PipelineStageBase(ABC):
             )
             self.dw_runner.pop(bwd_chunk_id)()
         else:
-            print("Doing native backward_weight_one_chunk")
             dinputs, input_values, param_groups = self.backward_state.pop(bwd_chunk_id)
-            stage_backward_weight(self.submod.parameters(), param_groups)
+            self.dw_runner.pop(bwd_chunk_id)(self.submod.parameters(), param_groups)
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
@@ -1175,7 +1172,7 @@ class PipelineStage(_PipelineStageBase):
         input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
-        dw_builder: Optional[Callable[[], Callable[[], None]]] = None,
+        dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.submod.to(self.device)

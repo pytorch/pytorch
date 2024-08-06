@@ -380,8 +380,12 @@ class ScheduleTest(MultiProcContinousTest):
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
         # Create a pipeline stage to wrap that submodule
-        chunks = 8
-        input_args = x.chunk(chunks)[0]
+        num_microbatches = (
+            ScheduleClass.num_microbatches
+            if hasattr(ScheduleClass, "num_microbatches")
+            else 8
+        )
+        input_args = x.chunk(num_microbatches)[0]
         stages = [
             PipelineStage(
                 stage_module,
@@ -394,7 +398,7 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run
         for _ in range(2):
