@@ -2932,6 +2932,6 @@ def _extract_tensor_dict(t):
     ]
     for key in KEYS_TO_COPY:
         if key in t.__dict__:
-            tensor_dict[key] = copy.copy(t[key])
+            tensor_dict[key] = copy.copy(t.__dict__[key])
 
     return tensor_dict
