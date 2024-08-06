@@ -2346,7 +2346,11 @@ class CppVecKernel(CppKernel):
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                is_bool = dtype == torch.bool
+                is_bool = dtype == torch.bool and reduction_type in (
+                    "min",
+                    "max",
+                    "any",
+                )
                 # we are using at::vec::VecMask<float, N> for bool
                 vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
@@ -2449,8 +2453,7 @@ class CppVecKernel(CppKernel):
 
         scalar_init = reduction_init(reduction_type, dtype)
         vec_init = f"{vec_type}({scalar_init})"
-        if dtype == torch.bool:
-            assert reduction_type in ("min", "max")
+        if dtype == torch.bool and reduction_type in ("min", "max"):
             return f"{self._get_mask_type()}::from({vec_init})"
         return vec_init
 
@@ -2463,12 +2466,7 @@ class CppVecKernel(CppKernel):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
-        if dtype == torch.bool:
-            assert reduction_type in (
-                "min",
-                "max",
-                "any",
-            )
+        if dtype == torch.bool and reduction_type in ("min", "max", "any"):
             return f"{self._get_mask_type()}"
         return vec_type
 
