@@ -598,6 +598,10 @@ class FakeTensor(Tensor):
     nonzero_memo = SymIntMemoDescriptor(is_unbacked=True)
     item_memo = SymIntMemoDescriptor(is_unbacked=True)
     unique_memo = SymIntMemoDescriptor(is_unbacked=True)
+
+    # We expect nested_int_memo to be None when an offsets is a graph
+    # intermediate, or an input that has never been associated with a
+    # nested int.
     nested_int_memo = SymIntMemoDescriptor(is_unbacked=False)
 
     # Indicates to our torch_dispatch dispatching infra that
