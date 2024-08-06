@@ -1253,6 +1253,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def sdpa_hop(q, k, v, score_mod, block_mask):
@@ -1263,6 +1268,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
 
         @torch.compile(backend="aot_eager")
@@ -1271,7 +1277,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             Besides dropping LSE it also ensures that the hop is compiled with aot-eager
             backend. We need to replicate this.
             """
-            return flex_attention_hop(q, k, v, score_mod, block_mask.as_tuple(), 1.0)
+            return flex_attention_hop(
+                q, k, v, score_mod, block_mask.as_tuple(), 1.0, kernel_options
+            )
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
@@ -1319,6 +1327,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1328,7 +1341,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 v,
                 score_mod,
                 block_mask.as_tuple(),
-                scale=1.0,
+                1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return lse_2
@@ -1348,6 +1362,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
         block_mask = _create_empty_block_mask(q, k)
+        kernel_options = {
+            "ROWS_GUARANTEED_SAFE": False,
+            "PRESCALE_QK": False,
+            "OUTPUT_LOGSUMEXP": True,
+        }
 
         @torch.compile
         def func(q, k, v, score_mod, block_mask):
@@ -1358,6 +1377,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 score_mod,
                 block_mask.as_tuple(),
                 1.0,
+                kernel_options,
             )
             lse_2 = lse * 2
             return out, lse_2
@@ -1674,27 +1694,27 @@ class GraphModule(torch.nn.Module):
         l_kwargs_block_mask_full_q_num_blocks = L_kwargs_block_mask_full_q_num_blocks
         l_kwargs_block_mask_full_q_indices = L_kwargs_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True)
+        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_1 = None
+        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_2 = None
+        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_3 = None
+        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_4 = None
+        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
-        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32)
+        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_5 = None
+        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_6 = None
+        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_7 = None
+        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
-    class score_mod_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
             mul: "f64[]" = child * child;  child = None
             return mul
 
-    class mask_fn_0(torch.nn.Module):
+    class GraphModule(torch.nn.Module):
         def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
             ge: "b8[]" = child_7 >= child_8;  child_7 = child_8 = None
             return ge
@@ -1725,26 +1745,26 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return (getitem_4, getitem_5, getitem_6)
 
-    class fw_graph(torch.nn.Module):
+    class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
 
-    class joint_graph(torch.nn.Module):
+    class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1)
+            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
 
-    class mask_graph(torch.nn.Module):
+    class <lambda>(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full

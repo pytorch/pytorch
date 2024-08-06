@@ -63,7 +63,9 @@ from torch._inductor.codegen.rocm.compile_command import (
 
 T = TypeVar("T")
 
-from _collections_abc import dict_keys  # noqa: TCH003
+
+if TYPE_CHECKING:
+    from collections.abc import KeysView
 
 
 """
@@ -1394,9 +1396,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        self.device_types = graph.device_types
-        self.device_idxs = graph.device_idxs
-        self.mutated_inputs = graph.mutated_inputs
+        # TODO - ordered set
+        self.device_types = set(graph.device_types)
+        self.device_idxs = set(graph.device_idxs)
+        self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
@@ -1534,6 +1537,7 @@ def get_include_and_linking_paths(
         or vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or config.profiler_mark_wrapper_call
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
@@ -1800,7 +1804,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
+    def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
 
 
@@ -1870,11 +1874,16 @@ class AotCodeCompiler:
             payload_fn=lambda: source_code,
         )
 
+        # We use a file lock below to protect FS operations. The lock file
+        # is scoped to the 'key', so make sure the consts_path is protected
+        # by the same lock:
+        consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
+
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
                 consts,
                 "bin",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
 
             consts_o = os.path.splitext(consts_path)[0] + ".o"
@@ -1943,7 +1952,7 @@ class AotCodeCompiler:
                 _, _binary_constants_path = write(
                     consts,
                     "bin",
-                    specified_dir=os.path.split(input_path)[0],
+                    specified_dir=consts_specified_dir,
                 )
                 log.debug("binary constants path: %s", _binary_constants_path)
 
@@ -1966,7 +1975,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts_asm,
                 "S",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
             cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
@@ -2217,8 +2226,14 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
-@dynamo_timed
 def compile_file(
+    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+) -> None:
+    with dynamo_timed("compile_file"):
+        return _compile_file(input_path, output_path, cmd)
+
+
+def _compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
     input_paths = [input_path] if isinstance(input_path, str) else input_path
@@ -3416,7 +3431,7 @@ class DLLWrapper:
     def __init__(
         self,
         lib_path: str,
-    ):
+    ) -> None:
         self.lib_path = lib_path
         self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
@@ -3663,11 +3678,10 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ):
+    ) -> None:
         self.kernel = kernel
         self.future = future
 
-    # @dynamo_utils.dynamo_timed
     def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.
