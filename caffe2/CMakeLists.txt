@@ -1519,10 +1519,10 @@ if(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
-  #if(USE_FLASH_ATTENTION)
-  #  target_include_directories(
-  #      flash_attention_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
-  #endif()
+  if(USE_FLASH_ATTENTION)
+    target_include_directories(
+        flash_attention_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
