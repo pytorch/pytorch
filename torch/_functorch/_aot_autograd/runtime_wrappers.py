@@ -662,7 +662,7 @@ class EffectTokensWrapper(CompilerWrapper):
             if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
-                args = [[None] * num_tokens, *args]
+                args = [*([None] * num_tokens), *args]
                 old_args.clear()
 
             outs = compiled_fn(args)
@@ -1732,9 +1732,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
+
+                bw_tokens = [None] * len(CompiledFunction.metadata.tokens)
+
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
+                    *bw_tokens,
                     *flat_bw_args_with_grads,
                     *rng_args,
                 ]
@@ -1868,10 +1872,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     for i, t in enumerate(all_args)
                 ]
-                num_tokens = len(CompiledFunction.metadata.tokens)
-                if num_tokens > 0:
-                    # Adding runtime backward input tokens
-                    all_args = [*([None] * num_tokens), *all_args]
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():

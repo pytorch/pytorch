@@ -234,58 +234,67 @@ def maybe_to_fresh_input(idx, t, meta):
     return t
 
 
-def unlift_tokens(fw_module, fw_metadata):
+def unlift_tokens(fw_module, fw_metadata, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
 
-    input_token_nodes = []
-    for i, node in enumerate(fw_module.graph.nodes):
-        if i < num_tokens:
-            assert node.op == "placeholder"
-            input_token_nodes.append(node)
+    def do(module, subgraph):
+        input_token_nodes = []
 
-        elif node.op == "call_function" and node.target.__name__ == "with_effects":
-            if node.args[0] in input_token_nodes:
-                with fw_module.graph.inserting_before(node):
-                    new_token_node = fw_module.graph.call_function(
-                        torch.ops.prims._make_token.default, ()
+        for i, node in enumerate(module.graph.nodes):
+            if node.op == "placeholder":
+                if subgraph == "forward":
+                    if i < num_tokens:
+                        input_token_nodes.append(node)
+                elif subgraph == "backward":
+                    if (
+                        "tangents" in str(node.target)
+                        and len(input_token_nodes) < num_tokens
+                    ):
+                        input_token_nodes.append(node)
+
+            elif node.op == "call_function" and node.target.__name__ == "with_effects":
+                if node.args[0] in input_token_nodes:
+                    with module.graph.inserting_before(node):
+                        new_token_node = module.graph.call_function(
+                            torch.ops.prims._make_token.default, ()
+                        )
+                        new_token_node.meta["val"] = torch.tensor([])
+                        new_token_node.meta["tensor_meta"] = torch.tensor([])
+
+                        args = list(node.args)
+                        args[0] = new_token_node
+                        node.args = tuple(args)
+
+            elif node.op == "output":
+                output_token_nodes = node.args[0][:num_tokens]
+                other_output_args = node.args[0][num_tokens:]
+
+                for output_token_node in output_token_nodes:
+                    assert (
+                        output_token_node.op == "call_function"
+                        and output_token_node.target == operator.getitem
+                        and output_token_node.args[1] == 0
                     )
-                    new_token_node.meta["val"] = torch.tensor([])
-                    new_token_node.meta["tensor_meta"] = torch.tensor([])
+                with module.graph.inserting_before(node):
+                    sink_token_node = module.graph.call_function(
+                        torch.ops.prims._sink_tokens.default,
+                        (output_token_nodes,),
+                    )
+                    node.args = (other_output_args,)
 
-                    args = list(node.args)
-                    args[0] = new_token_node
-                    node.args = tuple(args)
+        for input_token_node in input_token_nodes:
+            module.graph.erase_node(input_token_node)
 
-        elif node.op == "output":
-            output_token_nodes = node.args[0][:num_tokens]
-            other_output_args = node.args[0][num_tokens:]
+        module.recompile()
 
-            for output_token_node in output_token_nodes:
-                assert (
-                    output_token_node.op == "call_function"
-                    and output_token_node.target == operator.getitem
-                    and output_token_node.args[1] == 0
-                )
-            with fw_module.graph.inserting_before(node):
-                sink_token_node = fw_module.graph.call_function(
-                    torch.ops.prims._sink_tokens.default,
-                    (output_token_nodes,),
-                )
-                node.args = (other_output_args,)
+    do(fw_module, "forward")
+    if bw_module is not None:
+        do(bw_module, "backward")
 
-    for input_token_node in input_token_nodes:
-        fw_module.graph.erase_node(input_token_node)
-
-    fw_module.recompile()
-
-    # This is sad, but we need to update the metadata to get rid of
-    # the tokens.
-    fw_metadata.num_forward_returns -= num_tokens
-    fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
 
 
