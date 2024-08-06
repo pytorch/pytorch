@@ -35,7 +35,8 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed.device_mesh import DeviceMesh
-
+from torch.distributed._tensor.ops._pointwise_ops import common_pointwise_strategy
+from torch.distributed._tensor.placement_types import TensorMeta
 
 aten = torch.ops.aten
 
