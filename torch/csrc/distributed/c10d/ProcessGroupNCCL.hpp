@@ -875,12 +875,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // And consolidate them if possible.
   std::mutex mtxTimeoutExtension_;
 
-  // The extended timeout set on top of existing timeout for works issued before
-  // first work finishes.
+  // The ephemeral timeout added on top of existing timeout for works issued
+  // before first work finishes.
   std::chrono::milliseconds ephemeralTimeoutActive_ =
       std::chrono::milliseconds(0);
 
-  // The timeout extension which has been already applied to work.
+  // The ephemeral timeout addition which has been already applied to work.
   std::chrono::milliseconds ephemeralTimeoutInflight_ =
       std::chrono::milliseconds(0);
 
