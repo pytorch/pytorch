@@ -109,7 +109,7 @@ class TestONNXScriptExport(common_utils.TestCase):
         # Control flow is tested for _find_onnxscript_op function in torch/onnx/utils.py,
         # which has recursive logic to go through every nodes with subgraph in model proto
         class NestedLoopsModel(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.selu = torch.nn.SELU()
 
