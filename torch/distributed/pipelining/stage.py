@@ -14,11 +14,7 @@ from torch.distributed._composable.fsdp.fully_shard import FSDPModule
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 
-from ._backward import (
-    stage_backward,
-    stage_backward_input,
-    stage_backward_weight
-)
+from ._backward import stage_backward, stage_backward_input, stage_backward_weight
 from ._debug import map_debug_info
 from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 
@@ -127,7 +123,7 @@ class _PipelineStageBase(ABC):
         self.group = group
 
         self.dw_builder = dw_builder
-        
+
         # backward state
         self.backward_state: Dict[int, []] = {}
 
@@ -621,12 +617,20 @@ class _PipelineStageBase(ABC):
                 logger.info("IN LOGGGSS")
                 # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
                 # if "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-                if isinstance(bwd_kwargs['stage_output'], torch.Tensor):
-                    bwd_kwargs['stage_output'] = (bwd_kwargs['stage_output'],)
+                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
                 # print(f"{bwd_kwargs['stage_output']}, {bwd_kwargs['input_values']}")
-                dinputs, param_groups = stage_backward_input(bwd_kwargs["stage_output"], bwd_kwargs["input_values"], self.submod.parameters())
-                self.backward_state[bwd_chunk_id] = (dinputs, input_values, param_groups)
+                dinputs, param_groups = stage_backward_input(
+                    bwd_kwargs["stage_output"],
+                    bwd_kwargs["input_values"],
+                    self.submod.parameters(),
+                )
+                self.backward_state[bwd_chunk_id] = (
+                    dinputs,
+                    input_values,
+                    param_groups,
+                )
                 self.grads_input = dinputs
             else:
                 assert bwd_chunk_id not in self.dw_runner, (

@@ -1,8 +1,10 @@
-import torch
-import torch.nn as nn
 import collections
 import weakref
+
+import torch
+import torch.nn as nn
 from torch.autograd.graph import GradientEdge
+
 
 def _get_grad_fn_or_grad_acc(t):
     if t.requires_grad and t.grad_fn is None:
@@ -39,7 +41,7 @@ def reverse_closure(roots, target_nodes):
 
 
 # Enable weak pointer
-class Holder():
+class Holder:
     def __init__(self, node):
         self.node = node
 
@@ -82,7 +84,9 @@ def get_param_groups(inputs, params):
             existing = param_groups.get(input_node, None)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
-                existing["intermediates"] = existing["intermediates"].union(param_group["intermediates"])
+                existing["intermediates"] = existing["intermediates"].union(
+                    param_group["intermediates"]
+                )
                 param_group = existing
             else:
                 param_groups[input_node] = param_group
@@ -112,31 +116,48 @@ def compute_grads_only_inputs2(roots, inps, weights):
 
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
+
             def get_hook(param_group, i):
                 def hook(grad_inputs):
                     if param_group.get("grads", None) is None:
-                        param_group["grads"] = [None] * len(param_group["intermediates"])
+                        param_group["grads"] = [None] * len(
+                            param_group["intermediates"]
+                        )
                     param_group["grads"][i] = grad_inputs
+
                 return hook
+
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
             intermediate.register_prehook(get_hook(param_group, i))
 
-    dinputs = torch.autograd.grad((out,), inputs=tuple(inps), grad_outputs=(torch.ones_like(out),), retain_graph=True)
+    dinputs = torch.autograd.grad(
+        (out,),
+        inputs=tuple(inps),
+        grad_outputs=(torch.ones_like(out),),
+        retain_graph=True,
+    )
     return dinputs, param_groups
+
 
 def compute_grads_only_weights2(user_weights, param_groups):
     all_dweights = dict()
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
-        intermediate_edges = tuple(GradientEdge(i, 0) for i in param_group["intermediates"])
+        intermediate_edges = tuple(
+            GradientEdge(i, 0) for i in param_group["intermediates"]
+        )
         weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
 
         assert all(len(g) == 1 for g in param_group["grads"])
         # [NEW!] Able to pass a GradientEdge to autograd.grad as output
         # We do not need to retain_graph because... guarantee no overlap?
         print("trying to execute: ", intermediate_edges, weights_edges)
-        dweights = torch.autograd.grad(intermediate_edges, weights_edges, grad_outputs=sum(param_group["grads"], tuple()))
+        dweights = torch.autograd.grad(
+            intermediate_edges,
+            weights_edges,
+            grad_outputs=sum(param_group["grads"], tuple()),
+        )
         for w, dw in zip(param_group["params"], dweights):
             all_dweights[w] = dw
     # return grads in the original order weights were provided in
@@ -146,7 +167,6 @@ def compute_grads_only_weights2(user_weights, param_groups):
         out.append(all_dweights[grad_acc])
     return tuple(out)
 
-import torch.nn as nn
 
 # Setup
 mod1 = nn.Linear(10, 10)
@@ -168,6 +188,7 @@ class LoggingTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
         print(f"{func.__module__}.{func.__name__}")
         return rs
 
+
 print(" -- SPLIT -- ")
 # Compute gradients in two parts
 with LoggingTensorMode():
@@ -182,7 +203,9 @@ print(" -- REF -- ")
 
 # Compare with reference
 with LoggingTensorMode():
-    ref_all_gradients = torch.autograd.grad(out, inputs=tuple(inps) + weights, grad_outputs=(torch.ones_like(out),))
+    ref_all_gradients = torch.autograd.grad(
+        out, inputs=tuple(inps) + weights, grad_outputs=(torch.ones_like(out),)
+    )
 
 for actual, ref in zip(dinputs + dweights, ref_all_gradients):
     print(torch.allclose(actual, ref))

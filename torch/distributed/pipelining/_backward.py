@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import logging
 import collections
+import logging
 import weakref
-from torch.autograd.graph import GradientEdge
 from typing import List, Optional
 
 import torch
+from torch.autograd.graph import GradientEdge
 
 from ._debug import map_debug_info
 
@@ -19,6 +19,7 @@ def _get_grad_fn_or_grad_acc(t):
         return t.view_as(t).grad_fn.next_functions[0][0]
     else:
         return t.grad_fn
+
 
 def reverse_closure(roots, target_nodes):
     # Recurse until we reach a target node
@@ -50,7 +51,7 @@ def reverse_closure(roots, target_nodes):
 
 
 # Enable weak pointer
-class Holder():
+class Holder:
     def __init__(self, node):
         self.node = node
 
@@ -79,6 +80,7 @@ def construct_reverse_graph(roots):
                 fn.metadata["reverse_edges"] = reverse_edges
     return reverse_graph_refs
 
+
 def get_param_groups(inputs, params):
     inputs_closure, _ = reverse_closure(inputs, set())
     param_groups = dict()  # keyed on intermediates
@@ -92,7 +94,9 @@ def get_param_groups(inputs, params):
             existing = param_groups.get(input_node, None)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
-                existing["intermediates"] = existing["intermediates"].union(param_group["intermediates"])
+                existing["intermediates"] = existing["intermediates"].union(
+                    param_group["intermediates"]
+                )
                 param_group = existing
             else:
                 param_groups[input_node] = param_group
@@ -170,14 +174,20 @@ def stage_backward_weight(weights, param_groups):
     all_dweights = dict()
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
-        intermediate_edges = tuple(GradientEdge(i, 0) for i in param_group["intermediates"])
+        intermediate_edges = tuple(
+            GradientEdge(i, 0) for i in param_group["intermediates"]
+        )
         weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
 
         assert all(len(g) == 1 for g in param_group["grads"])
         # [NEW!] Able to pass a GradientEdge to autograd.grad as output
         # We do not need to retain_graph because... guarantee no overlap?
         # print("trying to execute: ", intermediate_edges, weights_edges)
-        dweights = torch.autograd.grad(intermediate_edges, weights_edges, grad_outputs=sum(param_group["grads"], tuple()))
+        dweights = torch.autograd.grad(
+            intermediate_edges,
+            weights_edges,
+            grad_outputs=sum(param_group["grads"], tuple()),
+        )
         for w, dw in zip(param_group["params"], dweights):
             all_dweights[w] = dw
     # return grads in the original order weights were provided in

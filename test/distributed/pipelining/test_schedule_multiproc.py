@@ -428,9 +428,7 @@ class ScheduleTest(MultiProcContinousTest):
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
 
-        schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn
-        )
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
         # Run
         # TODO how to better specify .step() when first and last stage are on rank 0...
@@ -445,7 +443,6 @@ class ScheduleTest(MultiProcContinousTest):
                 out = schedule.step(target=target, losses=losses)
             else:
                 schedule.step()
-
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
