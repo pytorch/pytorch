@@ -1191,8 +1191,6 @@ class TritonKernel(SIMDKernel):
         self.autotune_hints: Set[AutotuneHint] = set()
         self.triton_meta: Optional[Dict[str, object]] = None
         self.optimize_mask: bool = optimize_mask
-        # used to convert 0dim cpu tensor to scalar for cuda kernels
-        self.zero_dim_cpu_tensor_list: Set[str] = set()
 
         self.codegen_range_tree()
 
@@ -1737,7 +1735,7 @@ class TritonKernel(SIMDKernel):
 
         advance_block_ptr = None
         append_broadcast = None
-        if V.graph.is_unspec_arg(name) or name in self.zero_dim_cpu_tensor_list:
+        if V.graph.is_unspec_arg(name) or V.graph.is_zero_dim_cpu_tensor(name):
             line = var
         else:
             if isinstance(indexing, BlockPtrOptions):
@@ -2591,7 +2589,6 @@ class TritonKernel(SIMDKernel):
         triton_meta_signature = signature_to_meta(
             signature,
             size_dtype=self.index_dtype,
-            zero_dim_cpu_tensor_list=self.zero_dim_cpu_tensor_list,
         )
         triton_meta = {
             "signature": triton_meta_signature,

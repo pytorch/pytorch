@@ -38,7 +38,7 @@ def signature_of(
                 return "fp32"
             else:
                 return new_tye
-        elif zero_dim_cpu_tensor_list and (arg.buffer in zero_dim_cpu_tensor_list):
+        elif V.graph.is_zero_dim_cpu_tensor(arg.buffer):
             if arg.dtype.is_floating_point:
                 return "fp64"
             elif arg.dtype.is_signed:
@@ -70,7 +70,6 @@ def signature_to_meta(
     *,
     size_dtype: str,
     indices: Optional[List[int]] = None,
-    zero_dim_cpu_tensor_list: Optional[Set[str]] = None,
 ) -> Dict[int, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -78,7 +77,6 @@ def signature_to_meta(
         i: signature_of(
             arg,
             size_dtype=size_dtype,
-            zero_dim_cpu_tensor_list=zero_dim_cpu_tensor_list,
         )
         for i, arg in zip(indices, signature)
     }

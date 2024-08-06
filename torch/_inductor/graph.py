@@ -352,6 +352,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: Set[str] = set()
         self.device_types: Set[str] = (
             const_module.device_types if const_module else set()
         )
@@ -1845,33 +1846,9 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_device().type == "cpu"
         )
 
-    def check_0dim_cpu_tensor(self, args: List[Any]) -> Set[str]:
+    def is_zero_dim_cpu_tensor(self, name: str) -> bool:
         """
-        Check if there is any 0-dim CPU tensor in the args for CUDA kenrels. If so, we need to
-        convert them to scalar before passing to the kernel.
+        Check if there is any 0-dim CPU tensor in the args. If so, we need to
+        convert them to scalar before passing to the kernel. This should only be used in triton CUDA kernels generations.
         """
-        zero_dim_cpu_tensor_list = set()
-        target_device_cuda = False
-        for arg in args:
-            if not isinstance(arg, str):
-                continue
-            buf = V.graph.name_to_buffer.get(arg, None)
-            if buf is not None and buf.get_device().type == "cuda":
-                target_device_cuda = True
-                break
-            arg_is_input = V.graph.graph_inputs.get(arg, None)
-            if arg_is_input is not None and arg_is_input.get_device().type == "cuda":
-                target_device_cuda = True
-                break
-        if target_device_cuda:
-            for arg in args:
-                if not isinstance(arg, str):
-                    continue
-                buf = V.graph.name_to_buffer.get(arg, None)
-                if (
-                    buf is not None
-                    and buf.get_device().type == "cpu"
-                    and buf.get_size() == []
-                ):
-                    zero_dim_cpu_tensor_list.add(arg)
-        return zero_dim_cpu_tensor_list
+        return name in self.zero_dim_cpu_tensor_list
