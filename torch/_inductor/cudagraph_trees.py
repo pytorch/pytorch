@@ -212,7 +212,7 @@ class TreeManagerContainer:
     -  All the storages are dead, we deallocate the tree manager
     """
 
-    def __init__(self, device_index: int):
+    def __init__(self, device_index: int) -> None:
         # This class keeps a strong reference to tree_manager,
         # but upon all other strong references to the tree_manager will reset it to None.
         # We need a strong reference so that we can still access its attributes upon cleanup.
@@ -445,7 +445,7 @@ class StorageWeakRefWrapper:
         self,
         inp: Union[Tensor, UntypedStorage],
         extra_ref_check: Optional[Callable[[], bool]] = None,
-    ):
+    ) -> None:
         """
         extra_ref_check is an additional check we need to run to check if the
         weak ref has expired. in checking storage use count we assume extra_ref_check
@@ -592,7 +592,7 @@ class CUDAWarmupNode:
         stream: torch.cuda.Stream,
         already_warm: bool,
         id: GraphID,
-    ):
+    ) -> None:
         self.wrapped_function = wrapped_function
         self.parent: Optional[Union[CUDAGraphNode, CUDAWarmupNode]] = parent
         self.cuda_graphs_pool = cuda_graphs_pool
@@ -727,7 +727,7 @@ class AliasesPriorGraphOutput(OutputAliasInfo):
 
     index: PathOutputIndex
 
-    def __init__(self, index: PathOutputIndex):
+    def __init__(self, index: PathOutputIndex) -> None:
         assert isinstance(index, tuple)
         self.index = index
 
@@ -739,7 +739,7 @@ class AliasesNewOutput(OutputAliasInfo):
 
     index: int
 
-    def __init__(self, index: int):
+    def __init__(self, index: int) -> None:
         assert isinstance(index, int)
         self.index = index
 
@@ -775,7 +775,7 @@ class CUDAGraphNode:
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
-    ):
+    ) -> None:
         assert isinstance(inputs, (list, tuple))
 
         self.wrapped_function = wrapped_function
@@ -1004,7 +1004,7 @@ class CUDAGraphNode:
         if (
             not self.rerecord_if_static_inputs_change
             and not torch._C._tensors_data_ptrs_at_indices_equal(
-                new_inputs,
+                new_inputs,  # type: ignore[arg-type]
                 self.static_input_data_ptrs,
                 self.non_managed_static_input_idxs,
             )
@@ -1623,7 +1623,9 @@ class CUDAGraphNode:
         # this is on the hot path so moved to C++. equivalent to:
         # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
         if not torch._C._tensors_data_ptrs_at_indices_equal(
-            inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
+            inputs,  # type: ignore[arg-type]
+            self.static_input_data_ptrs,
+            self.cudagraph_managed_idxs,
         ):
             status = CheckInvariantStatus.CudagraphManagedIdxMismatch
             _logger = functools.partial(
@@ -1646,7 +1648,9 @@ class CUDAGraphNode:
         if (
             self.rerecord_if_static_inputs_change
             and not torch._C._tensors_data_ptrs_at_indices_equal(
-                inputs, self.static_input_data_ptrs, self.static_input_idxs
+                inputs,  # type: ignore[arg-type]
+                self.static_input_data_ptrs,
+                self.static_input_idxs,
             )
         ):
             status = CheckInvariantStatus.StaticInputIdxMismatch
@@ -1807,7 +1811,7 @@ class CUDAGraphTreeManager:
     replay.
     """
 
-    def __init__(self, device_index: int):
+    def __init__(self, device_index: int) -> None:
         # roots are functions which have no dependencies on an other node. I.e.,
         # when they are first invoked, none of their inputs are outputs are outputs
         # of another node, nor are there any live outputs of another node whose

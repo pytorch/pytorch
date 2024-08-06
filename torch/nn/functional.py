@@ -5686,6 +5686,7 @@ Note:
     Due to the nature of fusing floating point operations, the output of this function may be different
     depending on what backend kernel is chosen.
     The c++ implementation supports torch.float64 and can be used when higher precision is required.
+    For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
 Note:
