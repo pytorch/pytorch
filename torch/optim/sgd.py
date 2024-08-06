@@ -5,6 +5,7 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -15,6 +16,7 @@ from .optimizer import (
     DeviceDict,
     Optimizer,
 )
+
 
 __all__ = ["SGD", "sgd"]
 
@@ -432,7 +434,7 @@ def _multi_tensor_sgd(
 
         if not device_has_sparse_grad:
             # handle internal item() call if lr is a tensor
-            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+            if isinstance(lr, torch.Tensor) and torch.compiler.is_compiling():
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:

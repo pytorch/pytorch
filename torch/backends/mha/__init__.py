@@ -8,6 +8,7 @@ __all__ = [
 
 import torch
 
+
 _is_fastpath_enabled: bool = True
 
 
