@@ -176,6 +176,9 @@ file(GLOB mem_eff_attention_cuda_kernels_cu "native/transformers/cuda/mem_eff_at
 file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention/*.cpp")
 
 if(USE_FLASH_ATTENTION)
+  # Do NOT add flash_attention_cuda_cu and flash_attention_cuda_kernels_cu to
+  # native_transformers_cuda_cu because they will be compiled as a separate
+  # target in order to limit the build parallelism to avoid OOMing.
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
   list(APPEND FLASH_ATTENTION_CUDA_SOURCES ${flash_attention_cuda_cu} ${flash_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})

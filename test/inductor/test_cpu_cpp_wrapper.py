@@ -88,7 +88,6 @@ if config.abi_compatible:
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
-        "test_profiler_mark_wrapper_call_cpu",
         "test_qconv2d_add_cpu",
         "test_qconv2d_add_relu_cpu",
         "test_qconv2d_cpu",
@@ -269,6 +268,7 @@ if RUN_CPU:
             test_cpu_repro.CPUReproTests(),
             condition=torch.backends.mkldnn.is_available(),
         ),
+        BaseTest("test_max_pool2d6"),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(

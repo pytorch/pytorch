@@ -60,6 +60,7 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
+  list(APPEND Caffe2_GPU_CU_SRCS_FLASH_ATTENTION ${torch_cuda_flash_attention_SOURCES})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
@@ -113,6 +114,7 @@ if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_FLASH_ATTENTION CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
@@ -139,6 +141,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
   message(STATUS "torch_cuda_cpp GPU sources (w/ sort by key): ")
   foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "torch_cuda_cu GPU sources (FlashAttention): ")
+  foreach(tmp ${Caffe2_GPU_CU_SRCS_FLASH_ATTENTION})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -926,12 +933,16 @@ elseif(USE_CUDA)
   endif()
   if(USE_FLASH_ATTENTION)
     # flash_attn for cuda requires excessive memory, so restrict parallelism in ninja builds
-    add_library(flash_attention_cuda OBJECT)
-    # set_target_properties(flash_attention_cuda PROPERTIES LINKER_LANGUAGE CUDA)
+    add_library(torch_cuda_flash_attention OBJECT)
     set_property(GLOBAL PROPERTY JOB_POOLS flash_attention_pool=3)
-    set_property(TARGET flash_attention_cuda PROPERTY JOB_POOL_COMPILE flash_attention_pool)
-    target_sources(flash_attention_cuda PRIVATE ${FLASH_ATTENTION_CUDA_SOURCES})
-    target_link_libraries(torch_cuda PRIVATE flash_attention_cuda)
+    set_property(TARGET torch_cuda_flash_attention PROPERTY JOB_POOL_COMPILE flash_attention_pool)
+    target_sources(torch_cuda_flash_attention PRIVATE ${Caffe2_GPU_CU_SRCS_FLASH_ATTENTION})
+    if(CUDA_SEPARABLE_COMPILATION)
+      set_property(TARGET torch_cuda_flash_attention PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+    else()
+      set_property(TARGET torch_cuda_flash_attention PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
+    endif()
+    target_link_libraries(torch_cuda PRIVATE torch_cuda_flash_attention)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
@@ -1056,6 +1067,7 @@ if(USE_XPU)
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
+  list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
@@ -1521,7 +1533,7 @@ if(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
   if(USE_FLASH_ATTENTION)
     target_include_directories(
-        flash_attention_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+        torch_cuda_flash_attention PRIVATE ${Caffe2_GPU_INCLUDE})
   endif()
 
   # These public dependencies must go after the previous dependencies, as the
@@ -1543,7 +1555,21 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  include(CheckLinkerFlag)
+
+  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+  check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+  check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+  # Ensure that torch_cpu is ready before being linked by torch_xpu.
+  add_dependencies(torch_xpu torch_cpu)
+
+  if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+    target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  else()
+    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+  endif()
 endif()
 
 # ---[ Metal(OSX) modification
