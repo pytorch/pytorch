@@ -633,3 +633,41 @@ def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
             else:
                 new_state_dict[k] = v
         return new_state_dict
+
+
+def get_runtime_asserts_printer(shape_env):
+    """
+    Returns a _PythonPrinter for prettifying runtime asserts for export,
+    building a map from shape symbols to sources, keeping unbacked symbols untouched.
+    e.g. s0 -> x.size(0), u0 -> u0.
+    """
+    from torch.fx.experimental.symbolic_shapes import _PythonPrinter
+
+    # no dynamic shapes here, let runtime asserts pass choose default printer
+    if shape_env.dim_constraints is None:
+        return None
+
+    # map symbols to prettified source names
+    src_map = {}
+    for symbol, sources in shape_env.dim_constraints._dcp.symbol_to_source.items():
+        src = sources[0]
+        if not isinstance(src, torch._dynamo.source.ConstantSource):
+            name = src.name()
+            name = re.sub(
+                r"L\['([A-Za-z0-9_]+)'\]",
+                r"\1",
+                name,  # replace L['foo']... with foo...
+            )
+            name = re.sub(
+                r"size\(\)\[(\d+)\]",
+                r"size(\1)",
+                name,  # replace size()[..] with size(..)
+            )
+            src_map[symbol.name] = [name]
+
+    # be safe and default to symbol names for remaining symbols (includes unbacked)
+    for symbol in shape_env.var_to_range.keys():
+        if symbol.name not in src_map:
+            src_map[symbol.name] = [symbol.name]
+
+    return _PythonPrinter(src_map)

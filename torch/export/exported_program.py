@@ -528,6 +528,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _node_metadata_hook,
         _set_node_metadata_hook,
     )
+    from torch._export.utils import get_runtime_asserts_printer
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
@@ -545,6 +546,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     shape_env,
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
+                    sympy_printer=get_runtime_asserts_printer(shape_env),
                 )
 
     # update output specs

@@ -287,6 +287,61 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
 
 
+def replace_non_strict_symbol_sources(shape_env, arg_names):
+    """
+    For non-strict mode, we map shape symbols to sources that don't match strict,
+    e.g. L["args"][0][..] for args; L["args"][1][..] for kwargs.
+    For prettifying runtime asserts, we'd like to map these back to the original names
+    in the forward() signature. These sources remain in the ShapeEnv, even when they're used
+    for later stages that are independent of strict/non-strict mode (e.g. run_decompositions()),
+    so here we just permanently replace the sources with what they'd look like for strict.
+    """
+    from dataclasses import asdict
+
+    if shape_env.dim_constraints is None:
+        return  # no dynamic shapes
+
+    def _replace_sources(source):
+        # this feels rather hacky, but pattern match on args & kwargs for non-strict to replace
+        # args: replace L["args"][0][idx][..] with L["{arg_names[idx]}"][..]
+        # kwargs: replace L["args"][1][name][..] with L[name][..]
+        args_target = GetItemSource(
+            base=LocalSource(
+                local_name="args",
+                cell_or_freevar=False,
+            ),
+            index=0,
+            index_is_slice=False,
+        )
+        kwargs_target = GetItemSource(
+            base=LocalSource(
+                local_name="args",
+                cell_or_freevar=False,
+            ),
+            index=1,
+            index_is_slice=False,
+        )
+
+        # recursively replace
+        if isinstance(source, GetItemSource) and source.base == args_target:
+            name = arg_names[source.index]
+            return LocalSource(local_name=name, cell_or_freevar=False)
+        elif isinstance(source, GetItemSource) and source.base == kwargs_target:
+            name = source.index
+            return LocalSource(local_name=name, cell_or_freevar=False)
+        elif hasattr(source, "base"):  # dataclasses are frozen, reconstruct anew
+            fields = asdict(source)
+            fields.pop("base")
+            return type(source)(base=_replace_sources(source.base), **fields)
+        return source
+
+    # overwrite symbol_to_source
+    shape_env.dim_constraints._dcp.symbol_to_source = {
+        symbol: [_replace_sources(src) for src in sources]
+        for symbol, sources in shape_env.dim_constraints._dcp.symbol_to_source.items()
+    }
+
+
 def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,

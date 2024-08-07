@@ -5602,6 +5602,11 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
         rhs = self.parenthesize(expr.rhs, sympy.printing.precedence.precedence(expr))
         return f"{lhs} {rel_op} {rhs}"
 
+    def _print_Mod(self, expr):
+        lhs = self.parenthesize(expr.args[0], sympy.printing.precedence.precedence(expr))
+        rhs = self.parenthesize(expr.args[1], sympy.printing.precedence.precedence(expr))
+        return f"{lhs} % {rhs}"
+
 
 def _suggest_torch_checks(e, src_map):
     # extract the unresolved condition on unbacked symints in the error

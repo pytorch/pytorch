@@ -56,6 +56,7 @@ def insert_deferred_runtime_asserts(
     shape_env: ShapeEnv,
     name: str,
     export: bool = False,
+    sympy_printer: Optional["sympy.printing.printer.Printer"] = None,
 ) -> None:
     """
     During tracing, we may have discovered that some data-dependent values
@@ -101,6 +102,7 @@ def insert_deferred_runtime_asserts(
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
+        SymExprPrinter,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -114,6 +116,10 @@ def insert_deferred_runtime_asserts(
             f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
         ),
     )
+
+    # Use default sympy printer if none specified
+    if sympy_printer is None:
+        sympy_printer = SymExprPrinter()
 
     # We are going to mutate the dict
     expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}
@@ -217,7 +223,8 @@ def insert_deferred_runtime_asserts(
                     # useless right now
                     (
                         res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                        "Runtime assertion failed for expression " \
+                        f"{sympy_printer.doprint(ra.expr)} on node '{res}'",
                     ),
                 )
                 added_asserts.add(ra.expr)
@@ -520,7 +527,8 @@ def insert_deferred_runtime_asserts(
                                 torch.ops.aten._assert_scalar.default,
                                 (
                                     ge,
-                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                    "Runtime assertion failed for expression " \
+                                    f"{sympy_printer.doprint(i0 >= min_val)} on node '{ge}'",
                                 ),
                             )
                             added_asserts.add(i0 >= min_val)
@@ -530,7 +538,8 @@ def insert_deferred_runtime_asserts(
                                 torch.ops.aten._assert_scalar.default,
                                 (
                                     le,
-                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                    "Runtime assertion failed for expression " \
+                                    f"{sympy_printer.doprint(i0 <= max_val)} on node '{le}'",
                                 ),
                             )
                             added_asserts.add(i0 <= max_val)

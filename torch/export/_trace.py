@@ -26,6 +26,7 @@ from torch._export.non_strict_utils import (
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
+    replace_non_strict_symbol_sources,
 )
 from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
@@ -37,7 +38,11 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import (
+    get_runtime_asserts_printer,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
@@ -684,6 +689,7 @@ def _export_to_aten_ir(
                     fake_mode.shape_env,
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
+                    sympy_printer=get_runtime_asserts_printer(fake_mode.shape_env),
                 )
 
     # update output specs
@@ -1812,13 +1818,18 @@ def _non_strict_export(
     fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
-        return produce_guards_and_solve_constraints(
+        # call produce_guards and export solver
+        produce_guards_and_solve_constraints(
             fake_mode=fake_mode,
             gm=gm,
             dynamic_shapes=dynamic_shapes,
             equalities_inputs=equalities_inputs,
             original_signature=original_signature,
             _is_torch_jit_trace=_is_torch_jit_trace,
+        )
+        # match up shape sources for non-strict to strict
+        replace_non_strict_symbol_sources(
+            fake_mode.shape_env, _get_forward_arg_names(mod, args, kwargs)
         )
 
     with fake_mode, _DataDependentErrorHandlerNonStrict():
