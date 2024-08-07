@@ -2072,7 +2072,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   if (onlyCached) {
-      return nullptr;
+    return nullptr;
   }
 
   // NCCL communicator not cached, create a new entry
@@ -2973,7 +2973,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     /* In eagerInit mode, reuse the parent comm.  Do not lazily create
      * p2p communicators. */
     bool showSerializationWarning =
-      getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
+        getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
     if (!batchP2P && showSerializationWarning) {
       TORCH_WARN_ONCE(
           "An unbatched P2P op (send/recv) was called on this "
@@ -2996,7 +2996,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         key, device, opType, p2pRank, isSendRecvSelf, true /*onlyCached*/);
 
     if (ncclComm == nullptr) {
-      C10_THROW_ERROR(NotImplementedError,
+      C10_THROW_ERROR(
+          NotImplementedError,
           "Parent communicator missing in eager initialization mode. "
           "Something went wrong. Please contact the PyTorch developers "
           "with this error message.");
