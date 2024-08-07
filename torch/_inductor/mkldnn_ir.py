@@ -238,10 +238,8 @@ class ConvolutionUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise",
-            cpp_kernel_name="mkldnn::_convolution_pointwise",
+            op_overload=torch.ops.mkldnn._convolution_pointwise.default,
         )
-        self.cpp_kernel_key = "convolution_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
                 const at::Tensor& input_t,
@@ -309,11 +307,8 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary",
-            cpp_kernel_name="mkldnn::_convolution_pointwise",
+            op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
         )
-        self.cpp_kernel_overload_name = "binary"
-        self.cpp_kernel_key = "convolution_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
                 const at::Tensor& input_t,
@@ -400,11 +395,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             reordered_inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise_.binary",
-            cpp_kernel_name="mkldnn::_convolution_pointwise_",
+            op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
         )
-        self.cpp_kernel_overload_name = "binary"
-        self.cpp_kernel_key = "convolution_pointwise_binary_"
         # TODO: op.call: input[0] should be at::Tensor&
         self.cpp_op_schema = """
             at::Tensor&(
@@ -498,10 +490,8 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_transpose_pointwise",
-            cpp_kernel_name="mkldnn::_convolution_transpose_pointwise",
+            op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
         )
-        self.cpp_kernel_key = "convolution_transpose_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
                 const at::Tensor& input_t,
@@ -594,10 +584,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.onednn.qconv2d_pointwise",
-            cpp_kernel_name="onednn::qconv2d_pointwise",
+            op_overload=torch.ops.onednn.qconv2d_pointwise.default,
         )
-        self.cpp_kernel_key = "qconv2d_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
                 at::Tensor act,
@@ -621,20 +609,33 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
+        const_arg_names = [
+            "x_scale",
+            "x_zero_point",
+            "stride",
+            "padding",
+            "dilation",
+            "groups",
+            "output_scale",
+            "output_zero_point",
+            "output_dtype",
+            "attr",
+            "scalars",
+            "algorithm",
+        ]
+        const_args = list(self.codegen_const_args(const_arg_names))
 
         x = args[0]
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
         w_scale, w_zp = args[-2], args[-1]
         (
+            x_scale,
+            x_zp,
             stride,
             padding,
             dilation,
             groups,
-            x_scale,
-            x_zp,
             o_scale,
             o_zp,
             output_dtype,
@@ -717,16 +718,22 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         w_scale.realize()
         w_zero_point.realize()
         inputs = inputs + [w_scale, w_zero_point]
-        constant_args = constant_args + [
-            x_scale,
-            x_zero_point,
-            output_scale,
-            output_zero_point,
-            output_dtype,
-            attr,
-            may_convert_to_optional(scalars),
-            algorithm,
-        ]
+
+        constant_args = (
+            [
+                x_scale,
+                x_zero_point,
+            ]
+            + constant_args
+            + [
+                output_scale,
+                output_zero_point,
+                output_dtype,
+                attr,
+                may_convert_to_optional(scalars),
+                algorithm,
+            ]
+        )
 
         assert output_dtype is not None
         if output_dtype in [torch.float32, torch.bfloat16]:
@@ -766,11 +773,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.onednn.qconv2d_pointwise.binary",
-            cpp_kernel_name="onednn::qconv2d_pointwise",
+            op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
         )
-        self.cpp_kernel_overload_name = "binary"
-        self.cpp_kernel_key = "qconv2d_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
                 at::Tensor act,
@@ -799,22 +803,39 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def codegen(self, wrapper):
         # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
+        const_arg_names = [
+            "x_scale",
+            "x_zero_point",
+            "accum_scale",
+            "accum_zero_point",
+            "stride",
+            "padding",
+            "dilation",
+            "groups",
+            "output_scale",
+            "output_zero_point",
+            "output_dtype",
+            "binary_attr",
+            "alpha",
+            "unary_attr",
+            "unary_scalars",
+            "unary_algorithm",
+        ]
+        const_args = list(self.codegen_const_args(const_arg_names))
 
         x = args[0]
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
         accum, w_scale, w_zp = args[-3], args[-2], args[-1]
         (
-            stride,
-            padding,
-            dilation,
-            groups,
             x_scale,
             x_zp,
             accum_scale,
             accum_zp,
+            stride,
+            padding,
+            dilation,
+            groups,
             o_scale,
             o_zp,
             output_dtype,
@@ -924,20 +945,25 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         w_scale.realize()
         w_zero_point.realize()
         inputs = inputs + [w_scale, w_zero_point]
-        constant_args = constant_args + [
-            x_scale,
-            x_zero_point,
-            accum_scale,
-            accum_zero_point,
-            output_scale,
-            output_zero_point,
-            output_dtype,
-            binary_attr,
-            alpha,
-            unary_attr,
-            may_convert_to_optional(unary_scalars),
-            unary_algorithm,
-        ]
+        constant_args = (
+            [
+                x_scale,
+                x_zero_point,
+                accum_scale,
+                accum_zero_point,
+            ]
+            + constant_args
+            + [
+                output_scale,
+                output_zero_point,
+                output_dtype,
+                binary_attr,
+                alpha,
+                unary_attr,
+                may_convert_to_optional(unary_scalars),
+                unary_algorithm,
+            ]
+        )
 
         assert (
             binary_attr == "sum"
@@ -966,10 +992,8 @@ class MKLPackedLinear(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkl._mkl_linear",
-            cpp_kernel_name="mkl::_mkl_linear",
+            op_overload=torch.ops.mkl._mkl_linear.default,
         )
-        self.cpp_kernel_key = "mkl_linear"
         self.cpp_op_schema = """
             at::Tensor(
                 const at::Tensor& self,
@@ -1024,8 +1048,7 @@ class LinearUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._linear_pointwise",
-            cpp_kernel_name="mkldnn::_linear_pointwise",
+            op_overload=torch.ops.mkldnn._linear_pointwise.default,
         )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
@@ -1090,11 +1113,8 @@ class LinearBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._linear_pointwise.binary",
-            cpp_kernel_name="mkldnn::_linear_pointwise",
+            op_overload=torch.ops.mkldnn._linear_pointwise.binary,
         )
-        self.cpp_kernel_overload_name = "binary"
-        self.cpp_kernel_key = "linear_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
                 const at::Tensor& input_t,
@@ -1172,15 +1192,10 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name=(
-                "torch.ops.onednn.qlinear_pointwise.tensor"
-                if x_scale_zp_are_tensors
-                else "torch.ops.onednn.qlinear_pointwise.default"
-            ),
-            cpp_kernel_name="onednn::qlinear_pointwise",
+            op_overload=torch.ops.onednn.qlinear_pointwise.tensor
+            if x_scale_zp_are_tensors
+            else torch.ops.onednn.qlinear_pointwise.default,
         )
-        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
-        self.cpp_kernel_key = "qlinear_pointwise"
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
             if x_scale_zp_are_tensors
@@ -1349,17 +1364,10 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name=(
-                "torch.ops.onednn.qlinear_pointwise.binary_tensor"
-                if x_scale_zp_are_tensors
-                else "torch.ops.onednn.qlinear_pointwise.binary"
-            ),
-            cpp_kernel_name="onednn::qlinear_pointwise",
+            op_overload=torch.ops.onednn.qlinear_pointwise.binary_tensor
+            if x_scale_zp_are_tensors
+            else torch.ops.onednn.qlinear_pointwise.binary,
         )
-        self.cpp_kernel_overload_name = (
-            "binary_tensor" if x_scale_zp_are_tensors else "binary"
-        )
-        self.cpp_kernel_key = "qlinear_pointwise_binary"
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
             if x_scale_zp_are_tensors
@@ -1568,8 +1576,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="aten.mkldnn_rnn_layer",
-            cpp_kernel_name="at::mkldnn_rnn_layer",
+            op_overload=torch.ops.aten.mkldnn_rnn_layer.default,
         )
 
     @classmethod
