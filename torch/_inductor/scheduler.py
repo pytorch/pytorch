@@ -3068,6 +3068,7 @@ class Scheduler:
                     if (
                         buffer
                         and buffer.get_device().type == "cpu"
+                        and not isinstance(buffer.layout, MultiOutputLayout)
                         and buffer.get_size() == []
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
