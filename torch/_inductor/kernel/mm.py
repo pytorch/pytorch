@@ -21,7 +21,7 @@ from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
-from ..ir import FlexibleLayout
+from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -174,15 +174,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-        num_choices_before_extra_configs = len(choices)
-        if torch._inductor.config.run_autoheuristic(name):
-            for config in extra_mm_configs(m, n, k):
-                mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2),
-                    layout=layout,
-                    **mm_options(config, m, n, k, layout),
-                )
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
@@ -201,8 +192,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
         is_nonzero
         and use_triton_template(layout)
         and torch._inductor.config.run_autoheuristic(name)
+        and is_triton(mat1)
     ):
-        # using AutoHeuristic for ranking
+        num_choices_before_extra_configs = len(choices)
+        for config in extra_mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
+            )
         ah_choices = mm_autoheuristic(
             mat1,
             mat2,
@@ -216,10 +215,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
             None,
             top_k=10,
         )
-        if ah_choices is not None and len(ah_choices) > 0:
-            choices = ah_choices
-        else:
-            choices = choices[num_choices_before_extra_configs]
+        if not torch._inductor.config.collect_autoheuristic(name):
+            # if we are collecting data, we do not want to modify choices
+            if ah_choices is not None and len(ah_choices) > 0:
+                choices = ah_choices
+            else:
+                choices = choices[:num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
