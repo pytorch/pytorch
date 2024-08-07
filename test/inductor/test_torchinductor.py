@@ -1747,6 +1747,21 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    @requires_gpu()
+    def test_reduction_config_limit(self):
+        """
+        This unit-test tests whether we exceed cudaDeviceProperties.maxGridSize in
+        triton reduction configs for large size hints. #128826 introduced a scaling XBLOCK
+        feature to resolve the issue in reduction configs which may exceed the maxGridSize
+        """
+        from torch._inductor.runtime.runtime_utils import next_power_of_2
+        from torch._inductor.runtime.triton_heuristics import triton_config_reduction
+
+        size_hints = [67108864, 8192]
+        for i in range(4):
+            size_hints[0] = next_power_of_2(size_hints[0])
+            triton_config_reduction(size_hints, 1, 2048, 1, 8)
+
     def test_prod(self):
         def fn(a):
             return a.prod(0), a.prod(1), a.prod()
@@ -8653,9 +8668,6 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
-        if self.device == "cpu":
-            raise unittest.SkipTest("broken on CPU")
-
         # Unrolled reduction
         t1 = torch.randn((6, 6))
         t1[:, 1] = float("nan")
@@ -8745,12 +8757,6 @@ class CommonTemplate:
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
-    @unittest.skip(
-        """
-        FIXME: In the case of having equally max/min elements, our implementation returns
-        the last index instead of the first one
-        """
-    )
     def test_argmax_argmin3(self):
         def fn(x):
             return (
@@ -8762,7 +8768,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.randint(0, 5, [10, 10])],
+            [torch.randint(0, 5, [64, 64])],
         )
 
     def test_vdd_clamp(self):
@@ -9432,8 +9438,8 @@ class CommonTemplate:
         def fn(a, b):
             return a + b
 
-        a = torch.rand((100,))
-        b = torch.rand((100,))
+        a = torch.rand((100,), device=self.device)
+        b = torch.rand((100,), device=self.device)
         with profile() as prof:
             fn(a, b)
         assert any(
