@@ -647,6 +647,8 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -656,9 +658,8 @@ class InputWriter:
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
-        if (
-            isinstance(t.storage_offset(), torch.SymInt)
-            or _storage_offset_or_default(None) != t.storage_offset()
+        if not statically_known_true(
+            _storage_offset_or_default(None) == t.storage_offset()
         ):
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
