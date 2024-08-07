@@ -489,7 +489,7 @@ class AOTAutogradCache:
             "components": debug_lines,
         }
         ChromiumEventLogger.log_instant_event(
-            f"autograd_cache_{cache_state}", cache_event_time, cache_args
+            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
         )
         torch._logging.trace_structured(
             "artifact",
