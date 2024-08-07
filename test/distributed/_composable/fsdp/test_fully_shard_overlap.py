@@ -109,6 +109,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
                 loss = ref_model(inp).sum()
                 loss.backward()
+                # Run dummy reduce-scatters per weight
                 for lin in ref_model:
                     dummy_rs_input = torch.empty_like(lin.weight)
                     dummy_rs_output = torch.chunk(dummy_rs_input, self.world_size)[
