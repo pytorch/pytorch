@@ -685,12 +685,11 @@ def dequantize_per_channel(
     new_shape[0] = scales.shape[0]
     scales = scales.view(new_shape)
     if zero_points is not None:
-        # TODO: investigate why
-        # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
-        # failed the test
-        res = (input.to(out_dtype) - zero_points.view(new_shape)) * scales
+        res = (input - zero_points.view(new_shape)) * scales
     else:
-        res = input.to(out_dtype) * scales
+        res = input * scales
+
+    res = res.to(out_dtype)
 
     out = res.permute(tuple(permute_axis_list))
     return out
