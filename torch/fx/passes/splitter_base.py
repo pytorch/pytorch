@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import argparse
 import copy
@@ -859,7 +860,7 @@ class _SplitterBase:
             for node in self.module.graph.nodes:
                 if hasattr(node, "tag"):
                     del node.tag
-        return split_module  # type: ignore[return-value]
+        return split_module
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()

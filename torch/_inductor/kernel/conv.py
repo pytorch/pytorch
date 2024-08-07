@@ -1,9 +1,10 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
 
@@ -444,12 +445,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: Optional[TensorBox],
-    stride: Sequence[int],
-    padding: Sequence[int],
-    dilation: Sequence[int],
+    bias: TensorBox,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
     transposed: bool,
-    output_padding: Sequence[int],
+    output_padding: List[int],
     groups: int,
 ):
     stride = tuple(stride)
@@ -554,17 +555,21 @@ def convolution(
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
-    choices = [
-        aten_convolution.bind(
-            args,
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            **kwargs,
-        )
-    ]
+
+    choices = []
+    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
+        choices = [
+            aten_convolution.bind(
+                args,
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                **kwargs,
+            )
+        ]
 
     if (
-        use_triton_template(layout)
+        torch._inductor.utils._use_conv_autotune_backend("TRITON")
+        and use_triton_template(layout)
         # templates only support these:
         and is_ones(dilation)
         and not transposed

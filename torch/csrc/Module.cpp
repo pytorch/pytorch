@@ -1551,6 +1551,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -1708,6 +1709,7 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+  THCPMemPool_init(module);
 #endif
 
 #ifdef USE_XPU
@@ -1977,6 +1979,13 @@ Call this whenever a new thread is created in order to propagate values from
       .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
+  py_module.def("_is_flash_attention_available", []() {
+#ifdef USE_CUDA
+    return sdp::is_flash_attention_available();
+#else
+    return false;
+#endif
+  });
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {

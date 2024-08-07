@@ -4548,7 +4548,8 @@
     # the NestedTensor keys are necessary because NestedTensor has been removed
     # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
     CompositeExplicitAutograd, NestedTensorCPU: is_pinned
-    SparseCPU, SparseCsrCPU: is_pinned_sparse
+    SparseCsrCPU: is_pinned_sparse_compressed
+    SparseCPU: is_pinned_sparse_coo
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
@@ -4558,9 +4559,10 @@
 # Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
 - func: _pin_memory(Tensor self, Device? device=None) -> Tensor
   dispatch:
-    NestedTensorCPU: _pin_memory_nested
-    SparseCPU, SparseCsrCPU: _pin_memory_sparse
     CompositeExplicitAutograd: _pin_memory
+    NestedTensorCPU: _pin_memory_nested
+    SparseCPU: _pin_memory_sparse_coo
+    SparseCsrCPU: _pin_memory_sparse_compressed
   autogen: _pin_memory.out
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
