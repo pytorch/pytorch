@@ -37,6 +37,11 @@
 
 namespace c10d {
 
+// Control EagerInit P2P serialization warning
+static std::vector<std::string>
+    TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING = {
+        "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -682,7 +687,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Device& device,
       OpType opType,
       int p2pRank = 0,
-      bool isSendRecvSelf = false);
+      bool isSendRecvSelf = false,
+      bool onlyCached = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
@@ -707,6 +713,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
  private:
   int globalRankStart;
   int globalRankStride;
+  bool eagerInit{false};
 
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
