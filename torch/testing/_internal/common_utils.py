@@ -2843,7 +2843,7 @@ class TestCase(expecttest.TestCase):
                     abs_test_path = os.path.abspath(inspect.getfile(type(self)))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
-                    test_run_cmd = f"python {test_filename} -k {class_name}.{method_name}"
+                    test_run_cmd = f"python {test_filename} {class_name}.{method_name}"
                     env_var_prefix = TestEnvironment.repro_env_var_prefix()
                     repro_parts = [env_var_prefix, test_run_cmd]
                     self.wrap_with_policy(
