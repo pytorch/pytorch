@@ -59,6 +59,11 @@ class StructuredTraceTestingFilter(logging.Filter):
         return "str" not in record.metadata
 
 
+class ChromiumEventFilter(logging.Filter):
+    def filter(self, record):
+        return "chromium_event" not in record.metadata
+
+
 class StructuredTraceTestingFormatter(logging.Formatter):
     def format(self, record):
         metadata = copy.deepcopy(record.metadata)
@@ -99,6 +104,21 @@ class StructuredTraceTestingFormatter(logging.Formatter):
 
 trace_log = logging.getLogger("torch.__trace")
 
+chrome_event_filter = ChromiumEventFilter()
+
+
+def show_chrome_events(fn):
+    """
+    Don't hide chrome events for this test
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        self.handler.removeFilter(chrome_event_filter)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 class StructuredTraceTest(TestCase):
     def setUp(self):
@@ -112,6 +132,7 @@ class StructuredTraceTest(TestCase):
         self.handler = logging.StreamHandler(self.buffer)
         self.handler.setFormatter(StructuredTraceTestingFormatter())
         self.handler.addFilter(StructuredTraceTestingFilter())
+        self.handler.addFilter(chrome_event_filter)
         trace_log.addHandler(self.handler)
 
         self.raw_file = tempfile.NamedTemporaryFile(
@@ -621,6 +642,93 @@ def forward(self, x, y):
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_hash", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+""",  # noqa: B950
+        )
+
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @show_chrome_events
+    def test_chromium_event(self):
+        def fn(a):
+            return a.sin()
+
+        x = torch.tensor([1.0])
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt(x)
+        torch._dynamo.reset()
+        # Trigger a cache hit
+        fn_opt(x)
+        # Should print twice, including inductor_output_code
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
+{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_source": {"describer_id": "ID", "id": 0, "source": "L['a']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_output_graph": {"sizes": {"l_a_": [1], "sin": [1]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"aot_forward_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"artifact": {"name": "fx_graph_runnable", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"inductor_post_grad_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"artifact": {"name": "fx_graph_cache_hash", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_source": {"describer_id": "ID", "id": 0, "source": "L['a']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_output_graph": {"sizes": {"l_a_": [1], "sin": [1]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"aot_forward_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"artifact": {"name": "fx_graph_cache_hash", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
+{"chromium_event": {}, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )

@@ -864,15 +864,19 @@ class ChromiumEventLogger:
         event = {
             "name": event_name,
             "ts": time_ns / 1000,  # Chromium events are in ms
-            "args": metadata, #
+            "args": metadata,
             "ph": phase,
-            "pid": 0, # pid should be specified on all logs, we don't personally care about the actual process id
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
         }
-        torch._logging.trace_structured("chromium_event", payload_fn=lambda: event, suppress_context=True)
+        torch._logging.trace_structured(
+            "chromium_event", payload_fn=lambda: event, suppress_context=True
+        )
 
     @staticmethod
     def log_instant_event(
-        event_name: str, time_ns: int, metadata: Optional[Dict[str, Any]] = None,
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Log an instant event with no associated duration.
@@ -886,10 +890,12 @@ class ChromiumEventLogger:
             "ts": time_ns / 1000,
             "args": metadata,
             "ph": "i",
-            "pid": 0, # pid should be specified on all logs, we don't personally care about the actual process id
-            "s": "p", # We use "process" level instant events so they all appear on the same row in the trace.
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+            "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
         }
-        torch._logging.trace_structured("chromium_event", payload_fn=lambda: event, suppress_context=True)
+        torch._logging.trace_structured(
+            "chromium_event", payload_fn=lambda: event, suppress_context=True
+        )
 
 
 @dataclasses.dataclass
