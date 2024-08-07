@@ -31,6 +31,7 @@ if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
     prims = torch.ops.prims
+    bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
 
     _conv_args = [Arg() for _ in range(10)]
     _linear_args = [Arg() for _ in range(6)]
@@ -802,10 +803,19 @@ if torch._C._has_mkldnn:
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
-            assert weight_meta.dtype in (
-                torch.bfloat16,
-                torch.float16,
+
+            use_bf16_for_fp32_weight = (
+                bf32_matmul_enabled and weight_meta.dtype == torch.float32
             )
+            assert (
+                weight_meta.dtype
+                in (
+                    torch.bfloat16,
+                    torch.float16,
+                )
+                or use_bf16_for_fp32_weight
+            )
+
             if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
@@ -955,7 +965,6 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
-        bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
         use_bf16_for_fp32_weight = (
             bf32_matmul_enabled and weight_meta_value.dtype == torch.float32
         )
@@ -1160,9 +1169,6 @@ if torch._C._has_mkldnn:
                 is_lp_weight = weight_dtype in (
                     torch.bfloat16,
                     torch.float16,
-                )
-                bf32_matmul_enabled = (
-                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
                 )
                 use_bf16_for_fp32_weight = (
                     bf32_matmul_enabled and weight_dtype == torch.float32
