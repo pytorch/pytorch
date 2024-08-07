@@ -1478,6 +1478,7 @@ def estimate_runtime(node):
     elif RUNTIME_MODE == "profile":
         with no_dispatch():
             from torch._inductor.runtime.benchmarking import benchmarker
+
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
             ms = benchmarker.benchmark_gpu(lambda: node.target(*args, **kwargs))
             return ms

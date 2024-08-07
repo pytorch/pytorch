@@ -78,7 +78,9 @@ def test_GPU_time(shapes):
         torch_ms, _, _ = benchmarker.benchmark_gpu(lambda: torch_mm(a, b))
         triton_ms, _, _ = benchmarker.benchmark_gpu(lambda: triton_mm(a, b))
         ind_aten_ms, _, _ = benchmarker.benchmark_gpu(lambda: inductor_aten_mm(a, b))
-        ind_triton_ms, _, _ = benchmarker.benchmark_gpu(lambda: inductor_triton_mm(a, b))
+        ind_triton_ms, _, _ = benchmarker.benchmark_gpu(
+            lambda: inductor_triton_mm(a, b)
+        )
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
         torch._dynamo.reset()

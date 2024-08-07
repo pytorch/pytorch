@@ -213,9 +213,13 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
         f_bad_shape, inputs_bad_shape = create_model(30522)
 
         print("benchmark for good shape")
-        latency_good_shape = benchmarker.benchmark_gpu(lambda: f_good_shape(**inputs_good_shape))
+        latency_good_shape = benchmarker.benchmark_gpu(
+            lambda: f_good_shape(**inputs_good_shape)
+        )
         print("benchmark for bad shape")
-        latency_bad_shape = benchmarker.benchmark_gpu(lambda: f_bad_shape(**inputs_bad_shape))
+        latency_bad_shape = benchmarker.benchmark_gpu(
+            lambda: f_bad_shape(**inputs_bad_shape)
+        )
         print(
             f"Latency with good and bad shape: {latency_good_shape:.3f} v.s. {latency_bad_shape:.3f}"
         )
