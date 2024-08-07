@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import cast, List, Sequence, Tuple
 
 import torch
@@ -224,3 +225,170 @@ def compute_local_stride(
     return tuple(
         global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
     )
+
+
+def get_shard_idx_on_dim(
+    dim_map: List[List[int]], mesh: DeviceMesh, tensor_dim: int
+) -> int:
+    """
+    Returns the index of the current shard on a given tensor dimension.
+    """
+    shard_mesh_dims = dim_map[tensor_dim]
+    coordinate = mesh.get_coordinate()
+
+    shard_idx_on_tensor_dim = 0
+    for i, mesh_dim in enumerate(shard_mesh_dims):
+        if i != len(shard_mesh_dims) - 1:
+            # For a given coordinate, the stride equals to the product of the mesh dim
+            # of all the mesh dimensions sharded on the same tensor dimension
+            # For a given coordinate i, the stride equals to the product of the mesh dim size
+            # of all the mesh dimensions sharded on the same tensor dimension
+            # when the same tensor dimenstion is further sharded on additional mesh dimensions.
+            # For example, with 3D 2*2*2 mesh with all placements on Shard(0), the stride of
+            # coordinate 0 is mesh.size(1) * mesh.size(2) = 4, and the stride of coordinate 1 is
+            # mesh.size(2) = 2.
+            stride = reduce(
+                lambda a, b: a * b, [mesh.size(j) for j in shard_mesh_dims[i + 1 :]]
+            )
+            shard_idx_on_tensor_dim += coordinate[mesh_dim] * stride  # type: ignore[index]
+        else:
+            # For the last mesh dimension, the stride is simply 1.
+            shard_idx_on_tensor_dim += coordinate[mesh_dim]  # type: ignore[index]
+
+    return shard_idx_on_tensor_dim
+
+
+def get_dim_map(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> List[List[int]]:
+    """
+    Returns a dim_map of list of list such that dim_map[i] includes a list of mesh dimensions
+    that tensor dimension i is sharded on. For example, if we have a dist tensor that have the
+    shape of [18, 20, 30, 40] with a 2*2*2 device_mesh and placements [shard(0), shard(0), shard(1)],
+    we would have a dim_map of [[0, 1], [2], [-1], [-1]].
+
+    TODO: replace the current dim_map with this updated dim_map, as the current dim_map cannot
+    express a tensor dim being sharded on multiple mesh dims.
+    """
+    dim_map = [[-1]] * len(global_shape)
+    for mesh_dim, placement in enumerate(placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if dim_map[shard_dim] == [-1]:
+                dim_map[shard_dim] = [mesh_dim]
+            else:
+                dim_map[shard_dim].append(mesh_dim)
+    return dim_map
+
+
+def compute_padded_and_unpadded_local_shape(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """
+    This util computes the padded and unpadded local shape of a DTensor. The padded shape is computed by considering
+    applying padding to the global tensor such that each padded shard would have the exact same shape across all ranks.
+    This means sharding happens after padding.
+
+    # TODO: Remove compute_local_shape once we switch to static padding.
+    This differs from `compute_local_shape`. The local shape from `compute_local_shape` considers padding after sharding,
+    meaning padding is applied on each placements instead of globally. Therefore, the local shape on each shard
+    after padding could be different. The local shape returned from `compute_local_shape` is different from the
+    unpadded local shape.
+
+    Padded and unpadded local shape could be the same depending on whether padding is needed on the current shard.
+    """
+
+    # Calculate globally how many chunks a given tensor dim will have globally.
+    num_chunks_on_dim = [1 for _ in enumerate(global_shape)]
+    for mesh_idx, placement in enumerate(placements):
+        if placement.is_shard():
+            tensor_dim = placement.dim  # type: ignore[attr-defined]
+            mesh_dim_size = mesh.size(mesh_idx)
+            num_chunks_on_dim[tensor_dim] *= mesh_dim_size
+
+    dim_map = get_dim_map(global_shape, mesh, placements)
+    full_shard_size, cur_unpadded_shard_size = [], []
+    for tensor_dim, _ in enumerate(zip(global_shape, num_chunks_on_dim)):
+        size_on_dim, num_chunks = _
+        if num_chunks == 1:
+            # This means no sharding is happening on the ith dimension of the global tensor.
+            # Therefore, the padded and unpadded size of the ith dimension is the same as global_shape[i].
+            full_shard_size.append(size_on_dim)
+            cur_unpadded_shard_size.append(size_on_dim)
+        else:
+            # Calculate the full chunk size and the number of full chunks on a given tensor dim
+            full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+            num_full_chunks = size_on_dim // full_chunk_size
+            tail_chunk_size = size_on_dim % full_chunk_size
+            full_shard_size.append(full_chunk_size)
+
+            cur_chunk = get_shard_idx_on_dim(dim_map, mesh, tensor_dim)
+
+            # If the index of cur chunk is smaller than num_full_chunks,
+            # this means cur_chunk would be a full chunk on the given tensor dimension.
+            if cur_chunk < num_full_chunks:
+                cur_unpadded_shard_size.append(full_chunk_size)
+            # If the index of cur_chunk is num_full_chunks and the tail_chunk_size is not 0,
+            # this means the cur_chunk is the non-empty tail chunk.
+            # There should be only 1 non-empty tail chunk.
+            # For example, shard [1, 1, 1, 1, 1] to 4 chunks, we would have [1, 1], [1, 1], [1].
+            # The third shard is a non-empty tail chunk and the last shard is an empty chunk.
+            elif cur_chunk == num_full_chunks and tail_chunk_size != 0:
+                cur_unpadded_shard_size.append(tail_chunk_size)
+            # Otherwise, the cur_chunk is an empty chunk on the tensor_dim. There could be more than 1 empty chunks.
+            # For example, chunk a tensor([1, 1]) into 4 chunks, the last two chunks would be empty.
+            else:
+                cur_unpadded_shard_size.append(0)
+
+    return tuple(full_shard_size), tuple(cur_unpadded_shard_size)
+
+
+def compute_padding_size(
+    padded_size: Sequence[int], unpadded_size: Sequence[int]
+) -> Tuple[int, ...]:
+    """
+    Given the padded and unpadded shape of a tensor, returns a tuple of padding.
+    padding_size[i] is the size of padding needed on the i-th tensor dimension.
+    """
+    assert len(padded_size) == len(unpadded_size)
+    padding_size = [
+        padded_size_on_dim - unpadded_size_on_dim
+        for padded_size_on_dim, unpadded_size_on_dim in zip(padded_size, unpadded_size)
+    ]
+    return tuple(padding_size)
+    
+def compute_global_padding(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> List[int]:
+    """
+    Compute the padding needed to make the tensor evenly shardable. It returns
+    a list of ints where pad_sizes[i] means tensor dim i needs to be padded by
+    pad_sizes[i] in order to make the tensor evenly shardable on the given mesh
+    and placements.
+
+    For example, we have a dist tensor with shape (5, 1) on
+    device_mesh([[0, 1],[2, 3]]) with placements [Shard(0), Shard(0)].
+    The pad_sizes would be [3, 0]. This means, to make the tensor evenly shardable,
+    we need to pad the tensor on dim 0 by 5 elements and no padding is needed on dim 1.
+    """
+    num_shard_by_dim = [1 for _ in range(len(global_shape))]
+    for mesh_idx, placement in enumerate(placements):
+        if placement.is_shard():
+            tensor_shard_dim = placement.dim  # type: ignore[attr-defined]
+            mesh_dim_size = mesh.size(mesh_idx)
+            num_shard_by_dim[tensor_shard_dim] *= mesh_dim_size
+
+    pad_sizes = []
+    for tensor_dim, num_shard in enumerate(num_shard_by_dim):
+        tensor_dim_size = global_shape[tensor_dim]
+        if num_shard == 1 or num_shard == tensor_dim_size:
+            pad_sizes.append(0)
+        elif tensor_dim_size > num_shard:
+            padded_tensor_dim_size = (
+                tensor_dim_size + num_shard - (tensor_dim_size % num_shard)
+            )
+            pad_sizes.append(padded_tensor_dim_size - tensor_dim_size)
+        elif tensor_dim_size < num_shard:
+            pad_sizes.append(num_shard - tensor_dim_size)
+
+    return pad_sizes
