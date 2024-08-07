@@ -15,6 +15,7 @@ from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import ops, V
+from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
@@ -38,7 +39,7 @@ GEMM_TEMPLATE = r"""
 {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
 {%- endif %}
 
-extern "C"
+extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
@@ -225,7 +226,7 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
             "packed_gemm",
@@ -824,6 +825,7 @@ class CppPackedGemmTemplate(CppTemplate):
             is_dynamic_M=self.is_dynamic_M,
             template=self,
             kernel=kernel,
+            export_declaration=get_export_declaration(),
             epilogue_nodes=epilogues,
             reindexers=reindexers,
             Y_2d=Y_2d,

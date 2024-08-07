@@ -44,14 +44,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-
-# see discussion at https://github.com/pytorch/pytorch/issues/120699
-from torch._C._dynamo.eval_frame import (  # noqa: F401
-    reset_code,
-    set_guard_error_hook,
-    skip_code,
-    unsupported,
-)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
@@ -80,6 +72,14 @@ if TYPE_CHECKING:
     from .types import CacheEntry, DynamoCallback
 
 
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
+
+set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
+skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
+unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
+
+
 log = logging.getLogger(__name__)
 
 
@@ -100,8 +100,7 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    from torch._C._dynamo.eval_frame import set_eval_frame
-
+    set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         log.warning(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
@@ -158,7 +157,7 @@ class OptimizedModule(torch.nn.Module):
         "named_children_walk",
     }
 
-    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
@@ -218,7 +217,7 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name, val):
+    def __setattr__(self, name, val) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
             return super().__setattr__(name, val)
@@ -304,7 +303,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
-    ):
+    ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
@@ -539,7 +538,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
-    ):
+    ) -> None:
         def on_enter():
             install_generation_tagging_init()
 
@@ -879,7 +878,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         example_fake_inputs: List[torch.Tensor],
         flat_args_dynamic_dims: List[Set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
-    ):
+    ) -> None:
         super().__init__(m)
 
         assert len(flat_args_dynamic_dims) == len(flat_args)
@@ -1071,6 +1070,22 @@ def rewrite_signature(
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
+    def check_optional_input_and_error(f_sig: inspect.Signature):
+        # Check if function has optional input.
+        for name, param in f_sig.parameters.items():
+            if param.default is not inspect.Parameter.empty:
+                from torch._dynamo.exc import Unsupported
+
+                log.error(
+                    "Parameter %s is optional with a default value of %s",
+                    name,
+                    param.default,
+                )
+                raise Unsupported(
+                    "Tracing through optional input is not supported yet",
+                    case_name="optional_input",
+                )
+
     def produce_matching(debug_type, sources, candidates):
         matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
@@ -1081,9 +1096,11 @@ def rewrite_signature(
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
+                if debug_type == "inputs":
+                    check_optional_input_and_error(f_sig)
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
-                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
+                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"',
                 )
             else:
                 matched_elements_positions.append(dict_of_source_vals[id(val)])

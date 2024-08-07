@@ -26,7 +26,6 @@ from weakref import ReferenceType
 import torch
 import torch._logging
 import torch.fx.experimental._sym_dispatch_mode
-from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -126,7 +125,7 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-
+GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 compile_lock = threading.RLock()
 
@@ -652,10 +651,18 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    @dynamo_timed(phase_name="entire_frame_compile")
+    def compile_inner(
+        code: CodeType,
+        one_graph: bool,
+        hooks: Hooks,
+        transform: Callable[[List[Instruction], Dict[str, Any]], Any],
+    ) -> Optional[GuardedCode]:
+        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
+            return _compile_inner(code, one_graph, hooks, transform)
+
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
-    def compile_inner(
+    def _compile_inner(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
@@ -711,6 +718,10 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
+
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
 
         assert out_code is not None
         log_bytecode(
@@ -879,6 +890,9 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
+        start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
+            "inductor"
+        ]["possibly_missed_reinplacing_opportunities"]
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -942,6 +956,12 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
+                possibly_missed_reinplacing_opportunities = (
+                    torch._dynamo.utils.counters["inductor"][
+                        "possibly_missed_reinplacing_opportunities"
+                    ]
+                    - start_possibly_missed_reinplacing_opportunities
+                )
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -957,6 +977,7 @@ def _compile(
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = time.time() - start_time
+                possibly_missed_reinplacing_opportunities = None
 
             metrics = CompilationMetrics(
                 str(compile_id),
@@ -985,6 +1006,7 @@ def _compile(
                 restart_reasons,
                 dynamo_time_before_restart,
                 guarded_code is not None,
+                possibly_missed_reinplacing_opportunities,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
