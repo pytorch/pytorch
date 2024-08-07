@@ -4685,6 +4685,14 @@ class TestLinalg(TestCase):
             # disable TunableOp
             torch.cuda.tunable.enable(False)
 
+            # clean up, remove any file that was generated
+            try:
+                import os
+                filename = torch.cuda.tunable.get_filename()
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
+
     @onlyCUDA
     @dtypes(torch.half)
     def test_minimum_tuning_iteration_tunableop(self, device, dtype):
@@ -4743,6 +4751,14 @@ class TestLinalg(TestCase):
             # disable TunableOp
             torch.cuda.tunable.enable(False)
 
+            # clean up, remove any file that was generated
+            try:
+                import os
+                filename = torch.cuda.tunable.get_filename()
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
+
     @onlyCUDA
     @dtypes(torch.half)
     def test_matmul_check_entries_tunableop(self, device, dtype):
@@ -4779,6 +4795,14 @@ class TestLinalg(TestCase):
         finally:
             # disable TunableOp
             torch.cuda.tunable.enable(False)
+
+            # clean up, remove any file that was generated
+            try:
+                import os
+                filename = torch.cuda.tunable.get_filename()
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
