@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.logging
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -20,6 +21,11 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
@@ -422,8 +428,14 @@ AOT_COUNTER = itertools.count()
 aot_autograd_decompositions = {}
 
 
-@dynamo_timed
 def create_aot_dispatcher_function(
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+) -> Tuple[Callable, ViewAndMutationMeta]:
+    with dynamo_timed("create_aot_dispatcher_function"):
+        return _create_aot_dispatcher_function(flat_fn, flat_args, aot_config)
+
+
+def _create_aot_dispatcher_function(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig
 ) -> Tuple[Callable, ViewAndMutationMeta]:
     """
@@ -878,7 +890,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     )
 
     class AOTModule(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.orig_module = mod
 
@@ -964,11 +976,19 @@ def aot_module_simplified(
                 assert source not in seen_sources, source
                 seen_sources.add(source)
                 aot_autograd_arg_pos_to_source.append(source)
+                source_name = source.name() if source else str(source)
 
                 if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
                     "_dynamo_static_input_type", None
                 ):
+                    static_inputs_log.debug(
+                        "Adding static input pos %s for source %s", pos, source_name
+                    )
                     static_input_indices.append(pos)
+                else:
+                    static_inputs_log.debug(
+                        "Non-static input pos %s for source %s", pos, source_name
+                    )
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
