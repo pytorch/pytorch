@@ -205,6 +205,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+
         # using AutoHeuristic for ranking
         ah_choices = mm_autoheuristic(
             mat1,
@@ -221,6 +222,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included=always_included,
         )
         if not torch._inductor.config.collect_autoheuristic(name):
+            # if we are collecting data, we do not want to modify choices
             if ah_choices is not None and len(ah_choices) > 0:
                 # the order in which autoheuristic returns choices is not the same as
                 # as the order of choices, which affects things like epilogue fusion.
