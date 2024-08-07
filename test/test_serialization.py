@@ -1130,6 +1130,20 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
 
+    def test_weights_only_safe_globals_blocklist(self):
+        module = 'nt' if IS_WINDOWS else 'posix'
+        error_msg = f"unsupported GLOBAL {module}.execv whose module {module} is blocked"
+        with BytesIOContext() as f:
+            torch.save(os.execv, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            # safe_globals doesn't work even with allowlist
+            with torch.serialization.safe_globals([os.execv]):
+                with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                    torch.load(f, weights_only=True)
+
     @parametrize("unsafe_global", [True, False])
     def test_weights_only_error(self, unsafe_global):
         sd = {'t': TwoTensor(torch.randn(2), torch.randn(2))}
@@ -4031,7 +4045,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)
@@ -4057,7 +4071,7 @@ class TestSerialization(TestCase, SerializationMixin):
                      "CUDA is unavailable or NamedTemporaryFile on Windows")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)
@@ -4328,6 +4342,29 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
             finally:
                 torch.serialization.clear_safe_globals()
+
+    def test_safe_globals_context_manager_weights_only(self):
+        '''
+        Tests torch.serialization.safe_globals context manager
+        '''
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        try:
+            torch.serialization.add_safe_globals([TestEmptySubclass])
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(sd, f)
+                with torch.serialization.safe_globals([TwoTensor]):
+                    f.seek(0)
+                    torch.load(f, weights_only=True)
+                self.assertTrue(torch.serialization.get_safe_globals() == [TestEmptySubclass])
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                    torch.load(f, weights_only=True)
+        finally:
+            torch.serialization.clear_safe_globals()
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):

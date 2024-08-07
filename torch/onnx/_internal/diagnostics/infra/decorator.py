@@ -4,9 +4,8 @@ from __future__ import annotations
 import functools
 import logging
 import traceback
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Tuple
 
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils
 
@@ -14,12 +13,10 @@ from torch.onnx._internal.diagnostics.infra import formatter, utils
 MessageFormatterType = Callable[..., str]
 
 
-@_beartype.beartype
 def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
     return f"{formatter.display_name(fn)}. "
 
 
-@_beartype.beartype
 def format_exception_in_markdown(exception: Exception) -> str:
     msg_list = ["### Exception log", "```"]
     msg_list.extend(
@@ -29,11 +26,10 @@ def format_exception_in_markdown(exception: Exception) -> str:
     return "\n".join(msg_list)
 
 
-@_beartype.beartype
 def format_function_signature_in_markdown(
     fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     format_argument: Callable[[Any], str] = formatter.format_argument,
 ) -> str:
     msg_list = [f"### Function Signature {formatter.display_name(fn)}"]
@@ -46,7 +42,6 @@ def format_function_signature_in_markdown(
     return "\n".join(msg_list)
 
 
-@_beartype.beartype
 def format_return_values_in_markdown(
     return_values: Any,
     format_argument: Callable[[Any], str] = formatter.format_argument,
@@ -59,12 +54,11 @@ ModifierCallableType = Callable[
 ]
 
 
-@_beartype.beartype
 def diagnose_call(
     rule: infra.Rule,
     *,
     level: infra.Level = infra.Level.NONE,
-    diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
+    diagnostic_type: type[infra.Diagnostic] = infra.Diagnostic,
     format_argument: Callable[[Any], str] = formatter.format_argument,
     diagnostic_message_formatter: MessageFormatterType = format_message_in_text,
 ) -> Callable:
@@ -105,7 +99,7 @@ def diagnose_call(
             # TODO(bowbao): by default diagnostic doesn't have stack.
             # So need to check before doing this. Make the code cleaner.
             # Option: do not capture stack by default in diagnostic initialization.
-            stack: Optional[infra.Stack] = None
+            stack: infra.Stack | None = None
             if len(diag.stacks) > 0:
                 stack = diag.stacks[0]
                 stack.frames.pop(0)

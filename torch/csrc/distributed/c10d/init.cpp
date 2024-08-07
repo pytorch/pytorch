@@ -3,6 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -319,6 +320,36 @@ class PythonStore : public ::c10d::Store {
   bool hasExtendedApi() const override {
     PYBIND11_OVERLOAD_NAME(
         bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
+  }
+};
+
+class PythonRequest : public ::c10d::control_plane::Request {
+ public:
+  const std::string& body() const override {
+    PYBIND11_OVERRIDE_PURE(
+        const std::string&, ::c10d::control_plane::Request, body);
+  }
+
+  const std::multimap<std::string, std::string>& params() const override {
+    using MultiMap = const std::multimap<std::string, std::string>&;
+    PYBIND11_OVERRIDE_PURE(MultiMap, ::c10d::control_plane::Request, params);
+  }
+};
+class PythonResponse : public ::c10d::control_plane::Response {
+ public:
+  void setContent(std::string&& content, const std::string& content_type)
+      override {
+    PYBIND11_OVERRIDE_PURE_NAME(
+        void,
+        ::c10d::control_plane::Response,
+        "set_content",
+        setContent,
+        content,
+        content_type);
+  }
+  void setStatus(int status) override {
+    PYBIND11_OVERRIDE_PURE_NAME(
+        void, ::c10d::control_plane::Response, "set_status", setStatus, status);
   }
 };
 
@@ -891,6 +922,17 @@ This class does not support ``__members__`` property.)");
         return ::c10d::resolve_process_group(group_name);
       },
       py::arg("group_name"));
+
+  module.def(
+      "_register_work",
+      [](const at::Tensor& tensor,
+         const c10::intrusive_ptr<::c10d::Work>& work) {
+        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
+            ->ref_py_object();
+        ::c10d::register_work(tensor, std::move(work));
+      },
+      py::arg("tensor"),
+      py::arg("work"));
 
   // Remove a group from the native registry
   module.def(
@@ -1510,7 +1552,12 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)");
+          R"(Returns True if it's using the libuv backend.)")
+      .def(
+          "__repr__",
+          &::c10d::TCPStore::repr,
+          R"(Returns a string representation of the TCPStore.)",
+          py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -2664,6 +2711,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_add_ephemeral_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const std::chrono::milliseconds& timeout) {
+                self->addEphemeralTimeout(timeout);
+              },
+              py::arg("timeout"))
+          .def(
+              "_verify_work_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const c10::intrusive_ptr<::c10d::Work> work,
+                 const std::chrono::milliseconds& timeout) {
+                return self->verifyWorkTimeoutForTest(work, timeout);
+              },
+              py::arg("work"),
+              py::arg("timeout"))
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
@@ -2714,6 +2777,9 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+#ifdef NCCL_HAS_COMM_SPLIT
+      .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -2754,6 +2820,7 @@ Example::
     >>> nccl_options.config.cga_cluster_size = 2
     >>> nccl_options.config.max_ctas = 4
     >>> nccl_options.config.min_ctas = 2
+    >>> nccl_options.config.split_share = 1
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
@@ -2877,13 +2944,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           [](::c10d::Work& work) -> std::vector<at::Tensor> {
             // Deprecation reason:
             // Work.result() returns a vector of tensors. This signature is
-            // problematic as some collectives may just return one tensor (e.g
-            // all-reduce), while some others may return multiple tensors (e.g.
-            // all-gather).
-            // Deprecating work.result() would also allow us to remove the
-            // `outputs_` field in the Work class, avoiding an "artificial"
-            // reference to the tensors, which could potentially hold up the
-            // tensors' memory.
+            // problematic as some collectives may just return one tensor
+            // (e.g all-reduce), while some others may return multiple
+            // tensors (e.g. all-gather).
+            // Deprecating work.result() would
+            // also allow us to remove the `outputs_` field in the Work
+            // class, avoiding an "artificial" reference to the tensors,
+            // which could potentially hold up the tensors' memory.
             TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
             return work.result();
           })
@@ -3165,6 +3232,23 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           tensors(List[torch.Tensor]): List of tensors we want to hash.
       )");
   module.def(
+      "_dump_nccl_trace_json",
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_nccl_trace_json(
+            includeCollectives.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+      Arguments:
+            includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+      Returns:
+            Stringified json work traces.
+            Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+      )");
+  module.def(
       "_dump_nccl_trace",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
@@ -3199,6 +3283,61 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("host_or_file"),
           py::arg("port") = -1)
       .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
+
+  module.def(
+      "_get_handler",
+      [](const std::string& name) -> py::cpp_function {
+        return py::cpp_function(
+            ::c10d::control_plane::getHandler(name),
+            py::arg("request"),
+            py::arg("response"),
+            py::call_guard<py::gil_scoped_release>());
+      },
+      py::arg("name"),
+      R"(
+      Returns the handler with the specified name.
+    )");
+
+  module.def(
+      "_get_handler_names",
+      &::c10d::control_plane::getHandlerNames,
+      R"(
+      Returns the names of all handlers.
+    )",
+      py::call_guard<py::gil_scoped_release>());
+
+  py::class_<::c10d::control_plane::Request, PythonRequest>(
+      module,
+      "_Request",
+      R"(
+      See c10d::control_plane::Request for docs.
+)")
+      // Default constructor.
+      .def(py::init<>())
+      .def("body", &::c10d::control_plane::Request::body)
+      .def("params", &::c10d::control_plane::Request::params);
+
+  py::class_<
+      ::c10d::control_plane::Response,
+      std::shared_ptr<::c10d::control_plane::Response>,
+      PythonResponse>(
+      module,
+      "_Response",
+      R"(
+      See c10d::control_plane::Response for docs.
+)")
+      // Default constructor.
+      .def(py::init<>())
+      .def(
+          "set_content",
+          &::c10d::control_plane::Response::setContent,
+          py::arg("content"),
+          py::arg("content_type"))
+      .def(
+          "set_status",
+          &::c10d::control_plane::Response::setStatus,
+          py::arg("status"));
+
   Py_RETURN_TRUE;
 }
 

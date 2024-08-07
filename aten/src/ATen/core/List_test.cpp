@@ -1127,7 +1127,7 @@ TEST(ListTest, canAccessStringByReference) {
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {
-  List<std::optional<std::string>> list({"one", "two", c10::nullopt});
+  List<std::optional<std::string>> list({"one", "two", std::nullopt});
   const auto& listRef = list;
   static_assert(
       std::is_same_v<decltype(listRef[1]), std::optional<std::reference_wrapper<const std::string>>>,

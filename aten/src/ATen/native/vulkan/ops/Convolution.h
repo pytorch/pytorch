@@ -68,8 +68,8 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
       const bool quantized,
       const IntArrayRef output_padding_arg,
       const int64_t groups,
-      const std::optional<Scalar>& output_min = c10::nullopt,
-      const std::optional<Scalar>& output_max = c10::nullopt);
+      const std::optional<Scalar>& output_min = std::nullopt,
+      const std::optional<Scalar>& output_max = std::nullopt);
 
   /*
    * Assigns a name to each index in the unpacked list.
@@ -132,8 +132,8 @@ c10::intrusive_ptr<Conv2dPackedContext> create_conv2d_context(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const std::optional<Scalar>& output_min = c10::nullopt,
-    const std::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = std::nullopt,
+    const std::optional<Scalar>& output_max = std::nullopt);
 
 Tensor run_conv2d_context(
     const Tensor& input,
@@ -147,8 +147,8 @@ c10::intrusive_ptr<Conv2dPackedContext> create_tconv2d_context(
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const std::optional<Scalar>& output_min = c10::nullopt,
-    const std::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = std::nullopt,
+    const std::optional<Scalar>& output_max = std::nullopt);
 
 Tensor run_tconv2d_context(
     const Tensor& input,
@@ -161,8 +161,8 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const std::optional<Scalar>& output_min = c10::nullopt,
-    const std::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = std::nullopt,
+    const std::optional<Scalar>& output_max = std::nullopt);
 
 Tensor run_qconv2d_context(
     const Tensor& input_arg,
@@ -178,8 +178,8 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
     std::vector<int64_t>&& output_padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const std::optional<Scalar>& output_min = c10::nullopt,
-    const std::optional<Scalar>& output_max = c10::nullopt);
+    const std::optional<Scalar>& output_min = std::nullopt,
+    const std::optional<Scalar>& output_max = std::nullopt);
 
 // Backwards compatibility
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
@@ -193,8 +193,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      const std::optional<Scalar>& output_min = c10::nullopt,
-      const std::optional<Scalar>& output_max = c10::nullopt);
+      const std::optional<Scalar>& output_min = std::nullopt,
+      const std::optional<Scalar>& output_max = std::nullopt);
 
   using State = std::tuple<
       Tensor,

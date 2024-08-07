@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement
 from torch.distributed.device_mesh import DeviceMesh
 
 
@@ -22,6 +22,9 @@ except ImportError:
 # Common type aliases
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
+
+PlacementList = List[Optional[Placement]]
+
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
@@ -268,24 +271,24 @@ class OpSchema:
         )
 
     def __str__(self) -> str:
-        args_sharding: List[str] = []
+        args_schema: List[str] = []
         mesh_shape = None
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
+                args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
                 mesh_shape = first_op_strtgy.mesh_shape
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
             else:
-                args_sharding.append(str(arg))
-        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)} @ mesh: {mesh_shape})"
+                args_schema.append(str(arg))
+        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
         has_symints = False

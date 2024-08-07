@@ -201,6 +201,7 @@
 import os
 import sys
 
+
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
         "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
@@ -208,6 +209,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+
 
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
@@ -236,7 +238,6 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
-
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
@@ -1137,7 +1138,8 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
-        "sympy",
+        'sympy==1.12.1 ; python_version == "3.8"',
+        'sympy>=1.13.0 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
         "fsspec",
@@ -1199,7 +1201,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree==0.11.0"],
+        "optree": ["optree>=0.12.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 

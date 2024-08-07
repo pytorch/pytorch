@@ -353,12 +353,6 @@ if(BUILD_LIBTORCHLESS)
     target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
   endif()
 
-  if(MSVC AND NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(torch_python PRIVATE "AT_CORE_STATIC_WINDOWS=1")
-  endif()
-
-
-
 endif()
 
 add_dependencies(torch_python torch_python_stubs)
