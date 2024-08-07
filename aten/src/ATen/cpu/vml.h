@@ -168,4 +168,3 @@ IMPLEMENT_VML_MKL(log2, Log2)
 
 } // namespace
 } // namespace at::vml
-
