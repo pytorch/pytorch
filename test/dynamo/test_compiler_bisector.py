@@ -107,11 +107,12 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "decomposition")
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("aten.exponential" in out.debug_info)
-    
+
     def test_bad_lowering(self):
         def test_fn():
             torch._dynamo.reset()
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+
                 def my_func(x):
                     return (x * -1).relu()
 

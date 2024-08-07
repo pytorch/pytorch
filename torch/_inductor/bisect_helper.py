@@ -331,7 +331,7 @@ class BisectionManager:
                 low, high = cls.get_bisect_range(curr_backend, curr_subsystem)
                 if low == high:
                     print(
-                        f"Binary search completed for {curr_backend} - {curr_subsystem}. The bad number is {low}. "
+                        f"Binary search completed for {curr_backend} - {curr_subsystem}. The bisect number is {low}. "
                         f"Debug info: {call_counter_debug_info.get(low, 'not found')}"
                     )
                     return True
