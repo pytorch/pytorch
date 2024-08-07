@@ -248,7 +248,11 @@ class TritonBlockPointerTest(InductorTestCase):
         ],
     )
     def test_reduction(
-        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+        self,
+        view_size: Tuple[int],
+        num_block_pointers: int,
+        num_triton_kernels: int,
+        prefer_nd_tiling: bool,
     ):
         """
         Tests a reduction kernel.
@@ -266,6 +270,7 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=num_block_pointers,
             expected_num_triton_kernels=num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
     @parametrize(
