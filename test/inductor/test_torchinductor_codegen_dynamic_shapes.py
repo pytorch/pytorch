@@ -193,7 +193,7 @@ test_failures = {
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
-    "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_permute2_dynamic_shapes": TestFailure(("xpu")),
     "test_pointwise_airy_ai_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_digamma_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_gammainc_dynamic_shapes": TestFailure(("cuda", "xpu")),
