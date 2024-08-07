@@ -127,7 +127,7 @@ class MemoryBudgetTest(TestCase):
 
         def f(x, ws):
             xs = [torch.mm(x, w).cos() for w in ws]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         x = torch.randn(512, 512, requires_grad=True)
 
@@ -272,7 +272,7 @@ class MemoryBudgetTest(TestCase):
     def test_prioritize_cheaper_matmul(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         x1, w1 = create_pair(1, 4)
         x2, w2 = create_pair(2, 2)
@@ -311,7 +311,7 @@ class MemoryBudgetTest(TestCase):
     def test_prioritize_cheaper_matmul2(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         data = [(4, 4), (6, 2), (2, 6)]
         xs, ws = zip(*[create_pair(a, b) for a, b in data])

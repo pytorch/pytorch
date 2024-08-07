@@ -488,22 +488,22 @@ def aot_dispatch_autograd(
         # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
         #     so we need to figure out which subclass fw inputs they map to.
         if maybe_subclass_meta is None:
-            num_tokens = len(fw_metadata.tokens)
+            assert isinstance(inner_meta.num_bw_out_tokens, int)
+            num_bw_out_tokens: int = inner_meta.num_bw_out_tokens
             assert (
                 len(bw_outs)
-                == num_tokens
-                + len(fw_metadata.input_info)
+                == len(fw_metadata.input_info)
                 + inner_meta.num_outputs_rng_offset
+                + num_bw_out_tokens
             )
-            bw_outs_no_tokens_no_rng = bw_outs
-            if inner_meta.num_outputs_rng_offset > 0:
-                bw_outs_no_tokens_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
-            if num_tokens > 0:
-                bw_outs_no_tokens_no_rng = bw_outs_no_tokens_no_rng[num_tokens:]
+            bw_outs_no_rng = bw_outs
+            if (inner_meta.num_outputs_rng_offset + num_bw_out_tokens) > 0:
+                bw_outs_no_rng = bw_outs[
+                    : -(inner_meta.num_outputs_rng_offset + num_bw_out_tokens)
+                ]
+            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
 
-            assert len(bw_outs_no_tokens_no_rng) == len(fw_metadata.input_info)
-
-            for i, (bw_out) in enumerate(bw_outs_no_tokens_no_rng):
+            for i, (bw_out) in enumerate(bw_outs_no_rng):
                 # If our input experiences a metadata mutation inside the graph (e.g. set_()),
                 # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
                 metadata_mutation_in_graph = (
