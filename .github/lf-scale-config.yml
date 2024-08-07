@@ -203,7 +203,7 @@ runner_types:
     os: linux
     variants:
       amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
   lf.linux.arm64.m7g.4xlarge:
     disk_size: 256
     instance_type: m7g.4xlarge
@@ -212,7 +212,7 @@ runner_types:
     os: linux
     variants:
       amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
   lf.linux.arm64.m7g.metal:
     disk_size: 256
     instance_type: m7g.metal
@@ -221,7 +221,7 @@ runner_types:
     os: linux
     variants:
       amz2023:
-        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
   lf.windows.4xlarge:
     disk_size: 256
     instance_type: c5d.4xlarge
