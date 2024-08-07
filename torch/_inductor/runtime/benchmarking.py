@@ -19,15 +19,14 @@ class Benchmarker:
         fn: Callable[..., Any],
         fn_args: Tuple[Any],
         fn_kwargs: Dict[str, Any],
-        *args: Any,
         **kwargs: Any,
     ) -> float:
         """Dispatch benchmark request to CPU or GPU depending on device of `fn_args` and `fn_kwargs`"""
         if is_cpu_device(list(fn_args) + list(fn_kwargs.values())):
             return self.benchmark_cpu(
-                lambda: fn(*fn_args, **fn_kwargs), *args, **kwargs
+                lambda: fn(*fn_args, **fn_kwargs), **kwargs
             )
-        return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), *args, **kwargs)
+        return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
     def benchmark_cpu(
         self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
