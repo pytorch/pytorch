@@ -142,12 +142,12 @@ void ProcessGroup::init() {
 
 const std::string& ProcessGroup::getGroupName() const {
   TORCH_CHECK(!deviceTypeToBackend_.empty(), "ProcessGroup name not set");
-  return deviceTypeToBackend_.begin()->second->getGroupName();
+  return deviceTypeToBackend_.begin()->second->getGroupUid();
 }
 
 void ProcessGroup::setGroupName(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
-    kv.second->setGroupName(name);
+    kv.second->setGroupUid(name);
   }
 }
 
