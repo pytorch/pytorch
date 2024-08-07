@@ -612,7 +612,7 @@ class SideEffects:
                         )
                     else:
                         cg.tx.output.update_co_names(name)
-                        cg(value, allow_cache=False)
+                        cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.TupleIteratorVariable):
