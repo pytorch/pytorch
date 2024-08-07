@@ -801,7 +801,7 @@ class triton:
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
     # it easier to identify block pointers.
-    prefer_nd_tiling: bool = False
+    prefer_nd_tiling: bool = True  # XXX Testing purposes!
 
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
