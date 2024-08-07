@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
@@ -195,7 +196,7 @@ class UniformValueConstantFolder(ConstantFolder):
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
@@ -266,6 +267,10 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
+        # handle device_put op
+        if node.target == prims.device_put.default:
+            return super(ConstantFolder, self).run_node(node)
+
         # constructors ops
         if (
             node.op == "call_function"
@@ -275,6 +280,10 @@ class UniformValueConstantFolder(ConstantFolder):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
             new_args = [[1], args[1]]
             return aten.full.default(*new_args, **node.kwargs)
+
+        # handle before view ops because this changes value
+        if node.target == aten.view.dtype:
+            return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
@@ -353,6 +362,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            continue
+
+        # TODO - not sure about lossy uint->python value->uint conversions
+        if fake_tensor.dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
             continue
 
         if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:

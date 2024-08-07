@@ -24,9 +24,9 @@ from torch._inductor.comm_analysis import (
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
+    at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
     requires_nccl,
-    skip_if_lt_x_gpu,
 )
 from torch.utils._triton import has_triton
 
@@ -93,7 +93,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         return 2
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -112,7 +111,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             b = torch.matmul(a, a)
             return torch.matmul(ar, b)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
@@ -131,7 +132,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -152,7 +152,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             e = _functional_collectives.all_reduce(b, "sum", "0")
             return torch.matmul(d, e)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
@@ -177,7 +179,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -200,7 +201,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             g = torch.matmul(f, f)
             return torch.mm(e, g)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -228,9 +231,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -253,7 +254,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             e = torch.matmul(d + ar + fr, g)
             return (e,)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -262,28 +265,25 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(True, "FIXME: broken test/feature.")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -311,7 +311,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             e = torch.matmul(d + ar + fr, g)
             return (e,)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
@@ -320,27 +322,25 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
-                "extern_kernels.mm("
-            ).check("extern_kernels.mm(").check("_wait_tensor(").check(
-                "triton_poi_fused_mul"
-            ).check(
-                "dist.all_reduce("
-            ).check(
-                "_wait_tensor("
-            ).check(
-                "triton_poi_fused_add"
-            ).check(
-                "extern_kernels.mm("
-            ).run(
-                code
+            (
+                FileCheck()
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("triton_poi_fused_relu")
+                .check("extern_kernels.mm")
+                .check("extern_kernels.mm")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_mul")
+                .check("torch.ops._c10d_functional.all_reduce_.default")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check("triton_poi_fused_add")
+                .check("extern_kernels.mm")
+                .run(code)
             )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(
@@ -360,7 +360,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             mm = torch.matmul(mul, ar)
             return (mm,)
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+        ):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())

@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <nlohmann/json.hpp>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -174,7 +173,6 @@
   } while (0)
 
 namespace c10d {
-using json = nlohmann::json;
 #define DEFINE_CONSTANT(name, value) \
   static c10::IValue name = value;   \
   static std::string name##_str = value;
@@ -185,8 +183,9 @@ DEFINE_CONSTANT(version_key, "version");
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.2");
+DEFINE_CONSTANT(version_val, "2.3");
 DEFINE_CONSTANT(pg_config_key, "pg_config");
+DEFINE_CONSTANT(pg_status_key, "pg_status");
 DEFINE_CONSTANT(record_id_key, "record_id");
 DEFINE_CONSTANT(pg_id_key, "pg_id");
 DEFINE_CONSTANT(pg_name_key, "process_group");
@@ -328,7 +327,6 @@ class NCCLComm {
     comm->initialized_ = isInitialized;
     return comm;
   }
-#endif
 
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
@@ -336,6 +334,7 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
+#endif
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
@@ -644,6 +643,7 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
 
@@ -659,9 +659,14 @@ struct NCCLTraceBuffer {
       Event* start,
       Event* end,
       std::chrono::milliseconds timeout_ms,
+      std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P) {
     if (!enabled_) {
       return std::nullopt;
+    }
+    if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
+      // Current pg_status is not in FR.
+      all_pg_status_[pg_id] = pg_status;
     }
     auto traceback =
         torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
@@ -813,77 +818,6 @@ struct NCCLTraceBuffer {
     }
   }
 
-  std::list<json> getCollectiveTraceJson(bool onlyActive) {
-    auto result = dump_entries();
-
-    std::list<json> entries;
-    for (auto i : c10::irange(result.size())) {
-      json j;
-      auto& e = result.at(i);
-      if (onlyActive && e.time_discovered_completed_.has_value()) {
-        continue;
-      }
-      j[record_id_key_str] = int64_t(e.id_);
-      j[pg_id_key_str] = int64_t(e.pg_id_);
-      j[pg_name_key_str] = e.pg_name_;
-      j[collective_seq_id_key_str] = int64_t(e.collective_seq_id_);
-      j[p2p_seq_id_key_str] = int64_t(e.p2p_seq_id_);
-      j[op_id_key_str] = int64_t(e.op_id_);
-      j[profiling_name_key_str] = e.profiling_name_;
-      j[time_created_key_str] = int64_t(e.time_created_);
-      if (e.duration_) {
-        j[duration_key_str] = *e.duration_;
-      }
-      auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-        auto sizes = std::list<std::list<int>>();
-        for (auto dim : dims) {
-          auto arg_sizes = std::list<int>();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
-            arg_sizes.push_back(*it++);
-          }
-          sizes.push_back(arg_sizes);
-        }
-        return sizes;
-      };
-      j[input_sizes_key_str] = read_sizes(e.input_dims_);
-      std::vector<std::string> input_dtypes_strs;
-      input_dtypes_strs.reserve(e.input_dtypes_.size());
-      for (const auto& input_dtype : e.input_dtypes_) {
-        input_dtypes_strs.push_back(c10::toString(input_dtype));
-      }
-      j[input_dtypes_key_str] = input_dtypes_strs;
-      j[output_sizes_key_str] = read_sizes(e.output_dims_);
-      std::vector<std::string> output_dtypes_strs;
-      output_dtypes_strs.reserve(e.output_dtypes_.size());
-      for (const auto& output_dtype : e.output_dtypes_) {
-        output_dtypes_strs.push_back(c10::toString(output_dtype));
-      }
-      j[output_dtypes_key_str] = output_dtypes_strs;
-      if (e.time_discovered_completed_.has_value()) {
-        j[state_key_str] = completed_state_str;
-      } else if (e.time_discovered_started_.has_value()) {
-        j[state_key_str] = started_state_str;
-      } else {
-        j[state_key_str] = scheduled_state_str;
-      }
-      j[time_discovered_started_key_str] =
-          e.time_discovered_started_.has_value()
-          ? int64_t(*e.time_discovered_started_)
-          : 0;
-      j[time_discovered_completed_key_str] =
-          e.time_discovered_completed_.has_value()
-          ? int64_t(*e.time_discovered_completed_)
-          : 0;
-      j[retired_key_str] = e.retired_;
-      j[timeout_key_str] = e.timeout_ms_;
-      j[is_p2p_key_str] = e.isP2P_;
-      entries.emplace_back(j);
-    }
-    return entries;
-  }
-
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
       bool onlyActive) {
@@ -938,8 +872,7 @@ struct NCCLTraceBuffer {
         auto sizes = new_list();
         for (auto dim : dims) {
           auto arg_sizes = new_list();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
+          for (C10_UNUSED auto i : c10::irange(dim)) {
             arg_sizes.push_back(*it++);
           }
           sizes.push_back(arg_sizes);
@@ -1014,31 +947,41 @@ struct NCCLTraceBuffer {
     return result;
   }
 
+  // dump pg_status
+  const c10::Dict<c10::IValue, c10::IValue> getPgStatus() {
+    auto all_pg_status = new_dict();
+    for (const auto& [pg_id, status] : all_pg_status_) {
+      auto pg_status = new_dict();
+      pg_status.insert("last_enqueued_collective", status->lastEnqueuedSeq);
+      pg_status.insert("last_started_collective", status->lastStartedSeq);
+      pg_status.insert("last_completed_collective", status->lastCompletedSeq);
+      all_pg_status.insert(std::to_string(pg_id), pg_status);
+    }
+    return all_pg_status;
+  }
+
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgStatusJson() {
+    std::map<std::string, std::map<std::string, std::string>> result;
+    for (const auto& [pg_id, status] : all_pg_status_) {
+      auto pg_status = std::map<std::string, std::string>();
+      pg_status["last_enqueued_collective"] =
+          std::to_string(status->lastEnqueuedSeq);
+      pg_status["last_started_collective"] =
+          std::to_string(status->lastStartedSeq);
+      pg_status["last_completed_collective"] =
+          std::to_string(status->lastCompletedSeq);
+      result[std::to_string(pg_id)] = pg_status;
+    }
+    return result;
+  }
+
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap,
       bool includeCollectives,
-      bool onlyActive) {
-    json result;
-    result[version_key_str] = version_val_str;
-    result[pg_config_key_str] = getPgConfigJson();
-
-    // collective trace
-    if (includeCollectives) {
-      auto entries = getCollectiveTraceJson(onlyActive);
-      if (entries.size() > 0) {
-        result[entries_key_str] = entries;
-      }
-    }
-
-    if (ncclDumpMap.has_value()) {
-      result[nccl_comm_key_str] = ncclDumpMap.value();
-    }
-
-    return result.dump();
-  }
-
+      bool onlyActive);
   // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
@@ -1051,6 +994,7 @@ struct NCCLTraceBuffer {
     // common values
     result.insert(version_key, version_val);
     result.insert(pg_config_key, getPgConfig());
+    result.insert(pg_status_key, getPgStatus());
 
     // collective trace
     if (includeCollectives) {

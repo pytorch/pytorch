@@ -17,6 +17,7 @@ from torch.nn.attention import SDPBackend
 
 from .nested_tensor import NestedTensor
 
+
 log = logging.getLogger(__name__)
 
 
@@ -695,7 +696,7 @@ def jagged_scaled_dot_product_attention(
 
         # Reshape output to convert nnz to batch_size and seq_len
         attention = nested_view_from_values_offsets(
-            attention.squeeze(0),
+            attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
             output_nt_info["offsets"],
             min_seqlen=output_nt_info["_min_seqlen"],
             max_seqlen=output_nt_info["_max_seqlen"],

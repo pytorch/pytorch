@@ -12,7 +12,6 @@ from torch.distributed._tensor._collective_utils import (
 )
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
-
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     _world,
@@ -282,7 +281,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
         # tp_rank_0: [0, 2, 4, 6], tp_rank_1: [1, 3, 5, 7]
         tp_rank = mesh_3d.get_local_rank("tp")
-        print(f"{self.rank=}, {tp_rank=}")
         expected_tp_rank = self.rank % 2
         self.assertEqual(tp_rank, expected_tp_rank)
 
@@ -314,7 +312,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
         self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
         self.assertEqual(mesh_2d["TP"]._thread_id, ep_mesh._thread_id)
-        self.assertNotEqual(mesh_2d["TP"]._parent_mesh, ep_mesh._parent_mesh)
         self.assertNotEqual(hash(mesh_2d["TP"]), hash(ep_mesh))
         self.assertNotEqual(mesh_2d["TP"], ep_mesh)
 
@@ -330,7 +327,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
         self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
         self.assertEqual(ep_mesh._thread_id, another_mesh._thread_id)
-        self.assertEqual(ep_mesh._parent_mesh, another_mesh._parent_mesh)
         self.assertEqual(hash(ep_mesh), hash(another_mesh))
         self.assertEqual(ep_mesh, another_mesh)
 
@@ -528,6 +524,41 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # just reuse the parent mesh pg.
         tp_mesh = mesh["tp"]
         self.assertEqual(_world.group_count, ref_pg_count)
+
+    @with_comms
+    def test_get_item_3d_noncontinuous_slicing(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp", "pp", "cp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Slice order simply decides which mesh_dim sits on which mesh_dim.
+        # For dp_cp_mesh, cp mesh is the innermost dimension.
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        expected_mesh_tensor = (
+            torch.tensor([[0, 1], [4, 5]], dtype=torch.int)
+            if self.rank in (0, 1, 4, 5)
+            else torch.tensor([[2, 3], [6, 7]], dtype=torch.int)
+        )
+        dp_local_rank = dp_cp_mesh.get_local_rank("dp")
+        self.assertEqual(dp_cp_mesh.mesh, expected_mesh_tensor)
+        cp_mesh = mesh_3d["cp"]
+        # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
+        self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
+
+        # For dp_cp_mesh, dp mesh is the innermost dimension.
+        cp_dp_mesh = mesh_3d["cp", "dp"]
+        expected_mesh_tensor = (
+            torch.tensor([[0, 4], [1, 5]], dtype=torch.int)
+            if self.rank in (0, 1, 4, 5)
+            else torch.tensor([[2, 6], [3, 7]], dtype=torch.int)
+        )
+        cp_local_rank = cp_dp_mesh.get_local_rank("cp")
+        self.assertEqual(cp_dp_mesh.mesh, expected_mesh_tensor)
+        dp_mesh = mesh_3d["dp"]
+        # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
+        self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
 
 
 class TestMeshEnv(DTensorTestBase):

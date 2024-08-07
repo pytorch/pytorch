@@ -792,6 +792,9 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
+            "_functionalize_unsafe_set": [
+                "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
+            ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
             ],
@@ -807,6 +810,9 @@ def gen_pyi(
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
                 "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_set_storage_changed": [
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
@@ -1186,7 +1192,7 @@ def gen_pyi(
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": ["def storage_offset(self) -> _int: ..."],
+            "storage_offset": ["def storage_offset(self) -> Union[_int, SymInt]: ..."],
             "to": [
                 (
                     f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
@@ -1204,7 +1210,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [

@@ -64,6 +64,7 @@ using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
 using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
+using torch::profiler::impl::ivalueToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
@@ -258,6 +259,10 @@ struct AddGenericMetadata : public MetadataBase {
       }
     }
 
+    // Add metadata for kwinputs if exist
+    for (const auto& [key, val] : op_event.kwinputs_) {
+      addMetadata(key, ivalueToStr(val));
+    }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
       addMetadata(key, val);
@@ -770,6 +775,7 @@ KinetoEvent::KinetoEvent(
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concreteInputs);
+    kwinputs_ = std::move(op.kwinputs_);
   });
 }
 
@@ -801,6 +807,15 @@ bool KinetoEvent::hasConcreteInputs() const {
 
 const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
   return concrete_inputs_;
+}
+
+bool KinetoEvent::hasKwinputs() const {
+  return !kwinputs_.empty();
+}
+
+const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()
+    const {
+  return kwinputs_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {

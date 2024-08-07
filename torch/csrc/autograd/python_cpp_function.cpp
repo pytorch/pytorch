@@ -210,6 +210,27 @@ PyObject* THPCppFunction_set_sequence_nr(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPCppFunction_input_metadata(PyObject* self, void* closure) {
+  HANDLE_TH_ERRORS;
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  const auto num_inputs =
+      fn.num_inputs(); // Assuming there's a method to get the number of inputs
+  THPObjectPtr list(PyTuple_New(num_inputs));
+  if (!list) {
+    return nullptr;
+  }
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const auto& metadata = fn.input_metadata(i);
+    THPObjectPtr item(py::cast(metadata).release().ptr());
+    if (!item) {
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(list.get(), i, item.release());
+  }
+  return list.release();
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
     THP_FUNCTION_DEFAULT_METHODS,

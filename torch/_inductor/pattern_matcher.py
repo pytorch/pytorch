@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """
 # Inductor Pattern Matcher
 
@@ -33,12 +34,9 @@ implements a `_match` method which returns either a `Match` object for a
 successful match or a `FailedMatch` object for a failure to match.
 """
 
-# mypy: disallow-untyped-defs
-
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import functools
 import importlib
@@ -90,11 +88,12 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensorMode
+from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -1492,7 +1491,7 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if torch._subclasses.fake_tensor.is_fake(arg) and arg.constant is not None:
+        if isinstance(arg, FakeTensor) and arg.constant is not None:
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
@@ -1600,8 +1599,9 @@ def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
     return node is next(iter(graph.nodes))
 
 
-# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
-_mutation_op_re = re.compile(r"_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_)")
+# match: copy_, relu_, _set_grad_enabled, manual_seed, _enter_autocast, etc
+# doesn't match: __rshift__, etc
+_mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
 
 
 def is_mutation_op(node: torch.fx.Node) -> bool:
@@ -1612,6 +1612,12 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
         if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
     return node.kwargs.get("out") is not None
+
+
+def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+    assert "mutation_region_id" in a.meta
+    assert "mutation_region_id" in b.meta
+    return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
 
 
 def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
@@ -1642,14 +1648,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
 class PatternMatcherPass:
     def __init__(
         self,
-        prevent_match_across_mutations: bool = False,
         pass_name: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.patterns: DefaultDict[
             Tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
-        self.prevent_match_across_mutations = prevent_match_across_mutations
         self.pass_name = pass_name
 
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
@@ -1667,12 +1671,11 @@ class PatternMatcherPass:
             raise RuntimeError(
                 f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
             )
-        if self.prevent_match_across_mutations:
-            if should_compute_mutation_region_ids(graph):
-                compute_mutation_region_ids(graph)
-            get_mutation_region_id_partial = functools.partial(
-                get_mutation_region_id, graph
-            )
+        if should_compute_mutation_region_ids(graph):
+            compute_mutation_region_ids(graph)
+        get_mutation_region_id_partial = functools.partial(
+            get_mutation_region_id, graph
+        )
         count = 0
         nodes = []
         has_call_module = False
@@ -1705,8 +1708,7 @@ class PatternMatcherPass:
                     m = entry.pattern.match(node)
                     # pattern match crosses mutation barrier - discard
                     if (
-                        self.prevent_match_across_mutations
-                        and is_match(m)
+                        is_match(m)
                         and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
@@ -1805,12 +1807,19 @@ def fx_to_pattern(
 
 @torch.no_grad()
 def fwd_only(
-    fn: Callable[..., Any], args: Sequence[Any], *, run_dce: bool = True
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    *,
+    run_dce: bool = True,
+    get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+        decompositions = (
+            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
+        )
+        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 
