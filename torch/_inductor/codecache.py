@@ -63,7 +63,9 @@ from torch._inductor.codegen.rocm.compile_command import (
 
 T = TypeVar("T")
 
-from _collections_abc import dict_keys  # noqa: TCH003
+
+if TYPE_CHECKING:
+    from collections.abc import KeysView
 
 
 """
@@ -1086,6 +1088,7 @@ class FxGraphCache:
         from .graph import GraphLowering
 
         GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
         trace_structured(
@@ -1535,6 +1538,7 @@ def get_include_and_linking_paths(
         or vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or config.profiler_mark_wrapper_call
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
@@ -1801,7 +1805,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
+    def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
 
 

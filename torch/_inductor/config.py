@@ -66,7 +66,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
 )
 
 # dead code elimination
@@ -453,6 +453,15 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
+# Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
+# for all except for foreach, 2 - enable for all
+combo_kernel_allow_mixed_sizes = 1
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
@@ -534,7 +543,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode() and worker_start_method != "subprocess":
+    elif is_fbcode():
         return 1
     else:
         cpu_count = (
@@ -646,6 +655,12 @@ decompose_mem_bound_mm: bool = False
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
+
+# For the user-written Triton kernels compiled with the model, ignore the unsupported
+# arguments passed to the @triton.autotune in the user's code; this is unsafe, as
+# ignoring the unsupported args may lead to unexpected autotuning behavior: don't
+# set unless you know what you're doing.
+unsafe_ignore_unsupported_triton_autotune_args: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -963,10 +978,9 @@ class rocm:
     # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Enable for CDNA3 only for now
+    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
