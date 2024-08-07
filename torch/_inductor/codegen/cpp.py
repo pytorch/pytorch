@@ -180,8 +180,10 @@ def reduction_combine(
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
 ):
+    is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
-        return f"{var} + {next_value}"
+        conjunction = "|" if is_bool else "+"
+        return f"{var} {conjunction} {next_value}"
     if reduction_type == "prod":
         return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
@@ -2330,6 +2332,7 @@ class CppVecKernel(CppKernel):
             welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
         tmpvar: Union[str, CSEVariable]
+        is_bool = dtype == torch.bool
         if horizontal_reduction:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
@@ -2340,6 +2343,17 @@ class CppVecKernel(CppKernel):
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+            elif is_bool:
+                if reduction_type == "min":
+                    next_value = f"{acc_vec}.all_masked()"
+                elif reduction_type in (
+                    "any",
+                    "sum",
+                ):
+                    next_value = f"!{acc_vec}.all_zero()"
+                else:
+                    assert reduction_type == "max"
+                    next_value = f"{acc_vec}.all_zero()"
             else:
                 reduce_all_body = (
                     "{ return "
@@ -2354,7 +2368,7 @@ class CppVecKernel(CppKernel):
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
             )
             tmpvar = acc
         else:
@@ -2451,7 +2465,7 @@ class CppVecKernel(CppKernel):
         vec_init = f"{vec_type}({scalar_init})"
         if dtype == torch.bool:
             assert reduction_type in ("min", "max", "sum")
-            return f"{self._get_mask_type()}::from({vec_init})"
+            return f"{self._get_mask_type()}::from({scalar_init})"
         return vec_init
 
     def reduction_acc_type_vec(self, reduction_type, dtype):
@@ -2496,7 +2510,7 @@ class CppVecKernel(CppKernel):
             )
         elif reduction_type == "min":
             return (
-                f"~({var} | {next_value})"
+                f"{var} & {next_value}"
                 if is_bool
                 else f"at::vec::minimum({var}, {next_value})"
             )
