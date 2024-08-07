@@ -29,8 +29,10 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
 
+
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
+
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -336,7 +338,7 @@ class AutogradCompilerInstance:
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+            proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 

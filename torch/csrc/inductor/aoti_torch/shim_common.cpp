@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
-#include <memory>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -205,6 +204,7 @@ AOTITorchError aoti_torch_get_sizes(
     int64_t** ret_sizes) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_sizes = const_cast<int64_t*>(t->sizes().data());
   });
 }
@@ -224,6 +224,7 @@ AOTITorchError aoti_torch_get_strides(
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_strides = const_cast<int64_t*>(t->strides().data());
   });
 }
@@ -261,7 +262,7 @@ AOTITorchError aoti_torch_get_device_index(
     int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret_device_index = t->device().index();
+    *ret_device_index = static_cast<int16_t>(t->device().index());
   });
 }
 
@@ -874,7 +875,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle values,
+    const AtenTensorHandle& values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;

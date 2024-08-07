@@ -23,6 +23,7 @@ from torch.optim.rprop import Rprop
 from torch.optim.sgd import SGD
 from torch.optim.sparse_adam import SparseAdam
 
+
 Adafactor.__module__ = "torch.optim"
 
 
@@ -40,3 +41,23 @@ del rmsprop  # type: ignore[name-defined] # noqa: F821
 del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
+
+__all__ = [
+    "Adafactor",
+    "Adadelta",
+    "Adagrad",
+    "Adam",
+    "Adamax",
+    "AdamW",
+    "ASGD",
+    "LBFGS",
+    "lr_scheduler",
+    "NAdam",
+    "Optimizer",
+    "RAdam",
+    "RMSprop",
+    "Rprop",
+    "SGD",
+    "SparseAdam",
+    "swa_utils",
+]

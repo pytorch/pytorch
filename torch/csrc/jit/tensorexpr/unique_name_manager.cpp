@@ -5,7 +5,7 @@
 
 namespace torch::jit::tensorexpr {
 
-const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
+const std::string& UniqueNameManager::get_unique_name(const VarPtr& v) {
   // Find if we have already encountered this variable.
   auto iter = unique_name_mapping_.find(v);
   if (iter != unique_name_mapping_.end()) {
