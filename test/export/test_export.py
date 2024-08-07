@@ -1183,7 +1183,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
                 "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
-                ".*dy - 6.*must be specialized to 6 because the guards generated for it are too complex(.*\n)*.*"
+                ".*solving the guards generated for dy - 6.*resulted in a specialized value of 6(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
                 ".*dy = 12(.*\n)*.*"
             )
@@ -2455,8 +2455,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp  # source_fn_stack failure
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
