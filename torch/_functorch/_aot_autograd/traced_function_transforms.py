@@ -24,6 +24,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
+from torch.fx.experimental.proxy_tensor import _enable_thunkify, get_proxy_mode
 from torch.fx.experimental.symbolic_shapes import (
     definitely_false,
     PropagateUnbackedSymInts,
@@ -386,18 +387,27 @@ def create_functionalized_fn(
         assert all(token.numel() == 0 for token in tokens)
 
         with disable_above:
-            # Wrap inputs into functional wrappers
-            f_args = pytree.tree_map(to_fun, args)
-            f_tokens = pytree.tree_map(to_fun, tokens)
+            # The functionalization code here can potentially trigger traces
+            # into the graph, but we'd prefer to NOT do this, because if we
+            # trace them now, we will end up with FX nodes that don't have
+            # module stack annotations, which makes unflattener unhappy.
+            proxy_mode = get_proxy_mode()
+            assert proxy_mode is not None
+            with _enable_thunkify(proxy_mode.tracer):
+                # Wrap inputs into functional wrappers
+                f_args = pytree.tree_map(to_fun, args)
+                f_tokens = pytree.tree_map(to_fun, tokens)
 
-            # Populate the current FunctionalTensorMode with the tokens per
-            # operator. See Note [FunctionalTensorMode is Stateful]
-            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
-            )
-            assert functional_tensor_mode is not None
-            for i, k in enumerate(meta.tokens.keys()):
-                functional_tensor_mode._tokens[k] = f_tokens[i]
+                # Populate the current FunctionalTensorMode with the tokens per
+                # operator. See Note [FunctionalTensorMode is Stateful]
+                functional_tensor_mode = (
+                    torch.utils._python_dispatch._detect_infra_mode(
+                        torch._C._TorchDispatchModeKey.FUNCTIONAL
+                    )
+                )
+                assert functional_tensor_mode is not None
+                for i, k in enumerate(meta.tokens.keys()):
+                    functional_tensor_mode._tokens[k] = f_tokens[i]
 
             # Run the joint
             f_outs = fn(*f_args)

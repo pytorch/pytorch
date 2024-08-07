@@ -1183,7 +1183,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
                 "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
-                ".*dy - 6.*must be specialized to 6 because the guards generated for it are too complex(.*\n)*.*"
+                ".*solving the guards generated for dy - 6.*resulted in a specialized value of 6(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
                 ".*dy = 12(.*\n)*.*"
             )
@@ -2140,15 +2140,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # run_decompositions() triggers same error as Dynamo below
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureSerDer  # sympify on deserialization doesn't preserve sympy functions: T197567691
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
-
-        # NOTE: Dynamo errors with unsupported functions in `add_runtime_asserts`:
-        # "symbolically traced variables cannot be used as inputs to control flow"
-        strict = False
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2174,9 +2167,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         dim = torch.export.Dim("Dim", min=16, max=64)
         dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
 
-        exported_program = export(
-            model, inputs, dynamic_shapes=dynamic_shapes, strict=strict
-        )
+        exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
         self.assertEqual(exported_program.module()(*inputs), model(*inputs))
 
     def test_export_mod_constraints(self):
@@ -2464,8 +2455,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp  # source_fn_stack failure
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -5463,7 +5453,8 @@ def forward(self, b_pred, b_t, x, y):
 def forward(self, b_t, x, y):
     submod_3 = self.submod_1
     add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
-    return (add_1,)""",
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)""",
         )
 
         self.assertExpectedInline(
@@ -5473,7 +5464,7 @@ def forward(self, x, b_t, y):
     sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
-    return add_1""",
+    return (add_1,)""",
         )
 
     def test_predispatch_grad_wrappers(self):
@@ -6021,16 +6012,16 @@ def forward(self, x):
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
+    ge_1 = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
-    gt = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = _assert_scalar_default_2 = None
-    lt = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = _assert_scalar_default_3 = None
+    gt_1 = item > 2
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
+    lt_1 = item < 6
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
-    return foo_unbacked""",
+    return (foo_unbacked,)""",
         )
         ep_aot = ep_pre.run_decompositions()
         self.assertExpectedInline(

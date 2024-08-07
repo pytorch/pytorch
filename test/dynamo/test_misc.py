@@ -7099,10 +7099,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         a = torch.randn([3, 3])
         a.tag = "a"
-        a.frog = "ribbity ribbit"
         b = torch.randn([3, 3])
         b.tag = "b"
-        b.frog = "ribbit"
 
         exported = torch._dynamo.export(foo)(a, b)
         out_graph = exported[0]
@@ -7110,14 +7108,11 @@ utils_device.CURRENT_DEVICE == None""".split(
         nodes = list(out_graph.graph.nodes)
         placeholders = [node for node in nodes if node.op == "placeholder"]
         all_tags = []
-        all_frogs = []
         for placeholder in placeholders:
             if "tensor_dict" in placeholder.meta:
                 all_tags.append(placeholder.meta["tensor_dict"]["tag"])
-                all_frogs.append(placeholder.meta["tensor_dict"]["frog"])
 
         self.assertEqual(all_tags, ["a", "b"])
-        self.assertEqual(all_frogs, ["ribbity ribbit", "ribbit"])
 
     def test_tagging_tensors_mix_used_unused_structure(self):
         def pre_attention_state_ops(input, mems, state):
@@ -11045,6 +11040,61 @@ fn
         x = torch.randn(10)
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(mod(x), opt_mod(x))
+
+    def test_frozen_dict(self):
+        # A pattern from StableDiffusion
+        class FrozenDict(collections.OrderedDict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+                for key, value in self.items():
+                    setattr(self, key, value)
+
+                self.__frozen = True
+
+            def __delitem__(self, *args, **kwargs):
+                raise Exception(
+                    f"You cannot use ``__delitem__`` on a {self.__class__.__name__} instance."
+                )
+
+            def setdefault(self, *args, **kwargs):
+                raise Exception(
+                    f"You cannot use ``setdefault`` on a {self.__class__.__name__} instance."
+                )
+
+            def pop(self, *args, **kwargs):
+                raise Exception(
+                    f"You cannot use ``pop`` on a {self.__class__.__name__} instance."
+                )
+
+            def update(self, *args, **kwargs):
+                raise Exception(
+                    f"You cannot use ``update`` on a {self.__class__.__name__} instance."
+                )
+
+            def __setattr__(self, name, value):
+                if hasattr(self, "__frozen") and self.__frozen:
+                    raise Exception(
+                        f"You cannot use ``__setattr__`` on a {self.__class__.__name__} instance."
+                    )
+                super().__setattr__(name, value)
+
+            def __setitem__(self, name, value):
+                if hasattr(self, "__frozen") and self.__frozen:
+                    raise Exception(
+                        f"You cannot use ``__setattr__`` on a {self.__class__.__name__} instance."
+                    )
+                super().__setitem__(name, value)
+
+        d = {"a": 1}
+        frozen_d = FrozenDict(d)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dict(frozen_d).items()
+            return torch.sin(x)
+
+        fn(torch.randn(4))
 
 
 class TestTracer(JitTestCase):

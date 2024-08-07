@@ -81,6 +81,7 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -187,6 +188,12 @@ class CppWrapperCpu(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if config.profiler_mark_wrapper_call or enable_kernel_profile:
+            self.header.splice("#include <ATen/record_function.h>")
 
         self.header.splice("typedef at::Half half;")
         self.header.splice("typedef at::BFloat16 bfloat16;")
@@ -2383,8 +2390,8 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            # uint64_t is long on Linux, but long long on MacOS
-            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS and Windows
+            return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
