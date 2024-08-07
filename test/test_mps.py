@@ -360,7 +360,6 @@ def mps_ops_modifier(ops):
         'vsplit',
         'zero_',
         'zeros',
-        'byte',
     }
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
@@ -485,6 +484,7 @@ def mps_ops_modifier(ops):
         'true_divide',
         'vstack',
         'where',
+        'byte',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
