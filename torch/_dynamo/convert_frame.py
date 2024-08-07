@@ -357,7 +357,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             prof.dump_stats(profile_path)
         except PermissionError:
-            log.warning("Cannot write to %s", str(profile_path))
+            log.exception("Cannot write to %s", profile_path)
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
@@ -377,7 +377,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
             )
-            log.warning("Generated SVG from profile at %s", str(svg_path))
+            log.warning("Generated SVG from profile at %s", svg_path)
         except FileNotFoundError:
             log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
