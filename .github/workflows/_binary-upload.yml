@@ -1,0 +1,165 @@
+name: upload
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+        description: The build's name
+      use_s3:
+        type: boolean
+        default: true
+        description: If true, will download artifacts from s3. Otherwise will use the default GitHub artifact download action
+      PYTORCH_ROOT:
+        required: false
+        type: string
+        description: Root directory for the pytorch/pytorch repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
+      BUILDER_ROOT:
+        required: false
+        type: string
+        description: Root directory for the pytorch/builder repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
+      PACKAGE_TYPE:
+        required: true
+        type: string
+        description: Package type
+      DESIRED_CUDA:
+        required: true
+        type: string
+        description: Desired CUDA version
+      GPU_ARCH_VERSION:
+        required: false
+        type: string
+        description: GPU Arch version
+      GPU_ARCH_TYPE:
+        required: true
+        type: string
+        description: GPU Arch type
+      DOCKER_IMAGE:
+        required: false
+        type: string
+        description: Docker image to use
+      LIBTORCH_CONFIG:
+        required: false
+        type: string
+        description: Desired libtorch config (for libtorch builds only)
+      LIBTORCH_VARIANT:
+        required: false
+        type: string
+        description: Desired libtorch variant (for libtorch builds only)
+      DESIRED_DEVTOOLSET:
+        required: false
+        type: string
+        description: Desired dev toolset
+      DESIRED_PYTHON:
+        required: false
+        type: string
+        description: Desired python version
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        required: true
+        description: Github Token
+      conda-pytorchbot-token:
+        required: true
+        description: Conda PyTorchBot token
+      conda-pytorchbot-token-test:
+        required: true
+        description: Conda PyTorchBot token
+
+jobs:
+  upload:
+    runs-on: ubuntu-22.04
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    container:
+      image: continuumio/miniconda3:4.12.0
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
+      LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      ANACONDA_USER: pytorch
+      BINARY_ENV_FILE: /tmp/env
+      GITHUB_TOKEN: ${{ secrets.github-token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Configure AWS credentials(PyTorch account) for nightly
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          aws-region: us-east-1
+
+      - name: Configure AWS credentials(PyTorch account) for RC builds
+        if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
+      - name: Download Build Artifacts
+        id: download-artifacts
+        # NB: When the previous build job is skipped, there won't be any artifacts and
+        # this step will fail. Binary build jobs can only be skipped on CI, not nightly
+        continue-on-error: true
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+
+      - name: Set DRY_RUN (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        shell: bash -e -l {0}
+        run: |
+          # reference ends with an RC suffix
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload binaries
+        if: steps.download-artifacts.outcome && steps.download-artifacts.outcome == 'success'
+        shell: bash
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          # When running these on pull_request events these should be blank
+          CONDA_PYTORCHBOT_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.conda-pytorchbot-token-test }}
+          BUILD_NAME: ${{ inputs.build_name }}
+        run: |
+            set -ex
+            if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
+            else
+              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
+            fi
+            bash .circleci/scripts/binary_upload.sh
