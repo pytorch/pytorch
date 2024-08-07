@@ -102,8 +102,8 @@ class Benchmarker:
 
 
 class TritonBenchmarker(Benchmarker):
-    @maybe_time
     @cached_property
+    @maybe_time
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's do_bench."""
         try:

@@ -395,7 +395,7 @@ def set_logs(
 
         export (:class:`Optional[int]`):
             The log level for export. Default: ``logging.WARN``
-        
+
         benchmarking (:class:`bool`):
             Whether to emit detailed Inductor benchmarking information. Default: ``False``
 
