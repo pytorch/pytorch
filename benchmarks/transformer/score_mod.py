@@ -23,14 +23,14 @@ torch._dynamo.config.automatic_dynamic_shapes = False
 torch._dynamo.config.cache_size_limit = 1000
 
 
-from triton.testing import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs)) * 1e3
+    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)

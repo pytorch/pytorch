@@ -1476,11 +1476,10 @@ def estimate_runtime(node):
         return 1
 
     elif RUNTIME_MODE == "profile":
-        from triton.testing import do_bench
-
         with no_dispatch():
+            from torch._inductor.runtime.benchmarking import benchmarker
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
-            ms = do_bench(lambda: node.target(*args, **kwargs))
+            ms = benchmarker.benchmark_gpu(lambda: node.target(*args, **kwargs))
             return ms
 
     elif RUNTIME_MODE == "flops":
