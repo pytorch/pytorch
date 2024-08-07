@@ -417,7 +417,6 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
 
-    gm.graph.lint()
     for pattern in module_function_patterns:
         conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:
@@ -508,7 +507,6 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
-    gm.graph.lint()
 
     for pattern in function_patterns:  # type: ignore[assignment]
         for node in gm.graph.nodes:
