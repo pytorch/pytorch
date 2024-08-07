@@ -850,7 +850,7 @@ cpu_flash_attention(
           if (!headSize_even && need_pack) {
             // pad query if headSize is not even
             // [qBlockSize, headSize] -> [qBlockSize, eheadSize]
-            copy_pad_col_zero(
+            copy_pad_col_zero<scalar_t>(
                 q_data + i * qStrideB + j * qStrideH + m * qStrideM,
                 query_t_padding_ptr,
                 qBlockSize,
