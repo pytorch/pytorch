@@ -38,20 +38,6 @@ jobs:
         fetch-depth: 0
         path: ${{ env.home_dir }}//actionrepo
 
-    # - name: Install-driver
-    #   shell: cmd
-    #   run: |
-    #       set INSTALL_DRIVER=${{ inputs.INSTALL_DRIVER }}
-    #       set DRIVER_PACKAGE_PUBLIC_URL=${{ inputs.DRIVER_PACKAGE_PUBLIC_URL }}
-    #       set http_proxy=${{ secrets.http_proxy }}
-    #       set https_proxy=${{ secrets.https_proxy }}
-    #       set filename=%DRIVER_PACKAGE_PUBLIC_URL:~%DRIVER_PACKAGE_PUBLIC_URL:rindex('/')+1%
-    #       mkdir driver_install
-    #       cd driver_install
-    #       wget -q -e use_proxy=yes -e http_proxy=%http_proxy% -e https_proxy=%https_proxy% -e no_proxy='' %DRIVER_PACKAGE_PUBLIC_URL% 2>&1
-    #       tar -xvf %filename% -C driver || exit /b 1
-    #       start /wait /b "Installer Title" "driver\\Installer.exe" --silent --fresh --overwrite --noExtras --terminateProcesses --unsigned > driver_install.log 2>&1
-
     # - name: Set conda environment
     #   shell: cmd
     #   run: |
