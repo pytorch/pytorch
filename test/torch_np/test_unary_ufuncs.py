@@ -7,7 +7,6 @@ import numpy as np
 
 from torch._numpy._ufuncs import *  # noqa: F403
 from torch._numpy.testing import assert_allclose
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
