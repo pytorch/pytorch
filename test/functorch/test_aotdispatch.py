@@ -5550,7 +5550,7 @@ def forward(self, tangents_1, tangents_2):
         b1_ref = torch.ones(3, 3)
         b2_ref = torch.ones(3, 3)
         b_ref_base = TwoTensor(b1_ref, b2_ref, requires_grad=True)
-        a_ref_base = torch.ones(3, 3)
+        a_ref_base = torch.ones(3, 3, requires_grad=True)
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
