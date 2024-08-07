@@ -2561,14 +2561,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }
         template <> inline long parse_arg<long>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1 && PyErr_Occurred()))
-                throw std::runtime_error("expected int arg");
+            if(result == -1 && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
             return result;
         }
         template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
-                throw std::runtime_error("expected int arg");
+            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }
 
@@ -2576,10 +2576,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         static PyObject* %s_py(PyObject* self, PyObject* args) {
             try {
-                if(unlikely(!PyTuple_CheckExact(args)))
-                    throw std::runtime_error("tuple args required");
-                if(unlikely(PyTuple_GET_SIZE(args) != %s))
-                    throw std::runtime_error("requires %s args");
+                if(!PyTuple_CheckExact(args))
+                    [[unlikely]] throw std::runtime_error("tuple args required");
+                if(PyTuple_GET_SIZE(args) != %s)
+                    [[unlikely]] throw std::runtime_error("requires %s args");
                 %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());

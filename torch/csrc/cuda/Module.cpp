@@ -918,11 +918,11 @@ std::string uuid_to_string(const char* uuid_bytes) {
   // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
   // For string representation, the code here expands this to
   // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-  // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
+  // Size is 16x2 hex characters + 4 hyphens.
   constexpr size_t size = 16 * 2 + 4 + 1;
-  std::string device_path_str(size, '\0');
+  std::array<char, size> uuid_chars {};
   snprintf(
-      device_path_str.data(),
+      uuid_chars.data(),
       size,
       "%02x%02x%02x%02x-"
       "%02x%02x-"
@@ -945,7 +945,7 @@ std::string uuid_to_string(const char* uuid_bytes) {
       (uint8_t)uuid_bytes[13],
       (uint8_t)uuid_bytes[14],
       (uint8_t)uuid_bytes[15]);
-  return device_path_str;
+  return std::string(uuid_chars.data());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
