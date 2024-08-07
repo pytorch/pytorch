@@ -6012,14 +6012,14 @@ def forward(self, x):
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
+    ge_1 = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
-    gt = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = _assert_scalar_default_2 = None
-    lt = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = _assert_scalar_default_3 = None
+    gt_1 = item > 2
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
+    lt_1 = item < 6
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return (foo_unbacked,)""",
         )

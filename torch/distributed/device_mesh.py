@@ -62,7 +62,7 @@ else:
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: Dict[
                 int, Tuple[str, Optional[ProcessGroup.Options]]
             ] = {}
@@ -72,33 +72,36 @@ else:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
-        def create_child_mesh(
-            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
+        def create_sub_mesh(
+            self, device_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
-            # submesh_dims are the mesh dimension of the submesh in the parent mesh.
+            if device_mesh != self.get_root_mesh(device_mesh):
+                raise RuntimeError("Cannot create a submesh from a submesh.")
+
+            # submesh_dims are the mesh dimension of the submesh in the device mesh.
             submesh_dims = [
-                not_none(parent_mesh.mesh_dim_names).index(mesh_dim_name)
+                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
                 for mesh_dim_name in submesh_dim_names
             ]
             submesh_dim_sizes = [
-                parent_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
+                device_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
             ]
 
-            mesh_dims_remained = list(range(parent_mesh.mesh.ndim))
+            mesh_dims_remained = list(range(device_mesh.mesh.ndim))
             for submesh_dim in submesh_dims:
                 mesh_dims_remained.remove(submesh_dim)
 
             # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
             # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
             # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
-            pg_ranks_by_dim = parent_mesh.mesh.permute(
+            pg_ranks_by_dim = device_mesh.mesh.permute(
                 *mesh_dims_remained, *submesh_dims
             ).reshape(-1, *submesh_dim_sizes)
 
-            cur_rank = parent_mesh.get_rank()
+            cur_rank = device_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
                 submesh = DeviceMesh(
-                    parent_mesh.device_type,
+                    device_mesh.device_type,
                     mesh_nd,
                     mesh_dim_names=submesh_dim_names,
                     _init_backend=False,
@@ -107,28 +110,33 @@ else:
                     res_submesh = submesh
 
             res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
+                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
             ]
-            self.child_to_parent_mapping[res_submesh] = parent_mesh
+            self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
 
-        def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
-            return self.child_to_parent_mapping.get(device_mesh, None)
+        def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+            # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
+            # A root mesh is not created through slicing.
+            # We considers the root mesh of a root mesh is itself.
+            root_mesh = self.child_to_root_mapping.get(device_mesh, None)
+            return device_mesh if not root_mesh else root_mesh
 
-        def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        def get_root_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
             """
-            Return the index of the mesh dim in the parent mesh.
-            The device_mesh passed in needs to be sliced out from a parent mesh.
+            Returns the index of the mesh dim in the root mesh.
+            The device_mesh passed in needs to be sliced out from the root mesh
+            or submesh of the root mesh.
             """
-            parent_mesh = self.get_parent_mesh(device_mesh)
+            root_mesh = self.get_root_mesh(device_mesh)
             child_mesh_dim_names = device_mesh.mesh_dim_names
-            if parent_mesh and child_mesh_dim_names:
+            if root_mesh and child_mesh_dim_names:
                 assert (
                     len(child_mesh_dim_names) == 1
-                ), "The child mesh can only be a 1D mesh."
+                ), "The submesh can only be a 1D mesh."
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return self.get_mesh_dim_by_name(parent_mesh, child_mesh_dim_name)
+                return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
             return None
 
         @staticmethod
@@ -470,7 +478,7 @@ else:
                     f"mesh_dim_names from {self.mesh_dim_names}."
                 )
 
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
+            submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
             return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
