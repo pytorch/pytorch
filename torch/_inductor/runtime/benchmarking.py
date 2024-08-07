@@ -21,8 +21,9 @@ class Benchmarker:
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
-        """Dispatch benchmark request to CPU or GPU depending on device of `fn_args` and `fn_kwargs`.
-        
+        """Construct benchmarkable callable and dispatch benchmark request to the appropriate
+        benchmarking function depending on the device type of `fn_args` and `fn_kwargs`.
+
         Arguments:
         - fn: The function to benchmark.
         - fn_args: The function's arguments.
@@ -32,7 +33,7 @@ class Benchmarker:
         - **kwargs: The benchmarker's keyword arguments.
 
         Returns:
-        - The runtime of fn(*fn_args, **fn_kwargs), in milliseconds.
+        - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         if is_cpu_device(list(fn_args) + list(fn_kwargs.values())):
             return self.benchmark_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
@@ -44,14 +45,14 @@ class Benchmarker:
         """Benchmark a CPU callable.
 
         Arguments:
-        - _callable: The callable.
+        - _callable: The callable to benchmark.
 
         Keyword Arguments:
-        - warmup: Duration to run the callable before starting benchmarking, in milliseconds.
+        - warmup: Duration to run the callable before benchmarking, in milliseconds.
         - rep: Duration to run the benchmarking, in milliseconds.
 
         Returns:
-        - The median runtime of the callable, in milliseconds.
+        - The median runtime of `_callable`, in milliseconds.
         """
 
         def run_for(ms: int) -> List[float]:
@@ -68,7 +69,7 @@ class Benchmarker:
 
         run_for(warmup)
         return median(run_for(rep))
-    
+
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
 
@@ -83,11 +84,11 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
-    def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
+    def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
         """Benchmark a GPU callable using Triton's do_bench.
 
         Arguments:
-        - *args: Args passed to triton.testing.do_bench.
+        - _callable: The callable to benchmark.
 
         Keyword Arguments:
         - quantiles: A tuple of floats denoting the requested quantiles.
@@ -95,15 +96,15 @@ class TritonBenchmarker(Benchmarker):
         - **kwargs: Additional kwargs passed to triton.testing.do_bench.
 
         Returns:
-        - The runtime of the callable, in milliseconds. If `kwargs["quantiles"]` is specified,
+        - The runtime of `callable`, in milliseconds. If `kwargs["quantiles"]` is specified,
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
         if "quantiles" in kwargs:
-            return self.triton_do_bench(*args, **kwargs)[0]
+            return self.triton_do_bench(_callable, **kwargs)[0]
         elif "return_mode" in kwargs:
-            return self.triton_do_bench(*args, **kwargs)
-        return self.triton_do_bench(*args, **kwargs, return_mode="median")
+            return self.triton_do_bench(_callable, **kwargs)
+        return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
 benchmarker = TritonBenchmarker()
