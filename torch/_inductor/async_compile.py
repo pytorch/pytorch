@@ -127,18 +127,6 @@ def get_worker_start_method() -> str:
     return config.worker_start_method
 
 
-def get_compile_threads():
-    """
-    Temporary for internal subprocess pool rollout. Assign config.compile_threads
-    lazily and return it. TODO: remove after rollout.
-    """
-    if config.compile_threads is None:
-        # compile_threads depends on the worker_start_method, so make sure it's set:
-        get_worker_start_method()
-        config.compile_threads = config.decide_compile_threads()
-    return config.compile_threads
-
-
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -146,22 +134,22 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert get_compile_threads() > 1
-        return ThreadPoolExecutor(get_compile_threads())
+        assert config.compile_threads > 1
+        return ThreadPoolExecutor(config.compile_threads)
 
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
+        assert config.compile_threads > 1
         pool: AnyPool
         if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads())
+            pool = SubprocPool(config.compile_threads)
         else:
             pre_fork_setup()
             ctx = multiprocessing.get_context(get_worker_start_method())
             pool = ProcessPoolExecutor(
-                get_compile_threads(),
+                config.compile_threads,
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
@@ -176,15 +164,15 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if get_compile_threads() <= 1:
+        if config.compile_threads <= 1:
             return
         _compile_start()
-        _warm_process_pool(cls.process_pool(), get_compile_threads())
+        _warm_process_pool(cls.process_pool(), config.compile_threads)
         _compile_end()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
-        if get_compile_threads() <= 1:
+        if config.compile_threads <= 1:
             return task()
         return cls.pool().submit(task)
 
@@ -194,7 +182,7 @@ class AsyncCompile:
         _set_triton_ptxas_path()
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if get_compile_threads() > 1:
+        if config.compile_threads > 1:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -219,7 +207,7 @@ class AsyncCompile:
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
-        if get_compile_threads() <= 1:
+        if config.compile_threads <= 1:
             return CppCodeCache.load(source_code).kernel
         else:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
@@ -227,7 +215,7 @@ class AsyncCompile:
 
     def cpp_pybinding(self, argtypes: List[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
-        if get_compile_threads() <= 1:
+        if config.compile_threads <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
         else:
             get_result = CppPythonBindingsCodeCache.load_pybinding_async(
@@ -253,7 +241,7 @@ class AsyncCompile:
 
     def halide(self, meta: HalideMeta, source_code: str):
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
-        if get_compile_threads() <= 1:
+        if config.compile_threads <= 1:
             return HalideCodeCache.generate_halide(meta, source_code)
         else:
             get_result = HalideCodeCache.generate_halide_async(
@@ -275,7 +263,7 @@ class AsyncCompile:
             disable=config.disable_progress,
             delay=0,
         )
-        if get_compile_threads() > 1:
+        if config.compile_threads > 1:
             for key, result in scope.items():
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                     pbar.set_postfix_str(key)

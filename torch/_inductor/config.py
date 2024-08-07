@@ -66,7 +66,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
 )
 
 # dead code elimination
@@ -493,10 +493,10 @@ optimize_scatter_upon_const_tensor = (
 # The multiprocessing start method to use for inductor workers in the codecache.
 # Can be "subprocess" or "fork".
 def decide_worker_start_method() -> str:
-    # TODO: For internal rollout, we use a kill switch to disable the "subprocess"
+    # TODO: For internal rollout, we use a killswitch to disable the "subprocess"
     # start method. The justknob check should not be performed at import, however,
-    # so we assign worker_start_method to None below and call this method lazily
-    # in async_compile.py. Remove after "subprocess" rollout completes.
+    # so for fbcode, we assign worker_start_method to None below and call this method
+    # lazily in async_compile.py. Remove this after "subprocess" rollout completes.
     if "TORCHINDUCTOR_WORKER_START" in os.environ:
         start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
     elif is_fbcode() and not torch._utils_internal.justknobs_check(
@@ -555,7 +555,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode() and decide_worker_start_method() != "subprocess":
+    elif is_fbcode():
         return 1
     else:
         cpu_count = (
@@ -567,8 +567,7 @@ def decide_compile_threads() -> int:
         return min(32, cpu_count)
 
 
-# TODO: Set compile threads directly after internal rollout of "subprocess".
-compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
+compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
@@ -991,10 +990,9 @@ class rocm:
     # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Enable for CDNA3 only for now
+    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"

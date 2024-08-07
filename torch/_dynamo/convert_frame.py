@@ -891,6 +891,9 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
+        start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
+            "inductor"
+        ]["possibly_missed_reinplacing_opportunities"]
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -954,6 +957,12 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
+                possibly_missed_reinplacing_opportunities = (
+                    torch._dynamo.utils.counters["inductor"][
+                        "possibly_missed_reinplacing_opportunities"
+                    ]
+                    - start_possibly_missed_reinplacing_opportunities
+                )
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -969,6 +978,7 @@ def _compile(
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = time.time() - start_time
+                possibly_missed_reinplacing_opportunities = None
 
             metrics = CompilationMetrics(
                 str(compile_id),
@@ -997,6 +1007,7 @@ def _compile(
                 restart_reasons,
                 dynamo_time_before_restart,
                 guarded_code is not None,
+                possibly_missed_reinplacing_opportunities,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
