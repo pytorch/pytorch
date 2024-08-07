@@ -165,7 +165,6 @@ We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
-cond_op.__module__ = "torch.ops.higher_order"
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
