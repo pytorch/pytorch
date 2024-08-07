@@ -23,6 +23,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
@@ -453,15 +454,22 @@ def compile_fx_inner(*args, **kwargs):
     # compile_fx. The reason is the compilation for backward graph may happen after
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
-    with torch.utils._python_dispatch._disable_current_modes(), _use_lazy_graph_module(
-        dynamo_config.use_lazy_graph_module
-    ), dynamo_utils.dynamo_timed(
-        "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
-    ), with_fresh_cache_if_config():
-        return _compile_fx_inner(*args, **kwargs)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
+        stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
+        stack.enter_context(
+            dynamo_utils.dynamo_timed(
+                "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+            )
+        )
+        stack.enter_context(with_fresh_cache_if_config())
+        stack.enter_context(DebugContext())
+
+        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+            *args, **kwargs
+        )
 
 
-@DebugContext.wrap
 @time_and_log(attr="compilation time (in seconds)")
 def _compile_fx_inner(
     gm: torch.fx.GraphModule,
