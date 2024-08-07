@@ -73,6 +73,7 @@ from ..trace_rules import (
     is_numpy_type_info,
 )
 from ..utils import (
+    _extract_tensor_dict,
     build_checkpoint_variable,
     clone_input,
     common_constant_types,
@@ -1149,9 +1150,9 @@ class VariableBuilder:
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
-                tensor_variable.proxy.node.meta["tensor_dict"] = value[
-                    i
-                ].__dict__.copy()
+                tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
+                    value[i]
+                )
 
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
@@ -1360,7 +1361,12 @@ class VariableBuilder:
         if (
             config.inline_inbuilt_nn_modules
             and not is_static_input
-            and isinstance(value, torch.nn.Parameter)
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
+                # compatible with previous behavior.
+                or (source and source.guard_source().is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=False)
 
@@ -1509,7 +1515,7 @@ class VariableBuilder:
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
-        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
+        tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
 
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
