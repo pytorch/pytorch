@@ -356,3 +356,39 @@ def compute_padding_size(
         for padded_size_on_dim, unpadded_size_on_dim in zip(padded_size, unpadded_size)
     ]
     return tuple(padding_size)
+    
+def compute_global_padding(
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> List[int]:
+    """
+    Compute the padding needed to make the tensor evenly shardable. It returns
+    a list of ints where pad_sizes[i] means tensor dim i needs to be padded by
+    pad_sizes[i] in order to make the tensor evenly shardable on the given mesh
+    and placements.
+
+    For example, we have a dist tensor with shape (5, 1) on
+    device_mesh([[0, 1],[2, 3]]) with placements [Shard(0), Shard(0)].
+    The pad_sizes would be [3, 0]. This means, to make the tensor evenly shardable,
+    we need to pad the tensor on dim 0 by 5 elements and no padding is needed on dim 1.
+    """
+    num_shard_by_dim = [1 for _ in range(len(global_shape))]
+    for mesh_idx, placement in enumerate(placements):
+        if placement.is_shard():
+            tensor_shard_dim = placement.dim  # type: ignore[attr-defined]
+            mesh_dim_size = mesh.size(mesh_idx)
+            num_shard_by_dim[tensor_shard_dim] *= mesh_dim_size
+
+    pad_sizes = []
+    for tensor_dim, num_shard in enumerate(num_shard_by_dim):
+        tensor_dim_size = global_shape[tensor_dim]
+        if num_shard == 1 or num_shard == tensor_dim_size:
+            pad_sizes.append(0)
+        elif tensor_dim_size > num_shard:
+            padded_tensor_dim_size = (
+                tensor_dim_size + num_shard - (tensor_dim_size % num_shard)
+            )
+            pad_sizes.append(padded_tensor_dim_size - tensor_dim_size)
+        elif tensor_dim_size < num_shard:
+            pad_sizes.append(num_shard - tensor_dim_size)
+
+    return pad_sizes
