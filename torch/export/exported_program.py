@@ -1,3 +1,4 @@
+
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
@@ -345,6 +346,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
         fake_mode = detect_fake_mode(fake_args)
+        fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
@@ -411,18 +413,22 @@ def _decompose_and_get_gm_with_new_signature_constants(
                                     entry
                                 ]
 
-        aten_export_artifact = _export_to_aten_ir(
-            mod,
-            # this requires empty kwargs, but not in pytree.flattened format
-            (
-                *fake_args_unwrapped[0],
-                *fake_args_unwrapped[1].values(),
-            ),
-            {},
-            fake_params_buffers,
-            constant_attrs,
-            _check_autograd_state=False,
-        )
+        with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
+            _preserve_ops,
+            decomp_table,
+        ):
+            aten_export_artifact = _export_to_aten_ir(
+                mod,
+                # this requires empty kwargs, but not in pytree.flattened format
+                (
+                    *fake_args_unwrapped[0],
+                    *fake_args_unwrapped[1].values(),
+                ),
+                {},
+                fake_params_buffers,
+                constant_attrs,
+                _check_autograd_state=False,
+            )
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
