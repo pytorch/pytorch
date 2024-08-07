@@ -1451,7 +1451,11 @@ def cat(inputs, dim=0):
     MAX_SIMPLE_OP_COUNT = 2
 
     def additional_pointwise_ops(op: torch._ops.OpOverload):
-        return op in (aten.cat.default, aten.constant_pad_nd.default)
+        return op in (
+            aten.cat.default,
+            aten.constant_pad_nd.default,
+            aten._unsafe_masked_index.default,
+        )
 
     if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
