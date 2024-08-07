@@ -436,37 +436,33 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
         return config.get_config_copy()
 
 
-def with_fresh_cache_if_config(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if config.force_disable_caches:
-            # Don't delete the cache dir because it has to survive beyond the
-            # compile_fx call. Let's put the temp dirs under the default cache
-            # dir so they're easier to locate.
-            with fresh_inductor_cache(dir=cache_dir(), delete=False):
-                return fn(*args, **kwargs)
-        else:
-            return fn(*args, **kwargs)
-
-    return wrapper
+@contextlib.contextmanager
+def with_fresh_cache_if_config():
+    if config.force_disable_caches:
+        # Don't delete the cache dir because it has to survive beyond the
+        # compile_fx call. Let's put the temp dirs under the default cache
+        # dir so they're easier to locate.
+        with fresh_inductor_cache(dir=cache_dir(), delete=False):
+            yield
+    else:
+        yield
 
 
 def compile_fx_inner(*args, **kwargs):
+    # Need with_fresh_cache_if_config for compile_fx_inner even if we already have one for
+    # compile_fx. The reason is the compilation for backward graph may happen after
+    # compile_fx return and we may want to use the _LazyGraphModule for compiling
+    # the backward graph as well.
     with torch.utils._python_dispatch._disable_current_modes(), _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
     ), dynamo_utils.dynamo_timed(
         "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
-    ):
+    ), with_fresh_cache_if_config():
         return _compile_fx_inner(*args, **kwargs)
 
 
 @DebugContext.wrap
 @time_and_log(attr="compilation time (in seconds)")
-# Need this decorator for compile_fx_inner even if we already have one for
-# compile_fx. The reason is the compilation for backward graph may happen after
-# compile_fx return and we may want to use the _LazyGraphModule for compiling
-# the backward graph as well.
-@with_fresh_cache_if_config
 def _compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
