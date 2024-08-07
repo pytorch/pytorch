@@ -841,8 +841,10 @@ def forward(self, primals_1):
 
         a = torch.ones(4, requires_grad=True)
         a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
         aa = TwoTensor(a, a2)
-        aa2 = aa.clone().detach().requires_grad_()
+        aa2 = TwoTensor(a3, a4)
         aaaa = TwoTensor(aa, aa2)
         out = f(aaaa)
         self.assertTrue(isinstance(out, TwoTensor))
@@ -4068,8 +4070,8 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add_4 = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add_4,)""",
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""",
         )
 
     def test_aot_export_predispatch_func_simple(self):

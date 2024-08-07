@@ -195,6 +195,8 @@ include_patterns = [
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/cpu/*.h',
+    'aten/src/ATen/cpu/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
     'aten/src/ATen/cudnn/*.h',
@@ -951,7 +953,7 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=@.*(dynamo_timed)',
+    '--pattern=@.*(dynamo_timed|preserve_rng_state|clear_frame)',
     '--linter-name=CONTEXT_DECORATOR',
     '--error-name=avoid context decorator',
     """--error-description=\

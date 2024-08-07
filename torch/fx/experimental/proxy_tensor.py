@@ -62,7 +62,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter",
-    "py_sym_types", "get_innermost_proxy_mode", "get_proxy_mode", "handle_sym_dispatch"
+    "py_sym_types", "get_innermost_proxy_mode", "get_proxy_mode", "handle_sym_dispatch",
+    "maybe_enable_thunkify", "maybe_disable_thunkify",
 ]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
@@ -354,7 +355,7 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
     typing_extensions.assert_never(val)
 
 @contextmanager
-def _enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
+def _enable_thunkify(tracer: _ProxyTracer, *, enable: bool = True) -> Generator[None, None, None]:
     """
     Enable thunkification inside the context manager.  Thunkification prevents
     SymNode computation from directly being traced into an FX graph; instead,
@@ -363,11 +364,43 @@ def _enable_thunkify(tracer: _ProxyTracer) -> Generator[None, None, None]:
     to put in the tracker) even if it is unlikely to be used.
     """
     old = tracer.enable_thunkify
-    tracer.enable_thunkify = True
+    tracer.enable_thunkify = enable
     try:
         yield
     finally:
         tracer.enable_thunkify = old
+
+@contextmanager
+def maybe_disable_thunkify() -> Generator[None, None, None]:
+    """Within a context, disable thunkification.  See :func:`maybe_enable_thunkify`
+    for more details.  This is helpful if you have a wrapper function which
+    you want to enable thunkification on, but in some segment on the inside (say,
+    the original user function), you want to disable thunkification as you know
+    it is not needed there.
+    """
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is not None:
+        with _enable_thunkify(proxy_mode.tracer, enable=False):
+            yield
+    else:
+        yield
+
+@contextmanager
+def maybe_enable_thunkify() -> Generator[None, None, None]:
+    """Within this context manager, if you are doing make_fx tracing, we will thunkify
+    all SymNode compute and avoid tracing it into the graph unless it is actually needed.
+    You should prefer to avoid using this as much as possible, as lazy evaluation of
+    SymNode tracing can lead to long chains of thunks which will stack overflow
+    if you evaluate them.  However, this is currently sometimes necessary as there
+    are buggy parts of PT2 which will fail with "s0 is not tracked with proxy" error
+    due to insufficient tracing of SymNode computation.
+    """
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is not None:
+        with _enable_thunkify(proxy_mode.tracer):
+            yield
+    else:
+        yield
 
 # Note [invariants for node meta 'val']
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
