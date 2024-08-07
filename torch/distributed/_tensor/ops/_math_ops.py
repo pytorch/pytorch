@@ -317,6 +317,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.max.default: "max",
     aten.max.dim: "max",
     aten.max.out: "max",
+    aten.isinf.default: "max",
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
@@ -1053,3 +1054,32 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
+
+
+@register_op_strategy(
+    [aten.isinf.default],
+    schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+)
+def distribute_tensor_isinf(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    input_strategy = op_schema.args_schema[0]
+    input_strategy.strategies[0].output_specs.placements=tuple([Partial('max')])
+    reduction_strategy = OpStrategy([])
+    for strtg in input_strategy.strategies:
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple([Replicate()]),
+            tensor_meta=strtg.output_spec.tensor_meta,
+        )
+        redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
+        reduction_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=mesh,
+                    placements=tuple([Replicate()]),
+                ),
+                input_specs=(input_spec,),
+                redistribute_cost=redistribute_cost,
+            )
+        )
+
+    return reduction_strategy
