@@ -1860,14 +1860,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
-
-    def is_zero_dim_cpu_tensor(self, name: str) -> bool:
-        """
-        Check if there is any 0-dim CPU tensor in the args. If so, we need to
-        convert them to scalar before passing to the kernel. This should only be used in triton CUDA kernels generations.
-        """
-        return self.is_unspec_arg(name) or name in self.zero_dim_cpu_tensor_list
-
-    def in_zero_dim_cpu_tensor_list(self, name: str) -> bool:
-        return name in self.zero_dim_cpu_tensor_list
+        ) or name in self.zero_dim_cpu_tensor_list

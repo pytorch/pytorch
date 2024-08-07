@@ -37,13 +37,6 @@ def signature_of(
                 return "fp32"
             else:
                 return new_tye
-        elif V.graph.in_zero_dim_cpu_tensor_list(arg.buffer):
-            if arg.dtype.is_floating_point:
-                return "fp64"
-            elif arg.dtype.is_signed:
-                return "int64"
-            else:
-                return "uint64"
         else:
             return tye
     if isinstance(arg, SizeArg):
