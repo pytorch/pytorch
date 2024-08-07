@@ -460,6 +460,7 @@ def convolution(
     if not isinstance(groups, int):
         groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
+
     kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
@@ -585,6 +586,8 @@ def convolution(
         ):
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
+        stride = V.graph.sizevars.evaluate_static_shapes(stride)
+        padding = V.graph.sizevars.evaluate_static_shapes(padding)
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
