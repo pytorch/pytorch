@@ -740,7 +740,7 @@ cpu_flash_attention(
           if (need_pack) {
             for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
               bool tail = kvBlockSize - b < packb_size;
-              utils::transpose(
+              utils::transpose<uint16_t>(
                   tail ? kvBlockSize - b : packb_size,
                   headSize,
                   /* src_ptr */
@@ -773,7 +773,7 @@ cpu_flash_attention(
                       j * eheadSize * rkvSize + n * eheadSize + b * eheadSize);
             }
           } else {
-            utils::transpose(
+            utils::transpose<uint16_t>(
                 kvBlockSize,
                 headSize,
                 reinterpret_cast<const uint16_t*>(
