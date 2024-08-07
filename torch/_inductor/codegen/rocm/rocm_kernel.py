@@ -91,6 +91,7 @@ class ROCmTemplateKernel(ROCmKernel):
         self,
         inputs: List[IRNode],
         outputs: List[IRNode],
+        size_args: List[str],
         names_str: str = "",
         input_reorder: Optional[List[int]] = None,
     ) -> str:
@@ -132,7 +133,8 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+
+        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
         self,
@@ -149,29 +151,34 @@ class ROCmTemplateKernel(ROCmKernel):
         """
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
+        kernel_args = []
+        for arg in call_args:
+            # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+            if V.graph.is_unspec_arg(arg):
+                arg = arg + ".item()"
             else:
-                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
+                arg = f"c_void_p({arg}.data_ptr())"
+            kernel_args.append(arg)
+
+        # add size args
+        kernel_args.extend([f"c_int({sarg})" for sarg in node.template.size_args()])
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        call_args.append("None")
+        kernel_args.append("None")
 
         if node.get_workspace_size() > 0:
             wrapper.generate_workspace_allocation(
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
-            call_args.append("c_void_p(workspace.data_ptr())")
+            kernel_args.append("c_void_p(workspace.data_ptr())")
         else:
-            call_args.append("None")
+            kernel_args.append("None")
 
         current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
-            call_args,
+            kernel_args,
             device_index=current_device.index,
             cuda=True,
             triton=False,
