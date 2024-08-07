@@ -946,12 +946,7 @@ void initJitScriptBindings(PyObject* module) {
         if (!method) {
           return py::str("ScriptObject <" + self.type()->str() + ">");
         }
-        return invokeScriptMethodFromPython(
-            *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
       });
 
   special_magic_methods.emplace(
@@ -965,12 +960,7 @@ void initJitScriptBindings(PyObject* module) {
           ss << std::hex << static_cast<const void*>(&self);
           return py::str("<torch.ScriptObject object at " + ss.str() + ">");
         }
-        return invokeScriptMethodFromPython(
-            *method,
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(args),
-            // NOLINTNEXTLINE(performance-move-const-arg)
-            std::move(kwargs));
+        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
       });
 
   for (const char* mm_name : magic_method_names) {
@@ -1142,7 +1132,7 @@ void initJitScriptBindings(PyObject* module) {
              const ResolutionCallback& rcb) {
             const auto self = ModuleSelf(std::move(concreteType));
             m._ivalue()->compilation_unit()->define(
-                *m.type()->name(), script, pythonResolver(rcb), &self);
+                m.type()->name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
       .def(
@@ -1447,10 +1437,7 @@ void initJitScriptBindings(PyObject* module) {
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             py::object result = invokeScriptFunctionFromPython(
-                callee,
-                // NOLINTNEXTLINE(performance-move-const-arg)
-                tuple_slice(std::move(args), 1),
-                kwargs);
+                callee, tuple_slice(std::move(args), 1), kwargs);
             return result;
             END_HANDLE_TH_ERRORS_PYBIND
           })

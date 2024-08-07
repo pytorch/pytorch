@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -16,6 +17,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["Adagrad", "adagrad"]
 
