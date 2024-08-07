@@ -9,6 +9,7 @@ from torch.distributed._tensor._collective_utils import (
     get_unpadded_tensor,
 )
 from torch.distributed._tensor._utils import (
+    compute_global_padding,
     compute_local_shape,
     compute_local_shape_and_global_offset,
     compute_padded_and_unpadded_local_shape,
@@ -219,6 +220,53 @@ class UtilTest(DTensorTestBase):
         self.assertEqual(padded_shape, padded_tensor.shape)
         unpadded_tensor = get_unpadded_tensor(padded_tensor, unpadded_shape)
         self.assertEqual(tensor, unpadded_tensor)
+        
+    def test_compute_global_padding(self):
+        # 1D DTensor Scenario
+        mesh = init_device_mesh(self.device_type, (8,))
+
+        # when the original tensor is evenly shardable already
+        global_tensor = torch.randn(8, requires_grad=True)
+        padding = compute_global_padding(global_tensor.shape, mesh, [Shard(0)])
+        self.assertEqual(padding, [0])
+
+        # On 0th dim, num_shard = 8 > global_tensor.size(0) = 7
+        global_tensor = torch.randn(7, requires_grad=True)
+        padding = compute_global_padding(global_tensor.shape, mesh, [Shard(0)])
+        self.assertEqual(padding, [1])
+        self.assertEqual((padding[0] + global_tensor.shape[0]) % self.world_size, 0)
+
+        # On 0th dim, num_shard = 8 < global_tensor.size(0) = 9
+        global_tensor = torch.randn(9, requires_grad=True)
+        padding = compute_global_padding(global_tensor.shape, mesh, [Shard(0)])
+        self.assertEqual(padding, [7])
+        self.assertEqual((padding[0] + global_tensor.shape[0]) % self.world_size, 0)
+
+        # 2D DTensor Scenario
+        mesh = init_device_mesh(self.device_type, (4, self.world_size // 4))
+
+        # On 0th dim, total_num_shard = 8 > global_tensor.size(0) = 7
+        global_tensor = torch.randn(self.world_size - 1, 8, requires_grad=True)
+        padding = compute_global_padding(
+            global_tensor.shape, mesh, [Shard(0), Shard(0)]
+        )
+        self.assertEqual(padding, [1, 0])
+
+        # On 0th dim, total_num_shard= 8 < global_tensor.size(0) = 9
+        global_tensor = torch.randn(self.world_size + 1, 8, requires_grad=True)
+        padding = compute_global_padding(
+            global_tensor.shape, mesh, [Shard(0), Shard(0)]
+        )
+        self.assertEqual(padding, [7, 0])
+
+        # On both dim, tensor is not evenly shardable.
+        # On 0th dim, num_shard = 4 > global_tensor.size(0) = 3
+        # On 1st dim, num_shard = 2 < global_tensor.size(1) = 3
+        global_tensor = torch.randn(3, 3, requires_grad=True)
+        padding = compute_global_padding(
+            global_tensor.shape, mesh, [Shard(0), Shard(1)]
+        )
+        self.assertEqual(padding, [1, 1])
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
