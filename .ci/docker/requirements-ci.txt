@@ -15,6 +15,12 @@ click
 #Pinned versions:
 #test that import:
 
+sympy==1.12.1
+#Description: Python library for symbolic mathematics
+# installed before coremltools to avoid installation of greater sympy version
+#Pinned versions: 1.12.1
+#test that import:
+
 coremltools==5.0b5
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
