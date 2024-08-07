@@ -691,7 +691,7 @@ def _export_to_aten_ir(
     graph_signature.user_outputs = _graph_output_names(gm)
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 
