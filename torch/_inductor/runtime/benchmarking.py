@@ -1,5 +1,5 @@
 import time
-from functools import cached_property, partial
+from functools import cached_property
 from statistics import median
 from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Self
@@ -21,7 +21,19 @@ class Benchmarker:
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
-        """Dispatch benchmark request to CPU or GPU depending on device of `fn_args` and `fn_kwargs`"""
+        """Dispatch benchmark request to CPU or GPU depending on device of `fn_args` and `fn_kwargs`.
+        
+        Arguments:
+        - fn: The function to benchmark.
+        - fn_args: The function's arguments.
+        - fn_kwargs: The function's kwargs.
+
+        Keyword Arguments:
+        - **kwargs: The benchmarker's keyword arguments.
+
+        Returns:
+        - The runtime of fn(*fn_args, **fn_kwargs), in milliseconds.
+        """
         if is_cpu_device(list(fn_args) + list(fn_kwargs.values())):
             return self.benchmark_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
         return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
@@ -29,15 +41,17 @@ class Benchmarker:
     def benchmark_cpu(
         self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
     ) -> float:
-        """Benchmark a CPU callable, and return the median runtime in milliseconds.
+        """Benchmark a CPU callable.
 
-        Parameters:
-        - fn: The callable.
-        - warmup: Duration, in milliseconds, to run the callable before starting benchmarking.
-        - rep: Duration, in milliseconds, to run the benchmarking.
+        Arguments:
+        - _callable: The callable.
+
+        Keyword Arguments:
+        - warmup: Duration to run the callable before starting benchmarking, in milliseconds.
+        - rep: Duration to run the benchmarking, in milliseconds.
 
         Returns:
-        - The median runtime, in milliseconds, of the callable.
+        - The median runtime of the callable, in milliseconds.
         """
 
         def run_for(ms: int) -> List[float]:
@@ -54,19 +68,42 @@ class Benchmarker:
 
         run_for(warmup)
         return median(run_for(rep))
+    
+    def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
+        raise NotImplementedError
 
+
+class TritonBenchmarker(Benchmarker):
     @cached_property
     def triton_do_bench(self: Self) -> Callable[..., Any]:
-        """Lazily import Triton's do_bench, and set return mode to median."""
+        """Lazily import Triton's do_bench."""
         try:
             from triton.testing import do_bench
         except ImportError as e:
             raise NotImplementedError("requires Triton") from e
-        return partial(do_bench, return_mode="median")
+        return do_bench
 
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
-        """Benchmark a GPU callable using Triton's do_bench, and return the median runtime in milliseconds."""
-        return self.triton_do_bench(*args, **kwargs)
+        """Benchmark a GPU callable using Triton's do_bench.
+
+        Arguments:
+        - *args: Args passed to triton.testing.do_bench.
+
+        Keyword Arguments:
+        - quantiles: A tuple of floats denoting the requested quantiles.
+        - return_mode: The requested return mode, one of "min", "max", "mean", or "median".
+        - **kwargs: Additional kwargs passed to triton.testing.do_bench.
+
+        Returns:
+        - The runtime of the callable, in milliseconds. If `kwargs["quantiles"]` is specified,
+        this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
+        this is the requested return mode. Otherwise, this is the median.
+        """
+        if "quantiles" in kwargs:
+            return self.triton_do_bench(*args, **kwargs)[0]
+        elif "return_mode" in kwargs:
+            return self.triton_do_bench(*args, **kwargs)
+        return self.triton_do_bench(*args, **kwargs, return_mode="median")
 
 
-benchmarker = Benchmarker()
+benchmarker = TritonBenchmarker()
