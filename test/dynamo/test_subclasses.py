@@ -2148,7 +2148,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
 
         self._validate_compile(fn, arg_fn)
 
-    @unittest.expectedFailure
     def test_return_shape(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
 
