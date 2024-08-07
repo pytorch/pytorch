@@ -4671,6 +4671,7 @@ class TestLinalg(TestCase):
         # Test in try-finally block to avoid leaking state
         # if test is interrupted.
         try:
+            set_tunableop_defaults()
             torch.cuda.tunable.enable()
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -4681,8 +4682,8 @@ class TestLinalg(TestCase):
             C = torch.matmul(A, B)
             self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
         finally:
-            # disable TunableOp and reset to defaults
-            set_tunableop_defaults()
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -4692,6 +4693,7 @@ class TestLinalg(TestCase):
         # Test in try-finally block to avoid leaking state
         # if test is interrupted.
         try:
+            set_tunableop_defaults()
             torch.cuda.tunable.enable()
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -4738,8 +4740,8 @@ class TestLinalg(TestCase):
             self.assertEqual((total_num_results - ref_num_results), 1)
 
         finally:
-            # disables TunableOp and reset to defaults
-            set_tunableop_defaults()
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -4748,6 +4750,7 @@ class TestLinalg(TestCase):
         # Verify we get the correct number of results
 
         try:
+            set_tunableop_defaults()
             torch.cuda.tunable.enable()
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -4774,8 +4777,8 @@ class TestLinalg(TestCase):
             self.assertEqual((total_num_results - ref_num_results), count_matmul)
 
         finally:
-            # disables TunableOp and reset to defaults
-            set_tunableop_defaults()
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
