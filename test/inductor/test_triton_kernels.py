@@ -2412,6 +2412,22 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         expected = torch.empty_like(x)
         self.assertEqual(out, expected)
 
+    def test_capture_triton_disabled_in_triton_op(self):
+        status = []
+
+        @torch._library.triton_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            import torch._higher_order_ops.triton_kernel_wrap
+
+            status.append(
+                torch._higher_order_ops.triton_kernel_wrap.capture_triton_enabled.value
+            )
+            return x + y
+
+        x = torch.randn(3)
+        add(x, x)
+        self.assertEqual(status[-1], False)
+
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotune", [False, True])

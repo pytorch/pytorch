@@ -1,6 +1,7 @@
 from typing import Callable, Iterable, Optional, Union
 
 from .custom_ops import custom_op
+from .infer_schema import infer_schema
 
 
 def triton_op(
@@ -90,7 +91,22 @@ def triton_op(
     """
 
     def dec(fn: Callable) -> Callable:
-        result = custom_op(name, fn, mutates_args=mutates_args)
+        def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
+            from torch._higher_order_ops.triton_kernel_wrap import (
+                set_capture_triton_enabled,
+            )
+
+            # Optimization: we're passing regular Tensors into the triton kernel, so
+            # no need to go through HOP dispatch
+            with set_capture_triton_enabled(False):
+                return fn(*args, **kwargs)
+
+        result = custom_op(
+            name,
+            backend_fn,
+            mutates_args=mutates_args,
+            schema=infer_schema(fn, mutates_args=mutates_args),
+        )
         from .._subclasses.functional_tensor import FunctionalTensorMode
 
         # We require that the user pass us a function that is make_fx traceable,
