@@ -24,7 +24,10 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch.fx.experimental.proxy_tensor import _enable_thunkify, get_proxy_mode
+from torch.fx.experimental.proxy_tensor import (
+    maybe_disable_thunkify,
+    maybe_enable_thunkify,
+)
 from torch.fx.experimental.symbolic_shapes import (
     definitely_false,
     PropagateUnbackedSymInts,
@@ -189,6 +192,7 @@ def fn_prepped_for_autograd(
 def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
+
         assert len(tangent_mask) == len(outs)
         outs_to_grad = [
             o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent
@@ -391,23 +395,18 @@ def create_functionalized_fn(
             # into the graph, but we'd prefer to NOT do this, because if we
             # trace them now, we will end up with FX nodes that don't have
             # module stack annotations, which makes unflattener unhappy.
-            proxy_mode = get_proxy_mode()
-            assert proxy_mode is not None
-            with _enable_thunkify(proxy_mode.tracer):
-                # Wrap inputs into functional wrappers
-                f_args = pytree.tree_map(to_fun, args)
-                f_tokens = pytree.tree_map(to_fun, tokens)
+            # Wrap inputs into functional wrappers
+            f_args = pytree.tree_map(to_fun, args)
+            f_tokens = pytree.tree_map(to_fun, tokens)
 
-                # Populate the current FunctionalTensorMode with the tokens per
-                # operator. See Note [FunctionalTensorMode is Stateful]
-                functional_tensor_mode = (
-                    torch.utils._python_dispatch._detect_infra_mode(
-                        torch._C._TorchDispatchModeKey.FUNCTIONAL
-                    )
-                )
-                assert functional_tensor_mode is not None
-                for i, k in enumerate(meta.tokens.keys()):
-                    functional_tensor_mode._tokens[k] = f_tokens[i]
+            # Populate the current FunctionalTensorMode with the tokens per
+            # operator. See Note [FunctionalTensorMode is Stateful]
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            assert functional_tensor_mode is not None
+            for i, k in enumerate(meta.tokens.keys()):
+                functional_tensor_mode._tokens[k] = f_tokens[i]
 
             # Run the joint
             f_outs = fn(*f_args)
@@ -719,10 +718,14 @@ def aot_dispatch_subclass(
         return unwrapped_outs
 
     def joint_fn(primals, tangents):
-        return inner_fn(flat_fn_maybe_joint, (primals, tangents), use_trace_joint=True)
+        with maybe_enable_thunkify():
+            return inner_fn(
+                flat_fn_maybe_joint, (primals, tangents), use_trace_joint=True
+            )
 
     def fw_fn(*primals):
-        return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
+        with maybe_enable_thunkify():
+            return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
     def metadata_fn(*primals):
         return inner_fn(fw_only, primals, use_trace_joint=False)
@@ -781,7 +784,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     def functional_call(*args, **kwargs):
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
+        ), maybe_disable_thunkify():
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(

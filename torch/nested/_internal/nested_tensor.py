@@ -5,7 +5,6 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -14,7 +13,16 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
 def get_tensor_symint(tensor, *, coeff=1):
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+    # NB: Only FakeTensor is associated with a memo
+    tensor = mb_unwrap_functional_tensor(tensor)
+    if isinstance(tensor, FakeTensor):
+        return tensor.get_nested_int(coeff=coeff)
+
     global _tensor_id_counter
+
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
         tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
@@ -79,42 +87,47 @@ class NestedTensor(torch.Tensor):
         assert not isinstance(values, NestedTensor)
         assert values.device == offsets.device
 
-        # Query cache for the symint associated with offsets or lengths
-        # (create a new one if needed).
-        ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
-        _ragged_idx = kwargs.get("_ragged_idx", 1)
-        B = offsets.shape[0] - 1
-        if lengths is not None:
-            assert B == lengths.shape[0]
+        from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 
-        # subtract 1 to convert to values dim space
-        r = _ragged_idx - 1
-        _size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
-        stride = values.stride()
-        _strides = (ragged_size * stride[r], *stride)
+        # This should be removed after
+        # https://github.com/pytorch/pytorch/pull/125941/ lands
+        with maybe_enable_thunkify():
+            # Query cache for the symint associated with offsets or lengths
+            # (create a new one if needed).
+            ragged_source = offsets if lengths is None else lengths
+            ragged_size = get_tensor_symint(ragged_source, coeff=1)
+            _ragged_idx = kwargs.get("_ragged_idx", 1)
+            B = offsets.shape[0] - 1
+            if lengths is not None:
+                assert B == lengths.shape[0]
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls,
-            _size,
-            _strides,
-            0,
-            torch.contiguous_format,
-            values.dtype,
-            torch.jagged,
-            values.device,
-            False,
-            kwargs.get("requires_grad", False),
-            "sizes",
-            False,
-            True,  # dispatch_layout
-            ks,
-            # don't try to calculate storage based on non-zero size
-            storage_size=values.untyped_storage().size(),
-        )
-        r._ragged_idx = _ragged_idx
-        r._size = _size
-        r._strides = _strides
+            # subtract 1 to convert to values dim space
+            r = _ragged_idx - 1
+            _size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
+            stride = values.stride()
+            _strides = (ragged_size * stride[r], *stride)
+
+            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                cls,
+                _size,
+                _strides,
+                0,
+                torch.contiguous_format,
+                values.dtype,
+                torch.jagged,
+                values.device,
+                False,
+                kwargs.get("requires_grad", False),
+                "sizes",
+                False,
+                True,  # dispatch_layout
+                ks,
+                # don't try to calculate storage based on non-zero size
+                storage_size=values.untyped_storage().size(),
+            )
+            r._ragged_idx = _ragged_idx
+            r._size = _size
+            r._strides = _strides
 
         return r
 
@@ -201,6 +214,9 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
+    def data_ptr(self) -> int:
+        return self._values.data_ptr()
+
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -240,6 +256,8 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
+        from torch._subclasses.fake_tensor import FakeTensor
+
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
         values = inner_tensors["_values"]
@@ -253,18 +271,14 @@ class NestedTensor(torch.Tensor):
             metadata_cache["min_seqlen"] = min_seqlen_tensor
         if max_seqlen_tensor is not None:
             metadata_cache["max_seqlen"] = max_seqlen_tensor
-
         ragged_idx = meta["ragged_idx"]
 
-        # Note that we cannot simply check if is_fake(values) because
-        # during aot autograd, FunctionalTensors are not fake but hold
-        # symbolic sizes.
+        # Alternatively, we could make it the caller's responsibility to
+        # cache it. But this heuristic seems simple enough.
         ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
-            # Associate offsets or lengths (possibly fake, possibly functionalized)
-            # with the ragged_size.
+        if isinstance(ragged_source, FakeTensor):
             ragged_size = outer_size[ragged_idx]
-            _tensor_symint_registry[ragged_source] = ragged_size
+            ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(
             values,
