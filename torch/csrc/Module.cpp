@@ -1955,16 +1955,24 @@ Call this whenever a new thread is created in order to propagate values from
                        at::Tensor const& value,
                        std::optional<at::Tensor> attn_mask,
                        double dropout,
-                       bool is_causal) {
+                       bool is_causal,
+                       bool enable_gqa) {
         return sdp::sdp_params{
-            query, key, value, std::move(attn_mask), dropout, is_causal};
+            query,
+            key,
+            value,
+            std::move(attn_mask),
+            dropout,
+            is_causal,
+            enable_gqa};
       }))
       .def_readonly("query", &sdp::sdp_params::query)
       .def_readonly("key", &sdp::sdp_params::key)
       .def_readonly("value", &sdp::sdp_params::value)
       .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
       .def_readonly("dropout", &sdp::sdp_params::dropout)
-      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal)
+      .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
   py::enum_<sdp::SDPBackend>(
       py_module,
