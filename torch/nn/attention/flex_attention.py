@@ -198,12 +198,12 @@ class BlockMask:
 
     The essentials of our format are:
 
-    - num_blocks_in_row: Tensor[ROWS]
-        Describes the number of blocks present in each row.
+    num_blocks_in_row: Tensor[ROWS]:
+    Describes the number of blocks present in each row.
 
-    - col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]
-        `col_indices[i]` is the sequence of block positions for row i. The values of
-        this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
+    col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]:
+    `col_indices[i]` is the sequence of block positions for row i. The values of
+    this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
 
     For example, to reconstruct the original tensor from this format:
 
@@ -707,22 +707,19 @@ def create_block_mask(
         _compile (bool): Whether to compile the mask creation.
 
     Returns:
-        block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
-                            KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
+        BlockMask:  A BlockMask object that contains the block mask information.
 
     Example Usage:
-    .. code-block:: python
+        .. code-block:: python
 
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
+            def causal_mask(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
-
-        query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-        key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-        value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-
-        output = flex_attention(query, key, value, block_mask=block_mask)
+            block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
+            query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
     assert (
@@ -830,8 +827,7 @@ def flex_attention(
         value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
-        scale (Optional[float]): Scaling factor applied prior to softmax. If
-        none, the default value is set to :math`\frac{1}{\sqrt{E}}`
+        scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
@@ -886,11 +882,16 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass hop to it. So we wrap it in a dummy function.
+    def _flex_attention_hop_wrapper(*args, **kwargs):
+        return flex_attention_hop(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
-                    flex_attention_hop, backend="eager", fullgraph=True
+                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
                 )(
                     query,
                     key,

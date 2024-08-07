@@ -271,24 +271,24 @@ class OpSchema:
         )
 
     def __str__(self) -> str:
-        args_sharding: List[str] = []
+        args_schema: List[str] = []
         mesh_shape = None
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
+                args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
                 mesh_shape = first_op_strtgy.mesh_shape
-                args_sharding.append(str(arg))
+                args_schema.append(str(arg))
             else:
-                args_sharding.append(str(arg))
-        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)} @ mesh: {mesh_shape})"
+                args_schema.append(str(arg))
+        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
         has_symints = False
