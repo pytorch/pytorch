@@ -7,7 +7,7 @@ import torch
 from torch.autograd import DeviceType
 
 from .runtime.benchmarking import benchmarker
-from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes,
+from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
 
 _kernel_category_choices = [
