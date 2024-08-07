@@ -544,7 +544,10 @@ class GraphModule(torch.nn.Module):
         a = torch.tensor([1.0, 0.0, 1.0])
         b = torch.randn(3)
         t = TwoTensor(a, b)
-        with self.assertRaisesRegex(NotImplementedError, "no rule registered"):
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "no rule registered for HOP cond and subclass .*TwoTensor'>",
+        ):
             res = cond_op(a.sum() > 0, torch.sin, torch.cos, (t,))
 
         called = 0
@@ -577,7 +580,10 @@ class GraphModule(torch.nn.Module):
 
         a = torch.tensor([1.0, 0.1, 1.0])
         pred = a.sum() > 0
-        with self.assertRaisesRegex(NotImplementedError, "no rule registered"):
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "no rule registered for HOP cond and mode .*MyMode",
+        ):
             with MyMode():
                 res = cond_op(pred, torch.sin, torch.cos, (a,))
 

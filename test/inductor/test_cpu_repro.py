@@ -2558,7 +2558,7 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch(fx_graph_cache=False)
     def test_outer_loop_fusion(self):
@@ -2740,7 +2740,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
@@ -2764,13 +2764,13 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
             # Test argmin
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn2, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -3527,18 +3527,23 @@ class CPUReproTests(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.group_norm = torch.nn.GroupNorm(32, 32)
+                self.group_norm = torch.nn.GroupNorm(3, 90)
 
             def forward(self, x):
                 return self.group_norm(x)
 
-        metrics.reset()
-        mod = M().eval()
-        x = torch.randn(2, 32, 32, 32)
-        with torch.no_grad():
-            self.common(mod, (x,))
-            # 2 generated kernels (one for var_mean, the other for result)
-            check_metrics_vec_kernel_count(2)
+        options = itertools.product(
+            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+        )
+        for dtype, fmt in options:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
+            with torch.no_grad():
+                self.common(mod, (x,))
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -4097,6 +4102,24 @@ class CPUReproTests(TestCase):
                 2,
                 exactly=True,
             ).run(code)
+
+    def test_any_bool_vec(self):
+        def fn(x, y):
+            return torch.any(x), torch.any(y)
+
+        c = [False] * 64
+        input1 = torch.Tensor(c)
+        c[0] = True
+        input2 = torch.Tensor(c)
+        metrics.reset()
+        self.common(
+            fn,
+            (
+                input1,
+                input2,
+            ),
+        )
+        check_metrics_vec_kernel_count(2)
 
 
 if __name__ == "__main__":

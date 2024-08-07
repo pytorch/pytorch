@@ -351,6 +351,8 @@ class ViewAndMutationMeta:
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
 
+    num_bw_out_tokens: Optional[int] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
