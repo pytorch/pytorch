@@ -9,7 +9,7 @@ from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from ._remove_effect_tokens_pass import _is_impure_node, _remove_effect_tokens
+from ._remove_effect_tokens_pass import _remove_effect_tokens
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -185,7 +185,7 @@ def _unlift(
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
-    gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
+    gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 

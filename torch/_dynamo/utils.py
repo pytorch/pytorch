@@ -742,6 +742,7 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: bool
+    possibly_missed_reinplacing_opportunities: Optional[int]
 
 
 @dataclasses.dataclass
@@ -2144,7 +2145,9 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        # Marking the tensor attributes of nn modules static to keep the behavior same as before
+        # inline_inbuilt_nn_module flag was introduced.
+        or tensor_source.guard_source().is_unspecialized_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2208,6 +2211,7 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
+    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -2920,3 +2924,18 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
+# To avoid ref cycles, it's important that no tensors are present here, so leave those out.
+def _extract_tensor_dict(t):
+    KEYS_TO_COPY = [
+        "_dynamo_static_input_type",
+        "tag",
+    ]
+
+    tensor_dict = {
+        key: copy.copy(t.__dict__[key]) for key in KEYS_TO_COPY if key in t.__dict__
+    }
+
+    return tensor_dict
