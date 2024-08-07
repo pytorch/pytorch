@@ -763,7 +763,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-xpu
       build_environment: linux-binary-manywheel
@@ -784,7 +783,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
     permissions:
       id-token: write
@@ -854,7 +852,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-xpu
     secrets:
@@ -1654,7 +1651,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
@@ -1675,7 +1671,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
     permissions:
       id-token: write
@@ -1745,7 +1740,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-xpu
     secrets:
@@ -2480,7 +2474,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
@@ -2501,7 +2494,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
     permissions:
       id-token: write
@@ -2571,7 +2563,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-xpu
     secrets:
@@ -3306,7 +3297,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
@@ -3327,7 +3317,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
     permissions:
       id-token: write
@@ -3397,7 +3386,6 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
-      DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-xpu
     secrets:
