@@ -88,13 +88,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 }
 #endif
 
-#ifndef FBCODE_CAFFE2
-bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf) {
-  // For point-to-point communication on the same process, don't need broadcast.
-  return !isSendRecvSelf;
-}
-#endif
-
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
   static std::string versionString;
