@@ -7660,6 +7660,18 @@ def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs={'memory_format': memory_format} if memory_format else {})
     yield SampleInput(make_arg((2, 3, 2, 3)), kwargs={'memory_format': torch.channels_last})
 
+def sample_inputs_byte(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=0, high=255, requires_grad=requires_grad)
+
+    shapes = ((),
+              (2, 3))
+    memory_format_options = [None, torch.contiguous_format]
+
+    for shape, memory_format in itertools.product(shapes, memory_format_options):
+        yield SampleInput(make_arg(shape),
+                          kwargs={'memory_format': memory_format} if memory_format else {})
+    yield SampleInput(make_arg((2, 3, 2, 3)), kwargs={'memory_format': torch.channels_last})
+
 def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
 
@@ -18512,7 +18524,7 @@ op_db: List[OpInfo] = [
         op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
         supports_out=False,
-        sample_inputs_func=sample_inputs_conversion,
+        sample_inputs_func=sample_inputs_byte,
         # The autograd test runner cannot handle functions that change dtype
         supports_autograd=False,
         skips=(

@@ -484,6 +484,7 @@ def mps_ops_modifier(ops):
         'true_divide',
         'vstack',
         'where',
+        'byte',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
@@ -974,8 +975,6 @@ def mps_ops_modifier(ops):
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
         'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
 
-        # Failures due to casting negative float to uint8 is undefined
-        'byte': [torch.float16, torch.float32],
         # float output for float16 input on MPS
         'logit': [torch.float16],
     }
