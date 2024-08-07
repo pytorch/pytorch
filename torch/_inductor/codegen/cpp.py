@@ -2401,9 +2401,9 @@ class CppVecKernel(CppKernel):
                 )
                 is_any = reduction_type == "any"
                 # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
-                vec = f"at::vec::Vectorized<{vec_dtype}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
+                vec_dtype = torch.float if is_any else dtype
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
