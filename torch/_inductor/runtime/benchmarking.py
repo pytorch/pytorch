@@ -3,7 +3,7 @@ from functools import cached_property
 from functools import cached_property, wraps
 from statistics import median
 from typing import Any, Callable, Dict, List, Tuple
-from typing_extensions import Self
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 from torch._inductor.utils import is_cpu_device
@@ -14,8 +14,11 @@ log = torch._logging.getArtifactLogger(__name__, "benchmarking")
 
 MILLISECONDS_PER_SECOND = 1000
 
+P = ParamSpec("P")
+T = TypeVar("T")
 
-def maybe_time(fn: Callable[..., Any]) -> Callable[..., Any]:
+
+def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
     if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
         return fn
 
