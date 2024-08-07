@@ -1221,6 +1221,12 @@ class FxGraphCache:
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache
 
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if BisectionManager.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            raise BypassFxGraphCache
+
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:

@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import getpass
 import inspect
 import operator
-import os
-import re
-import tempfile
 import time
 
 import torch
+from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
+    cache_dir,
+    default_cache_dir,
+)
 
 
 def conditional_product(*args):
@@ -153,22 +153,6 @@ def do_bench_cpu(fn, warmup=20, rep=100):
         return (sorted_durations[times // 2 - 1] + sorted_durations[times // 2]) / 2
     else:
         return sorted_durations[times // 2]
-
-
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def default_cache_dir():
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-    return os.path.join(
-        tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
-    )
 
 
 try:
