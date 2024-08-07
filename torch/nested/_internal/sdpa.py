@@ -643,7 +643,7 @@ def _autocast(
     """
     device_type = query.device.type
     if not torch.is_autocast_enabled(device_type):
-        return query, key, value
+        return query, key, value, mask
 
     def cvt(x):
         if x is None:
