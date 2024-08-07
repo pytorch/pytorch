@@ -1,3 +1,14 @@
+__all__ = [
+    # _C
+    "FileCheck",
+    # _comparisons
+    "assert_allclose",
+    "assert_close",
+    "make_tensor",
+    # submodules
+    "_utils",
+]
+
 from torch._C import FileCheck as FileCheck
 
 from . import _utils

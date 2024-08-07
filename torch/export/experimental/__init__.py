@@ -1,3 +1,9 @@
+__all__ = [
+    "_decompose_exported_program",
+    "_export_forward_backward",
+    "_remove_detach_pass",
+]
+
 import copy
 
 import torch

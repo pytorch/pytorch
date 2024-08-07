@@ -1,5 +1,11 @@
 # Config options to enable/disable C++ kernel for nn.functional.MHA
 # and nn.TransformerEncoder
+
+__all__ = [
+    "get_fastpath_enabled",
+    "set_fastpath_enabled",
+]
+
 import torch
 
 

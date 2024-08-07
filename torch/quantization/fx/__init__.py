@@ -7,6 +7,12 @@ appropriate files under `torch/ao/quantization/fx/`, while adding an import stat
 here.
 """
 
+__all__ = [
+    "prepare",
+    "convert",
+    "fuse",
+]
+
 from torch.ao.quantization.fx.convert import convert
 from torch.ao.quantization.fx.fuse import fuse
 

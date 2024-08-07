@@ -39,6 +39,22 @@ In the example above if ``trainer_func`` takes more than 60 seconds to
 complete, then the worker process is killed and the agent retries the worker group.
 """
 
+__all__ = [
+    # api
+    "configure",
+    "expires",
+    "TimerClient",
+    "TimerRequest",
+    "TimerServer",
+    # file based timer
+    "FileTimerClient",
+    "FileTimerRequest",
+    "FileTimerServer",
+    # local timer
+    "LocalTimerClient",
+    "LocalTimerServer",
+]
+
 from .api import (  # noqa: F401
     configure,
     expires,

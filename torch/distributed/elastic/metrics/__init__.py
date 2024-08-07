@@ -136,6 +136,24 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 """
 
+__all__ = [
+    # api
+    "configure",
+    "ConsoleMetricHandler",
+    "get_elapsed_time_ms",
+    "getStream",
+    "MetricData",
+    "MetricHandler",
+    "MetricsConfig",
+    "NullMetricHandler",
+    "prof",
+    "profile",
+    "publish_metric",
+    "put_metric",
+    # functions
+    "initialize_metrics",
+]
+
 from typing import Optional
 
 from .api import (  # noqa: F401
