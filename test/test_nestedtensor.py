@@ -6446,6 +6446,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
     )
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
