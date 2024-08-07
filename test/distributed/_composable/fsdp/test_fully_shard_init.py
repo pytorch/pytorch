@@ -134,7 +134,7 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
         model = MLP(8)
-        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\(\[\[\[0\]\], \[\[1\]\]\]\)"
+        regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\('cuda', \[\[\[0\]\], \[\[1\]\]\]\)"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh)
 
@@ -889,7 +889,7 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
         model_args = ModelArgs()
         model = Transformer(model_args)
         # Add a buffer to show that this flow works for buffers too
-        model.register_buffer("buf", torch.randn((model_args.dim,)))
+        model.buf = torch.nn.Buffer(torch.randn((model_args.dim,)))
         for module in model.modules():
             if isinstance(module, TransformerBlock):
                 fully_shard(module, mesh=mesh)
