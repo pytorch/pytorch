@@ -234,7 +234,9 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             if functional_tensor_mode is not None:
-                functional_tensor_mode.on_forward_tracing_end()
+                functional_tensor_mode._tokens_forward_output = (
+                    functional_tensor_mode._tokens.copy()
+                )
 
             with fx_traceback.preserve_node_meta():
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
@@ -625,7 +627,6 @@ def handle_effect_tokens_fn(
     trace_joint: bool,
 ) -> Any:
     num_tokens = len(meta.tokens)
-    num_tokens_fwd_bwd = 2 * num_tokens
 
     @wraps(fn)
     def inner_fn(*args):
@@ -638,14 +639,12 @@ def handle_effect_tokens_fn(
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if trace_joint:
                 assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
-                fwd_tokens = args[0][:num_tokens]
-                assert all(token.numel() == 0 for token in fwd_tokens)
-                bwd_tokens = args[1][:num_tokens]
-                assert all(token.numel() == 0 for token in bwd_tokens)
-                args = (args[0][num_tokens:], args[1][num_tokens:], *args[2:])
+                tokens = args[0][:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
+                args = (args[0][num_tokens:], *args[1:])
             else:
-                fwd_tokens = args[:num_tokens]
-                assert all(token.numel() == 0 for token in fwd_tokens)
+                tokens = args[:num_tokens]
+                assert all(token.numel() == 0 for token in tokens)
                 args = args[num_tokens:]
 
             # Populate the current FunctionalTensorMode with the tokens per
@@ -654,14 +653,10 @@ def handle_effect_tokens_fn(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             assert functional_tensor_mode is not None
-            f_fwd_tokens = pytree.tree_map(to_fun, fwd_tokens)
-            if trace_joint:
-                f_bwd_tokens = pytree.tree_map(to_fun, bwd_tokens)
+            f_tokens = pytree.tree_map(to_fun, tokens)
 
             for i, k in enumerate(meta.tokens.keys()):
-                functional_tensor_mode._tokens[k] = f_fwd_tokens[i]
-                if trace_joint:
-                    functional_tensor_mode._tokens_backward_input[k] = f_bwd_tokens[i]
+                functional_tensor_mode._tokens[k] = f_tokens[i]
 
             # Run the joint
             outs = fn(*args)
@@ -670,29 +665,30 @@ def handle_effect_tokens_fn(
         # See Note [Side-Effectful Tokens in AOTAutograd]
         if trace_joint:
             assert len(outs) == 2
-            out_fwd_tokens = [
-                from_fun(t)
-                for t in functional_tensor_mode._tokens_forward_output.values()
-            ]
-            out_bwd_tokens = [
-                from_fun(t) for t in functional_tensor_mode._tokens.values()
-            ]
-            return ((*out_fwd_tokens, *outs[0]), (*out_bwd_tokens, *outs[1]))
+            assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
+            fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
 
-        out_fwd_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
-        return (*out_fwd_tokens, *outs)
+            assert len(functional_tensor_mode._tokens) == num_tokens
+            bwd_out_tokens = functional_tensor_mode._tokens.values()
+
+            bwd_out_tokens_used_in_bw = [
+                bt for ft, bt in zip(fwd_out_tokens, bwd_out_tokens) if ft is not bt
+            ]
+            fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
+            bwd_out_tokens_used_in_bw = [from_fun(t) for t in bwd_out_tokens_used_in_bw]
+
+            meta.num_bw_out_tokens = len(bwd_out_tokens_used_in_bw)
+            return ((*fwd_out_tokens, *outs[0]), (*outs[1], *bwd_out_tokens_used_in_bw))
+
+        out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
+        return (*out_tokens, *outs)
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_fwd_token_inputs = [torch.tensor([])] * num_tokens
 
     if trace_joint:
-        additional_bwd_token_inputs = [torch.tensor([])] * num_tokens
-        args = (
-            [*additional_fwd_token_inputs, *args[0]],
-            (*additional_bwd_token_inputs, *args[1]),
-            *args[2:],
-        )
+        args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])
     else:
         args = [*additional_fwd_token_inputs, *args]
     return inner_fn, args
