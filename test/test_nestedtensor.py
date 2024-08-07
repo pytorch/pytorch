@@ -6442,6 +6442,45 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
 
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipIfTorchDynamo()
+    def test_sdpa_autocast(self, device):
+        def fn_nt(values32, values16, offsets):
+            nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
+            nt16 = convert_jagged_to_nested_tensor(values16, offsets, max_length=16)
+            nt32 = nt32.transpose(1, 2)
+            nt16 = nt16.transpose(1, 2)
+            return F.scaled_dot_product_attention(nt32, nt16, nt32)
+
+        def fn_dense(x32, x16):
+            x32 = x32.view(8, 16, 4, 16).transpose(1, 2)
+            x16 = x16.view(8, 16, 4, 16).transpose(1, 2)
+            return F.scaled_dot_product_attention(x32, x16, x32)
+
+        values32 = torch.randn((8 * 16, 4, 16), device=device, dtype=torch.float32)
+        values16 = torch.randn((8 * 16, 4, 16), device=device, dtype=torch.float16)
+        offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
+
+        x32 = values32.clone()
+        x16 = values16.clone()
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            out_dense_eager = fn_dense(x32, x16)
+            out_dense_compiled = torch.compile(fn_dense)(x32, x16)
+            out_nt_eager = fn_nt(values32, values16, offsets)
+            out_nt_compiled = torch.compile(fn_nt)(values32, values16, offsets)
+
+        self.assertEqual(out_dense_eager, out_dense_compiled)
+        self.assertEqual(
+            out_dense_eager.transpose(1, 2),
+            out_nt_eager.values().transpose(0, 1).view(8, 16, 4, 16),
+        )
+        self.assertEqual(
+            out_dense_eager.transpose(1, 2),
+            out_nt_compiled.values().transpose(0, 1).view(8, 16, 4, 16),
+        )
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(

@@ -615,6 +615,21 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
+def _autocast(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    device_type = query.device.type
+    if not torch.is_autocast_enabled(device_type):
+        return query, key, value
+
+    def cvt(x):
+        return x.to(torch.get_autocast_dtype(device_type))
+
+    return cvt(query), cvt(key), cvt(value)
+
+
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -624,6 +639,7 @@ def jagged_scaled_dot_product_attention(
     is_causal=False,
     scale=None,
 ):
+    query, key, value = _autocast(query, key, value)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
     assert (
