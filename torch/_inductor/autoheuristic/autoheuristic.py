@@ -147,8 +147,6 @@ class AutoHeuristic:
                 self.context,
             )
             choices = controller.get_decisions_ranked(top_k)
-            if choices is None:
-                return None
             return choices
         return None
 
