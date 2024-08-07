@@ -113,7 +113,7 @@
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
 #     variable in a graph. The result of this function is `c10::optional<Tensor>`,
-#     and it is `c10::nullopt` when the condition evalutes to `false`,
+#     and it is `::std::nullopt` when the condition evalutes to `false`,
 #     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
@@ -396,6 +396,14 @@
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
+
+- name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
+  dispatch:
+    Default:
+      # the default case will use the CompositeImplicitAutograd
+      self: not_implemented("chunk")
+    AutogradNestedTensor:
+      self: chunk_backward_nested(grads, self, chunks, dim)
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
@@ -2275,6 +2283,10 @@
   self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
+- name: channel_shuffle(Tensor self, SymInt groups) -> Tensor
+  self: channel_shuffle_symint(grad, grad.sym_size(1) / groups)
+  result: auto_linear
+
 - name: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
   result: auto_linear
@@ -2828,7 +2840,7 @@
   dummy: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
+  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
 
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)

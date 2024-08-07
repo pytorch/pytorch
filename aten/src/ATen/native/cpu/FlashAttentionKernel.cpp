@@ -380,23 +380,29 @@ void cpu_flash_attention(
                 tmp_max);
           }
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-          // qk <- exp(qk - max) and sum per row
-          tmp_sum = tmp_max;
-          _exp_reduce_sum_fusion_kernel(
-              qk_data + row * kvBlockSize, kvBlockSize,
-              conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize,
-              tmp_sum);
-          // exp_tmp <- exp(max[row] - max)
-          exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-          // sum[row] <- sum + exp_tmp * sum[row]
-          qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-          // max[row] <- max
-          qk_max_data[row] = tmp_max;
-          // dst <- dst * exp_tmp
-          if (n > 0) {
-            vec::map<accum_t>(
-              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-              dst_data + row * headSize, dst_data + row * headSize, headSize);
+          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
+            // to avoid `nan = exp2f(-inf - (-inf))`
+            fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize,
+              static_cast<scalar_t>(0), kvBlockSize);
+          } else {
+            tmp_sum = tmp_max;
+            // qk <- exp(qk - max) and sum per row
+            _exp_reduce_sum_fusion_kernel(
+                qk_data + row * kvBlockSize, kvBlockSize,
+                conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize,
+                tmp_sum);
+            // exp_tmp <- exp(max[row] - max)
+            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
+            // sum[row] <- sum + exp_tmp * sum[row]
+            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
+            // max[row] <- max
+            qk_max_data[row] = tmp_max;
+            // dst <- dst * exp_tmp
+            if (n > 0) {
+              vec::map<accum_t>(
+                [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+                dst_data + row * headSize, dst_data + row * headSize, headSize);
+            }
           }
         }
         // Calculate Softmax(q @ k.T) @ v
@@ -648,7 +654,11 @@ void cpu_flash_attention_backward(
               fill_stub(row_ptr + last_col + 1, static_cast<accum_t>(0), kvBlockSize - last_col - 1);
             }
           }
+#ifdef _MSC_VER
           if (is_reduced_type) {
+#else
+          if constexpr (is_reduced_type) {
+#endif
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
                 attn_data + row * kvBlockSize,
@@ -700,7 +710,11 @@ void cpu_flash_attention_backward(
               grad_attn_data + row * kvBlockSize,
               kvBlockSize);
           }
+#ifdef _MSC_VER
           if (is_reduced_type) {
+#else
+          if constexpr (is_reduced_type) {
+#endif
             for (const auto row : c10::irange(qBlockSize)) {
               convert<accum_t, scalar_t>(
                 grad_attn_data + row * kvBlockSize,

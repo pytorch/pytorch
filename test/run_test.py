@@ -38,10 +38,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW_GRADCHECK,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
     TEST_CLASS_TIMES_FILE,
@@ -71,10 +72,11 @@ from tools.testing.test_selections import (
 )
 
 
-HAVE_TEST_SELECTION_TOOLS = True
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
 
+
+HAVE_TEST_SELECTION_TOOLS = True
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -104,9 +106,7 @@ def maybe_set_hip_visible_devies():
 
 
 def strtobool(s):
-    if s.lower() in ["", "0", "false", "off"]:
-        return False
-    return True
+    return s.lower() not in {"", "0", "false", "off"}
 
 
 class TestChoices(list):
@@ -430,7 +430,14 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
+        replacement = {"-f": "-x"}
+        unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.showlocals:
+        if options.pytest:
+            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
+        else:
+            unittest_args.append("--locals")
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
@@ -732,6 +739,51 @@ def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
 
 def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
     return _test_cpp_extensions_aot(test_directory, options, use_ninja=False)
+
+
+def test_autoload_enable(test_module, test_directory, options):
+    return _test_autoload(test_directory, options, enable=True)
+
+
+def test_autoload_disable(test_module, test_directory, options):
+    return _test_autoload(test_directory, options, enable=False)
+
+
+def _test_autoload(test_directory, options, enable=True):
+    # Wipe the build folder, if it exists already
+    cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=os.environ)
+    if return_code != 0:
+        return return_code
+
+    # "install" the test modules and run tests
+    python_path = os.environ.get("PYTHONPATH", "")
+
+    try:
+        cpp_extensions = os.path.join(test_directory, "cpp_extensions")
+        install_directory = ""
+        # install directory is the one that is named site-packages
+        for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
+            for directory in directories:
+                if "-packages" in directory:
+                    install_directory = os.path.join(root, directory)
+
+        assert install_directory, "install_directory must not be empty"
+        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
+
+        cmd = [sys.executable, "test_autoload.py"]
+        return_code = shell(cmd, cwd=test_directory, env=os.environ)
+        return return_code
+    finally:
+        os.environ["PYTHONPATH"] = python_path
+        os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1052,6 +1104,8 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
+    "test_autoload_enable": test_autoload_enable,
+    "test_autoload_disable": test_autoload_disable,
 }
 
 
@@ -1071,6 +1125,21 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
+    if sys.version_info >= (3, 9):
+        parser.add_argument(
+            "--showlocals",
+            action=argparse.BooleanOptionalAction,
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+    else:
+        parser.add_argument(
+            "--showlocals",
+            action="store_true",
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1433,9 +1502,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(
-    file: str,
-) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> Dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):

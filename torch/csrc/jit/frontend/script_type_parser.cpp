@@ -226,7 +226,7 @@ std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
       }
     } break;
   }
-  return at::nullopt;
+  return std::nullopt;
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {

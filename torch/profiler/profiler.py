@@ -138,7 +138,7 @@ class _KinetoProfile:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = dict()
+        self.preset_metadata: Dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -772,7 +772,7 @@ class ExecutionTraceObserver(_ITraceObserver):
     incurring any overheads.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the default states.
         """

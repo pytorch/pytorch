@@ -1168,7 +1168,6 @@ inline bool use_rnn_persist_small_h(
     const RNNDescriptorParams& rnn,
     const TensorDescriptorListParams& tensors,
     bool forward) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major < 6)
     return false;
@@ -1190,9 +1189,6 @@ inline bool use_rnn_persist_small_h(
   }
 
   return false;
-#else
-  return false;
-#endif
 }
 
 cudnnRNNAlgo_t get_algo(
@@ -1211,13 +1207,11 @@ cudnnRNNAlgo_t get_algo(
   // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
   if (!tensors.is_input_packed()) {
     auto cudnnDataType = getCudnnDataType(input);
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
     if (cudnnDataType != CUDNN_DATA_DOUBLE) {
       if (use_rnn_persist_small_h(rnn, tensors, forward)) {
         return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
       }
     }
-#endif
     if (cudnnDataType == CUDNN_DATA_HALF) {
       if (use_persist_common_heuristics(rnn, tensors) &&
           use_persist_device_heuristics(rnn, tensors)) {

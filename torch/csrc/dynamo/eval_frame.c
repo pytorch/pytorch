@@ -523,6 +523,7 @@ static PyObject* _custom_eval_frame_shim(
 // we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
 // The should_clear_frame flag is used to indicate whether the frame should be
 // cleared by _custom_eval_frame's caller.
+// Generally should_clear_frame should be set if and only we don't eval_frame_default.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,

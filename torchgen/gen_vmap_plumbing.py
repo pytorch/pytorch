@@ -36,16 +36,14 @@ def is_tensor_list(typ: Type) -> bool:
 
 def unwrap_tensor(name: str, cur_level_var: str) -> list[str]:
     result = f"""\
-    Tensor {name}_value;
-    optional<int64_t> {name}_bdim;
-    std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, {cur_level_var});"""
+    auto [{name}_value, {name}_bdim] = unwrapTensorAtLevel({name}, {cur_level_var});"""
     return textwrap.dedent(result).split("\n")
 
 
 def unwrap_optional_tensor(name: str, cur_level_var: str) -> list[str]:
     result = f"""\
-    optional<Tensor> {name}_value;
-    optional<int64_t> {name}_bdim;
+    std::optional<Tensor> {name}_value;
+    std::optional<int64_t> {name}_bdim;
     if ({name}) {{
         std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), {cur_level_var});
     }}"""

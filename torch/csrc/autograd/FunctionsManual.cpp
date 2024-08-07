@@ -240,7 +240,7 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
 Tensor norm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     const Tensor& norm) {
   return norm_backward(grad, self, p_, norm, {}, true);
 }
@@ -248,7 +248,7 @@ Tensor norm_backward(
 Tensor norm_backward(
     Tensor grad,
     const Tensor& self,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     Tensor norm,
     IntArrayRef dim,
     bool keepdim) {
@@ -302,7 +302,7 @@ Tensor norm_backward(
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     Tensor norm,
     IntArrayRef dim,
     bool keepdim) {
@@ -367,7 +367,7 @@ Tensor norm_jvp(
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
-    const optional<Scalar>& p_,
+    const std::optional<Scalar>& p_,
     Tensor norm) {
   return norm_jvp(self_p, self_t, p_, std::move(norm), {}, true);
 }
@@ -568,8 +568,12 @@ Tensor angle_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor mvlgamma_backward(const Tensor& grad, const Tensor& self, int64_t p) {
-  Tensor args =
-      at::arange(-static_cast<double>(p) / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args = at::arange(
+      -static_cast<double>(p) / 2. + 0.5,
+      0.5,
+      0.5,
+      // use strided here regardless of self's layout; useful for e.g. NJT
+      self.options().layout(c10::kStrided));
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
 }
@@ -1182,8 +1186,8 @@ std::vector<Tensor> block_diag_backward(
 Tensor clamp_backward(
     const Tensor& grad,
     const Tensor& self,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   // clamp: gradients not defined on min and max, so we return the subgradient 1
   // for these cases.
   if (max && min) {
@@ -2083,6 +2087,27 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
         (gradh - A.matmul(K)).matmul(pinvA).matmul(pinvAh) + pinvAhK -
         pinvAhK.matmul(pinvA).matmul(A);
   }
+}
+
+Tensor chunk_backward_nested(
+    const std::vector<torch::autograd::Variable>& grads,
+    const Tensor& self,
+    int64_t chunks,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      self.layout() == c10::kJagged,
+      "Nested Strided Tensor doesn't support chunk backward.")
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_INTERNAL_ASSERT(
+      dim != 0, "Nested Tensor doesn't support chunk backward on dim=0 yet.")
+  Tensor ret = at::zeros_like(self);
+  std::vector<Tensor> rets = at::chunk(ret, chunks, dim);
+  for (const auto j : c10::irange(grads.size())) {
+    if (grads[j].defined()) {
+      rets[j].copy_(grads[j]);
+    }
+  }
+  return ret;
 }
 
 Tensor split_with_sizes_backward(
@@ -3110,7 +3135,7 @@ Tensor as_strided_backward(
     const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
-    const optional<c10::SymInt>& sym_storage_offset_) {
+    const std::optional<c10::SymInt>& sym_storage_offset_) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -3242,7 +3267,7 @@ Tensor as_strided_scatter_backward(
     const TensorGeometry& src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset) {
+    std::optional<c10::SymInt> storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with

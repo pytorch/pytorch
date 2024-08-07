@@ -9,8 +9,8 @@ import unittest
 import expecttest
 
 from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
-
 from torchgen.gen_backend_stubs import run
+
 
 path = os.path.dirname(os.path.realpath(__file__))
 gen_backend_stubs_path = os.path.join(path, "../torchgen/gen_backend_stubs.py")

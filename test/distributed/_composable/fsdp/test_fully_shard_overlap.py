@@ -6,7 +6,6 @@ from typing import Callable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -140,7 +139,11 @@ class TestFullyShardOverlap(FSDPTest):
             num_iters * (3 * compute_sleep_ms + buffer_ms) + comm_sleep_ms
         )
         self.assertLessEqual(test_time, expected_test_time)
-        self.assertGreater(baseline_time, expected_test_time)
+        # Since `get_cycles_per_ms` uses lru cache, there may be some variance
+        # between the initially determined cycles vs. the current cycles per
+        # ms, so we relax the baseline check to just that it is greater than
+        # the test time rather than the expected test time
+        self.assertGreater(baseline_time, test_time)
 
     def _time_fn(self, fn: Callable):
         start_event = torch.cuda.Event(enable_timing=True)

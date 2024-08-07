@@ -159,7 +159,7 @@ class IListRefTagImpl<IListRefTag::Unboxed, at::OptionalTensorRef>
 
 template <>
 class IListRefTagImpl<IListRefTag::Boxed, at::OptionalTensorRef>
-    : public IListRefTagImplBase<IListRefTag::Boxed, at::OptionalTensorRef, optional<at::Tensor>> {
+    : public IListRefTagImplBase<IListRefTag::Boxed, at::OptionalTensorRef, std::optional<at::Tensor>> {
 
  public:
   /*

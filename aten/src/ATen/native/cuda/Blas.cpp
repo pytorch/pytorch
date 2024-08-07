@@ -331,9 +331,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
-            c10::nullopt /* layout */,
+            std::nullopt /* layout */,
             at::kCPU,
-            c10::nullopt /* pin_memory */));
+            std::nullopt /* pin_memory */));
   }
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
@@ -716,7 +716,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
-              beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
+              beta_, self.scalar_type(), std::nullopt /* layout */, at::kCPU, std::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
