@@ -116,18 +116,26 @@ else:
 
             return res_submesh
 
-        def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+        def create_flatten_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            mesh_dim_name: Optional[str],
+        ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             flatten_dims_in_root = [
                 not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
-            flatten_mesh_dim_names = "_".join(
-                [
-                    not_none(root_mesh.mesh_dim_names)[dim]
-                    for dim in flatten_dims_in_root
-                ]
-            )
+            if mesh_dim_name:
+                flatten_mesh_dim_name = mesh_dim_name
+            else:
+                flatten_mesh_dim_name = "_".join(
+                    [
+                        not_none(root_mesh.mesh_dim_names)[dim]
+                        for dim in flatten_dims_in_root
+                    ]
+                )
+
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
             remained_dims_in_root = list(range(root_mesh.mesh.ndim))
@@ -144,7 +152,7 @@ else:
                 flattened_mesh = DeviceMesh(
                     root_mesh.device_type,
                     mesh_nd,
-                    mesh_dim_names=(flatten_mesh_dim_names,),
+                    mesh_dim_names=(flatten_mesh_dim_name,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
@@ -691,16 +699,21 @@ else:
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
-        def _flatten(self) -> "DeviceMesh":
+        def _flatten(self, *, mesh_dim_name: Optional[str] = None) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
+            If no mesh_dim_name is assigned for the flatten mesh, the default is a string
+            concatenating the mesh_dim_names with each mesh_dim_name separated by an underscore.
+
+            For example, if you have a 2D DeviceMesh with mesh_dim_names=("dp", "cp"), the default
+            flatten_mesh_dim_name will be "dp_cp".
             """
             if not self.mesh_dim_names:
                 raise RuntimeError(
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            return _mesh_resources.create_flatten_mesh(self)
+            return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
 
     def init_device_mesh(
         device_type: str,
