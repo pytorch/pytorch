@@ -442,7 +442,11 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
+      if [[ "$device" == "cpu_x86" ]]; then
+        dtype=amp
+      else
+        dtype=bfloat16
+      fi
     elif [[ "$mode" == "training" ]]; then
       dtype=amp
     fi
@@ -459,6 +463,11 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
+      if [[ "$DASHBOARD_TAG" == *default_freezing-true* ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
@@ -469,6 +478,12 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *dynamic_freezing-true* ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            --dynamic-batch-only "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_dynamic_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
@@ -489,6 +504,11 @@ test_perf_for_dashboard() {
         TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *aotinductor_freezing-true* ]] && [[ "$mode" == "inference" ]]; then
+        TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
