@@ -252,7 +252,13 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
+            ChromiumEventLogger.log_timed_event(key, time.time_ns(), "B")
+            if phase_name:
+                ChromiumEventLogger.log_timed_event(phase_name, time.time_ns(), "B")
             yield
+            if phase_name:
+                ChromiumEventLogger.log_timed_event(phase_name, time.time_ns(), "E")
+            ChromiumEventLogger.log_timed_event(key, time.time_ns(), "E")
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -796,6 +802,40 @@ def clear_compilation_metrics() -> None:
 
 def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
     return list(_compilation_metrics)
+
+
+class ChromiumEventLogger:
+    """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link"""
+
+    @staticmethod
+    def log_timed_event(
+        event_name: str,
+        time_ns: int,
+        phase: str,
+        args: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,  # Chromium events are in ms
+            "args": args,
+            "ph": phase,
+            "pid": 0,
+        }
+        torch._logging.trace_structured("chromium_event", payload_fn=lambda: event, suppress_context=True)
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str, time_ns: int, args: Optional[Dict[str, Any]] = None
+    ) -> None:
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,
+            "args": args,
+            "ph": "i",
+            "pid": 0,
+            "s": "p",
+        }
+        torch._logging.trace_structured("chromium_event", payload_fn=lambda: event, suppress_context=True)
 
 
 @dataclasses.dataclass
