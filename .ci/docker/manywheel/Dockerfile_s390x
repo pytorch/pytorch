@@ -11,6 +11,7 @@ ARG DEVTOOLSET_VERSION=13
 RUN yum -y install epel-release
 RUN yum -y update
 RUN yum install -y \
+  sudo \
   autoconf \
   automake \
   bison \
@@ -56,7 +57,6 @@ RUN yum install -y \
   libxslt-devel \
   libxml2-devel \
   valgrind
-
 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
