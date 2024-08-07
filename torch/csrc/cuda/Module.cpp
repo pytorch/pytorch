@@ -995,6 +995,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
 #endif
+      .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -1007,7 +1008,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #ifndef FBCODE_CAFFE2
                << ", uuid=" << std::string(prop.uuid.bytes, 16)
 #endif
-               << ")";
+               << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
+               << "MB)";
         return stream.str();
       });
 
