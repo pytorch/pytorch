@@ -51,6 +51,7 @@ torch.fx.experimental.symbolic_shapes
     compute_unbacked_bindings
     rebind_unbacked
     resolve_unbacked_bindings
+    is_accessor_node
 
 torch.fx.experimental.proxy_tensor
 -------------------------------------
