@@ -914,6 +914,40 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+std::string uuid_to_string(const char* uuid_bytes) {
+  // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+  // For string representation, the code here expands this to
+  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+  // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
+  constexpr size_t size = 16 * 2 + 4 + 1;
+  std::string device_path_str(size, '\0');
+  snprintf(
+      device_path_str.data(),
+      size,
+      "%02x%02x%02x%02x-"
+      "%02x%02x-"
+      "%02x%02x-"
+      "%02x%02x-"
+      "%02x%02x%02x%02x%02x%02x",
+      (uint8_t)uuid_bytes[0],
+      (uint8_t)uuid_bytes[1],
+      (uint8_t)uuid_bytes[2],
+      (uint8_t)uuid_bytes[3],
+      (uint8_t)uuid_bytes[4],
+      (uint8_t)uuid_bytes[5],
+      (uint8_t)uuid_bytes[6],
+      (uint8_t)uuid_bytes[7],
+      (uint8_t)uuid_bytes[8],
+      (uint8_t)uuid_bytes[9],
+      (uint8_t)uuid_bytes[10],
+      (uint8_t)uuid_bytes[11],
+      (uint8_t)uuid_bytes[12],
+      (uint8_t)uuid_bytes[13],
+      (uint8_t)uuid_bytes[14],
+      (uint8_t)uuid_bytes[15]);
+  return device_path_str;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -932,37 +966,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
             return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
           })
       .def("__str__", [](const CUuuid& uuid) {
-        // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
-        // For string representation, the code here expands this to
-        // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-        // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
-        constexpr size_t size = sizeof(CUuuid) * 2 + 4 + 1;
-        char device_path_str[size] = {0};
-        snprintf(
-            device_path_str,
-            sizeof(device_path_str),
-            "%02x%02x%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x%02x%02x%02x%02x",
-            (uint8_t)uuid.bytes[0],
-            (uint8_t)uuid.bytes[1],
-            (uint8_t)uuid.bytes[2],
-            (uint8_t)uuid.bytes[3],
-            (uint8_t)uuid.bytes[4],
-            (uint8_t)uuid.bytes[5],
-            (uint8_t)uuid.bytes[6],
-            (uint8_t)uuid.bytes[7],
-            (uint8_t)uuid.bytes[8],
-            (uint8_t)uuid.bytes[9],
-            (uint8_t)uuid.bytes[10],
-            (uint8_t)uuid.bytes[11],
-            (uint8_t)uuid.bytes[12],
-            (uint8_t)uuid.bytes[13],
-            (uint8_t)uuid.bytes[14],
-            (uint8_t)uuid.bytes[15]);
-        return std::string(device_path_str);
+          return uuid_to_string(uuid.bytes);
       });
 #endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
@@ -1006,7 +1010,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
 #ifndef FBCODE_CAFFE2
-               << ", uuid=" << std::string(prop.uuid.bytes, 16)
+               << ", uuid=" << uuid_to_string(prop.uuid.bytes)
 #endif
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
