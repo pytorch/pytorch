@@ -6498,14 +6498,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         with torch.autocast(device_type="cuda", dtype=torch.float16):
             loss_dense_eager = fn_dense(v32_dense_eager, v16_dense_eager).sum()
             loss_dense_compile = torch.compile(fn_dense)(
-                v32_dense_eager, v16_dense_eager
+                v32_dense_compile, v16_dense_compile
             ).sum()
             loss_nt_eager = fn_nt(v32_nt_eager, v16_nt_eager, offsets).values().sum()
             loss_nt_compile = (
-                torch.compile(fn_nt)(v32_nt_eager, v16_nt_eager, offsets).values().sum()
+                torch.compile(fn_nt)(v32_nt_compile, v16_nt_compile, offsets)
+                .values()
+                .sum()
             )
 
-        # gradcheck isn't great because we want to run forward in autocast and backward outside of autocast
+        loss_dense_eager.backward()
+        loss_dense_compile.backward()
+        loss_nt_eager.backward()
+        loss_nt_compile.backward()
+
         self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
         self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
         self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
