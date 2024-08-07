@@ -612,3 +612,24 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
+    """
+    If `in_place` is false, remove a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
+    `v` is the values in the dictionary.
+    If `in_place` is true, modify `state_dict` in place.
+    """
+    if in_place:
+        for k, v in state_dict.items():
+            if "proxy" in v.__dict__:
+                state_dict[k] = v.clone().detach()
+        return state_dict
+    else:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if "proxy" in v.__dict__:
+                new_state_dict[k] = v.clone().detach()
+            else:
+                new_state_dict[k] = v
+        return new_state_dict
