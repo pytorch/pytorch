@@ -279,7 +279,15 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
             elif node.op == "output":
                 # forward output tokens are at the start
                 output_token_nodes = node.args[0][:num_tokens]
-                other_output_args = node.args[0][num_tokens:]
+
+                # Also remove tokens saved for backward
+                other_output_args = tuple(
+                    [
+                        n
+                        for n in node.args[0][num_tokens:]
+                        if n not in output_token_nodes
+                    ]
+                )
 
                 rewrite_output(module, node, output_token_nodes, other_output_args)
 
@@ -313,16 +321,17 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
         module.recompile()
 
     do_forward(fw_module)
-    fw_module.print_readable()
 
     if bw_module is not None:
         do_backward(bw_module)
 
+    # No need to update fw_metadata.num_forward_returns and fw_metadata.num_forward as num_tokens are not part of it.
+    # As CompiledFunction.forward runs function wrapped in EffectTokensWrapper, that will toss out output tokens.
+
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
-    fw_metadata.num_forward_returns -= num_tokens
-    fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
+    fw_metadata.num_bw_out_tokens = 0
 
 
 def root_module_when_exporting_non_strict(flat_fn):
