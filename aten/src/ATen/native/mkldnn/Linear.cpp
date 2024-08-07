@@ -56,6 +56,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 namespace at {
 namespace native {
 
+static bool use_mkldnn_bf32_linear() {
+  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
+}
+
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
@@ -231,7 +235,9 @@ static Tensor mkldnn_linear_pointwise(
         it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
     op_attr = it->second(scalars, algorithm);
   }
-
+  if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
@@ -314,6 +320,10 @@ static Tensor mkldnn_linear_pointwise_binary(
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+
+  if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
 
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
