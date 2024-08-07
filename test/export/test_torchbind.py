@@ -1320,8 +1320,8 @@ def forward(self, token, obj, x):
     with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    return (getitem, add)""",  # noqa: B950
+    add_3 = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    return (getitem, add_3)""",  # noqa: B950
         )
 
     @parametrize("backend", ["eager", "aot_eager"])
