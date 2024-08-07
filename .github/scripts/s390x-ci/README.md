@@ -32,9 +32,10 @@ using following commands:
 
 ```
 $ cd ~
-$ git clone https://github.com/pytorch/builder
-$ cd builder
-$ GPU_ARCH_TYPE=cpu-s390x "$(pwd)/manywheel/build_docker.sh"
+$ git clone https://github.com/pytorch/pytorch
+$ cd pytorch
+$ git submodule update --init --recursive
+$ GPU_ARCH_TYPE=cpu-s390x "$(pwd)/.ci/docker/manywheel/build.sh" manylinuxs390x-builder
 $ docker image save -o ~/manywheel-s390x.tar docker.io/pytorch/manylinuxs390x-builder:cpu-s390x
 ```
 
