@@ -166,6 +166,21 @@ class TestAutocastCPU(TestCase):
             )
 
     @skipIfTorchDynamo()
+    def test_autocast_aten_16(self):
+        for op_with_args in self.autocast_lists.aten_16:
+            op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
+            self._run_autocast_outofplace(
+                op, args, torch.bfloat16, module=torch.ops.aten, add_kwargs=maybe_kwargs
+            )
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float16,
+                add_kwargs=maybe_kwargs,
+                amp_dtype=torch.float16,
+            )
+
+    @skipIfTorchDynamo()
     def test_autocast_nn_16(self):
         for op_with_args in self.autocast_lists.nn_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)

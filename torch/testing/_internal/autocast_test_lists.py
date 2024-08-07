@@ -333,8 +333,20 @@ class AutocastCPUTestLists:
                                               torch.randn((3 * n), device=dev, dtype=torch.float32),
                                               torch.randn((n, n), device=dev, dtype=torch.float32),
                                               torch.randn((n), device=dev, dtype=torch.float32))),
-            ("_flash_attention_forward", ()),
-            ("_efficient_attention_forward", ()),
+        ]
+        self.aten_16 = [
+            ("_flash_attention_forward", (torch.randn((n, n, n, n), device=dev, dtype=torch.float32).transpose(1, 2),  # q
+                                          torch.randn((n, n, n, n), device=dev, dtype=torch.float32).transpose(1, 2),  # k
+                                          torch.randn((n, n, n, n), device=dev, dtype=torch.float32).transpose(1, 2),  # v
+                                          None,  # cum_seq_q
+                                          None,  # cum_seq_k
+                                          n,  # max_q
+                                          n,  # max_k
+                                          0.0,  # dropout_p
+                                          False,  # is_causal
+                                          False,  # return_debug_mask
+                                          )),
+            # ("_efficient_attention_forward", ()),
         ]
         self.torch_fp32 = [
             ("poisson_nll_loss", mat0_bf16 + mat1_bf16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),

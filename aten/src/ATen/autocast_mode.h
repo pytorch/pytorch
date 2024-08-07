@@ -780,7 +780,9 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(rnn_tanh_cell)                       \
   _(rnn_relu_cell)                       \
   _(_scaled_dot_product_flash_attention) \
-  _(scaled_dot_product_attention)
+  _(scaled_dot_product_attention)        \
+  _(_flash_attention_forward)            \
+  _(_efficient_attention_forward)
 
 #define AT_FORALL_FP32(_)             \
   _(acos)                             \
