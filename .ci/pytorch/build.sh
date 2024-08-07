@@ -175,7 +175,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
-  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
   export USE_XPU=1
 fi
 
