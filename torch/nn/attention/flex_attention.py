@@ -681,13 +681,12 @@ def _create_block_mask_inner(
 
 def create_block_mask(
     mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
@@ -730,6 +729,16 @@ def create_block_mask(
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
+    if isinstance(BLOCK_SIZE, int):
+        Q_BLOCK_SIZE = BLOCK_SIZE
+        KV_BLOCK_SIZE = BLOCK_SIZE
+    else:
+        Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
     if Q_LEN < 128:
         Q_BLOCK_SIZE = Q_LEN
     else:
@@ -877,11 +886,16 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass hop to it. So we wrap it in a dummy function.
+    def _flex_attention_hop_wrapper(*args, **kwargs):
+        return flex_attention_hop(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
-                    flex_attention_hop, backend="eager", fullgraph=True
+                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
                 )(
                     query,
                     key,
