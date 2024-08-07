@@ -326,10 +326,6 @@ class ModuleList(Module):
     def __getitem__(self, idx: int) -> Module:
         ...
 
-    @overload
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
-        ...
-
     @_copy_to_script_wrapper
     def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
         if isinstance(idx, slice):
