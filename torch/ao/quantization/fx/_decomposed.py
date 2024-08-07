@@ -682,12 +682,14 @@ def dequantize_per_channel(
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
     res = torch.zeros_like(input, dtype=out_dtype)
 
-    for i in range(input.size(0)):
-        zp = zero_points[i] if zero_points is not None else 0
+    scales = scales.unsqueeze(1)
+    if zero_points is not None:
         # TODO: investigate why
         # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
         # failed the test
-        res[i] = (input[i].to(out_dtype) - zp) * scales[i]
+        res = (input.to(out_dtype) - zero_points.unsqueeze(1)) * scales
+    else:
+        res = input.to(out_dtype) * scales
 
     out = res.permute(tuple(permute_axis_list))
     return out
