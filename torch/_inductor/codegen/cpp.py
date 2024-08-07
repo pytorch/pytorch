@@ -2929,6 +2929,8 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float,
             torch.bfloat16,
             torch.float16,
+            torch.uint8,
+            torch.int8,
         ]
 
     def disable_vec(self, msg=None):
