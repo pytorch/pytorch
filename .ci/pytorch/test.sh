@@ -1387,7 +1387,7 @@ test_operator_benchmark() {
   pip_install pandas
   python check_perf_csv.py \
   --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-  --expected "benchmarks/operator_benchmark/expected_ci_operator_benchmark_eager_float32_cpu.csv"
+  --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
 
 }
 
