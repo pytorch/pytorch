@@ -294,7 +294,6 @@ class ConstDictVariable(VariableTracker):
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
             if len(args) == 1:
-                unimplemented("key does not exist")
                 return ConstantVariable(None)
             else:
                 return args[1]
@@ -499,6 +498,8 @@ class SetVariable(ConstDictVariable):
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
+            if args[0] not in self:
+                unimplemented("key does not exist")
             return super().call_method(tx, "pop", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
