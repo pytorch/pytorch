@@ -327,7 +327,6 @@ class NCCLComm {
     comm->initialized_ = isInitialized;
     return comm;
   }
-#endif
 
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
@@ -335,6 +334,7 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
+#endif
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
