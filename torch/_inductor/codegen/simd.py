@@ -1752,18 +1752,18 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings = OrderedSet()
+            new_tilings: OrderedSet[tuple[sympy.expr]] = OrderedSet()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
                 first_trailing_dim = num_leading_dims + 1
                 collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
-                tiling = [collapsed_leading_dim] + node_range[first_trailing_dim:]
+                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
                 new_tilings.add(tuple(tiling))
 
             # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
             # Since this is a stable sort, ties are broken by schedule order.
-            ranked_new_tilings = sorted(list(new_tilings), key=len)
+            ranked_new_tilings = sorted(new_tilings, key=len)
             ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:

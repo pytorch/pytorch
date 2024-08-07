@@ -9606,10 +9606,12 @@ class CommonTemplate:
         weights = torch.randn((C_bias, H), device=DEVICE, dtype=DTYPE)
         inps = (query, key, value, bias, weights)
 
-        with config.patch({
-            "triton.prefer_nd_tiling": prefer_nd_tiling,
-            "triton.use_block_ptr": use_block_ptr,
-        }):
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": prefer_nd_tiling,
+                "triton.use_block_ptr": use_block_ptr,
+            }
+        ):
             # Check accuracy
             self.common(
                 foo,

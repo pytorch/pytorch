@@ -173,7 +173,7 @@ class TritonBlockPointerTest(InductorTestCase):
             torch.add,
             *args,
             expected_num_block_pointers=3 if require_block_ptr else None,
-            config_patches = {"triton.prefer_nd_tiling": prefer_nd_tiling},
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
     @parametrize("prefer_nd_tiling", [(False, True)])
@@ -192,7 +192,9 @@ class TritonBlockPointerTest(InductorTestCase):
             ),  # Unmatched dims for first operand.
         ],
     )
-    def test_broadcast(self, x_size: Tuple[int], y_size: Tuple[int], prefer_nd_tiling: bool):
+    def test_broadcast(
+        self, x_size: Tuple[int], y_size: Tuple[int], prefer_nd_tiling: bool
+    ):
         """
         Test that we can generate strided block pointers when inputs have different
         shapes, and they are broadcast together.
@@ -220,9 +222,15 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertIn(1, all_dims)
 
         # Expect 3 block pointers: 2 inputs one output
-        self.run_and_compare(foo, x, y, expected_num_block_pointers=3,
-                             config_patches = {"triton.prefer_nd_tiling": prefer_nd_tiling})
+        self.run_and_compare(
+            foo,
+            x,
+            y,
+            expected_num_block_pointers=3,
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
+        )
 
+    @parametrize("prefer_nd_tiling", [(False, True)])
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
@@ -363,17 +371,31 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
     @parametrize(
-        "full_size,view_size",
+        "full_size,view_size,num_tiles",
         [
-            ((5,9),(3,7)), # 2D tensor with 1 discontiguous dim
-            ((11,13,7),(11,13,5)), # 3D tensor with 1 discontiguous dim
+            ((32, 32), (16, 32), 1),  # Contiguous 2D tensor. Does not require tiling.
+            ((5, 9), (3, 7), 2),  # 2D tensor with 1 discontiguous dim.
+            ((11, 13, 7), (9, 13, 5), 2),  # 3D tensor with 1 discontiguous dim (2).
+            (
+                (3, 11, 13, 7),
+                (2, 9, 13, 7),
+                2,
+            ),  # 4D tensor with 1 discontiguous dim (1).
+            (
+                (3, 11, 13, 7),
+                (2, 11, 9, 7),
+                2,
+            ),  # 4D tensor with 1 discontiguous dim (2).
         ],
     )
-    def test_nd_tiling_odd_shapes_pointwise(self, full_size: tuple[int], view_size: tuple[int]):
+    def test_nd_tiling_odd_shapes_pointwise(
+        self, full_size: tuple[int], view_size: tuple[int], num_tiles: int
+    ):
         """
         Test odd shapes with ND tiling enabled.
         Uses a pointwise op.
         """
+
         def get_input() -> torch.Tensor:
             device = torch.device(GPU_TYPE)
             full = torch.randn(full_size).to(device)
@@ -392,7 +414,7 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
         # Check the code for ND tiling
-        for tile_name in ("XBLOCK", "YBLOCK", "ZBLOCK")[:config.triton.max_tiles]:
+        for tile_name in ("XBLOCK", "YBLOCK", "ZBLOCK")[:num_tiles]:
             for program in code:
                 self.assertIn(tile_name, program)
 
