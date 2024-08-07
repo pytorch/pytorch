@@ -589,6 +589,32 @@ class RunOnlyContext(_TorchDynamoContext):
         return (self.__class__, ())
 
 
+class EnableContext:
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, fn):
+        fn = innermost_fn(fn)
+
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
+
+            prior = set_eval_frame_callback_enabled(True)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                set_eval_frame_callback_enabled(prior)
+
+        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        return _fn
+
+
 class DisableContext(_TorchDynamoContext):
     def __init__(self) -> None:
         super().__init__(callback=None)

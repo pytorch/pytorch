@@ -385,6 +385,30 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
+    def test_enable_decorator(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.enable
+        def f(x):
+            if torch._dynamo.is_compiling():
+                return x + 1
+            return x + 2
+
+        @torch._dynamo.disable
+        def g(x):
+            x = f(x)
+            if torch._dynamo.is_compiling():
+                return x + 4
+            return x + 8
+
+        @torch.compile(backend=cnts)
+        def h(x):
+            return g(x)
+
+        self.assertEqual(h(torch.ones(3, 3)), torch.ones(3, 3) + 9)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.

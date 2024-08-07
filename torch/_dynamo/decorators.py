@@ -8,7 +8,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
+from .eval_frame import DisableContext, EnableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 
@@ -55,6 +55,13 @@ def disable(fn=None, recursive=True):
         return DisableContext()
     else:
         return skip(fn)
+
+
+def enable(fn=None):
+    if fn is not None:
+        assert callable(fn)
+        return EnableContext()(fn)
+    return EnableContext()
 
 
 def skip(fn=None):
