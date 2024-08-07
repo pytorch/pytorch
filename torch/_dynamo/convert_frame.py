@@ -358,6 +358,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
             prof.dump_stats(profile_path)
         except PermissionError:
             log.warning("Cannot write to %s", str(profile_path))
+        log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
             gprof2dot_process = subprocess.Popen(
