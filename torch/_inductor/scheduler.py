@@ -3062,21 +3062,15 @@ class Scheduler:
 
     def update_zero_dim_cpu_tensor(self) -> None:
         for node in self.nodes:
-            if node.node:
-                maybe_data = getattr(node.node, "data", None)
-                if (
-                    not isinstance(node.node, MultiOutput)
-                    and node.node.get_device().type == "cpu"
-                    and (
-                        not isinstance(maybe_data, torch._inductor.ir.Pointwise)
-                        and hasattr(node.node, "layout")
-                        and hasattr(node.node.layout, "size")
-                        and hasattr(node.node, "get_size")
-                        and node.node.get_size() == []
-                    )
-                    and hasattr(node.node, "name")
-                ):
-                    V.graph.zero_dim_cpu_tensor_list.add(node.node.name)
+            if node.get_device().type == "cuda":
+                for read in node.read_writes.reads:
+                    buffer = V.graph.name_to_buffer.get(read.name)
+                    if (
+                        buffer
+                        and buffer.get_device().type == "cpu"
+                        and buffer.get_size() == []
+                    ):
+                        V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
 class BaseScheduling:

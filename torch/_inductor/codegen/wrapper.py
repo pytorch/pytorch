@@ -1541,10 +1541,7 @@ class WrapperCodeGen(CodeGen):
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-                if V.graph.is_unspec_arg(arg):
-                    return f"{arg}.item()"
-                else:
-                    return arg
+                return arg + ".item()" if V.graph.is_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:

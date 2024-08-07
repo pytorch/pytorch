@@ -12,11 +12,7 @@ from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
-def signature_of(
-    arg: KernelArgType,
-    *,
-    size_dtype: str,
-) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -66,10 +62,7 @@ def signature_to_meta(
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        i: signature_of(
-            arg,
-            size_dtype=size_dtype,
-        )
+        i: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
     }
 
