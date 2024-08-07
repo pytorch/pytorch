@@ -293,7 +293,7 @@ def log_data_ptr_mismatch(
 def maybe_warning_due_to_dynamic_shape(
     fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
-):
+) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
     def warn_msg():
@@ -314,6 +314,9 @@ def maybe_warning_due_to_dynamic_shape(
         > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
     ):
         perf_hint_log.warning(warn_msg())
+        return True
+
+    return False
 
 
 @dataclasses.dataclass(frozen=True)
