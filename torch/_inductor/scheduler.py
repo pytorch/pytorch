@@ -2197,7 +2197,9 @@ class Scheduler:
 
             triton_choices = 0
 
-            for choice, unfused_time in sorted(choice_timings.items(), key=choice_timings.__getitem__):
+            for choice, unfused_time in sorted(
+                choice_timings.items(), key=lambda x: x[1]
+            ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
