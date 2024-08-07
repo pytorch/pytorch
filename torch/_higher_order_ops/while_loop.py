@@ -222,9 +222,12 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
-    return _trace_while_loop(
-        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
-    )
+    if mode.enable_tracing:
+        return _trace_while_loop(
+            mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+        )
+    else:
+        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 @while_loop_op.py_impl(FakeTensorMode)
