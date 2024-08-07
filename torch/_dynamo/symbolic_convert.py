@@ -2122,7 +2122,7 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(k) for k in tos]))  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
