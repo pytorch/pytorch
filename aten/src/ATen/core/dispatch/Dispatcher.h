@@ -607,7 +607,7 @@ struct CaptureKernelCall<void> {
   void release() && {}
 };
 
-void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet);
+TORCH_API void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet);
 
 } // namespace detail
 
