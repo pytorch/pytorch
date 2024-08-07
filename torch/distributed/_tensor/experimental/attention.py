@@ -48,8 +48,8 @@ class _RotateMethod(Enum):
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 _convert_to_f32 = True
-_enable_load_balance = True
-_rotate_method = _RotateMethod.ALL_TO_ALL
+_enable_load_balance = False
+_rotate_method = _RotateMethod.ALL_GATHER
 
 
 def _is_causal_behavior(
@@ -1014,7 +1014,7 @@ class ZigzagLoadBalancer(_LoadBalancer):
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_rank()
+        cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
         chunks = buffer.chunk(cp_world_size * 2, dim=seq_dim)
         return torch.cat(
@@ -1028,7 +1028,7 @@ class ZigzagLoadBalancer(_LoadBalancer):
     ) -> torch.Tensor:
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_rank()
+        cp_rank = mesh.get_local_rank()
 
         all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
         ft_c.all_gather_inplace(all_buffers, buffer, mesh)
