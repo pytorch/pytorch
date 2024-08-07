@@ -117,6 +117,16 @@ except AttributeError:
     pass  # register_at_fork does not exists on windows
 
 
+def get_worker_start_method() -> str:
+    """
+    Temporary for internal subprocess pool rollout. Assign config.worker_start_method
+    lazily and return it. TODO: remove after rollout.
+    """
+    if config.worker_start_method is None:
+        config.worker_start_method = config.decide_worker_start_method()
+    return config.worker_start_method
+
+
 class AsyncCompile:
     def __init__(self) -> None:
         pass
@@ -132,12 +142,12 @@ class AsyncCompile:
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
         pool: AnyPool
-        if config.worker_start_method == "subprocess":
+        if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             pool = SubprocPool(config.compile_threads)
         else:
             pre_fork_setup()
-            ctx = multiprocessing.get_context(config.worker_start_method)
+            ctx = multiprocessing.get_context(get_worker_start_method())
             pool = ProcessPoolExecutor(
                 config.compile_threads,
                 mp_context=ctx,
@@ -269,6 +279,9 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
     # The subprocess pool is only used for the Triton backend
     or not has_triton_package()
+    # Skip for fbcode so we can query the worker_start_method lazily.
+    # TODO: remove once "subprocess" has rolled out internally.
+    or config.is_fbcode()
 ):
     pass
 else:
