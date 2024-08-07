@@ -12,6 +12,9 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep/tensor.hpp>
+#if AT_ONEDNN_GRAPH_ENABLED()
+#include <oneapi/dnnl/dnnl_graph.hpp>
+#endif // AT_ONEDNN_GRAPH_ENABLED()
 #endif // AT_MKLDNN_ENABLED()
 
 namespace at { namespace native {
@@ -69,6 +72,28 @@ inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
   }
   return input;
 }
+
+#if AT_ONEDNN_GRAPH_ENABLED()
+
+namespace onednn_graph {
+
+struct Engine {
+  // CPU engine singleton
+  static dnnl::engine& getEngine();
+  Engine(const Engine&) = delete;
+  void operator=(const Engine&) = delete;
+};
+
+struct Stream {
+  // CPU stream singleton
+  static dnnl::stream& getStream();
+  Stream(const Stream&) = delete;
+  void operator=(const Stream&) = delete;
+};
+
+}
+
+#endif // AT_ONEDNN_GRAPH_ENABLED()
 
 #if AT_MKLDNN_ENABLED()
 

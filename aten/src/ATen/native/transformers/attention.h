@@ -68,5 +68,12 @@ using flash_attention_backward_fn = void (*)(
 DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel);
 DECLARE_DISPATCH(flash_attention_backward_fn, flash_attention_backward_kernel);
 
+void reshape_attn_mask_to_4d(
+    Tensor& attn_mask,
+    int64_t batchSize,
+    int64_t num_head,
+    int64_t qSize,
+    int64_t kvSize);
+
 } // namespace native
 } // namespace at

@@ -1,16 +1,25 @@
 #include <ATen/core/TensorBody.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/cpu/Utils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/native/transformers/attention.h>
+#if AT_ONEDNN_GRAPH_ENABLED()
+#include <ATen/native/mkldnn/Attention.h>
+#include <ATen/native/mkldnn/Graph.h>
+#include <ATen/native/mkldnn/Utils.h>
+#endif // AT_ONEDNN_GRAPH_ENABLED()
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/ops/tensor.h>
 #include <c10/util/typeid.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
@@ -806,6 +815,150 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     return std::make_tuple(at::matmul(attn, value_acc).to(origin_dtype), attn.to(origin_dtype));
 }
 
+void reshape_attn_mask_to_4d(
+    Tensor& attn_mask,
+    int64_t batchSize,
+    int64_t num_head,
+    int64_t qSize,
+    int64_t kvSize) {
+  // Support mask shapes:
+  // 2d: ({Q_seq_len, 1}  x {KV_seq_len, 1})
+  // 4d: ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
+  // Guaranteed in check_attn_mask_shape
+  int64_t attn_mask_size_0 = 1;
+  int64_t attn_mask_size_1 = 1;
+  if (attn_mask.dim() == 4) {
+    if (attn_mask.size(0) == batchSize) {
+      attn_mask_size_0 = batchSize;
+    }
+    if (attn_mask.size(1) == num_head) {
+      attn_mask_size_1 = num_head;
+    }
+  }
+  attn_mask = attn_mask
+                  .view(
+                      {attn_mask_size_0,
+                       attn_mask_size_1,
+                       attn_mask.size(-2),
+                       attn_mask.size(-1)})
+                  .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
+}
+
+#if AT_ONEDNN_GRAPH_ENABLED()
+static void cpu_sdpa_forward_onednn_graph(
+    const Tensor& output,
+    const at::Tensor& q,
+    const at::Tensor& k,
+    const at::Tensor& v,
+    std::optional<Tensor> attn_mask,
+    std::optional<double> scale) {
+  // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
+  //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
+  // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
+  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
+  // Value (Batch x Num_heads  x KV_seq_len x Dim_per_head)
+  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
+  at::Tensor query = q.transpose(1, 2);
+  at::Tensor key = k.transpose(1, 2);
+  at::Tensor value = v.transpose(1, 2);
+  float scaling_factor =
+      sdp::calculate_scale(query, scale).as_float_unchecked();
+  // Sizes
+  TORCH_CHECK(
+      (query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
+      "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+
+  using namespace onednn_graph;
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+  if (has_attn_mask) {
+    int64_t batchSize = query.size(0);
+    int64_t qSize = query.size(1);
+    int64_t kvSize = value.size(1);
+    int64_t num_head = query.size(2);
+    reshape_attn_mask_to_4d(
+        attn_mask.value(), batchSize, num_head, qSize, kvSize);
+  }
+  using namespace onednn_graph;
+  std::bitset<32> patternID;
+  if (q.scalar_type() == c10::ScalarType::Float) {
+    // bit 5 corresponds to float dtype
+    patternID.set(5, 1);
+  } else {
+    // bit 4 corresponds to bfloat16 dtype
+    // the dtype can be either float or bfloat16.
+    patternID.set(4, 1);
+  }
+  // MHA pattern
+  patternID.set(6, 1);
+  // Refer to comments in Graph.cpp. The first 8 bits are reserved
+  int pos = 8;
+  at::TensorOptions scale_tensor_options;
+  scale_tensor_options = scale_tensor_options.dtype(at::ScalarType::Float);
+  scale_tensor_options = scale_tensor_options.device(at::kCPU);
+  at::Tensor scale_tensor = at::tensor({static_cast<float>(scaling_factor)}, scale_tensor_options);
+  if (!patternID[5]) {
+    scale_tensor = scale_tensor.to(at::ScalarType::BFloat16);
+  }
+  patternID.set(pos++, attn_mask.has_value());
+  // first check cache
+  // The key has a pattern ID, as well as the shapes of input tenors
+  std::vector<int64_t> map_key;
+  map_key.reserve(1024);
+  // We use this because different thread-pools may be used
+  map_key.push_back(omp_get_max_threads());
+  // Algo ID
+  std::vector<Tensor> input_tensors;
+  input_tensors.push_back(q);
+  input_tensors.push_back(k);
+  input_tensors.push_back(v);
+
+  map_key.push_back(static_cast<int64_t>(patternID.to_ullong()));
+  map_key.push_back(*(reinterpret_cast<int32_t*>(&scaling_factor)));
+
+  map_key.insert(map_key.end(), q.sizes().begin(), q.sizes().end());
+  map_key.insert(map_key.end(), q.strides().begin(), q.strides().end());
+  map_key.insert(map_key.end(), k.sizes().begin(), k.sizes().end());
+  map_key.insert(map_key.end(), q.strides().begin(), q.strides().end());
+  map_key.insert(map_key.end(), v.sizes().begin(), v.sizes().end());
+  map_key.insert(map_key.end(), v.strides().begin(), v.strides().end());
+  input_tensors.push_back(scale_tensor);
+  map_key.insert(
+      map_key.end(), scale_tensor.sizes().begin(), scale_tensor.sizes().end());
+  if (has_attn_mask) {
+    auto attn_mask_val = attn_mask.value();
+    input_tensors.push_back(attn_mask_val);
+    map_key.insert(
+        map_key.end(),
+        attn_mask_val.sizes().begin(),
+        attn_mask_val.sizes().end());
+  }
+  auto iter = cache_lookup(map_key);
+  if (iter == cache_end()) {
+    cp_entry compiledPartitionEntry;
+    auto graph_partition_iter = partition_map_lookup(patternID);
+    partition graph_partition;
+    if (graph_partition_iter == partition_map_end()) {
+      create_partition(patternID, q, k, v, scale_tensor, attn_mask);
+      graph_partition_iter = partition_map_lookup(patternID);
+    }
+    graph_partition = graph_partition_iter->second;
+    compiledPartitionEntry.partition_ = graph_partition;
+    compile_and_cache_sdpa_fusion(
+        input_tensors,
+        const_cast<at::Tensor&>(output),
+        compiledPartitionEntry,
+        patternID);
+    execute_partition(
+        input_tensors, const_cast<at::Tensor&>(output), compiledPartitionEntry);
+    insert_in_fused_kernel_cache(map_key, compiledPartitionEntry);
+  } else {
+    change_pos_in_list(iter->second);
+    cp_entry& cp = iter->second->second;
+    execute_partition(input_tensors, const_cast<at::Tensor&>(output), cp);
+  }
+}
+#endif // AT_ONEDNN_GRAPH_ENABLED()
+
 std::tuple<at::Tensor, at::Tensor>
 _scaled_dot_product_flash_attention_cpu(
     const Tensor& query,
@@ -837,15 +990,48 @@ _scaled_dot_product_flash_attention_cpu(
           (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
     "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+
+  at::Tensor output;
   const auto accumulate_dtype = toOpMathType(dtype);
-  at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
-      query.options().dtype(accumulate_dtype));
+  at::Tensor logsumexp = at::empty(
+      {batchSize, qSize, num_head}, query.options().dtype(accumulate_dtype));
 
-  flash_attention_kernel(kCPU, output, logsumexp,
-      query, key, value, dropout_p, is_causal, attn_mask, scale);
+  // oneDNN Graph SDPA is currently only supported with BF16 dtype on CPUs that support the AMX ISA.
+  // It's used only if B * N > 2 * num_threads
+  // Only forward pass is supported, and logsumexp wouldn't be filled.
+  const char* use_onednn_graph_sdpa = std::getenv("ENABLE_ONEDNN_GRAPH_SDPA");
+  if ((use_onednn_graph_sdpa != nullptr && std::strcmp(use_onednn_graph_sdpa, "1") == 0) &&
+      Context::hasOneDNNGraph() && at::cpu::is_amx_tile_supported() &&
+      (dtype == c10::ScalarType::BFloat16) && (is_causal == false) &&
+      (batchSize * num_head > 2 * at::get_num_threads()) &&
+      ((has_attn_mask && (attn_mask.value().scalar_type() != at::ScalarType::Bool)) ||
+      (!has_attn_mask))) {
+    output = at::empty({batchSize, num_head, qSize, headSize}, query.options());
+#if AT_ONEDNN_GRAPH_ENABLED()
+    // The output is contiguous
+    cpu_sdpa_forward_onednn_graph(output, query, key, value, attn_mask, scale);
+#endif // AT_ONEDNN_GRAPH_ENABLED()
+  } else {
+    output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+    flash_attention_kernel(
+        kCPU,
+        output,
+        logsumexp,
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        attn_mask,
+        scale);
+    output = output.transpose(1, 2);
+    // After the transpose above, the output would have discontiguous strides.
+    // Any trailing transpose & contiguous ops after the transpose above would not cause data movement.
+    // That's because such a transpose would simply result in nullifying the effect of the transpose op
+    // above by changing strides metadata. The contiguous would thus be a no-op.
+  }
 
-  output = output.transpose(1, 2);
   logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp));
