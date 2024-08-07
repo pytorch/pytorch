@@ -1283,9 +1283,7 @@ def masked_select_default(func, *args, **kwargs):
         )
 
     res_values = inp._values.masked_select(mask_values)
-    mask_cumsum = torch.cat(
-        [torch.tensor([0], device=mask.device), mask_values.cumsum(dim=0)]
-    )
+    mask_cumsum = F.pad(mask_values.cumsum(dim=0), (1, 0))
     res_offsets = mask_cumsum[inp._offsets]
 
     return NestedTensor(

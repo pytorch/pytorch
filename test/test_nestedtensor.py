@@ -6199,9 +6199,6 @@ class TestNestedTensorSubclass(TestCase):
         )
         self.assertEqual(masked_nt.lengths(), None)
 
-    @skipIfTorchDynamo(
-        "Fails on returning a fresh tensor but this is expected behavior"
-    )
     def test_nested_masked_select(self, device):
         t = torch.randn([3, 3], device=device)
         mask = torch.tensor([False], device=device)
