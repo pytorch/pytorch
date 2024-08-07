@@ -680,7 +680,6 @@ def dequantize_per_channel(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input, dtype=out_dtype)
 
     new_shape = [1] * input.dim()
     new_shape[0] = scales.shape[0]
