@@ -433,11 +433,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def _test_conv_transpose_unary_base(self, dim=4):
         assert dim == 4 or dim == 5
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    @bf32_on_and_off()
-    def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
