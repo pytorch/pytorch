@@ -1846,9 +1846,7 @@ torch.cuda.synchronize()
             },
         )
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
@@ -1991,9 +1989,7 @@ torch.cuda.synchronize()
                     )
                     h = (h, c)
 
-                with torch.autocast(
-                    "cuda",
-                ):
+                with torch.autocast("cuda"):
                     out, h_out = rnn(x, h)
                 out = out.data if input_layout == "packed" else out
                 self.assertEqual(out.dtype, torch.float16)
@@ -2048,9 +2044,7 @@ torch.cuda.synchronize()
         linear = torch.nn.Linear(10, 10).to("cuda")
         data = torch.randn(1, 10, device="cuda")
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             with torch.no_grad():
                 out = linear(data)
                 first_iter_mem = torch.cuda.memory_allocated()
@@ -3475,22 +3469,10 @@ exit(2)
                     },
                 )
                 for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
-                    (
-                        torch.optim.NAdam,
-                        torch.optim.RAdam,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        0.0,
-                        0.1,
-                    ),
+                    (torch.optim.NAdam, torch.optim.RAdam),
+                    (False, True),
+                    (False, True),
+                    (0.0, 0.1),
                 )
             ]
             + [
@@ -3499,14 +3481,8 @@ exit(2)
                     {"lr": 0.1, "foreach": foreach, "maximize": maximize},
                 )
                 for foreach, maximize in product(
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
+                    (False, True),
+                    (False, True),
                 )
             ]
             + [
@@ -5017,9 +4993,11 @@ class TestMemPool(TestCase):
         from torch.utils.cpp_extension import load_inline
 
         dummy_allocator_source = """
+        #include <torch/extension.h>
         extern "C" {
-          void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          void dummy_free(void* ptr) { }
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -5031,7 +5009,7 @@ class TestMemPool(TestCase):
                 build_directory=tempdir,
             )
             allocator = torch.cuda.memory.CUDAPluggableAllocator(
-                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
+                dummy_allocator,
                 "dummy_alloc",
                 "dummy_free",
             )

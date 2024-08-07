@@ -195,6 +195,8 @@ include_patterns = [
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/cpu/*.h',
+    'aten/src/ATen/cpu/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
     'aten/src/ATen/cudnn/*.h',
@@ -951,7 +953,7 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=@.*(dynamo_timed)',
+    '--pattern=@.*(dynamo_timed|preserve_rng_state|clear_frame)',
     '--linter-name=CONTEXT_DECORATOR',
     '--error-name=avoid context decorator',
     """--error-description=\
@@ -1008,16 +1010,16 @@ init_command = [
     'PyYAML==6.0.1',
 ]
 
-# Black + usort
+# usort + ruff-format
 [[linter]]
-code = 'UFMT'
+code = 'PYFMT'
 include_patterns = [
     '**/*.py',
     '**/*.pyi',
 ]
 command = [
     'python3',
-    'tools/linter/adapters/ufmt_linter.py',
+    'tools/linter/adapters/pyfmt_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -1475,9 +1477,9 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
     'black==23.12.1',
-    'ufmt==2.7.0',
     'usort==1.0.8.post1',
     'isort==5.13.2',
+    'ruff==0.5.5',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1562,7 +1564,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.5.5',
+    'ruff==0.5.5',  # sync with PYFMT
 ]
 is_formatter = true
 

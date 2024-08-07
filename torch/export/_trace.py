@@ -13,10 +13,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import torch
 import torch._dynamo
 import torch.fx
-
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.db.logging import (
+    exportdb_error_message,
+    get_class_if_classified_error,
+)
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
@@ -40,15 +43,12 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
-
 from torch._functorch._aot_autograd.utils import create_tree_flattened_fn
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export._remove_effect_tokens_pass import _is_impure_node
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -66,7 +66,6 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
-
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -84,6 +83,7 @@ from .graph_signature import (
     TensorArgument,
     TokenArgument,
 )
+
 
 log = logging.getLogger(__name__)
 
@@ -771,6 +771,9 @@ def _export_to_aten_ir(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     if pre_dispatch:
+        from torch._export.passes.replace_autocast_with_hop_pass import (
+            replace_autocast_with_hop_pass,
+        )
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
@@ -781,6 +784,10 @@ def _export_to_aten_ir(
         # and the constant_tensor is passed as input of the set grad hop, the placeholder's
         # meta["val"] will be None and fails our verifier for placeholder.
         gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
+
+        gm, export_graph_signature = replace_autocast_with_hop_pass(
             gm, export_graph_signature
         )
 
@@ -1026,20 +1033,6 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
-def _get_class_if_classified_error(e):
-    from torch._dynamo.exc import TorchRuntimeError, Unsupported, UserError
-
-    _ALLOW_LIST = {
-        Unsupported,
-        UserError,
-        TorchRuntimeError,
-    }
-    case_name = getattr(e, "case_name", None)
-    if type(e) in _ALLOW_LIST and case_name is not None:
-        return case_name
-    return None
-
-
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1057,10 +1050,9 @@ def _log_export_wrapper(fn):
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
-            case_name = _get_class_if_classified_error(e)
+            case_name = get_class_if_classified_error(e)
             if case_name is not None:
-                # TODO (shangdiy): detect whether case_name is really registered in exportdb after we set up exportdb registration.
-                log.error("See %s in exportdb for unsupported case.", case_name)
+                log.error(exportdb_error_message(case_name))
                 log_export_usage(
                     event="export.error.classified",
                     type=error_type,
@@ -1538,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                 record_module_stack=True,
                 pre_dispatch=True,
             )(*flat_args)
-            gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
+            gm.graph.eliminate_dead_code()
 
         return gm, None
 
