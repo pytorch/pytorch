@@ -281,7 +281,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
         # tp_rank_0: [0, 2, 4, 6], tp_rank_1: [1, 3, 5, 7]
         tp_rank = mesh_3d.get_local_rank("tp")
-        print(f"{self.rank=}, {tp_rank=}")
         expected_tp_rank = self.rank % 2
         self.assertEqual(tp_rank, expected_tp_rank)
 
