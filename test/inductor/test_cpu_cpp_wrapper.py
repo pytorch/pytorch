@@ -9,7 +9,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import IS_MACOS, slowTest, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_WINDOWS,
+    slowTest,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -281,37 +286,37 @@ if RUN_CPU:
             "test_qconv2d",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qconv2d_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qconv2d_add",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qconv2d_add_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qconv2d_dequant_promotion",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qconv2d_maxpool2d_linear_dynamic",
             "cpu",
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
                 [
                     "op_qconv2d_pointwise.call",
@@ -324,49 +329,49 @@ if RUN_CPU:
             "test_qlinear",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qlinear_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qlinear_gelu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qlinear_add",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qlinear_add_relu",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_qlinear_dequant_promotion",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_dynamic_qlinear",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest(
             "test_dynamic_qlinear_qat",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
