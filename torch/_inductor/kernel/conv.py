@@ -461,6 +461,11 @@ def convolution(
         groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
 
+    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
+    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+    dilation = tuple(V.graph.sizevars.evaluate_static_shapes(dilation))
+    output_padding = tuple(V.graph.sizevars.evaluate_static_shapes(output_padding))
+
     kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
@@ -485,9 +490,6 @@ def convolution(
     padding = pad_listlike(padding, ndim)
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
-
-    stride = V.graph.sizevars.evaluate_static_shapes(stride)
-    padding = V.graph.sizevars.evaluate_static_shapes(padding)
 
     def channels_last_conv():
         if V.graph.layout_opt and ndim == 2:
