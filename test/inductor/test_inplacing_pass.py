@@ -8,7 +8,7 @@ from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, requires_gpu
 
 
 aten = torch.ops.aten
@@ -46,10 +46,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         )
         inp2 = (inp[0].clone(), inp[1].clone())
         self.assertEqual(f(*inp), nf(*inp2))
-        # breakpoint()
         self.assertEqual(inp, inp2)
 
-    @requires_cuda
+    @requires_gpu()
     def test_dont_modify_live(self):
         def f(x, y):
             x = x.cos()
@@ -58,7 +57,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_cuda
+    @requires_gpu()
     def test_dont_modify_view_of_live(self):
         def f(x, y):
             x = x.cos()
@@ -69,14 +68,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_cuda
+    @requires_gpu()
     def test_dont_modify_input(self):
         def f(x, y):
             return x.index_put((y,), const)
 
         self._test(f)
 
-    @requires_cuda
+    @requires_gpu()
     def test_should_modify_inner(self):
         def f(x, y):
             x = x.cos()
@@ -85,7 +84,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_cuda
+    @requires_gpu()
     def test_should_modify_input(self):
         def f(x, y):
             x = x.index_put_((y,), const)
@@ -159,4 +158,5 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 common_utils.instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CPU or HAS_GPU:
+        run_tests(needs="filelock")
