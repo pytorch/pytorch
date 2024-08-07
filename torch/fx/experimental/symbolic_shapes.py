@@ -1241,6 +1241,15 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
+def _has_unsupported_sympy_function(expr) -> bool:
+    return expr.has(
+        torch.utils._sympy.functions.ToFloat,
+        torch.utils._sympy.functions.TruncToInt,
+        torch.utils._sympy.functions.CeilToInt,
+        # add more sympy functions that involve float<->int conversion here
+        # since our solver does not know what to do with them
+    )
+
 @dataclass(frozen=True)
 class SymbolicContext:
     """
@@ -1728,7 +1737,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne):
+        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -2215,7 +2224,7 @@ class DimConstraints:
                     'For more information, run with TORCH_LOGS="+dynamic".\n'
                 )
                 for s, val in forced_specializations.items():
-                    buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
+                    buf += f"  - solving the guards generated for {s} resulted in a specialized value of {val}.\n"
 
             self._process_derived_dim_roots(results, name_to_dim)
 
@@ -3547,7 +3556,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            if type(val) is int:
+            if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             else:
                 sympy_expr = make_symbol(SymT.FLOAT, len(self.var_to_val), positive=positive, real=True)
@@ -3814,7 +3823,7 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(set)
-        constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
+        constraint_violations : List[Tuple[bool, str, Callable[[], str]]] = []
 
         def record_constraint_violation(warn_only, debug_name, msg, hint=None):
             constraint_violations.append(
@@ -5567,7 +5576,7 @@ def _blame_user_code(e, frame):
     )
     msg = e.args[0]
     msg += (
-        '\n\nUser code:\n' +
+        '\n\nThe following call raised this error:\n' +
         ''.join(traceback.StackSummary.from_list([frame_summary]).format())
     )
     e.args = (msg,)
@@ -5585,7 +5594,7 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
         self.src_map = src_map
 
     def _print_Symbol(self, sym):
-        return self.src_map[sym.name]
+        return self.src_map[sym.name][0]
 
     def _print_Relational(self, expr):
         lhs = self.parenthesize(expr.lhs, sympy.printing.precedence.precedence(expr))
@@ -5603,7 +5612,7 @@ def _suggest_torch_checks(e, src_map):
         return
     printer = _PythonPrinter(src_map)
     msg = e.args[0]
-    msg += "\nSuggested fixes (please choose one of the following):"
+    msg += "\nTo fix the error, insert one of the following checks before this call:"
     # suggested fixes to resolve `cond`` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
     suggested_fixes = [
@@ -5612,6 +5621,11 @@ def _suggest_torch_checks(e, src_map):
     ]
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i+1}. {fix}"
+    src_mapped = ', '.join(
+        f"`{s}` with {' or '.join(src_map[s])}"
+        for s in sorted(s.name for s in cond.free_symbols)
+    )
+    msg += f"\n\n(These suggested fixes were derived by replacing {src_mapped} in {cond} and its negation.)"
     e.args = (msg,)
 
 
@@ -5630,17 +5644,17 @@ def _suggest_fixes_for_data_dependent_error_non_strict(e):
             _blame_user_code(e, frame)
 
             # map symbol names reachable via frame locals to their source-level names
-            src_map = {}
+            src_map = defaultdict(list)
             for var, val in frame.f_locals.items():
                 # figure out how to access any symbol inside `val` through `var`
                 for path, leaf in pytree.tree_leaves_with_path(val):
                     name = var + pytree.keystr(path)
                     if isinstance(leaf, torch.SymInt):
-                        src_map[str(leaf.node.expr)] = name
+                        src_map[str(leaf.node.expr)].append(name)
                     elif isinstance(leaf, torch.Tensor):
                         for i, dim in enumerate(leaf.shape):
                             if isinstance(dim, torch.SymInt):
-                                src_map[str(dim.node.expr)] = f"{name}.shape[{i}]"
+                                src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
 
             # add suggested torch.check()s based on `src_map` to the error message
             # replacing unbacked symints in the unresolved condition in the error

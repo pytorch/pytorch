@@ -4,14 +4,15 @@ import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import istype
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class MutableLocalSource(Enum):
@@ -30,7 +31,7 @@ class MutableLocalBase:
     Base class for Variable.mutable_local
     """
 
-    def __init__(self, typ: MutableLocalSource):
+    def __init__(self, typ: MutableLocalSource) -> None:
         # In HigherOrderOperator tracing, we need to distinguish
         # between MutableLocals inside the HigherOrderOperator and
         # ones outside it. For example, it is not safe to mutate
@@ -69,7 +70,7 @@ class MutableLocal(MutableLocalBase):
     state.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):
@@ -109,7 +110,7 @@ class VariableTrackerMeta(type):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
 
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs) -> None:
         super().__init__(name, bases, attrs)
         VariableTrackerMeta.all_subclasses.append(cls)
 
@@ -172,7 +173,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             for subvalue in value.values():
                 cls.visit(fn, subvalue, cache)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 
     def debug_repr(self):
@@ -285,25 +286,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
-        # like unpack_var_sequence, but should only be used when it is
-        # safe to eagerly (vs. lazily) unpack this variable.
-        # e.g. map(f, x) is normally evaluated lazily but sometimes
-        # we want to force eager unpacking, e.g. when converting to a list.
-        # NOTE: this method is allowed to mutate the VariableTracker, so
-        # it should only be called once.
-        return self.unpack_var_sequence(tx)
-
     def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
-
-    # NB: don't call force_unpack_var_sequence, especially if it mutates!
-    def has_force_unpack_var_sequence(self, tx) -> bool:
-        return self.has_unpack_var_sequence(tx)
 
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")
@@ -364,7 +352,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-    ):
+    ) -> None:
         super().__init__()
         self.source = source
         self.mutable_local = mutable_local

@@ -8,6 +8,8 @@ from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgor
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
+    get_mixedmm_precondition,
+    mixed_mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
@@ -172,7 +174,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if use_ck_template(layout, m, n, k):
+    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -346,6 +348,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
+    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+        )
+
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
             choices,
@@ -497,6 +508,8 @@ def mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes):
         input_nodes=input_nodes,
         context=context,
         name=name,
+        augment_context=mixed_mm_operations(),
+        precondition=get_mixedmm_precondition,
     )
     return autoheuristic.get_choice_caller()
 
@@ -573,7 +586,11 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     input_nodes = [mat1, mat2]
     if torch._inductor.config.run_autoheuristic(name):
         choice = mixed_mm_autoheuristic(mat1, mat2, m, n, k, choices, name, input_nodes)
-        if choice is not None:
+        if (
+            not skip_triton
+            and inductor_config.mixed_mm_choice == "heuristic"
+            and choice is not None
+        ):
             choices.insert(0, choice)
     return autotune_select_algorithm(name, choices, input_nodes, layout)
 
