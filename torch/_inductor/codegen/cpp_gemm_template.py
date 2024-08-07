@@ -14,7 +14,7 @@ from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import ops, V
+from ..virtualized import V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
@@ -454,7 +454,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
                 assert len(input_indices) >= 3
-                # assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
+                # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
                 inp_idx = input_indices[0]
                 x_idx = input_indices[1]
                 w_idx = input_indices[2]
