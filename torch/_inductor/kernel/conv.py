@@ -486,6 +486,9 @@ def convolution(
     dilation = pad_listlike(dilation, ndim)
     output_padding = pad_listlike(output_padding, ndim)
 
+    stride = V.graph.sizevars.evaluate_static_shapes(stride)
+    padding = V.graph.sizevars.evaluate_static_shapes(padding)
+
     def channels_last_conv():
         if V.graph.layout_opt and ndim == 2:
             return True
@@ -586,8 +589,6 @@ def convolution(
         ):
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
-        stride = V.graph.sizevars.evaluate_static_shapes(stride)
-        padding = V.graph.sizevars.evaluate_static_shapes(padding)
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
