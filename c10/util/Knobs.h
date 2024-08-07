@@ -18,7 +18,7 @@ namespace c10 {
 // default_value - Then value to return when nothing is set
 // on platforms where it is acceptable to have a default.
 // Some platforms (e.g. justknobs) do not have default
-// values, and will need to be configured when a new rollout is
+// values, and will need to be configured when a new rollout is 
 // added so it can be tracked.
 
 // For feature rollouts, the default should be true
@@ -36,19 +36,12 @@ namespace c10 {
 // There are no default values by design.
 
 // Default: true
-bool C10_EXPORT justknobs_check(
-    const char* the_namespace,
-    const char* feature_name,
-    bool default_value);
-bool C10_EXPORT justknobs_check_default(
-    const char* the_namespace,
-    const char* feature_name,
-    bool default_value);
+bool C10_EXPORT justknobs_check(const char* the_namespace, const char* feature_name, bool default_value);
+bool C10_EXPORT justknobs_check_default(const char* the_namespace, const char* feature_name, bool default_value);
 
 // Deployments may want to change how they control features.
 // They should call SetFeatureResolver, to change the implementation
 // of FeatureEnabled from the default.
-void C10_EXPORT set_justknobs_check_resolver(
-    std::function<bool(const char*, const char*, bool)> resolver);
+void C10_EXPORT set_justknobs_check_resolver(std::function<bool(const char*, const char*, bool)> resolver);
 
 } // namespace c10

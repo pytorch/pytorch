@@ -15,22 +15,9 @@ import re
 import sys
 import types
 import weakref
-from typing import Any, List, NamedTuple, Optional, TYPE_CHECKING, Union
-
-from torch._utils_internal import justknobs_check
-
-from torch.utils._sympy.value_ranges import ValueRanges
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
+from typing import Any, List, MutableMapping, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
-
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -38,6 +25,7 @@ from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any
+from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -49,10 +37,10 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, mutation_guard, replay_record, trace_rules
-
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
@@ -109,7 +97,6 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-
 from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
@@ -179,10 +166,13 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
-
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
@@ -195,6 +185,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
@@ -202,7 +193,20 @@ from .user_defined import (
 )
 
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
 log = logging.getLogger(__name__)
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 DimList = List
@@ -274,7 +278,7 @@ class GraphArg:
 
 
 class BackwardStateGraphArg(GraphArg):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             source=None,
             _example=BackwardState(),
@@ -307,7 +311,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-    ):
+    ) -> None:
         assert (
             source is not None
         ), "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -830,7 +834,7 @@ class VariableBuilder:
             return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
         elif PlacementClassVariable.is_placement_type(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
@@ -838,7 +842,7 @@ class VariableBuilder:
             return PlacementClassVariable(value, source=self.source)
         elif PlacementVariable.is_placement(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return PlacementVariable(
                 value,
                 source=self.source,
@@ -931,10 +935,12 @@ class VariableBuilder:
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
+            result = PythonModuleVariable(
                 value,
                 source=self.source,
             )
+            self.tx.output.side_effects.track_object_existing(value, result)
+            return result
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
         ):
@@ -1078,6 +1084,9 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif issubclass(type(value), MutableMapping):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return MutableMappingVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1197,6 +1206,9 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
 
+        static_inputs_log.debug(
+            "Marking static input %s, id: %s)", self.source.name(), id(value)
+        )
         mark_static_address(value, guard=guard)
 
         # Check if we've seen this tensor before and update graph metadata if needed
@@ -1274,7 +1286,11 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            result = UnspecializedNNModuleVariable(value, source=self.source)
+            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
+                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            else:
+                result = UnspecializedNNModuleVariable(value, source=self.source)
+
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1302,7 +1318,8 @@ class VariableBuilder:
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
-                or self.source.guard_source().is_nn_module()
+                or self.source.guard_source().is_specialized_nn_module()
+                or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1343,7 +1360,12 @@ class VariableBuilder:
         if (
             config.inline_inbuilt_nn_modules
             and not is_static_input
-            and isinstance(value, torch.nn.Parameter)
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
+                # compatible with previous behavior.
+                or (source and source.guard_source().is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=False)
 
@@ -1352,7 +1374,7 @@ class VariableBuilder:
         )
 
         if (
-            source.guard_source().is_nn_module() or make_graph_attribute
+            source.guard_source().is_specialized_nn_module() or make_graph_attribute
         ) and not source.guard_source().is_fsdp_module():
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -1437,17 +1459,14 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        # Reject sparse, but not coo.
-        # TODO: remove this altogether when non-coo sparsity propagation is ready
-        if is_sparse_any(value) and not value.is_sparse:
-            unimplemented(
-                f"torch.compile does not support sparse Tensor with {value.layout} layout"
-            )
-
         # TODO(pearu,sparse-team) - Add the corresponding SPARSE_TENSOR_MATCH guards
-        if is_sparse_any(value) and value.is_sparse and not self.tx.export:
-            # A hot fix for sparse tensors + torch.compile. There is some
-            # support for export + coo tensor. We need to create
+        if (
+            isinstance(value, torch.Tensor)
+            and is_sparse_any(value)
+            and (not self.tx.export or not config.capture_sparse_compute)
+        ):
+            # A hot fix for sparse tensors + torch.compile. Support for
+            # export + sparsity is being added but we need to create
             # SPARSE_TENSOR_GUARDS for guards to work propertly.
             unimplemented("torch.compile does not support sparse Tensors")
 
@@ -2358,7 +2377,8 @@ def _automatic_dynamic(
         tx.output.frame_state[name] = frame_state_entry
 
     if (st := tx.distributed_state) is None:
-        update_frame_state(e.size(), e.stride())
+        stride = e.stride() if not is_sparse_any(e) else ()
+        update_frame_state(e.size(), stride)
         frame_state_entry = tx.output.frame_state[name]
     elif st.all_states is None:
         # Preflight, always pretend as if it's static
@@ -2539,7 +2559,9 @@ def wrap_to_fake_tensor_and_record(
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
-            e, is_tensor, guard_source=source.guard_source()
+            e,
+            is_tensor,
+            tensor_source=source,
         )
 
         if not parent_context:
@@ -2614,7 +2636,7 @@ def wrap_to_fake_tensor_and_record(
 
         if (
             is_tensor
-            and not (static_shapes and source.is_nn_module())
+            and not (static_shapes and source.is_specialized_nn_module())
             and not is_constant_source(source)
         ):
             tx.output.tracked_fakes.append(
@@ -2640,7 +2662,7 @@ class SourcelessBuilder:
     if/else type->VariableTracker trees that were cropping up all over dynamo.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod

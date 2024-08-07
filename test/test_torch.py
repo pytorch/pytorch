@@ -10672,10 +10672,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t7.d = "dog"
         self._checked_swap(t6, t7)
 
+    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
+    def test_bf16_supported_on_cpu(self):
+        self.assertFalse(torch.cuda.is_bf16_supported())
+
     def test_c10_feature_enabled(self):
         namespace = "movefast/knobs"
         feature = "use_justknobs"
-
         @contextlib.contextmanager
         def mocksetting(v):
             if IS_FBCODE:
@@ -10683,9 +10686,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 with PyPatchJustKnobs().patch(f"{namespace}:{feature}", v):
                     yield
             else:
-                assert feature not in os.environ
-                os.environ[feature] = "1" if v else "0"
                 try:
+                    assert k not in os.environ
+                    os.environ[feature] = "1" if feature else "0"
                     yield
                 finally:
                     del os.environ[feature]

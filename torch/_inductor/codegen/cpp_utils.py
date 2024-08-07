@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import sys
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from unittest.mock import patch
@@ -80,7 +81,9 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+_IS_WINDOWS = sys.platform == "win32"
+
+INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -166,13 +169,13 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
         super().__init__(name, bounds)
         self.is_vec = False
         self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
             f"dependent_itervars: {self.dependent_itervars})"
@@ -219,7 +222,7 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
@@ -492,7 +495,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         inner,
         global_to_local: Dict[str, ir.Buffer],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
-    ):
+    ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
         self.rewrite_index = rewrite_index
@@ -534,7 +537,7 @@ class LocalBufferContext:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel_args: KernelArgs):
+    def __init__(self, kernel_args: KernelArgs) -> None:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer

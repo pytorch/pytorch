@@ -1154,8 +1154,7 @@ PyObject* THPModule_c10_justknobs_check(PyObject* _unused, PyObject* args) {
   PyObject* the_namespace = nullptr;
   PyObject* feature = nullptr;
   int default_value = 0;
-  if (!PyArg_ParseTuple(
-          args, "OOp", &the_namespace, &feature, &default_value)) {
+  if (!PyArg_ParseTuple(args, "OOp", &the_namespace, &feature, &default_value)) {
     return nullptr;
   }
   if (!PyUnicode_Check(the_namespace) || !PyUnicode_Check(feature)) {
@@ -1576,15 +1575,13 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {"_c10_justknobs_check",
-     THPModule_c10_justknobs_check,
-     METH_VARARGS,
-     nullptr},
+    {"_c10_justknobs_check", THPModule_c10_justknobs_check, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -1742,6 +1739,7 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+  THCPMemPool_init(module);
 #endif
 
 #ifdef USE_XPU
