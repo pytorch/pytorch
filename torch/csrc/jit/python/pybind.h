@@ -90,7 +90,7 @@ namespace pybind11::detail {
    protected:                                                                             \
     friend class type_caster_generic;                                                     \
                                                                                           \
-    bool load_value(value_and_holder&& v_h) {                                             \
+    bool load_value(const value_and_holder& v_h) {                                        \
       if (v_h.holder_constructed()) {                                                     \
         value = v_h.template holder<holder_type>().get();                                 \
         return true;                                                                      \

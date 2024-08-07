@@ -11,6 +11,7 @@ import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
+
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
 
