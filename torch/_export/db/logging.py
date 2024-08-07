@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 
-from .examples import all_examples
-from torch._utils_internal import log_export_usage
-
-ALL_EXAMPLES = all_examples()
 
 def exportdb_error_message(case_name: str):
+    from .examples import all_examples
+    from torch._utils_internal import log_export_usage
+
+    ALL_EXAMPLES = all_examples()
     # Detect whether case_name is really registered in exportdb.
     if case_name in ALL_EXAMPLES:
         url_case_name = case_name.replace("_", "-")

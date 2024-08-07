@@ -170,7 +170,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+
     try:
         output_msg = (
             subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
@@ -205,7 +205,6 @@ def is_msvc_cl() -> bool:
 
 
 def get_compiler_version_info(compiler: str) -> str:
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
     try:
@@ -1017,7 +1016,9 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
 
 
 def get_cpp_torch_cuda_options(
-    cuda: bool, aot_mode: bool = False
+    cuda: bool,
+    aot_mode: bool = False,
+    compile_only: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
     definations: List[str] = []
     include_dirs: List[str] = []
@@ -1073,7 +1074,7 @@ def get_cpp_torch_cuda_options(
         else:
             include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
-    if aot_mode and cuda and config.is_fbcode():
+    if aot_mode and cuda and config.is_fbcode() and not compile_only:
         if torch.version.hip is None:
             # TODO: make static link better on Linux.
             passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
@@ -1134,7 +1135,9 @@ class CppTorchCudaOptions(CppTorchOptions):
             cuda_libraries_dirs,
             cuda_libraries,
             cuda_passthough_args,
-        ) = get_cpp_torch_cuda_options(cuda=cuda, aot_mode=aot_mode)
+        ) = get_cpp_torch_cuda_options(
+            cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
+        )
 
         if compile_only:
             cuda_libraries_dirs = []
