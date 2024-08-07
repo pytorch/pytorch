@@ -752,7 +752,7 @@ cpu_flash_attention(
                   /* ld_dst */ packb_size);
               // padding [headSize, x] -> [eheadSize, x]
               if (!headSize_even) {
-                pad_remain_row_col_zero(
+                pad_remain_row_col_zero<scalar_t>(
                     transpose_buffer,
                     headSize,
                     kvBlockSize - b,
