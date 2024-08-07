@@ -3,7 +3,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -227,6 +227,36 @@ def check_tensor_meta(
 def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
+
+
+def get_padded_tensor(
+    tensor: torch.Tensor, padding_size: Sequence[int]
+) -> torch.Tensor:
+    """
+    Given a tensor and a sequence of padding size, return a padded tensor with padding applied on all dimensions if needed.
+    """
+    if all(padding_size_on_dim == 0 for padding_size_on_dim in padding_size):
+        return tensor
+    pad = []
+    # padding_size has the same length of tensor.shape with ith element represent the padding size on ith dimension.
+    # pad actually pad the input from the last dimension and moving forward. Hence, we need to reverse the padding_size list.
+    for padding_size_on_dim in reversed(padding_size):
+        pad.extend([0, padding_size_on_dim])
+    return torch.nn.functional.pad(tensor, pad)
+
+
+def get_unpadded_tensor(
+    tensor: torch.Tensor, unpadded_shape: Sequence[int]
+) -> torch.Tensor:
+    """
+    Returns a tensor with the shape equal to the unpadded shape.
+    For example, given unpadded_shape = [1, 2, 3], returns tensor[:1, :2, :3].
+    """
+    if list(tensor.shape) == unpadded_shape:
+        return tensor
+
+    slices = [slice(0, unpadded_size_on_dim) for unpadded_size_on_dim in unpadded_shape]
+    return tensor[slices]
 
 
 @dataclass
