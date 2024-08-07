@@ -82,8 +82,8 @@ fastest available implementation across both rocblas and hipblaslt.
 ### Motivation
 Basically it is used for workload with high-memory utilization where one might run out of memory with regular tuning.
 
-### Workflow 
-There are basically two steps: 
+### Workflow
+There are basically two steps:
 1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned?.csv` ("?" is placeholder for the GPU ID), like:
 ```
 PYTORCH_TUNABLEOP_ENABLED=1
