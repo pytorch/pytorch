@@ -1405,11 +1405,6 @@ def mean_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if len(new_kwargs["dim"]) > 1:
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor"
-        )
-
     inp = new_kwargs.pop("input")
 
     (
@@ -1424,11 +1419,6 @@ def mean_dim(func, *args, **kwargs):
         inp._ragged_idx,
     )
 
-    if reduce_on_batch:
-        raise RuntimeError(
-            "mean(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
-        )
-
     if reduce_on_ragged and inp._lengths is not None:
         raise RuntimeError(
             "mean(): not supported where lengths is not None "
@@ -1438,21 +1428,45 @@ def mean_dim(func, *args, **kwargs):
     if not new_kwargs["keepdim"]:
         raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
 
-    if reduce_on_ragged:  # raggedness reduced away
-        torch_sum = torch.sum(inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"])
+    if reduce_on_ragged:  # raggedness reduced away --> return dense tensor
+        if (
+            reduce_on_batch
+        ):  # reduction cases: (batch, ragged), (batch, ragged, non-batch), etc.
+            return func(
+                inp._values, **new_kwargs
+            )  # no need to read offsets --> apply mean directly on values
+        else:
+            if (
+                reduce_on_non_batch
+            ):  # invalid reduction cases: (ragged, non-batch), etc.
+                raise RuntimeError(
+                    "mean(): not supported along a ragged and non-batch dimension for NestedTensor"
+                )
 
-        # for every non-batch dimension,
-        #   unsqueeze lengths into the same shape as the PyTorch sum,
-        #   as the extra dimensions must all be divided by the same length
-        lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 2):
-            lengths = lengths.unsqueeze(-1)
+            # reduction cases: (ragged)
+            torch_sum = torch.sum(
+                inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"]
+            )
 
-        return torch_sum / lengths.broadcast_to(torch_sum.shape)
+            # for every non-batch dimension,
+            #   unsqueeze lengths into the same shape as the PyTorch sum,
+            #   as the extra dimensions must all be divided by the same length
+            lengths = inp._offsets.diff()
+            for _ in range(inp.dim() - 2):
+                lengths = lengths.unsqueeze(-1)
 
-    return NestedTensor(
-        func(inp._values, **new_kwargs), **extract_kwargs(inp)
-    )  # raggedness preserved
+            return torch_sum / lengths.broadcast_to(torch_sum.shape)
+    else:  # raggedness preserved --> return nested tensor
+        if (
+            reduce_on_batch
+        ):  # invalid reduction cases: (batch), (batch, non-batch), etc.
+            raise RuntimeError(
+                "mean(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
+            )
+        # reduction cases: (non-batch), (non-batch, non-batch), etc.
+        return NestedTensor(
+            func(inp._values, **new_kwargs), **extract_kwargs(inp)
+        )  # apply sum directly on values
 
 
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")

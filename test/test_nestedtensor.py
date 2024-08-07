@@ -5008,14 +5008,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         components_require_grad,
     ):
         """
-        Mean on NestedTensor fails when trying to reduce across multiple dimensions
+        Mean on NestedTensor passes when reducing across multiple dimensions
         """
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4))
+        reduce_dims = (
+            ((0, 1), (0,)),
+            ((2, 3), (1, 2)),
+            ((2, 3, 4), (1, 2, 3)),
+        )
 
-        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
+        for tensor_list, reduce_dim_tuple in itertools.product(
+            tensor_lists, reduce_dims
+        ):
             nt = torch.nested.nested_tensor(
                 tensor_list,
                 device=device,
@@ -5024,22 +5030,29 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 requires_grad=requires_grad,
             )
 
+            reduce_dim, reduce_dim_expected = reduce_dim_tuple
+
             if nt.dim() > reduce_dim[-1]:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "not supported across multiple dimensions for NestedTensor",
-                ):
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
+                out_actual = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
+                out_expected = torch.mean(nt.values(), dim=reduce_dim_expected)
+                if out_actual.is_nested:
+                    self.assertTrue(
+                        torch.allclose(
+                            out_actual.values().view(-1), out_expected.view(-1)
+                        )
+                    )
+                else:
+                    self.assertTrue(
+                        torch.allclose(out_actual.view(-1), out_expected.view(-1))
+                    )
 
     @dtypes(torch.float32)
-    @parametrize("keepdim", [False, True])
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
     def test_mean_dim_keepdim_False(
         self,
         device,
         dtype,
-        keepdim,
         requires_grad,
         components_require_grad,
     ):
@@ -5061,14 +5074,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
             if nt.dim() > reduce_dim[-1]:
-                if not keepdim:
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "not supported when keepdim=False for NestedTensor",
-                    ):
-                        out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-                else:
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "not supported when keepdim=False for NestedTensor",
+                ):
+                    out = torch.mean(nt, dim=reduce_dim, keepdim=False)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
