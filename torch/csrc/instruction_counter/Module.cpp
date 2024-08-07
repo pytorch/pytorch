@@ -11,14 +11,14 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <stdexcept>
 #endif
 
 namespace torch::instruction_counter {
 
 long start() {
 #if !defined(__linux__)
-  printf("This systems seems not to be Linux");
-  return -1;
+  throw std::runtime_error("This systems seems not to be Linux");
 #else
 
   // Construct base perf_event_attr struct
@@ -49,8 +49,7 @@ long start() {
 
 uint64_t end(int fd) {
 #if !defined(__linux__)
-  printf("This systems seems not to be Linux");
-  return -1;
+  throw std::runtime_error("This systems seems not to be Linux");
 #else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
