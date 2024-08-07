@@ -1616,6 +1616,39 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     return inp._metadata_cache.get("max_seqlen", None)
 
 
+@register_jagged_func(torch.ops.aten.masked_select.default, "self: jt, mask: any")
+def masked_select_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    mask = new_kwargs.pop("mask")
+
+    mask_values = None
+    if inp.shape == mask.shape:
+        mask_values = mask.values()
+    # [B, j0] x [B, 1]
+    elif not mask.is_nested and inp.shape[0] == mask.shape[0]:
+        mask_values = mask.repeat_interleave(
+            inp.lengths if inp.lengths() is not None else inp.offsets().diff()
+        )
+    else:
+        raise RuntimeError(
+            f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
+        )
+
+    res_values = inp._values.masked_select(mask_values)
+    mask_cumsum = F.pad(mask_values.cumsum(dim=0), (1, 0))
+    res_offsets = mask_cumsum[inp._offsets]
+
+    return NestedTensor(
+        values=res_values,
+        offsets=res_offsets,
+        _metadata_cache=inp._metadata_cache,
+        _ragged_idx=inp._ragged_idx,
+    )
+
+
 # Make the dummy available on the C++ side.
 @register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
 def _nested_get_jagged_dummy(func, *args, **kwargs):
