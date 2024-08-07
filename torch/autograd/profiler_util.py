@@ -2,15 +2,14 @@
 import bisect
 import itertools
 import math
-
 from collections import defaultdict, namedtuple
 from operator import attrgetter
-
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import deprecated
 
 import torch
 from torch.autograd import DeviceType
+
 
 __all__ = [
     "EventList",
@@ -606,7 +605,7 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.device_time_total - sum(
-                [child.device_time_total for child in self.cpu_children]
+                child.device_time_total for child in self.cpu_children
             )
         else:
             assert self.device_type in [
@@ -645,7 +644,7 @@ class FunctionEvent(FormattedTimesMixin):
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.key: Optional[str] = None
         self.count: int = 0
         self.node_id: int = 0

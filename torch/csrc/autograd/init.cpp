@@ -442,6 +442,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         meta->set_creation_meta(new_creation_meta);
       });
 
+  m.def("_get_current_graph_task_keep_graph", []() {
+    return torch::autograd::get_current_graph_task_keep_graph();
+  });
+
+  m.def(
+      "_get_data_attr", [](const at::Tensor& t) { return t.variable_data(); });
+
   _C_m.def(
       "_register_py_class_for_device",
       [](const std::string& device, py::object python_type_class) {

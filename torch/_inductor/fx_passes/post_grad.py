@@ -47,7 +47,7 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -109,8 +109,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
-        apply_pass(lambda: group_batch_fusion_passes(gm.graph, pre_grad=False))
-        apply_pass(lambda: remove_noop_ops(gm.graph))
+        apply_pass(
+            lambda: group_batch_fusion_passes(gm.graph, pre_grad=False),
+            "group_batch_fusion_passes",
+        )
+        apply_pass(lambda: remove_noop_ops(gm.graph), "remove_noop_ops")
         for i, patterns in enumerate(pass_patterns):
             apply_pass(lambda: patterns.apply(gm.graph), f"pass_pattern_{i}")  # type: ignore[arg-type]
         for pass_name in config.post_grad_fusion_options:
@@ -121,7 +124,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
-            apply_pass(lambda: pattern_matcher_pass.apply(gm.graph))  # type: ignore[arg-type]
+            apply_pass(lambda: pattern_matcher_pass.apply(gm.graph), pass_name)  # type: ignore[arg-type]
             if not is_same_dict(counters["inductor"], inductor_before_change):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
@@ -130,7 +133,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
-        apply_pass(lambda: micro_pipeline_tp_patterns.apply(gm))
+        micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
         apply_pass(
@@ -138,27 +141,35 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 gm.graph,
                 config._fuse_ddp_communication_passes,
                 config._fuse_ddp_bucket_size,
-            )
+            ),
+            "fuse_ddp_communication",
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
         with GraphTransformObserver(
             gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
         ):
-            apply_pass(lambda: post_grad_custom_post_pass(gm.graph))
+            apply_pass(
+                lambda: post_grad_custom_post_pass(gm.graph),
+                "post_grad_custom_post_pass",
+            )
 
     apply_pass(lambda: stable_topological_sort(gm.graph), "stable_sort")
 
-    apply_pass(lambda: move_constructors_to_cuda(gm.graph))
+    apply_pass(lambda: move_constructors_to_cuda(gm.graph), "move_constructors_to_cuda")
 
     fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     apply_pass(lambda: reinplace_inplaceable_ops(gm.graph), "reinplace_inplaceable_ops")
-    apply_pass(lambda: decompose_auto_functionalized(gm.graph))
+    apply_pass(
+        lambda: decompose_auto_functionalized(gm.graph), "decompose_auto_functionalized"
+    )
 
-    apply_pass(lambda: comms.reinplace_fsdp_all_gather(gm.graph))
+    apply_pass(
+        lambda: comms.reinplace_fsdp_all_gather(gm.graph), "reinplace_fsdp_all_gather"
+    )
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
@@ -674,7 +685,7 @@ noop_registry: Dict[Any, Any] = {}
 def register_noop_decomp(targets, nop_arg=0):
     def register_fun(cond):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
-            (cond, nop_arg)
+            (cond, nop_arg)  # type: ignore[arg-type]
         )
         return cond
 

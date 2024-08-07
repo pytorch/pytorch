@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/bitwise_and_native.h>
@@ -79,6 +80,50 @@ kernel void bitwise_xor_scalar(constant uint& length [[buffer(0)]],
     return;
   }}
   out[offset] = a[offset] ^ b;
+}}
+
+kernel void bitwise_lshift_tensor(constant uint& length [[buffer(0)]],
+                         device {0}  *out [[buffer(1)]],
+                         device {1}  *a [[buffer(2)]],
+                         device {2}  *b [[buffer(3)]],
+                         uint offset [[thread_position_in_grid]]) {{
+  if (offset >= length) {{
+    return;
+  }}
+  out[offset] = a[offset] << b [offset];
+}}
+
+kernel void bitwise_lshift_scalar(constant uint& length [[buffer(0)]],
+                         device {0}  *out [[buffer(1)]],
+                         device {1}  *a [[buffer(2)]],
+                         constant {2}  &b [[buffer(3)]],
+                         uint offset [[thread_position_in_grid]]) {{
+  if (offset >= length) {{
+    return;
+  }}
+  out[offset] = a[offset] << b;
+}}
+
+kernel void bitwise_rshift_tensor(constant uint& length [[buffer(0)]],
+                         device {0}  *out [[buffer(1)]],
+                         device {1}  *a [[buffer(2)]],
+                         device {2}  *b [[buffer(3)]],
+                         uint offset [[thread_position_in_grid]]) {{
+  if (offset >= length) {{
+    return;
+  }}
+  out[offset] = a[offset] >> b [offset];
+}}
+
+kernel void bitwise_rshift_scalar(constant uint& length [[buffer(0)]],
+                         device {0}  *out [[buffer(1)]],
+                         device {1}  *a [[buffer(2)]],
+                         constant {2}  &b [[buffer(3)]],
+                         uint offset [[thread_position_in_grid]]) {{
+  if (offset >= length) {{
+    return;
+  }}
+  out[offset] = a[offset] >> b;
 }}
 
 kernel void bitwise_not(constant uint& length [[buffer(0)]],
@@ -210,6 +255,10 @@ static void _bitwise_op_out_mps(const Tensor& self,
       output.fill_(c10::Scalar(self.item<int64_t>() | other.item<int64_t>()));
     } else if (op_name == "xor") {
       output.fill_(c10::Scalar(self.item<int64_t>() ^ other.item<int64_t>()));
+    } else if (op_name == "lshift") {
+      output.fill_(c10::Scalar(self.item<int64_t>() << other.item<int64_t>()));
+    } else if (op_name == "rshift") {
+      output.fill_(c10::Scalar(self.item<int64_t>() >> other.item<int64_t>()));
     } else {
       TORCH_CHECK(false, "Unknown operation to be performed over scalars ", op_name);
     }
@@ -280,6 +329,16 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
 }
 
 } // namespace mps
+namespace {
+void lshift_kernel_mps(TensorIteratorBase& iter) {
+  mps::_bitwise_op_out_mps(iter.input(0), iter.input(1), iter.output(0), "lshift");
+}
+
+void rshift_kernel_mps(TensorIteratorBase& iter) {
+  mps::_bitwise_op_out_mps(iter.input(0), iter.input(1), iter.output(0), "rshift");
+}
+
+} // namespace
 
 TORCH_IMPL_FUNC(bitwise_and_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::_bitwise_op_out_mps(self, other, output, "and");
@@ -296,4 +355,8 @@ TORCH_IMPL_FUNC(bitwise_xor_out_mps)(const Tensor& self, const Tensor& other, co
 TORCH_IMPL_FUNC(bitwise_not_out_mps)(const Tensor& self, const Tensor& output) {
   mps::_bitwise_not_out_mps(self, output);
 }
+
+REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps);
+REGISTER_MPS_DISPATCH(rshift_stub, &rshift_kernel_mps);
+
 } // namespace at::native

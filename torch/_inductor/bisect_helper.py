@@ -8,17 +8,23 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
+
 # Set the subdirectory name
 SUBDIR_NAME = "bisect"
 
 # Dictionary of backend -> subsystems
 BACKENDS: Dict[str, List[str]] = {
+    # run dynamo without aot_autograd
     "eager": [],
+    # run dynamo with aot_autograd, but no partitioner or decomps
     "aot_eager": [],
-    "aot_eager_decomp_partition": ["decomposition"],  # TODO - add cse ?
+    # run dynamo with aot autograd, decompositions and partitioner
+    "aot_eager_decomp_partition": [
+        "decomposition"  # number of decompositions we apply in tracing
+    ],  # TODO - add cse ?
     "inductor": [
-        "post_grad_passes",
-        "lowerings",
+        "post_grad_passes",  # passes applied individually on forward, and backward in inductor
+        "lowerings",  # lowering aten operators to inductor
     ],  # TODO - add more - fusions, amp numeric mode ?
 }
 
@@ -38,9 +44,16 @@ def get_env_val(env_str: str) -> Optional[str]:
 
 @dataclasses.dataclass
 class BisectionResult:
+    """
+    backend: torch.compile backend responsible for failure
+    subsystem: optional, registered component identified for failure
+    bisect_number: optional, number of times the subsystem needed to be applied to trigger failure
+    debug_info: associated info of the triggering bisect application of subsystem
+    """
+
     backend: str
     subsystem: Optional[str] = None
-    bad_number: Optional[int] = None
+    bisect_number: Optional[int] = None
     debug_info: Optional[str] = None
 
 
@@ -90,7 +103,10 @@ class BisectionManager:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_backend(cls) -> str:
+    def get_backend(cls) -> Optional[str]:
+        """
+        Returns the active backend, if any
+        """
         if val := get_env_val("TORCH_BISECT_BACKEND"):
             return val
 
@@ -99,10 +115,14 @@ class BisectionManager:
         for line in lines:
             if line.startswith("backend="):
                 return line.strip().split("=")[1]
-        return ""
+        return None
 
     @classmethod
-    def get_subsystem(cls) -> str:
+    def get_subsystem(cls) -> Optional[str]:
+        """
+        Returns the active subsystem, if any
+        """
+
         if val := get_env_val("TORCH_BISECT_SUBSYSTEM"):
             return val
 
@@ -111,17 +131,23 @@ class BisectionManager:
         for line in lines:
             if line.startswith("subsystem="):
                 return line.strip().split("=")[1]
-        return ""
+        return None
 
     @classmethod
-    def get_run_state(cls, backend_name: str, subsystem_name: str) -> str:
+    def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
+        """
+        Returns the current stage of bisecting, if Any
+        """
+
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_run_state.txt"
         )
         lines = cls.read_lines_from_file(file_path)
         if lines:
-            return lines[0].strip()
-        return ""
+            out = lines[0].strip()
+            assert out in ("test_disable", "find_max_bounds", "bisect")
+            return out
+        return None
 
     @classmethod
     def get_bisect_range(
@@ -199,6 +225,7 @@ class BisectionManager:
             )
             return False
         else:
+            assert run_state == "bisect"
             # If the environment variable is not set, use the bisection range midpoint
             low, high = cls.get_bisect_range(backend, subsystem)
             # if high - low <= 2:
@@ -346,6 +373,7 @@ class BisectionManager:
             curr_subsystem = cls.get_subsystem()
 
         while True:
+            assert curr_backend is not None
             reset_counters()
             if curr_subsystem:
                 result = cls.perform_bisection(
@@ -353,6 +381,7 @@ class BisectionManager:
                 )
                 if result:
                     curr_subsystem = cls.get_subsystem()
+                    assert curr_subsystem is not None
                     low, _ = cls.get_bisect_range(curr_backend, curr_subsystem)
                     return BisectionResult(
                         curr_backend,
@@ -366,6 +395,7 @@ class BisectionManager:
                     print(
                         f"The issue is in the {curr_backend} system, but could not identify subsystem."
                     )
+                    assert curr_backend is not None
                     return BisectionResult(curr_backend)
 
                 curr_subsystem = next_subsystem

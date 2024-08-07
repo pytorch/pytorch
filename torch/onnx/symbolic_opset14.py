@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 14.
@@ -25,6 +24,7 @@ import torch
 from torch.onnx import _constants, _type_utils, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
+
 
 __all__ = [
     "hardswish",

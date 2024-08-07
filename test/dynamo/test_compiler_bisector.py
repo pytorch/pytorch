@@ -1,21 +1,19 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
-
 from contextlib import contextmanager
 
 import torch
-
 import torch._prims_common as utils
 import torch.nn.functional as F
-
 from torch import nn
 from torch._decomp import decomposition_table
 from torch._dynamo.test_case import TestCase
-
+from torch._inductor import config
 from torch._inductor.bisect_helper import BisectionManager
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
 
 aten = torch.ops.aten
 
@@ -49,8 +47,7 @@ class TestCompilerBisector(TestCase):
             )
             # on most hardwares dont need to subtract 1, but rng is device dependent,
             # so make it always bad for determinism
-            bad_incr_val = -1
-            return (-1 + bad_incr_val) / rate * torch.log1p(-torch.rand_like(self))
+            return ((-1) / rate * torch.log1p(-torch.rand_like(self))) / 0.0
 
         @contextmanager
         def patch_exp_decomp():
@@ -88,6 +85,7 @@ class TestCompilerBisector(TestCase):
                 return codevector_probs
 
         def test_fn():
+            torch._dynamo.reset()
             with patch_exp_decomp():
                 vq = GumbelVectorQuantizer().cuda()
                 vq_compiled = torch.compile(vq)
@@ -107,27 +105,24 @@ class TestCompilerBisector(TestCase):
         out = BisectionManager.do_bisect(test_fn)
         self.assertEqual(out.backend, "aot_eager_decomp_partition")
         self.assertEqual(out.subsystem, "decomposition")
-        self.assertEqual(out.bad_number, 4)
+        self.assertEqual(out.bisect_number, 4)
         self.assertTrue("aten.exponential" in out.debug_info)
-
+    
     def test_bad_lowering(self):
         def test_fn():
             torch._dynamo.reset()
-            from torch._inductor import config
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                def my_func(x):
+                    return (x * -1).relu()
 
-            config.triton.inject_relu_bug_TESTING_ONLY = "accuracy"
+                inp = torch.rand([100], device="cuda")
 
-            def my_func(x):
-                return ((x * 0.2) / 4).relu()
-
-            inp = torch.rand([100], device="cuda") - 0.5
-
-            return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
         out = BisectionManager.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "lowerings")
-        self.assertEqual(out.bad_number, 2)
+        self.assertEqual(out.bisect_number, 1)
         self.assertTrue("relu" in out.debug_info)
 
     def test_eager_backend(self):

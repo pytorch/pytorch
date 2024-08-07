@@ -4,7 +4,7 @@ import torch
 
 
 class Module(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv = torch.nn.Conv2d(1, 10, 5, 1)
 
