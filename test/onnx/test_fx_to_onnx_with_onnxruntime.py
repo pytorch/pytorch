@@ -7,22 +7,19 @@ import operator
 import os
 import tempfile
 import unittest
-
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
 import parameterized  # type: ignore[import]
 import pytorch_test_common
-
 import transformers  # type: ignore[import]
 
 import torch
 import torch.onnx
 from torch import nn
-
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, exporter
+from torch.onnx._internal import _exporter_legacy
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_symbolic_graph_extractor,
@@ -30,6 +27,7 @@ from torch.onnx._internal.fx import (
     serialization as fx_serialization,
 )
 from torch.testing._internal import common_utils
+
 
 try:
     import torchvision  # type: ignore[import]
@@ -101,7 +99,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
     @pytorch_test_common.xfail(
-        error_message="Unexpectedly found a <class 'torch.Tensor'> in the inputs.",
+        error_message="Tracing through optional input is not supported yet",
         reason="https://github.com/pytorch/pytorch/issues/96379",
     )
     def test_func_with_args_and_tensor_kwargs(self):
@@ -158,8 +156,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.tensor([operator.sub(x.item(), y.item())]),
                     torch.tensor([operator.mul(x.item(), y.item())]),
                     torch.tensor([operator.truediv(x.item(), y.item())]),
-                    torch.tensor([operator.floordiv(x.item(), y.item())]),
-                    torch.tensor([operator.pow(x.item(), y.item())]),
+                    # This requires torch.sym_float, probably easy to lower to
+                    # ONNX but I don't know where to put it
+                    # torch.tensor([operator.floordiv(x.item(), y.item())]),
+                    # NB: abs so that the base and exponent are provably
+                    # non-negative, so we don't generate runtime asserts
+                    torch.tensor([operator.pow(abs(x.item()), abs(y.item()))]),
                     torch.tensor([operator.abs(x.item())]),
                     torch.tensor([operator.neg(x.item())]),
                     torch.tensor([math.ceil(x.item())]),
@@ -271,7 +273,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
@@ -300,7 +302,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
         # conventional `torch.ops.aten.log_sigmoid`.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.LogSigmoid()
 
@@ -417,7 +419,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 1, 3, stride=2)
 
@@ -433,9 +435,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail(
-        error_message=("Unsupported FX nodes: {'call_function': [")
-    )
+    @pytorch_test_common.xfail_dynamic_fx_test  # no dynamic shapes present
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -539,7 +539,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        error_message="at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED"
+        error_message="at::functionalization::impl::isFunctionalTensor(t) INTERNAL ASSERT FAILED"
     )
     def test_expand_as_fill_separate_tensor(self):
         class Model(torch.nn.Module):
@@ -629,10 +629,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}.",
-        reason="https://github.com/pytorch/pytorch/issues/112622",
-    )
     def test_operator_with_scalar_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -644,10 +640,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4))
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}",
-        reason="https://github.com/pytorch/pytorch/issues/112622",
-    )
     def test_operator_with_dynamic_output_shape(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -727,7 +719,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             CustomModule(), (torch.randn(1, 2, 3),)
         )
 
-    @_beartype.beartype
     def _test_fx_symbolic_tracer_large_scale_exporter(
         self,
         model_name: str,
@@ -790,7 +781,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = exporter.ResolvedExportOptions(options)
+                export_options = _exporter_legacy.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
@@ -854,7 +845,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)
@@ -961,7 +952,6 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         super().setUp()
         self.ort_version = onnxruntime.__version__
 
-    @_beartype.beartype
     def _test_fake_tensor_mode_exporter(
         self,
         model_name: str,
@@ -1188,7 +1178,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc0 = nn.Linear(8, 8, bias=True)
                 self.fc1 = nn.Linear(8, 4, bias=True)
@@ -1235,7 +1225,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1269,14 +1259,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="Dynamo error: scaled_dot_product_attention(): argument 'is_causal' must be bool, not SymBool",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
-    @pytorch_test_common.xfail_op_level_debug_test(
+    @pytorch_test_common.xfail(
         error_message="Could not find an implementation for Trilu(14) node",
         reason="ORT error during op level dubug",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-    )
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="aot_autograd expected to have an entirely functional graph",
-        reason="aot_autograd doesn't support it.",
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):
         config = transformers.WhisperConfig(
@@ -1342,7 +1327,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1375,7 +1360,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         batch, seq = 4, 256
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
@@ -1412,7 +1397,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPT2Model(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             batch, seq = 4, 256
@@ -1460,7 +1445,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return transformers.GPTNeoXModel(config).eval()
 
         def create_args():
-            return tuple()
+            return ()
 
         def create_kwargs():
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))

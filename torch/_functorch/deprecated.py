@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The APIs in this file are exposed as `functorch.*`. They are thin wrappers
 around the torch.func.* APIs that have deprecation warnings -- we're trying
@@ -37,7 +38,7 @@ def get_warning(api, new_api=None, replace_newlines=False):
 
 def warn_deprecated(api, new_api=None):
     warning = get_warning(api, new_api, replace_newlines=True)
-    warnings.warn(warning, FutureWarning, stacklevel=2)
+    warnings.warn(warning, FutureWarning, stacklevel=3)
 
 
 def setup_docs(functorch_api, torch_func_api=None, new_api_name=None):

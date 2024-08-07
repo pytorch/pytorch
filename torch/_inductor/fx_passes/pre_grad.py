@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import itertools
 import logging
@@ -11,12 +12,12 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
@@ -28,38 +29,32 @@ from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
+
 log = logging.getLogger(__name__)
 
 efficient_conv_bn_eval_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
+    pass_name="efficient_conv_bn_eval_pass"
 )
 
 fuse_split_linear_add_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="fuse_split_linear_add_pass",
 )
 fuse_chunk_squeeze_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="fuse_chunk_squeeze_cat_pass",
 )
 remove_reshape_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True,
     pass_name="remove_reshape_pass",
 )
 
 # based on predispatch aten IR
-normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_stack_tahn_unbind_pass_aten = PatternMatcherPass(
-    prevent_match_across_mutations=True
-)
-mutate_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
-remove_split_with_size_one_pass_aten = PatternMatcherPass(
-    prevent_match_across_mutations=True
-)
+normalization_pass_aten = PatternMatcherPass()
+merge_splits_pass_aten = PatternMatcherPass()
+split_cat_pass_aten = PatternMatcherPass()
+unbind_stack_pass_aten = PatternMatcherPass()
+merge_getitem_cat_pass_aten = PatternMatcherPass()
+merge_stack_tahn_unbind_pass_aten = PatternMatcherPass()
+mutate_cat_pass_aten = PatternMatcherPass()
+remove_split_with_size_one_pass_aten = PatternMatcherPass()
 
 
 def save_inductor_dict(pass_to_compare=None):
@@ -82,6 +77,10 @@ def fuse_parallel_linear_pass(graph):
 
 
 def remove_split_ops(graph, shape_prop):
+    return None
+
+
+def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
     return None
 
 
@@ -138,6 +137,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_unsqueeze_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,
@@ -207,7 +212,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # we support run same pattern multiple times, the default is to run only once
+                counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
+                for _ in range(counter):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"
@@ -216,7 +224,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        config.pre_grad_custom_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -257,16 +268,31 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        gm = linear_permute_fusion(gm)
-        gm = permute_linear_fusion(gm)
-        gm = permute_matmul_fusion(gm)
+        with GraphTransformObserver(
+            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = linear_permute_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_linear_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        gm = remove_identity(gm)
-        gm = fuse_conv_bn(gm)
+        with GraphTransformObserver(
+            gm, "remove_identity", config.trace.log_url_for_graph_xform
+        ):
+            gm = remove_identity(gm)
+        with GraphTransformObserver(
+            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
+        ):
+            gm = fuse_conv_bn(gm)
     return gm
 
 
@@ -325,7 +351,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
             bn_eps=None,
             bn_weight=None,
             bn_bias=None,
-        ):
+        ) -> None:
             self.bn_nodes = [
                 bn_node,
             ]

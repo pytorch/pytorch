@@ -8,6 +8,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+if HAS_CUDA:
+    torch.set_default_device("cuda")
+
+
 @inductor_config.patch(
     {
         "benchmark_kernel": True,
@@ -53,5 +57,4 @@ class LoopOrderingTest(TestCase):
 
 if __name__ == "__main__":
     if HAS_CUDA:
-        torch.set_default_device("cuda")
         run_tests()

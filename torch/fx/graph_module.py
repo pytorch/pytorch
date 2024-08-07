@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import contextlib
 import copy
 import itertools
@@ -820,12 +822,12 @@ class {module_name}(torch.nn.Module):
         return res
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True, include_stride=False, include_device=False):
+    def print_readable(self, print_output=True, include_stride=False, include_device=False, colored=False):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
         verbose_python_code = self._graph.python_code(
-            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device
+            root_module="self", verbose=True, include_stride=include_stride, include_device=include_device, colored=colored
         )
         module_code = verbose_python_code.src
         module_code = module_code.lstrip("\n")
@@ -835,7 +837,12 @@ class {module_name}(torch.nn.Module):
         submodule_code_list = [""]
         for submodule in self.children():
             if isinstance(submodule, GraphModule):
-                submodule_code_list.append(submodule.print_readable(print_output=False))
+                submodule_code_list.append(submodule.print_readable(
+                    print_output=False,
+                    include_stride=include_stride,
+                    include_device=include_device,
+                    colored=colored
+                ))
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 

@@ -355,7 +355,7 @@ properties on the nodes as we see them at runtime. That might look like:
                 attr_itr = self.mod
                 for i, atom in enumerate(target_atoms):
                     if not hasattr(attr_itr, atom):
-                        raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
+                        raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
                     attr_itr = getattr(attr_itr, atom)
                 return attr_itr
 
@@ -1143,7 +1143,6 @@ API Reference
 .. py:module:: torch.fx.experimental.normalize
 .. py:module:: torch.fx.experimental.optimization
 .. py:module:: torch.fx.experimental.partitioner_utils
-.. py:module:: torch.fx.experimental.proxy_tensor
 .. py:module:: torch.fx.experimental.recording
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
@@ -1175,6 +1174,7 @@ API Reference
 .. py:module:: torch.fx.passes.fake_tensor_prop
 .. py:module:: torch.fx.passes.graph_drawer
 .. py:module:: torch.fx.passes.graph_manipulation
+.. py:module:: torch.fx.passes.graph_transform_observer
 .. py:module:: torch.fx.passes.infra.partitioner
 .. py:module:: torch.fx.passes.infra.pass_base
 .. py:module:: torch.fx.passes.infra.pass_manager

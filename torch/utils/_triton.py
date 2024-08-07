@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import hashlib
 
@@ -5,10 +6,12 @@ import hashlib
 @functools.lru_cache(None)
 def has_triton_package() -> bool:
     try:
-        import triton
+        from triton.compiler.compiler import triton_key
 
-        return triton is not None
+        return triton_key is not None
     except ImportError:
+        return False
+    except RuntimeError:
         return False
 
 
@@ -61,7 +64,9 @@ def triton_hash_with_backend():
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    # Hash is upper case so that it can't contain any Python keywords.
+    return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
 
 
 def dtype_to_string(dtype):

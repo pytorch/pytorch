@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import os
 import warnings
 from typing import Any, cast, Dict, Optional, Set, Union
@@ -14,6 +16,7 @@ from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlan, LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
+
 
 __all__ = ["load_state_dict", "load"]
 
@@ -177,6 +180,7 @@ def load(
             elem = state_dict[key]
             if isinstance(elem, Stateful):
                 elem.load_state_dict(statetful_sd[key])
+            state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(

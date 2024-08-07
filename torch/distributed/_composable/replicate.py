@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import weakref
 from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 
@@ -7,6 +9,7 @@ from torch.distributed._composable_state import _State
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
+
 
 _ROOT_MODULE_PREFIX = ""
 
@@ -64,7 +67,7 @@ class _ReplicateState(_State):
             assert self._init_args is not None
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
-            self._init_args = tuple()
+            self._init_args = ()
             self._init_kwargs = {}
 
         _lazy_init()
@@ -212,7 +215,10 @@ def replicate(
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
 
-        if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+        root_mesh = _mesh_resources.get_parent_mesh(device_mesh)
+        # if a root mesh is not the same as device_mesh,
+        # meaning the device_mesh is sliced out from the root mesh.
+        if root_mesh != device_mesh:
             # TODO: This is a temporary work around to enable DDP + TP.
             # We should do the logic in DDP so that the 2D implementation is
             # sound and the state_dict works out of the box.

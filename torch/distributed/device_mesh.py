@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
@@ -5,10 +6,9 @@ import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-
 from torch.distributed import is_available
+from torch.utils._typing_utils import not_none
 
-from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
@@ -38,6 +38,7 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        get_backend,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -61,56 +62,81 @@ else:
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.child_to_root_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: Dict[
+                int, Tuple[str, Optional[ProcessGroup.Options]]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
-        def create_child_mesh(
-            self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
+        def create_sub_mesh(
+            self, device_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
-            # swap the current dim to the last dim then reshape to flatten out other
-            # dims, so we can just extract the list of ranks which contains cur_rank.
-            cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
-                -1, device_mesh.mesh.size(mesh_dim)
-            )
+            if device_mesh != self.get_root_mesh(device_mesh):
+                raise RuntimeError("Cannot create a submesh from a submesh.")
 
-            for mesh_1d in pg_ranks_by_dim:
-                sub_mesh = DeviceMesh(
+            # submesh_dims are the mesh dimension of the submesh in the device mesh.
+            submesh_dims = [
+                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
+                for mesh_dim_name in submesh_dim_names
+            ]
+            submesh_dim_sizes = [
+                device_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
+            ]
+
+            mesh_dims_remained = list(range(device_mesh.mesh.ndim))
+            for submesh_dim in submesh_dims:
+                mesh_dims_remained.remove(submesh_dim)
+
+            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
+            # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
+            # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
+            pg_ranks_by_dim = device_mesh.mesh.permute(
+                *mesh_dims_remained, *submesh_dims
+            ).reshape(-1, *submesh_dim_sizes)
+
+            cur_rank = device_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                submesh = DeviceMesh(
                     device_mesh.device_type,
-                    mesh_1d,
-                    mesh_dim_names=(mesh_dim_name,),
+                    mesh_nd,
+                    mesh_dim_names=submesh_dim_names,
                     _init_backend=False,
                 )
-                if cur_rank in mesh_1d:
-                    res_sub_mesh = sub_mesh
+                if cur_rank in mesh_nd:
+                    res_submesh = submesh
 
-            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
-            res_sub_mesh._parent_mesh = device_mesh
-            # Assign the current DeviceMesh as the parent of the child DeviceMesh.
-            # We need to update the mappings after the child mesh hash update.
-            self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            return res_sub_mesh
+            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
+                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
+            ]
+            self.child_to_root_mapping[res_submesh] = device_mesh
 
-        def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
-            return self.child_to_parent_mapping.get(device_mesh, None)
+            return res_submesh
 
-        def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+            # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
+            # A root mesh is not created through slicing.
+            # We considers the root mesh of a root mesh is itself.
+            root_mesh = self.child_to_root_mapping.get(device_mesh, None)
+            return device_mesh if not root_mesh else root_mesh
+
+        def get_root_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
             """
-            Return the index of the mesh dim in the parent mesh.
-            The device_mesh passed in needs to be sliced out from a parent mesh.
+            Returns the index of the mesh dim in the root mesh.
+            The device_mesh passed in needs to be sliced out from the root mesh
+            or submesh of the root mesh.
             """
-            parent_mesh = self.get_parent_mesh(device_mesh)
+            root_mesh = self.get_root_mesh(device_mesh)
             child_mesh_dim_names = device_mesh.mesh_dim_names
-            if parent_mesh and child_mesh_dim_names:
+            if root_mesh and child_mesh_dim_names:
                 assert (
                     len(child_mesh_dim_names) == 1
-                ), "The child mesh can only be a 1D mesh."
+                ), "The submesh can only be a 1D mesh."
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return self.get_mesh_dim_by_name(parent_mesh, child_mesh_dim_name)
+                return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
             return None
 
         @staticmethod
@@ -139,6 +165,14 @@ else:
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
+
+        def _set_mesh_dim_group_options(
+            self,
+            dim: int,
+            backend: str,
+            pg_options: Optional[ProcessGroup.Options] = None,
+        ) -> None:
+            self.mesh_dim_group_options[dim] = (backend, pg_options)
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -215,8 +249,7 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional[DeviceMesh] = None
-            self._thread_id = threading.get_ident()
+            self._thread_id = None
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -227,6 +260,9 @@ else:
                 if _init_backend:
                     self._get_or_create_default_group()
                     self._init_process_groups()
+
+                if is_initialized() and get_backend() == "threaded":
+                    self._thread_id = threading.get_ident()
 
                 # calculate the coordinates of the current global rank on the mesh
                 rank_coords = (self.mesh == get_rank()).nonzero()
@@ -297,16 +333,30 @@ else:
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
+                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                        # Inherit from the parent group if no options are specified for the group.
+                        if dim in _mesh_resources.mesh_dim_group_options:
+                            (
+                                backend,
+                                pg_options,
+                            ) = _mesh_resources.mesh_dim_group_options[dim]
+                        else:
+                            backend, pg_options = None, None
+
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(ranks=subgroup_ranks)
+                        dim_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
+                            pg_options=pg_options,
+                        )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
                                 raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
+                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
@@ -330,9 +380,9 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"DeviceMesh({self.mesh.tolist()})"
+                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
                 if not self.mesh_dim_names
-                else f"DeviceMesh({self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
             )
             return device_mesh_repr
 
@@ -346,7 +396,6 @@ else:
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
-                        self._parent_mesh,
                         self._thread_id,
                     )
                 )
@@ -363,92 +412,119 @@ else:
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
-                    and self._parent_mesh == other._parent_mesh
                     and self._thread_id == other._thread_id
                 )
 
-        def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
+        def __getitem__(
+            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+        ) -> "DeviceMesh":
             """
-            Slice the current DeviceMesh based on the mesh_dim_name given to create a child
-            DeviceMesh.
+            Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
+            The submesh created consists of the dimensions and the communicators indicated by
+            ``mesh_dim_names``
 
             Args:
-                mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
-                to create a child DeviceMesh for.
+                mesh_dim_names (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh dimension of the DeviceMesh to create the submesh for.
             Returns:
                 A :class:`DeviceMesh` object
 
-            The following program runs on each process/rank in an SPMD manner. In this example, we have 2
-            hosts with 4 GPUs each.
-            Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
-            Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
-            Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
-            Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
-            Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
-            Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
+            The following program runs on each process/rank in an SPMD manner in a world size of 8.
+            In the first example:
+                Calling mesh_2d["tp"] on rank 0, 1, 2, 3 returns a 1D submesh of DeviceMesh:([0, 1, 2, 3]).
+                Calling mesh_2d["tp"] on rank 4, 5, 6, 7 returns a 1D submesh of  DeviceMesh:([4, 5, 6, 7]).
+                Calling mesh_2d["dp"] on rank 0, 4 returns a 1D submesh of  DeviceMesh:([0, 4]).
+                Calling mesh_2d["dp"] on rank 1, 5 returns a 1D submesh of  DeviceMesh:([1, 5]).
+                Calling mesh_2d["dp"] on rank 2, 6 returns a 1D submesh of  DeviceMesh:([2, 6]).
+                Calling mesh_2d["dp"] on rank 3, 7 returns a 1D submesh of  DeviceMesh:([3, 7]).
+
+            In the second example:
+                Calling mesh_3d["dp", "cp"] on rank 0, 1, 4, 5 returns a 2D submesh of DeviceMesh:([[0, 1], [4, 5]]).
+                Calling mesh_3d["dp", "cp"] on rank 2, 3, 6, 7 returns a 2D submesh of DeviceMesh:([[2, 3], [6, 7]]).
+                Calling mesh_3d["cp", "dp"] on rank 0, 1, 4, 5 returns a 2D submesh of DeviceMesh:([[0, 4], [1, 5]]).
+                Calling mesh_3d["cp", "dp"] on rank 2, 3, 6, 7 returns a 2D submesh of DeviceMesh:([[2, 6], [3, 7]]).
 
             Example::
                 >>> # xdoctest: +SKIP("no rank")
                 >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
-                >>> # Initialize device mesh as (2, 4) to represent the topology
+                >>> # Initialize a 2D device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
-                >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
+                >>> mesh_2d = init_device_mesh(device_type="cuda", (2,4), mesh_dim_names=("dp", "tp"))
+                >>> tp_mesh = mesh_2d["tp"]
+                >>> dp_mesh = mesh_2d["dp"]
+                >>>
+                >>> # Initialize a 3D mesh.
+                >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
+                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> dp_cp_mesh = mesh_3d["dp", "cp"]
+                >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
-            if self.mesh.ndim == 1:
-                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
-                    return self
-                else:
-                    raise RuntimeError(
-                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
-                    )
+            if not self.mesh_dim_names:
+                raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
 
-            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
+            mesh_dim_names = (
+                (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
+            )
+
+            if mesh_dim_names == self.mesh_dim_names:
+                return self
+            elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
+                mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
+            ):
+                raise KeyError(
+                    f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                    "Valid mesh_dim_names should be a subsequence of valid"
+                    f"mesh_dim_names from {self.mesh_dim_names}."
+                )
+
+            submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
             return submesh
 
-        def get_group(
-            self, mesh_dim: Optional[Union[int, str]] = None
-        ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
-            Returns a list of ProcessGroups corresponding to the mesh dimensions, or
-            returns a single ProcessGroup if mesh_dim is specified or the given mesh has
-            only one mesh dimension.
+            Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
+            DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
 
             Args:
                 mesh_dim (str/int, optional): it can be the name of the mesh dimension or the index
                 of the mesh dimension. Default is None.
 
             Returns:
-                A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
-                a DeviceMesh with more than 1 dimension; otherwise, returns a single
-                :class:`ProcessGroup` object.
+                A :class:`ProcessGroup` object.
             """
             if not hasattr(self, "_dim_group_infos"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
-            if self.mesh.ndim == 1:
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
+            if self.mesh.ndim > 1 and mesh_dim is None:
+                raise RuntimeError(
+                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                    "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+                    "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
+                    "please use `get_all_groups()` instead.",
                 )
 
-            if mesh_dim is not None:
-                if isinstance(mesh_dim, str):
-                    mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
-                return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])
-                )
+            if self.mesh.ndim == 1 and mesh_dim is None:
+                mesh_dim = 0
             else:
-                dim_groups = []
-                for ith_dim in range(self.mesh.ndim):
-                    dim_groups.append(
-                        not_none(
-                            _find_pg_by_ranks_and_tag(
-                                *self._dim_group_infos[ith_dim][:2]
-                            )
-                        )
-                    )
-                return dim_groups
+                mesh_dim = (
+                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    if isinstance(mesh_dim, str)
+                    else mesh_dim
+                )
+
+            return not_none(
+                _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
+            )
+
+        def get_all_groups(self) -> List[ProcessGroup]:
+            """
+            Returns a list of ProcessGroups for all mesh dimensions.
+
+            Returns:
+                A list of :class:`ProcessGroup` object.
+            """
+            return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
         def from_group(

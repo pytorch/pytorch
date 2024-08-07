@@ -13,14 +13,14 @@ from torch.testing._internal.common_utils import (
 
 
 d_hid = 512
-batch_size = 256
+microbatch_size = 16
 
 torch.manual_seed(0)
 
 
 # Basic example
 class ExampleCode(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -46,7 +46,7 @@ class ExampleCode(torch.nn.Module):
 
 
 class MultiMLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mlp0 = MLPModule(d_hid)
         self.mlp1 = MLPModule(d_hid)
@@ -81,13 +81,12 @@ class PipeTests(TestCase):
     @parametrize("ModelClass", [ExampleCode, MultiMLP, ModelWithParamAlias])
     def test_model_split(self, ModelClass):
         mod = ModelClass()
-        x = torch.randn(batch_size, d_hid)
-        y = torch.randn(batch_size, d_hid)
+        x = torch.randn(microbatch_size, d_hid)
+        y = torch.randn(microbatch_size, d_hid)
 
         pipe = pipeline(
             mod,
-            num_chunks=4,
-            example_args=(x, y),
+            mb_args=(x, y),
         )
 
         assert (

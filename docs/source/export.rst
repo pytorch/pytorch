@@ -286,7 +286,7 @@ know the python code is not exactly needed for computation. For example:
 In this example, the first call using non-strict mode (through the
 ``strict=False`` flag) traces successfully whereas the second call using strict
 mode (default) results with a failure, where TorchDynamo is unable to support
-context managers. One option is to rewrite the code (see :ref:`Limitations of torch.expot <Limitations of
+context managers. One option is to rewrite the code (see :ref:`Limitations of torch.export <Limitations of
 torch.export>`), but seeing as the context manager does not affect the tensor
 computations in the model, we can go with the non-strict mode's result.
 
@@ -505,7 +505,7 @@ Input Tensor Shapes
 
 By default, ``torch.export`` will trace the program specializing on the input
 tensors' shapes, unless a dimension is specified as dynamic via the
-``dynamic_shapes`` argumen to ``torch.export``. This means that if there exists
+``dynamic_shapes`` argument to ``torch.export``. This means that if there exists
 shape-dependent control flow, ``torch.export`` will specialize on the branch
 that is being taken with the given sample inputs. For example:
 
@@ -683,6 +683,7 @@ API Reference
 
     .. automethod:: dynamic_shapes
 
+.. autofunction:: torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
@@ -718,3 +719,5 @@ API Reference
     :members:
 
 .. automodule:: torch.export.custom_obj
+
+.. automodule:: torch.export.experimental

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import enum
 import logging
@@ -16,10 +17,10 @@ from ...ir import (
     ReinterpretView,
 )
 from ..common import IndentedBuffer
-
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
+
 
 log = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
         Args:
             input_nodes (List[Buffer]): List of input nodes of the GEMM kernel.
@@ -743,7 +744,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
+        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:

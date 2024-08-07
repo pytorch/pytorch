@@ -550,9 +550,9 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenFallbackKernelWithoutTens
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-std::optional<Tensor> called_arg2 = c10::nullopt;
-std::optional<int64_t> called_arg3 = c10::nullopt;
-std::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = std::nullopt;
+std::optional<int64_t> called_arg3 = std::nullopt;
+std::optional<std::string> called_arg4 = std::nullopt;
 
 void kernelWithOptInputWithoutOutput(Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
   called = true;
@@ -660,18 +660,6 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   ASSERT_TRUE(op.has_value());
   std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(dispatch_key), "1", "2", 3);
   EXPECT_EQ("123", result);
-}
-
-void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
-  at::AutoDispatchBelowAutograd mode;
-
-  // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
-  ASSERT_TRUE(op.has_value());
-  expectThrows<c10::Error>(
-    [&] {callOp(*op, dummyTensor(dispatch_key), "1", "2", 3);},
-    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()."
-  );
 }
 
 TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {

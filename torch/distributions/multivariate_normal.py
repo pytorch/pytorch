@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import math
 
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
+
 
 __all__ = ["MultivariateNormal"]
 

@@ -30,6 +30,9 @@
   {%- if config["devtoolset"] %}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
   {%- endif %}
+  {%- if config.use_split_build is defined %}
+      use_split_build: !{{ config["use_split_build"] }}
+  {%- endif %}
 {%- endif %}
 {%- if config["package_type"] == "libtorch" %}
   {%- if config["libtorch_config"] %}
@@ -44,6 +47,7 @@
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.8"
   {%- endif %}
+
 {%- else %}
       DESIRED_PYTHON: "!{{ config["python_version"] }}"
 {%- endif %}

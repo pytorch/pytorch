@@ -13,9 +13,7 @@ import unittest
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-
 import torch._dynamo
-
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
@@ -569,7 +567,7 @@ class OpCheckMode(TorchFunctionMode):
         if (
             torch.jit.is_tracing()
             or torch.jit.is_scripting()
-            or torch.compiler.is_compiling()
+            or torch._dynamo.is_compiling()
         ):
             return func(*args, **kwargs)
         # Pre-existing code may not use the .default overload. If we see an

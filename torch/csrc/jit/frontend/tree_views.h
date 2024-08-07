@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/tree.h>
@@ -10,8 +9,7 @@
 #include <string>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // clang-format off
 // TreeView provides a statically-typed way to traverse the tree, which should
@@ -202,7 +200,7 @@ struct Maybe : public TreeView {
   explicit Maybe(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_OPTION);
     if (tree_->trees().size() > 1)
-      throw ErrorReport(tree) << "Maybe trees can have at most one subtree";
+      throw(ErrorReport(tree) << "Maybe trees can have at most one subtree");
   }
   /* implicit */ Maybe(const T& tree) : TreeView(tree) {}
   bool present() const {
@@ -260,8 +258,9 @@ struct Stmt : public TreeView {
       case TK_WITH:
         return;
       default:
-        throw ErrorReport(tree)
-            << kindToString(tree->kind()) << " is not a valid Stmt";
+        throw(
+            ErrorReport(tree)
+            << kindToString(tree->kind()) << " is not a valid Stmt");
     }
   }
 };
@@ -319,8 +318,9 @@ struct Expr : public TreeView {
       case TK_WITH_ITEM:
         return;
       default:
-        throw ErrorReport(tree)
-            << kindToString(tree->kind()) << " is not a valid Expr";
+        throw(
+            ErrorReport(tree)
+            << kindToString(tree->kind()) << " is not a valid Expr");
     }
   }
 };
@@ -661,7 +661,7 @@ struct AugAssignKind : public TreeView {
       case TK_RSHIFT:
         return;
       default:
-        throw ErrorReport(tree) << "is not a valid AugAssignKind";
+        throw(ErrorReport(tree) << "is not a valid AugAssignKind");
     }
   }
 };
@@ -843,12 +843,14 @@ struct BinOp : public Expr {
       case TK_FLOOR_DIV:
       case TK_IN:
         if (tree->trees().size() != 2)
-          throw ErrorReport(tree)
-              << "BinOp expected 2 subtrees, found " << tree->trees().size();
+          throw(
+              ErrorReport(tree)
+              << "BinOp expected 2 subtrees, found " << tree->trees().size());
         return;
       default:
-        throw ErrorReport(tree)
-            << kindToString(tree->kind()) << " is not a valid BinOp";
+        throw(
+            ErrorReport(tree)
+            << kindToString(tree->kind()) << " is not a valid BinOp");
     }
   }
   Expr lhs() const {
@@ -873,12 +875,14 @@ struct UnaryOp : public Expr {
       case '~':
       case TK_NOT:
         if (tree->trees().size() != 1)
-          throw ErrorReport(tree)
-              << "UnaryOp expected 1 subtree, found " << tree->trees().size();
+          throw(
+              ErrorReport(tree)
+              << "UnaryOp expected 1 subtree, found " << tree->trees().size());
         return;
       default:
-        throw ErrorReport(tree)
-            << kindToString(tree->kind()) << " is not a valid UnaryOp";
+        throw(
+            ErrorReport(tree)
+            << kindToString(tree->kind()) << " is not a valid UnaryOp");
     }
   }
   static UnaryOp create(const SourceRange& range, int kind, const Expr& expr) {
@@ -906,11 +910,11 @@ struct Const : public Expr {
   }
   int64_t asIntegral() const {
     try {
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      return std::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
+      return std::stoll(subtree(0)->stringValue(), nullptr, 0);
     } catch (const std::out_of_range&) {
-      throw ErrorReport(range()) << "Integral constant out of range "
-                                    "(must fit in a signed 64 bit integer)";
+      throw(
+          ErrorReport(range()) << "Integral constant out of range "
+                                  "(must fit in a signed 64 bit integer)");
     }
   }
   double asFloatingPoint() const {
@@ -1032,7 +1036,7 @@ struct SliceExpr : public Expr {
 
  private:
   Expr createInt(int64_t value) const {
-    return Expr(Const::create(range(), c10::to_string(value)));
+    return Expr(Const::create(range(), std::to_string(value)));
   }
 };
 
@@ -1263,8 +1267,7 @@ inline Expr pep604union_to_union(const Expr& expr) {
   return std::move(synthesised_union);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
 
 namespace std {
 

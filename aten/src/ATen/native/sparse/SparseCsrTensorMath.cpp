@@ -14,6 +14,7 @@
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
@@ -314,14 +315,6 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 }
 } // namespace
 
-// Only accept squares sparse matrices or dense input as a vector
-// TODO: Check what happens with MKL, the output error reported with non square
-// matrices tends to be high See:
-// https://github.com/pytorch/pytorch/issues/58770
-static bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
-  return (dim_i == dim_k && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
-}
-
 Tensor& normal_sparse_csr_(
     Tensor& self,
     double mean,
@@ -473,7 +466,10 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 static CREATE_UNARY_UFUNC(relu);
+C10_DIAGNOSTIC_POP()
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -588,12 +584,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // TODO: remove this, there are no codegenerated checks for devices yet
-  sparse::impl::_check_is_cpu(self, "self");
-  sparse::impl::_check_is_cpu(mat1, "mat1");
-  sparse::impl::_check_is_cpu(mat2, "mat2");
-  sparse::impl::_check_is_cpu(result, "result");
-
   // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
   // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
   // TODO: remove code duplication and unify code

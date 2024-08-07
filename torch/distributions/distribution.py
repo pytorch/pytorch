@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 from typing import Any, Dict, Optional, Tuple
 from typing_extensions import deprecated
@@ -6,6 +7,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
 from torch.types import _size
+
 
 __all__ = ["Distribution"]
 

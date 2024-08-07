@@ -1,15 +1,13 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def patch(f):
@@ -18,7 +16,6 @@ def patch(f):
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
             "merge_getitem_cat_pass": {},
-            "merge_stack_tahn_unbind_pass": {},
             "merge_splits_pass": {},
             "mutate_cat_pass": {},
             "split_cat_pass": {},
@@ -1129,14 +1126,178 @@ class TestSplitCatFxPasses(TestCase):
             )
             return torch.cat((output, cat), dim=0)
 
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "split_cat_to_slices_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def split_cat_to_slices(x):
+            x_c = x.clone()
+            x_c_2 = x.clone()
+            l1_out = torch.split(x, [50, 50, 50, 50, 50, 50, 50, 50, 50, 50], dim=0)
+            l2_out = torch.split(x_c, [50, 50, 50, 50, 50, 50, 50, 50, 50, 50], dim=0)
+            l3_out = torch.split(x_c_2, [100, 100, 100, 100, 100], dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item0_c = l2_out[0]
+            item1_c = l2_out[1]
+            item2_c = l2_out[2]
+            item3_c = l2_out[3]
+            item4_c = l2_out[4]
+            item5_c = l2_out[5]
+            item6_c = l2_out[6]
+            item7_c = l2_out[7]
+            item8_c = l2_out[8]
+            item9_c = l2_out[9]
+            item0_c_2 = l3_out[0]
+            item1_c_2 = l3_out[1]
+            item2_c_2 = l3_out[2]
+            item3_c_2 = l3_out[3]
+            item4_c_2 = l3_out[4]
+            other = item0.clone()
+            return torch.cat(
+                [
+                    other,
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item4_c,
+                    item5_c,
+                    item6_c,
+                    item7_c,
+                    item8_c,
+                    item9_c,
+                    item0_c,
+                    item1_c,
+                    item2_c,
+                    item3_c,
+                    item0_c_2,
+                    item1_c_2,
+                    item2_c_2,
+                    item3_c_2,
+                    item4_c_2,
+                ],
+                dim=0,
+            )
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "unbind_cat_to_view_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def unbind_cat_to_view(x):
+            x_c = x.view(10, 50, 500)
+            l1_out = torch.unbind(x_c, dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            cat = torch.cat(
+                [
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                ],
+                dim=1,
+            )
+            return torch.cat((cat, item7, item8, item9), dim=1)
+
+        @torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "split_stack_to_cats_pass": {},
+            },
+            post_grad_fusion_options={},
+        )
+        def split_stack_to_cats(x):
+            x_c = x.view(10, 50, 500)
+            l1_out = torch.unbind(x_c, dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            split1 = torch.split(item0, [250, 250], dim=1)
+            split2 = torch.split(item1, [250, 250], dim=1)
+            split3 = torch.split(item2, [250, 250], dim=1)
+            split4 = torch.split(item3, [250, 250], dim=1)
+            split5 = torch.split(item4, [250, 250], dim=1)
+            split6 = torch.split(item5, [250, 250], dim=1)
+            getitem0, getitem1 = split1[0], split1[1]
+            getitem2, getitem3 = split2[0], split2[1]
+            getitem4, getitem5 = split3[0], split3[1]
+            getitem6, getitem7 = split4[0], split4[1]
+            getitem8, getitem9 = split5[0], split5[1]
+            getitem10, getitem11 = split6[0], split6[1]
+            getitem0_c = getitem0.clone()
+            getitem1_c = getitem1.clone()
+            getitem2_c = getitem2.clone()
+            return torch.stack(
+                (
+                    getitem0,
+                    getitem1,
+                    getitem2,
+                    getitem3,
+                    getitem4,
+                    getitem5,
+                    getitem0_c,
+                    getitem1_c,
+                    getitem6,
+                    getitem7,
+                    getitem8,
+                    getitem9,
+                    getitem10,
+                    getitem11,
+                    getitem2_c,
+                ),
+                dim=1,
+            )
+
         args = [
             torch.randn(500, 500),
         ]
-        for fn, expected_getitem_cat_merged, expected_cat_removed in [
-            (split_cat_split, 2, 0),
-            (split_cat_split_kwarg, 2, 0),
-            (remove_cat_node_with_all_getitmes, 0, 2),
-            (mutate_cat_node_with_some_getitmes, 0, 1),
+        for (
+            fn,
+            expected_getitem_cat_merged,
+            expected_cat_removed,
+            expected_split_cat_to_slices,
+            exptected_unbind_to_cat_view,
+            expected_split_stack_to_cats,
+        ) in [
+            (split_cat_split, 2, 0, 0, 0, 0),
+            (split_cat_split_kwarg, 2, 0, 0, 0, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2, 0, 0, 0),
+            (mutate_cat_node_with_some_getitmes, 0, 1, 0, 0, 0),
+            (split_cat_to_slices, 0, 0, 1, 0, 0),
+            (unbind_cat_to_view, 0, 0, 0, 1, 0),
+            (split_stack_to_cats, 0, 0, 0, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1150,41 +1311,18 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["mutate_cat_pass"],
                 expected_cat_removed,
             )
-            counters.clear()
-
-    @patch
-    def test_stack_tahn_unbind_merge(self):
-        def stack_tahn_unbind(x):
-            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
-            item0 = l1_out[0]
-            item1 = l1_out[1]
-            item2 = l1_out[2]
-            item3 = l1_out[3]
-            item4 = l1_out[4]
-            item5 = l1_out[5]
-            item6 = l1_out[6]
-            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
-            cat_1 = torch.cat((item3, item4), 1)
-            cat_2 = torch.cat((item5, item6), 1)
-            tanh = torch.tanh(stack)
-            unbind = torch.unbind(tanh, 0)
-            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
-
-        args = [
-            torch.randn(50, 120),
-        ]
-        for fn, expected_stack_tahn_unbind_merged in [
-            (stack_tahn_unbind, 1),
-        ]:
-            expected = fn(*args)
-            actual = torch.compile(fn)(*args)
-
-            torch.testing.assert_close(actual, expected)
             self.assertEqual(
-                counters["inductor"]["merge_stack_tahn_unbind_pass"],
-                expected_stack_tahn_unbind_merged,
+                counters["inductor"]["split_cat_to_slices_pass"],
+                expected_split_cat_to_slices,
             )
-            self.assertIn("merge_getitem_cat_pass_pre_grad", optimus_scuba_log)
+            self.assertEqual(
+                counters["inductor"]["unbind_cat_to_view_pass"],
+                exptected_unbind_to_cat_view,
+            )
+            self.assertEqual(
+                counters["inductor"]["split_stack_to_cats_pass"],
+                expected_split_stack_to_cats,
+            )
             counters.clear()
 
     def test_numpy_compat_normalization(self):
@@ -1205,12 +1343,12 @@ class TestSplitCatFxPasses(TestCase):
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch
-    @requires_cuda
+    @requires_gpu
     def test_stack_normalization_axis_kwarg(self):
         def fn(x, y):
             return torch.stack([x, y], axis=1)
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
         expected = fn(x, y)
         actual = torch.compile(fn)(x, y)
 
@@ -1218,5 +1356,5 @@ class TestSplitCatFxPasses(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

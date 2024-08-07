@@ -82,7 +82,7 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
 
 template <typename func_t,
     typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
+inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
@@ -97,7 +97,7 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 
 template <typename func_t,
     typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
+inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   for (; i < n; i++) {
@@ -111,7 +111,7 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 // Basic loop operation (one output, N inputs). May be auto-vectorized
 // by the compiler. Supports inputs and outputs of different types.
 template <typename func_t>
-static inline void
+inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   constexpr int ntensors = traits::arity + 1;
@@ -166,7 +166,7 @@ void handle_tuple_outputs(char* C10_RESTRICT data[],
 // 2. Iterate over the members of the returned tuple, set the corresponding
 //    output tensor by the tuple member in `handle_tuple_outputs` function.
 template <typename func_t>
-static inline void
+inline void
 multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
 
@@ -195,7 +195,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
 // is 0, then there are no scalar inputs.
 template <typename func_t, typename vec_func_t>
-static inline void
+inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
@@ -228,7 +228,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 
 
 template <typename traits, typename cb_t>
-static inline void unroll_contiguous_scalar_checks(
+inline void unroll_contiguous_scalar_checks(
     const int64_t* /*strides*/,
     std::index_sequence<>,
     cb_t&& cb) {
@@ -236,7 +236,7 @@ static inline void unroll_contiguous_scalar_checks(
 }
 
 template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
-static inline void unroll_contiguous_scalar_checks(
+inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
     std::index_sequence<INDEX0, INDEX...>,
     cb_t&& cb) {

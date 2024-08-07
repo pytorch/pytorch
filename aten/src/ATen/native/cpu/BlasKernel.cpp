@@ -38,6 +38,11 @@ float fp16_dot_with_fp32_arith(
   const float16_t* x,
   const float16_t* a,
   int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
 }
 #endif
 
@@ -185,8 +190,7 @@ void gemm_transa_(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
-gemm_transb_(
+void gemm_transb_impl(
     TransposeType transb,
     int64_t m,
     int64_t n,
@@ -196,12 +200,9 @@ gemm_transb_(
     int64_t lda,
     const scalar_t* b,
     int64_t ldb,
-    opmath_t beta,
-    scalar_t* c,
+    /* we expect pre-applied beta */
+    opmath_t* c,
     int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
   // c += alpha * (a @ b.T)
   for (const auto l : c10::irange(k)) {
     for (const auto j : c10::irange(n)) {
@@ -220,6 +221,27 @@ gemm_transb_(
   }
 }
 
+template <typename scalar_t, typename opmath_t>
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+gemm_transb_(
+    TransposeType transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    opmath_t alpha,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
+    opmath_t beta,
+    scalar_t* c,
+    int64_t ldc) {
+  // c *= beta
+  scale_(m, n, beta, c, ldc);
+
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c, ldc);
+}
+
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
 typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
@@ -236,18 +258,44 @@ gemm_transb_(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  // c += alpha * (a @ b.T)
-  for (const auto i : c10::irange(m)) {
+  // We need to calculate full-precision dot products for correctness;
+  // users notice error accumulation with reduced-width types (e.g.,
+  // https://github.com/pytorch/pytorch/issues/95125 and
+  // https://github.com/pytorch/pytorch/issues/83863, which were filed
+  // when we used gemm_transb_impl naively, accumulating into
+  // float16/bfloat16). The straightforward way to do this is to use
+  // the vector dot column algorithm anyway, but this gives terrible
+  // performance because of the non-contiguous matrix
+  // access. Therefore, we instead elect to allocate temporary space
+  // to hold the output at higher-precision so that we can accumulate
+  // into it using the above cache-friendly "load one vector element,
+  // FMA it with an entire matrix row into the entire result vector"
+  // algorithm instead.
+  const auto c_size = m * n;
+  auto c_accum = std::make_unique<opmath_t[]>(c_size);
+  if (beta == 1) {
     for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
-      });
-      if (beta == opmath_t(0)) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = c[j * ldc + i];
       }
+    }
+  } else if (beta == 0) {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = 0;
+      }
+    }
+  } else {
+    for (const auto j : c10::irange(n)) {
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = beta * c[j * ldc + i];
+      }
+    }
+  }
+  gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c_accum.get(), m);
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      c[j * ldc + i] = c_accum[j * m + i];
     }
   }
 }
@@ -326,20 +374,8 @@ static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
     len);
 }
 
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t l) {
-    if ((l&3) != 0) {
-      return sum(l, [&](int64_t i) -> float {
-        return float(a[i]) * float(b[i]);
-      });
-    }
-    float32x4_t rcv = vdupq_n_f32(0);
-    for (int64_t idx = 0; idx < l; idx += 4) {
-      float32x4_t aVec = load_as_float32x4(a + idx);
-      float32x4_t bVec = load_as_float32x4(b + idx);
-      rcv = vaddq_f32(rcv, vmulq_f32(aVec, bVec));
-    }
-    auto sum = vpaddq_f32(rcv, rcv);
-    return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>

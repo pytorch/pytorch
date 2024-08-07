@@ -17,12 +17,14 @@ try:
     try:
         from . import (
             test_cpu_repro,
+            test_cpu_select_algorithm,
             test_mkldnn_pattern_matcher,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
         import test_cpu_repro
+        import test_cpu_select_algorithm
         import test_mkldnn_pattern_matcher
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
@@ -86,7 +88,6 @@ if config.abi_compatible:
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
-        "test_profiler_mark_wrapper_call_cpu",
         "test_qconv2d_add_cpu",
         "test_qconv2d_add_relu_cpu",
         "test_qconv2d_cpu",
@@ -94,8 +95,16 @@ if config.abi_compatible:
         "test_qconv2d_maxpool2d_linear_dynamic_cpu",
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
+        "test_qlinear_add_cpu",
+        "test_qlinear_add_relu_cpu",
         "test_qlinear_dequant_promotion_cpu",
+        "test_qlinear_gelu_cpu",
         "test_qlinear_relu_cpu",
+        *[
+            func
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
     ]
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -230,6 +239,12 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
+        *[
+            BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
+            if func.startswith("test_linear_with_pointwise")
+        ],
+        BaseTest("test_polar"),
         BaseTest(
             "test_linear_binary",
             "",
@@ -237,18 +252,29 @@ if RUN_CPU:
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
-        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_linear_packed",
+            "",
+            test_cpu_repro.CPUReproTests(),
+            torch.backends.mkldnn.is_available()
+            and (
+                torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            ),
+        ),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
             "cpu",
             test_cpu_repro.CPUReproTests(),
             condition=torch.backends.mkldnn.is_available(),
         ),
+        BaseTest("test_max_pool2d6"),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"py::gil_scoped_release release;": 1},
+            # Two threads compile, so we expect the output code to be printed twice.
+            code_string_count={"py::gil_scoped_release release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

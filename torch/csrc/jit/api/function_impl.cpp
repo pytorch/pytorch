@@ -28,7 +28,7 @@ c10::FunctionSchema defaultSchemaFor(const GraphFunction& function) {
   for (const auto i : c10::irange(num_inputs)) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
-                                         : ("argument_" + c10::to_string(i));
+                                         : ("argument_" + std::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
   for (const auto i : c10::irange(g.outputs().size())) {

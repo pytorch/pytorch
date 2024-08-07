@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -57,8 +58,8 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
-
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -166,8 +167,7 @@ def _init_process_group_state_for_hybrid_shard(
             state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
-                "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_group())}"
+                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
             )
     elif process_group is None:
         default_group = _get_default_group()
@@ -476,11 +476,11 @@ def _init_core_state(
     state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = {}
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
-    _handle: FlatParamHandle = None
+    _handle: Optional[FlatParamHandle] = None
     state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
@@ -521,7 +521,10 @@ def _init_prefetching_state(
 def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
     # TODO: we need to add additional check once we support FSDP + PiPPy.
     # This check is currently sufficient, since we only support FSDP + TP.
-    if device_mesh and _mesh_resources.get_parent_mesh(state._device_mesh) is not None:
+    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    # if a root mesh is not the same as device_mesh,
+    # meaning the device_mesh is sliced out from the root mesh.
+    if device_mesh and root_mesh != state._device_mesh:
         state._fsdp_extension = DTensorExtensions(state._device_handle)
     else:
         # We need to explicilty set _fsdp_extension to None.
@@ -807,16 +810,18 @@ def _get_device_from_device_id(
     device = (
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
-    if device == torch.device("cuda"):
+    if device in [torch.device("cuda"), torch.device("hpu")]:
+        backend = getattr(torch, device.type)
+        device_idx = backend.current_device()
         warnings.warn(
             f"FSDP got the argument `device_id` {device_id} on rank "
             f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.cuda.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+            f"FSDP will use the current device {device_idx}. "
+            "If this is incorrect, please explicitly call torch.{device_type}.set_device() "
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument."
         )
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(device.type, device_idx)
     return device
 
 
@@ -874,6 +879,7 @@ def _materialize_meta_module(
         torch.cuda.current_device()
     )
     modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
+    module = None
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children

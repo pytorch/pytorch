@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import gzip
 import json
 import os
@@ -131,11 +132,13 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
+        elif ProfilerActivity.MTIA in self.activities:
+            self.use_device = "mtia"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = dict()
+        self.preset_metadata: Dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -148,7 +151,6 @@ class _KinetoProfile:
         if self.profiler is None:
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_mtia=(ProfilerActivity.MTIA in self.activities),
                 use_device=self.use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
@@ -601,6 +603,7 @@ class profile(_KinetoProfile):
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",
                 FutureWarning,
+                stacklevel=2,
             )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
@@ -769,7 +772,7 @@ class ExecutionTraceObserver(_ITraceObserver):
     incurring any overheads.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the default states.
         """
