@@ -192,33 +192,64 @@ def generic_associative_scan(operator, elems_flat, dim=0, lifted_args=()):
     # TODO: The recursion involved here "unrolls" the scan
     # function for all inputs. Could there be a more efficient
     # way instead of running over the operation in sequence?
+    
+    if hasattr(operator, "graph"):#torch.compiler.is_dynamo_compiling():
+        def operator_fct(x, y, l_args):
+            return operator(*x, *y, *[torch.squeeze(l_arg, dim) for l_arg in l_args])
+        operator_vmap = torch.vmap(operator_fct, in_dims=dim, out_dims=dim)
+        lifted_args_vmap = [torch.unsqueeze(l_arg, dim) for l_arg in lifted_args]
+    else:
+        def operator_fct(x, y, l_args):
+            return operator(*x, *y, *l_args)
+        operator_vmap = operator_fct
+        lifted_args_vmap = lifted_args
+        
+    # operator_vmap = torch.vmap(operator, in_dims=dim, out_dims=dim)
+    
     def _scan(elems):
         """Perform scan on `elems`."""
         num_elems = elems[0].shape[dim]
 
         if num_elems < 2:
             return elems
+        
+        # print([elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems])
+        # print([elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems])
 
-        reduced_elems = operator(
-            *[elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
-            *[elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems],
-            *lifted_args,
+        # if num_elems % 2 == 0:
+        reduced_elems = operator_vmap(
+            # *[elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
+            # *[elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems],
+            # *lifted_args_vmap,
+            [elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
+            [elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems],
+            lifted_args_vmap,
         )
+        # else:
+        #     if num_elems % 2 == 0:
+        
+        # print(reduced_elems)
 
         # Recursively compute scan for partially reduced tensors.
         odd_elems = _scan(reduced_elems)
 
         if num_elems % 2 == 0:
-            even_elems = operator(
-                *[e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
-                *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
-                *lifted_args,
+            even_elems = operator_vmap(
+                # *[e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
+                # *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                # *lifted_args_vmap,
+                [e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
+                [e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                lifted_args_vmap,
             )
         else:
-            even_elems = operator(
-                *odd_elems,
-                *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
-                *lifted_args,
+            even_elems = operator_vmap(
+                # *odd_elems,
+                # *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                # *lifted_args_vmap,
+                odd_elems,
+                [e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems],
+                lifted_args_vmap,
             )
 
         # The first element of a scan is the same as the first element
@@ -260,9 +291,10 @@ def trace_associative_scan(
         sample_inputs = [
             torch.empty_like(
             # torch.empty(
-                x,
+                # x,
                 # tuple([s if n != dim else -1 for n, s in enumerate(x.size)]),
-                #x[slice_along_axis(0, 1, stride=None, dim=dim)],
+                # x[slice_along_axis(0, 1, stride=None, dim=dim)],
+                torch.squeeze(x[slice_along_axis(0, 1, stride=None, dim=dim)], dim),
                 dtype=x.dtype,
                 device=x.device,
                 requires_grad=x.requires_grad,

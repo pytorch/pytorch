@@ -1031,8 +1031,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args=(
                     SourcelessBuilder.create(
                         tx,
-                        leaf.size
+                        # leaf.size
                         # tuple([s if n != dim.as_proxy() else -1 for n, s in enumerate(leaf.size)])
+                        tuple([s for n, s in enumerate(leaf.size) if n != dim.as_proxy()])
                         if leaf.size is not None
                         else BuiltinVariable(getattr)
                             .call_function(
