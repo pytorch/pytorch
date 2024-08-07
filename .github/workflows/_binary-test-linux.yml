@@ -1,0 +1,235 @@
+name: linux-binary-test
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        required: true
+        type: string
+        description: The build's name
+      build_environment:
+        required: true
+        type: string
+        description: The build environment
+      ALPINE_IMAGE:
+        required: false
+        type: string
+        default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      PYTORCH_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/pytorch repository
+      BUILDER_ROOT:
+        required: true
+        type: string
+        description: Root directory for the pytorch/builder repository
+      PACKAGE_TYPE:
+        required: true
+        type: string
+        description: Package type
+      DESIRED_CUDA:
+        required: true
+        type: string
+        description: Desired Cuda version
+      GPU_ARCH_VERSION:
+        required: false
+        type: string
+        description: GPU Arch version
+      GPU_ARCH_TYPE:
+        required: true
+        type: string
+        description: GPU Arch type
+      DOCKER_IMAGE:
+        required: true
+        type: string
+        description: Docker image to use
+      LIBTORCH_CONFIG:
+        required: false
+        type: string
+        description: Desired libtorch config (for libtorch builds only)
+      LIBTORCH_VARIANT:
+        required: false
+        type: string
+        description: Desired libtorch variant (for libtorch builds only)
+      DESIRED_DEVTOOLSET:
+        required: false
+        type: string
+        description: Desired dev toolset
+      DESIRED_PYTHON:
+        required: false
+        type: string
+        description: Desired python version
+      runs_on:
+        required: true
+        type: string
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        required: true
+        description: Github Token
+
+jobs:
+  test:
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
+      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
+      PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
+      LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
+      DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      # Needed for conda builds
+      ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+      ANACONDA_USER: pytorch
+      AWS_DEFAULT_REGION: us-east-1
+      BINARY_ENV_FILE: /tmp/env
+      BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+    steps:
+      - name: Make the env permanent during this workflow (but not the secrets)
+        shell: bash
+        run: |
+          {
+            echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
+            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
+            echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
+
+            echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
+            echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
+            echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
+            echo "DOCKER_IMAGE=${{ env.DOCKER_IMAGE }}"
+            echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
+            echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
+            echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
+            echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
+            echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
+
+            echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
+            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
+            echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
+            echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
+            echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
+            echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+            echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
+          } >> "${GITHUB_ENV} }}"
+
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
+        with:
+          github-secret: ${{ secrets.github-token }}
+
+        # Setup the environment
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
+
+      - name: Setup Linux
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/setup-linux
+
+      - name: Chown workspace
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
+      - name: Clean workspace
+        shell: bash
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch to pytorch dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+
+      - name: Checkout pytorch/builder to builder dir
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+
+      - name: Check if the job is disabled
+        id: filter
+        uses: ./pytorch/.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # NB: Use a mock test matrix with a default value here. After filtering, if the
+          # returned matrix is empty, it means that the job is disabled
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+
+      - name: Download Build Artifacts
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
+
+      - name: Pull Docker image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ inputs.DOCKER_IMAGE }}
+
+      - name: Test Pytorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+
+      - name: Teardown Linux
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+
+      - name: Chown workspace
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./pytorch/.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

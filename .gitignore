@@ -1,0 +1,381 @@
+# READ THIS BEFORE YOU REFACTOR ME
+#
+# setup.py uses the list of patterns in this file to decide
+# what to delete, but it's not 100% sound.  So, for example,
+# if you delete aten/build/ because it's redundant with build/,
+# aten/build/ will stop being cleaned.  So be careful when
+# refactoring this file!
+
+## PyTorch
+
+.coverage
+coverage.xml
+.dmypy.json
+.gradle
+.hypothesis
+.mypy_cache
+.additional_ci_files
+/.extracted_scripts/
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-disabled-tests.json
+**/.pytorch-slow-tests.json
+*/*.pyc
+*/*.so*
+*/**/__pycache__
+*/**/*.dylib*
+*/**/*.pyc
+*/**/*.pyd
+*/**/*.so*
+*/**/**/*.pyc
+*/**/**/**/*.pyc
+*/**/**/**/**/*.pyc
+aten/build/
+aten/src/ATen/Config.h
+aten/src/ATen/cuda/CUDAConfig.h
+benchmarks/.data
+caffe2/cpp_test/
+dist/
+docs/build/
+docs/cpp/src
+docs/src/**/*
+docs/cpp/build
+docs/cpp/source/api
+docs/cpp/source/html/
+docs/cpp/source/latex/
+docs/source/compile/generated/
+docs/source/generated/
+docs/source/compile/generated/
+log
+usage_log.txt
+test-reports/
+test/*.bak
+test/**/*.bak
+test/.coverage
+test/.hypothesis/
+test/cpp/api/mnist
+test/custom_operator/model.pt
+test/debug/
+test/jit_hooks/*.pt
+test/data/legacy_modules.t7
+test/data/*.pt
+test/forward_backward_compatibility/nightly_schemas.txt
+dropout_model.pt
+test/generated_type_hints_smoketest.py
+test/htmlcov
+test/cpp_extensions/install/
+third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
+tools/shared/_utils_internal.py
+tools/fast_nvcc/wrap_nvcc.sh
+tools/fast_nvcc/wrap_nvcc.bat
+tools/fast_nvcc/tmp/
+torch.egg-info/
+torch/_C/__init__.pyi
+torch/_C/_nn.pyi
+torch/_C/_VariableFunctions.pyi
+torch/_VF.pyi
+torch/return_types.pyi
+torch/nn/functional.pyi
+torch/utils/data/datapipes/datapipe.pyi
+torch/csrc/autograd/generated/*
+torch/csrc/lazy/generated/*.[!m]*
+torch_compile_debug/
+# Listed manually because some files in this directory are not generated
+torch/testing/_internal/generated/annotated_fn_args.py
+torch/testing/_internal/data/*.pt
+torch/csrc/api/include/torch/version.h
+torch/csrc/cudnn/cuDNN.cpp
+torch/csrc/generated
+torch/csrc/generic/TensorMethods.cpp
+torch/csrc/inductor/aoti_torch/generated/*.cpp
+torch/csrc/jit/generated/*
+torch/csrc/jit/fuser/config.h
+torch/csrc/nn/THCUNN.cpp
+torch/csrc/nn/THCUNN.cwrap
+torch/bin/
+torch/cmake/
+torch/lib/*.a*
+torch/lib/*.dll*
+torch/lib/*.exe*
+torch/lib/*.dylib*
+torch/lib/*.h
+torch/lib/*.lib
+torch/lib/*.pdb
+torch/lib/*.so*
+torch/lib/protobuf*.pc
+torch/lib/build
+torch/lib/caffe2/
+torch/lib/cmake
+torch/lib/include
+torch/lib/pkgconfig
+torch/lib/protoc
+torch/lib/protobuf/
+torch/lib/tmp_install
+torch/lib/torch_shm_manager
+torch/lib/site-packages/
+torch/lib/python*
+torch/lib64
+torch/include/
+torch/share/
+torch/test/
+torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
+torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
+torch/version.py
+minifier_launcher.py
+# Root level file used in CI to specify certain env configs.
+# E.g., see .circleci/config.yaml
+env
+.circleci/scripts/COMMIT_MSG
+scripts/release_notes/*.json
+sccache-stats*.json
+lint.json
+merge_record.json
+
+# These files get copied over on invoking setup.py
+torchgen/packaged/*
+!torchgen/packaged/README.md
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swa
+*.swb
+*.swc
+*.swd
+*.swe
+*.swf
+*.swg
+*.swh
+*.swi
+*.swj
+*.swk
+*.swl
+*.swm
+*.swn
+*.swo
+*.swp
+*~
+.~lock.*
+
+# macOS dir files
+.DS_Store
+
+# Ninja files
+.ninja_deps
+.ninja_log
+compile_commands.json
+*.egg-info/
+docs/source/scripts/activation_images/
+docs/source/scripts/quantization_backend_configs/
+
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
+*.pyc
+*.pyd
+
+# Compiled MATLAB
+*.mex*
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# NFS handle files
+**/.nfs*
+
+# Sublime Text settings
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse Project settings
+*.*project
+.settings
+
+# QtCreator files
+*.user
+
+# PyCharm files
+.idea
+
+# GDB history
+.gdb_history
+
+## Caffe2
+
+# build, distribute, and bins (+ python proto bindings)
+build/
+# Allow tools/build/ for build support.
+!tools/build/
+build_host_protoc
+build_android
+build_ios
+.build_debug/*
+.build_release/*
+.build_profile/*
+distribute/*
+*.testbin
+*.bin
+cmake_build
+.cmake_build
+gen
+.setuptools-cmake-build
+.pytest_cache
+aten/build/*
+
+# Bram
+plsdontbreak
+
+# Generated documentation
+docs/_site
+docs/gathered
+_site
+doxygen
+docs/dev
+
+# LevelDB files
+*.sst
+*.ldb
+LOCK
+CURRENT
+MANIFEST-*
+
+# generated version file
+caffe2/version.py
+
+# setup.py intermediates
+.eggs
+caffe2.egg-info
+MANIFEST
+
+# Atom/Watchman required file
+.watchmanconfig
+.watchman
+
+# Files generated by CLion
+cmake-build-debug
+
+# BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
+#
+# Below files are not deleted by "setup.py clean".
+
+# Downloaded bazel
+tools/bazel
+
+# Visual Studio Code files
+.vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
+
+# YouCompleteMe config file
+.ycm_extra_conf.py
+
+# Files generated when a patch is rejected
+*.orig
+*.rej
+
+# Files generated by ctags
+CTAGS
+GTAGS
+GRTAGS
+GSYMS
+GPATH
+tags
+TAGS
+
+
+# ccls file
+.ccls-cache/
+
+# clang tooling storage location
+.clang-format-bin
+.clang-tidy-bin
+.lintbin
+
+# clangd background index
+.clangd/
+.cache/
+
+# bazel symlinks
+bazel-*
+
+# xla repo
+xla/
+
+# direnv, posh-direnv
+.env
+.envrc
+.psenvrc
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+**/core.[1-9]*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
+
+# coverage files
+*/**/.coverage.*
+
+# buck generated files
+.buckd/
+.lsp-buck-out/
+.lsp.buckd/
+buck-out/
+
+# Downloaded libraries
+third_party/ruy/
+third_party/glog/
+
+# Virtualenv
+venv/
+
+# Log files
+*.log
+sweep/
+
+# Android build artifacts
+android/pytorch_android/.cxx
+android/pytorch_android_torchvision/.cxx
+
+# Pyre configs (for internal usage)
+.pyre_configuration
+.pyre_configuration.codenav
+.arcconfig
+.stable_pyre_client
+.pyre_client

@@ -1,0 +1,105 @@
+name: Setup Windows
+
+description: Set up for windows jobs
+
+inputs:
+  cuda-version:
+    description: which cuda version to install, 'cpu' for none
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
+
+    # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+    - name: Enable long paths on Windows
+      shell: powershell
+      run: |
+        Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+
+    - name: Setup conda
+      shell: bash
+      run: |
+        # Windows conda is baked into the AMI at this location
+        CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+        {
+          echo "CONDA_RUN=${CONDA} run --no-capture-output";
+          echo "CONDA_BUILD=${CONDA} run conda-build";
+          echo "CONDA_INSTALL=${CONDA} install";
+        } >> "${GITHUB_ENV}"
+
+    - name: Setup Python3
+      shell: bash
+      run: |
+        set +e
+        set -x
+
+        PYTHON3=$(${CONDA_RUN} which python3)
+        EXIT_CODE=$?
+
+        if [[ "${EXIT_CODE}" == "0" ]]; then
+          echo "Found Python3 at ${PYTHON3}, adding it into GITHUB_PATH"
+
+          PYTHON_PATH=$(dirname "${PYTHON3}")
+          echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
+        else
+          # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3
+          # installation, which is Python 3 based. Its Python is default to Python 3. Further, there
+          # is also the Miniconda installation that is Python 2 based, and both can be installed if
+          # needed. In both cases, Python binary is just called python
+          PYTHON=$(${CONDA_RUN} which python)
+          EXIT_CODE=$?
+
+          if [[ "${EXIT_CODE}" == "0" ]]; then
+            echo "Found Python at ${PYTHON}, set Python3 alias and add it into GITHUB_PATH"
+
+            PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
+            # It's difficult to setup alias across GitHub action steps, so I just add a softlink
+            # here pointing to Python
+            ln -s "${PYTHON}" "${PYTHON3}"
+
+            PYTHON_PATH=$(dirname "${PYTHON}")
+            echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
+          else
+            echo "Found no Python using ${CONDA_RUN}"
+          fi
+        fi
+
+    - name: Get temporary directory used by Windows Python
+      shell: bash
+      run: |
+        TMPDIR=$(python -c 'import tempfile; print(tempfile.gettempdir());')
+        echo "TMPDIR=${TMPDIR}" >> "${GITHUB_ENV}"
+
+    # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+    # removed once Windows Defender is removed from the AMI
+    - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      continue-on-error: true
+      shell: powershell
+      run: |
+        Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR,"C:\Jenkins\Miniconda3" -ErrorAction Ignore
+        # Let's both exclude the path and disable Windows Defender completely just to be sure
+        # that it doesn't interfere
+        Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+
+    - name: Install sysinternals handle tool
+      continue-on-error: true
+      shell: powershell
+      run: |
+        choco install handle -y
+        handle C:\actions-runner\_work\
