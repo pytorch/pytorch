@@ -6442,6 +6442,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
@@ -6480,6 +6484,35 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_dense_eager.transpose(1, 2),
             out_nt_compiled.values().transpose(0, 1).view(8, 16, 4, 16),
         )
+
+        def get_values():
+            return tuple(
+                x.clone().detach().requires_grad_(True) for x in (values32, values16)
+            )
+
+        v32_dense_eager, v16_dense_eager = get_values()
+        v32_dense_compile, v16_dense_compile = get_values()
+        v32_nt_eager, v16_nt_eager = get_values()
+        v32_nt_compile, v16_nt_compile = get_values()
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            loss_dense_eager = fn_dense(v32_dense_eager, v16_dense_eager).sum()
+            loss_dense_compile = torch.compile(fn_dense)(
+                v32_dense_eager, v16_dense_eager
+            ).sum()
+            loss_nt_eager = fn_nt(v32_nt_eager, v16_nt_eager, offsets).values().sum()
+            loss_nt_compile = (
+                torch.compile(fn_nt)(v32_nt_eager, v16_nt_eager, offsets).values().sum()
+            )
+
+        # gradcheck isn't great because we want to run forward in autocast and backward outside of autocast
+        self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
+
+        self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
 
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
