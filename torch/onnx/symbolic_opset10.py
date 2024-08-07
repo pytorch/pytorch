@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 from __future__ import annotations
@@ -23,6 +22,7 @@ from torch.onnx import (
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md

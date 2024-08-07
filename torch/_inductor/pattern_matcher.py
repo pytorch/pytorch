@@ -34,8 +34,6 @@ implements a `_match` method which returns either a `Match` object for a
 successful match or a `FailedMatch` object for a failure to match.
 """
 
-# mypy: disallow-untyped-defs
-
 from __future__ import annotations
 
 import contextlib
@@ -1614,6 +1612,12 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
         if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
     return node.kwargs.get("out") is not None
+
+
+def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+    assert "mutation_region_id" in a.meta
+    assert "mutation_region_id" in b.meta
+    return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
 
 
 def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:

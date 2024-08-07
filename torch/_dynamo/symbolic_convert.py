@@ -12,14 +12,14 @@ import itertools
 import linecache
 import logging
 import operator
+import re
 import sys
-import textwrap
 import threading
 import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -110,6 +110,7 @@ from .variables.user_defined import (
     UserDefinedObjectVariable,
 )
 
+
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
@@ -134,6 +135,7 @@ class SpeculationEntry:
     filename: str
     lineno: int
     instruction_pointer: int
+    inst: Instruction  # for debugging only
     failed: bool = False
     reason: Optional[GraphCompileReason] = None
 
@@ -169,28 +171,63 @@ class SpeculationLog:
         self.entries.clear()
         self.index = 0
 
-    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
+    def next(
+        self, filename: str, lineno: int, instruction_pointer, inst
+    ) -> SpeculationEntry:
         """
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
         if len(self.entries) == self.index:
-            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
+            self.entries.append(
+                SpeculationEntry(filename, lineno, instruction_pointer, inst)
+            )
         entry = self.entries[self.index]
-        self.index += 1
+        prev_entry_msg = ""
+        if self.index != 0:
+            prev_entry = self.entries[self.index - 1]
+            prev_entry_msg = (
+                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+            )
         assert (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
-        ), textwrap.dedent(
-            f"""
-            SpeculationLog diverged at {self.index} of {len(self.entries)}:
-            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
-            - Run2: {filename}:{lineno} (ip={instruction_pointer})
-            Please submit a bug report.
-            """
-        )
+        ), f"""
+SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
+- Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
+- Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
+{prev_entry_msg}
+There are two usual reasons why this may have occured:
+- When Dynamo analysis restarted, the second run took a different path than
+  the first.  If this occurred, the previous instruction is the critical instruction that
+  behaved differently.
+- Speculation entries are only added under certain conditions (as seen in
+  step()), e.g., there must exist operators in the graph; those conditions may
+  have changed on restart.
+
+If this divergence was intentional, clear the speculation log before restarting (do NOT
+do this for graph breaks, you will infinite loop).
+
+Otherwise, please submit a bug report, ideally including the contents of TORCH_LOGS=+dynamo
+"""
+        self.index += 1
         return entry
+
+
+@dataclasses.dataclass
+class LocalState:
+    input_sizes: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+    input_strides: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+
+
+# Mutable box that is shared across restarts
+@dataclasses.dataclass
+class DistributedState:
+    compile_pg: Any
+    local_state: LocalState
+    all_states: Optional[List[LocalState]] = None
 
 
 @functools.lru_cache(None)
@@ -204,14 +241,20 @@ class BlockStackEntry:
     inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
-    with_context: Optional[ContextWrappingVariable] = None
+    with_context: Optional[
+        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+    ] = None
 
     def can_restore(self):
         return self.with_context is not None
 
     def resume_fn(self):
         assert self.stack_index is not None
-        if self.with_context and self.with_context.target_values:
+        if (
+            self.with_context
+            and hasattr(self.with_context, "target_values")
+            and self.with_context.target_values
+        ):
             return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
         else:
             return ReenterWith(self.stack_index)
@@ -230,7 +273,7 @@ def stack_op(fn: typing.Callable[..., object]):
     fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
-    def impl(self: "InstructionTranslatorBase", inst: Instruction):
+    def impl(self: "InstructionTranslator", inst: Instruction):
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
@@ -427,18 +470,18 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             try:
-                x = value.var_getattr(self, "__bool__")
+                x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
             except exc.ObservedException:
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")
+                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
             else:
                 if isinstance(x, GetAttrVariable):
                     # if __bool__ is missing, trying __len__ to infer a truth value.
-                    x = value.var_getattr(self, "__len__")
+                    x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                result = x.call_function(self, [], {})
+                result = x.call_function(self, [], {})  # type: ignore[arg-type]
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
@@ -584,6 +627,7 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
+                assert isinstance(b.with_context, ContextWrappingVariable)
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -640,7 +684,7 @@ def break_graph_if_unsupported(*, push):
 class BytecodeDistpatchTableMeta(type):
     """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
 
-    def __init__(cls, name, bases, dct):
+    def __init__(cls, name, bases, dct) -> None:
         super().__init__(name, bases, dct)
 
         def _missing(opname, *args):
@@ -757,7 +801,7 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))
+        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_user_function_return(self, fn, args, kwargs):
         """
@@ -788,6 +832,9 @@ class InstructionTranslatorBase(
         TracingContext.set_current_loc(
             self.f_code.co_filename, lineno, self.f_code.co_name
         )
+        from torch._logging.structured import dump_file
+
+        dump_file(self.f_code.co_filename)
         if trace_source_log.isEnabledFor(logging.DEBUG):
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
@@ -821,8 +868,8 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
-        except exc.ObservedException:
-            self.exception_handler()
+        except exc.ObservedException as e:
+            self.exception_handler(e)
             return True
         except ReturnValueOp:
             return False
@@ -1272,7 +1319,10 @@ class InstructionTranslatorBase(
             val = it.next_variable(self)
             self.push(it)
             self.push(val)
-        except (StopIteration, exc.UserStopIteration):
+        except (StopIteration, exc.ObservedUserStopIteration) as e:
+            if isinstance(e, exc.ObservedUserStopIteration):
+                exc.handle_observed_exception(self)
+
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
@@ -1288,13 +1338,6 @@ class InstructionTranslatorBase(
             unimplemented("re-raise")
         elif inst.arg == 1:
             val = self.pop()
-
-            # TODO(anijain2305) - Merge StopIterationVariable to use the same exception infra.
-            if (
-                isinstance(val, BuiltinVariable) and val.fn is StopIteration
-            ) or isinstance(val, variables.StopIterationVariable):
-                raise exc.UserStopIteration
-
             # User can raise exception in 2 ways
             #   1) raise exception type - raise NotImplementedError
             #   2) raise execption instance - raise NotImplemetedError("foo")
@@ -1303,19 +1346,22 @@ class InstructionTranslatorBase(
             if isinstance(val, variables.BuiltinVariable):
                 # Create the instance of the exception type
                 # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-                val = val.call_function(self, [], {})
+                val = val.call_function(self, [], {})  # type: ignore[arg-type]
 
             # Save the exception in a global data structure
             self.exn_vt_stack.append(val)
 
             # 2) when user raises exception instance
             if isinstance(val, variables.ExceptionVariable):
+                if val.exc_type is StopIteration:
+                    # StopIteration is used to find the end of iteration while tracing __next__
+                    raise exc.ObservedUserStopIteration(f"raised exception {val}")
                 raise exc.ObservedException(f"raised exception {val}")
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
 
-    def exception_handler(self):
+    def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
             if exn_tab_entry:
@@ -1348,7 +1394,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     raise Unsupported("Observed exception")
-                raise exc.ObservedException
+                raise raised_exception
         else:
             if len(self.block_stack):
                 # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
@@ -1409,7 +1455,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
                     raise Unsupported("Observed exception")
-                raise exc.ObservedException
+                raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
         val = self.pop()
@@ -1443,7 +1489,19 @@ class InstructionTranslatorBase(
     def check_if_exc_matches(self):
         assert len(self.stack) >= 2
         expected_exc_types = self.pop()
-        exc_instance = self.stack[-1]
+        if sys.version_info >= (3, 11):
+            # CHECK_EXC_MATCH (which is used from 3.11 onwards) does not pop.
+            # This is the description from the disassembly doc
+            #
+            # Performs exception matching for ``except``. Tests whether the ``STACK[-2]``
+            # is an exception matching ``STACK[-1]``. Pops ``STACK[-1]`` and pushes the boolean
+            # result of the test.
+            exc_instance = self.stack[-1]
+        else:
+            # This is used prior to 3.11 via opcode JUMP_IF_NOT_EXC_MATCH
+            # There is no documentation but here is the code pointer that does 2 pops
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L3650-L3665
+            exc_instance = self.stack.pop()
 
         # Users can check exception in 2 ways
         # 1) except NotImplementedError --> BuilinVariable
@@ -1551,11 +1609,28 @@ class InstructionTranslatorBase(
                 # aten.random.from, again causing syntax errors. Since this
                 # usecase is uncommon, graph break.
                 unimplemented("random_ op is called with from keyword")
+            elif (
+                fn.name == "uniform_"
+                and isinstance(argsvars, TupleVariable)
+                and len(argsvars.items) == 0
+                and isinstance(kwargsvars, ConstDictVariable)
+                and ConstantVariable.create("from") in kwargsvars
+            ):
+                # `from`` is python keyword. Adding uniform_ with `from` in the
+                # Fx graph causes syntax error. Even if we convert the kwargs to
+                # args, aot_autograd/inductor while lowering generates
+                # aten.uniform.from, again causing syntax errors. Since this
+                # usecase is uncommon, graph break.
+                unimplemented("uniform_ op is called with from keyword")
 
         if not isinstance(
             argsvars, BaseListVariable
         ) and argsvars.has_unpack_var_sequence(self):
             argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
+
+        # Unpack for cases like fn(**obj) where obj is a map
+        if isinstance(kwargsvars, UserDefinedObjectVariable):
+            kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
             kwargsvars, ConstDictVariable
@@ -1619,7 +1694,7 @@ class InstructionTranslatorBase(
     def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}
+            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
         )
         self.push(result)
 
@@ -1645,7 +1720,7 @@ class InstructionTranslatorBase(
 
         try:
             BuiltinVariable(setattr).call_function(
-                self, [obj, ConstantVariable.create(inst.argval), val], {}
+                self, [obj, ConstantVariable.create(inst.argval), val], {}  # type: ignore[arg-type]
             )
             return
         except Unsupported as e:
@@ -1671,7 +1746,7 @@ class InstructionTranslatorBase(
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}
+            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
         )
 
     def create_call_resume_at(self, offset):
@@ -1738,7 +1813,7 @@ class InstructionTranslatorBase(
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
+        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
         result = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
@@ -1843,7 +1918,7 @@ class InstructionTranslatorBase(
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         if isinstance(seq, TensorVariable):
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
+            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
@@ -1928,13 +2003,22 @@ class InstructionTranslatorBase(
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
-            value = ConstantVariable.create(str(value.sym_num))
+            from torch._dynamo.variables.lazy import (
+                LazySymNodeFormatString,
+                LazyVariableTracker,
+            )
+
+            value = LazyVariableTracker.create(
+                LazySymNodeFormatString(value, fmt_spec), source=value.source
+            )
+            self.push(value)
+            return
         if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})
+            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})
+            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})
+            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -1990,7 +2074,7 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})
 
     def LIST_TO_TUPLE(self, inst):
-        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))
+        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
     def DICT_MERGE(self, inst):
         v = self.pop()
@@ -2145,8 +2229,12 @@ class InstructionTranslatorBase(
             args = args + contents[2:]
             kwargs = {}
 
-        self.call_function(fn, args, kwargs)
-        self.kw_names = None
+        try:
+            # if call_function fails, need to set kw_names to None, otherwise
+            # a subsequent call may have self.kw_names set to an old value
+            self.call_function(fn, args, kwargs)
+        finally:
+            self.kw_names = None
 
     @break_graph_if_unsupported(push=1)
     def CALL(self, inst):
@@ -2174,11 +2262,18 @@ class InstructionTranslatorBase(
 
     def setup_or_before_with(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
+        if not isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        ):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
+
+        # Need this redundant check for mypy
+        assert isinstance(
+            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
+        )
 
         exit = WithExitFunctionVariable(
             ctx,
@@ -2361,6 +2456,11 @@ class InstructionTranslatorBase(
             lookup_line=False,
         )
 
+    def is_co_filename_from_nn_modules(self):
+        filename = getattr(self.f_code, "co_filename", "<unknown>")
+        nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
+        return nn_modules_pattern.match(filename) is not None
+
     def store_global_weakref_by_id(self, prefix, value):
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))
         install_guard(
@@ -2391,8 +2491,13 @@ class InstructionTranslatorBase(
             self.strict_checks_fn = prior
 
     def speculate(self) -> SpeculationEntry:
+        assert self.instruction_pointer is not None
+        assert self.instruction_pointer > 0
         return self.speculation_log.next(
-            self.f_code.co_filename, self.lineno, self.instruction_pointer
+            self.f_code.co_filename,
+            self.lineno,
+            self.instruction_pointer - 1,
+            self.instructions[self.instruction_pointer - 1],
         )
 
     def __init__(
@@ -2409,9 +2514,11 @@ class InstructionTranslatorBase(
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
-    ):
+        distributed_state: Optional[DistributedState],
+    ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
+        self.distributed_state = distributed_state
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2513,7 +2620,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
         speculation_log: SpeculationLog,
-    ):
+        distributed_state: Optional[DistributedState],
+    ) -> None:
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
@@ -2542,6 +2650,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            distributed_state=distributed_state,
         )
 
         self._throw_if_in_functorch()
@@ -2986,7 +3095,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: Dict[str, VariableTracker],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
-    ):
+    ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
@@ -3006,6 +3115,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            distributed_state=parent.distributed_state,
         )
         self.parent = parent
         self.symbolic_result = None
@@ -3148,16 +3258,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
             fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
-            fglobals_vt = self.output.side_effects.track_object_existing(
-                fglobals_value, fglobals_vt
-            )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
 
@@ -3169,7 +3276,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
     def YIELD_FROM(self, inst):
@@ -3186,7 +3293,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
         try:
             val = tos.next_variable(self)
-        except (StopIteration, exc.UserStopIteration) as ex:
+        except (StopIteration, exc.ObservedUserStopIteration) as ex:
+            if isinstance(ex, exc.ObservedUserStopIteration):
+                exc.handle_observed_exception(self)
+
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
             self.push(ConstantVariable.create(ex.value))
@@ -3213,7 +3323,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(val, ConstantVariable) and val.value is None:
                 try:
                     val = tos.next_variable(self)
-                except (StopIteration, exc.UserStopIteration) as ex:
+                except (StopIteration, exc.ObservedUserStopIteration) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
                     # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
