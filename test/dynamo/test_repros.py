@@ -1240,7 +1240,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """21""")
+            self.assertExpectedInline(cnt.op_count, """19""")
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -5400,17 +5400,15 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return map(f, x, y)
+            return tuple(map(f, x, y))
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
-        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
+        self.assertEqual(g(*inps), opt_g(*inps))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
@@ -5468,6 +5466,65 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_ref).sum().backward()
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
+
+    # https://github.com/pytorch/pytorch/issues/132200
+    def test_partitioner_cse_respects_mutation_boundaries(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
+        @torch.compile(backend="aot_eager_decomp_partition")
+        def f(x, l):
+            # z0 and z1 can be CSEd
+            z0 = x.sin()
+            z1 = x.sin()
+            y = x + 1
+            torch.ops.fsdp.set_.default(x, y)
+            # z3 and z3 can be CSEd with each other,
+            # but *not* with z0/z1 (they cross a mutation boundary)
+            z2 = x.sin()
+            z3 = x.sin()
+            return z0, z1, z2, z3, l**2
+
+        x = torch.randn(3)
+        x_clone = x.clone()
+        l = torch.randn(3, requires_grad=True)
+        z0, z1, z2, z3, _ = f(x, l)
+
+        # the partitioner runs CSE. We expect that of the 4 sin() ops above:
+        # - the first 2 are CSE'd
+        # - the last 2 are CSE'd
+        # - the set_() op in the middle is a mutation barrier, preventing CSE
+        self.assertEqual(z0, (x_clone).sin())
+        self.assertEqual(z1, (x_clone).sin())
+        self.assertEqual(z2, (x_clone + 1).sin())
+        self.assertEqual(z3, (x_clone + 1).sin())
+
+    # https://github.com/pytorch/pytorch/issues/132197
+    def test_fsdp_set_input_mutation_applied_when_input_gets_no_gradients(self):
+        set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
+        if not set_available:
+            return
+
+        @torch.compile(backend="aot_eager_decomp_partition")
+        def f(x, l):
+            z = x.sin()
+            y = x + 1
+            # graph input has its storage mutated
+            torch.ops.fsdp.set_.default(x, y)
+            z2 = x.sin()
+            return z2, l**2
+
+        x = torch.randn(3)
+        x_test = x.clone()
+        l = torch.randn(3, requires_grad=True)
+        result, _ = f(x, l)
+        result_test, _ = torch.compile(f, backend="aot_eager_decomp_partition")(
+            x_test, l
+        )
+
+        self.assertEqual(result, result_test)
+        self.assertEqual(x, x_test)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()

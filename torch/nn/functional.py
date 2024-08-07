@@ -5694,7 +5694,7 @@ scaled_dot_product_attention = _add_docstr(
         depending on what backend kernel is chosen.
         The c++ implementation supports torch.float64 and can be used when higher precision is required.
         For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
-        For more information please see :doc:`/notes/numerical_accuracy`
+    For more information please see :doc:`/notes/numerical_accuracy`
 
         Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
         and math kernel on CUDA tensor, and does not support Nested tensor.
