@@ -97,8 +97,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     def test_counters(self, device):
         def f(x):
             out = torch.empty_like(x)
-            new_out = auto_functionalized(sin._opoverload, x=x, out=out)
-            y = out * 3
+            _, new_out = auto_functionalized(sin._opoverload, x=x, out=out)
+            y = out * new_out
             return new_out, y
 
         x = torch.randn(3, device=device)
@@ -108,6 +108,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # We shouldn't have been able to reinplace `out` because it was used after
         # auto_functionalized. Note that this usually doesn't happen in practice;
         # we're artificially creating this example to test the counter.
+        # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
 
     @parametrize("device", ["cpu", device])
