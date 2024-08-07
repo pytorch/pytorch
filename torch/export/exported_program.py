@@ -389,6 +389,28 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
+
+        params_buffers_to_node_meta = {}
+        for node in mod.graph.nodes:
+            target = node.target
+            meta = node.meta
+            if node.op == "get_attr":
+                params_buffers_to_node_meta[target] = meta
+
+            # If the call_function uses param as input, we also need to update params' meta
+            # with this call_function node's meta.
+            # This is basically the same flow as torch.fx.traceback.preserve_meta()
+            if node.op == "call_function" and not isinstance(
+                node.target, torch._ops.HigherOrderOperator
+            ):
+                for arg in node._input_nodes:
+                    if arg.op == "get_attr":
+                        for entry in torch.fx.proxy._COPY_META_FIELDS:
+                            if entry in meta:
+                                params_buffers_to_node_meta[arg.target][entry] = meta[
+                                    entry
+                                ]
+
         aten_export_artifact = _export_to_aten_ir(
             mod,
             # this requires empty kwargs, but not in pytree.flattened format
@@ -414,6 +436,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
                             fqn,
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
+
+        # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
+        for metadata in params_buffers_to_node_meta.values():
+            metadata.pop("nn_module_stack", None)
+            metadata.pop("stack_trace", None)
+
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                if node.target in new_graph_signature.inputs_to_parameters:
+                    param_name = new_graph_signature.inputs_to_parameters[node.target]
+                    if param_name in params_buffers_to_node_meta:
+                        for k, v in params_buffers_to_node_meta[param_name].items():
+                            node.meta[k] = v
+                if node.target in new_graph_signature.inputs_to_buffers:
+                    buffer_name = new_graph_signature.inputs_to_buffers[node.target]
+                    if buffer_name in params_buffers_to_node_meta:
+                        for k, v in params_buffers_to_node_meta[buffer_name].items():
+                            node.meta[k] = v
 
         # overwrite signature for non-persistent buffers
         for spec in new_graph_signature.input_specs:
@@ -676,7 +716,7 @@ class ExportedProgram:
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
-        self._validate()
+        self.validate()
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1091,6 +1131,11 @@ class ExportedProgram:
             input_placeholders, flat_args_with_path, self.range_constraints
         )
 
+    @compatibility(is_backward_compatible=False)
+    def validate(self):
+        self._validate()
+
+    # TODO: remove this
     @final
     def _validate(self):
         assert (
