@@ -6,9 +6,11 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, requires_gpu
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 
 
 aten = torch.ops.aten
@@ -34,10 +36,6 @@ def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> No
 
 
 class TestReinplacingPassCorrectness(InductorTestCase):
-    def setUp(self):
-        super().setUp()
-        counters.clear()
-
     def _test(self, f):
         nf = torch.compile(f)
         inp = (
@@ -48,8 +46,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
 
-    @requires_gpu()
-    def test_dont_modify_live(self):
+    @onlyCUDA
+    def test_dont_modify_live(self, device):
         def f(x, y):
             x = x.cos()
             x2 = x.index_put((y,), const)
@@ -57,8 +55,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_gpu()
-    def test_dont_modify_view_of_live(self):
+    @onlyCUDA
+    def test_dont_modify_view_of_live(self, device):
         def f(x, y):
             x = x.cos()
             x2 = aten.alias(x)
@@ -68,15 +66,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_gpu()
-    def test_dont_modify_input(self):
+    @onlyCUDA
+    def test_dont_modify_input(self, device):
         def f(x, y):
             return x.index_put((y,), const)
 
         self._test(f)
 
-    @requires_gpu()
-    def test_should_modify_inner(self):
+    @onlyCUDA
+    def test_should_modify_inner(self, device):
         def f(x, y):
             x = x.cos()
             x = x.index_put((y,), const)
@@ -84,16 +82,17 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
-    @requires_gpu()
-    def test_should_modify_input(self):
+    @onlyCUDA
+    def test_should_modify_input(self, device):
         def f(x, y):
             x = x.index_put_((y,), const)
             return x
 
         self._test(f)
 
-    @parametrize("device", ["cpu", device])
     def test_counters(self, device):
+        counters.clear()
+
         def f(x):
             out = torch.empty_like(x)
             _, new_out = auto_functionalized(sin._opoverload, x=x, out=out)
@@ -110,23 +109,25 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
 
-    @parametrize("device", ["cpu", device])
-    @parametrize("requires_grad", [False, True])
-    def test_multi_output_intermediate(self, device, requires_grad):
-        def f(x):
-            out1 = torch.empty_like(x)
-            out2 = torch.empty_like(x)
-            sin_cos(x, out1, out2)
-            return out1, out2, x**2
+    def test_multi_output_intermediate(self, device):
+        for requires_grad in [False, True]:
+            counters.clear()
 
-        x = torch.randn(3, device=device, requires_grad=requires_grad)
-        res1, res2, _ = torch.compile(f)(x)
-        self.assertEqual(res1, x.sin())
-        self.assertEqual(res2, x.cos())
-        self.assertEqual(num_reinplacing_failures(), 0)
+            def f(x):
+                out1 = torch.empty_like(x)
+                out2 = torch.empty_like(x)
+                sin_cos(x, out1, out2)
+                return out1, out2, x**2
 
-    @parametrize("device", ["cpu", device])
+            x = torch.randn(3, device=device, requires_grad=requires_grad)
+            res1, res2, _ = torch.compile(f)(x)
+            self.assertEqual(res1, x.sin())
+            self.assertEqual(res2, x.cos())
+            self.assertEqual(num_reinplacing_failures(), 0)
+
     def test_multiple_mutations(self, device):
+        counters.clear()
+
         def f(x, out):
             sin(x, out)
             sin(out, out)
@@ -140,8 +141,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(result, out)
         self.assertEqual(num_reinplacing_failures(), 0)
 
-    @parametrize("device", ["cpu", device])
     def test_multiple_intermediate(self, device):
+        counters.clear()
+
         def f(x):
             out = torch.empty_like(x)
             sin(x, out)
@@ -155,7 +157,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(num_reinplacing_failures(), 0)
 
 
-common_utils.instantiate_parametrized_tests(TestReinplacingPassCorrectness)
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(
+    TestReinplacingPassCorrectness, globals(), only_for=only_for
+)
 
 if __name__ == "__main__":
     if HAS_CPU or HAS_GPU:
