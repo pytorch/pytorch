@@ -5,6 +5,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <fmt/core.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
@@ -918,17 +919,12 @@ std::string uuid_to_string(const char* uuid_bytes) {
   // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
   // For string representation, the code here expands this to
   // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-  // Size is 16x2 hex characters + 4 hyphens.
-  constexpr size_t size = 16 * 2 + 4 + 1;
-  std::array<char, size> uuid_chars {};
-  snprintf(
-      uuid_chars.data(),
-      size,
-      "%02x%02x%02x%02x-"
-      "%02x%02x-"
-      "%02x%02x-"
-      "%02x%02x-"
-      "%02x%02x%02x%02x%02x%02x",
+  return fmt::format(
+      "{:02x}{:02x}{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
       (uint8_t)uuid_bytes[0],
       (uint8_t)uuid_bytes[1],
       (uint8_t)uuid_bytes[2],
@@ -945,7 +941,6 @@ std::string uuid_to_string(const char* uuid_bytes) {
       (uint8_t)uuid_bytes[13],
       (uint8_t)uuid_bytes[14],
       (uint8_t)uuid_bytes[15]);
-  return std::string(uuid_chars.data());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -966,7 +961,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
             return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
           })
       .def("__str__", [](const CUuuid& uuid) {
-          return uuid_to_string(uuid.bytes);
+        return uuid_to_string(uuid.bytes);
       });
 #endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
