@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.fx as fx
-
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -520,7 +519,7 @@ def identify_mutated_tensors(kernel, kwargs):
 
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation")
 
 
@@ -529,7 +528,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional")
 
 
@@ -583,31 +582,24 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
         proxy_args,
         name=func_overload.__name__ + "_proxy",
     )
-    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return ret
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs
 ):
-    if mode.enable_tracing:
-        trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_mutation,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-            },
-        )
-    else:
-        triton_kernel_wrapper_mutation(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            kwargs=kwargs,
-        )
+    trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_mutation,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+        },
+    )
 
     return None
 
@@ -691,25 +683,17 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
-    if mode.enable_tracing:
-        return trace_triton_kernel_wrapper(
-            mode,
-            triton_kernel_wrapper_functional,
-            {
-                "kernel_idx": kernel_idx,
-                "constant_args_idx": constant_args_idx,
-                "grid": grid,
-                "kwargs": kwargs,
-                "tensors_to_clone": tensors_to_clone,
-            },
-        )
-    else:
-        return triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=kwargs,
-            tensors_to_clone=tensors_to_clone,
-        )
+    return trace_triton_kernel_wrapper(
+        mode,
+        triton_kernel_wrapper_functional,
+        {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "kwargs": kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        },
+    )
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
@@ -814,26 +798,33 @@ class TritonHOPifier:
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
-                (
-                    "warmup" in defaults
-                    and defaults["warmup"].default
-                    != torch._dynamo.utils.get_first_attr(
-                        kernel, "num_warmups", "warmup"
+                not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                and (
+                    (
+                        "warmup" in defaults
+                        and defaults["warmup"].default
+                        != torch._dynamo.utils.get_first_attr(
+                            kernel, "num_warmups", "warmup"
+                        )
+                    )
+                    or (
+                        "rep" in defaults
+                        and defaults["rep"].default
+                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
+                    )
+                    or (
+                        "prune_configs_by" in defaults
+                        and defaults["prune_configs_by"].default
+                        != kernel.early_config_prune
+                    )
+                    # Set via reset_to_zero argument
+                    or len(kernel.reset_idx) != 0
+                    or len(kernel.restore_idx) != 0
+                    or (
+                        "use_cuda_graph" in defaults
+                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
                 )
-                or (
-                    "rep" in defaults
-                    and defaults["rep"].default
-                    != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                )
-                or (
-                    "prune_configs_by" in defaults
-                    and defaults["prune_configs_by"].default
-                    != kernel.early_config_prune
-                )
-                # Set via reset_to_zero argument
-                or len(kernel.reset_idx) != 0
-                or len(kernel.restore_idx) != 0
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"
