@@ -619,7 +619,8 @@ def _autocast(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    attn_mask: Optional[torch.Tensor],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """
     [Autocasting SDPA for NJT]
 
@@ -645,9 +646,18 @@ def _autocast(
         return query, key, value
 
     def cvt(x):
-        return x.to(torch.get_autocast_dtype(device_type))
+        if x is None:
+            return x
+        target_dtype = torch.get_autocast_dtype(device_type)
+        if (
+            (not x.dtype.is_floating_point)
+            or x.dtype == target_dtype
+            or x.dtype == torch.float64
+        ):
+            return x
+        return x.to(target_dtype)
 
-    return cvt(query), cvt(key), cvt(value)
+    return cvt(query), cvt(key), cvt(value), cvt(attn_mask)
 
 
 def jagged_scaled_dot_product_attention(
@@ -659,7 +669,7 @@ def jagged_scaled_dot_product_attention(
     is_causal=False,
     scale=None,
 ):
-    query, key, value = _autocast(query, key, value)
+    query, key, value, attn_mask = _autocast(query, key, value, attn_mask)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
     assert (
