@@ -153,11 +153,25 @@ def compute_local_shape_and_global_offset(
         # TODO: this logic can be applied to contiguous sharding as well
         strided_sharding = any(isinstance(p, _StridedShard) for p in placements)
         if strided_sharding:
+            strided_part_seen = [False] * len(global_shape)
+            strided_part_end = [False] * len(global_shape)
             for idx, placement in enumerate(placements):
                 mesh_dim_size = mesh.size(idx)
                 if isinstance(placement, Shard):
                     shard_dim = placement.dim
+
+                    if strided_part_end[shard_dim]:
+                        raise NotImplementedError(
+                            f"Strided sharding does not allow Shard() to appear after "
+                            f"the strided part has ended. {placement} at idx {idx} in "
+                            f"{placements} violates this assumption."
+                        )
+
+                    if strided_part_seen[shard_dim]:
+                        strided_part_end[shard_dim] = True
+
                     if isinstance(placement, _StridedShard):
+                        strided_part_seen[shard_dim] = True
                         shard_idx_stride_by_mesh_dim[shard_dim][
                             idx
                         ] = num_shards_by_tensor_dim[shard_dim] // (
