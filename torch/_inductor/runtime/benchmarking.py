@@ -23,9 +23,7 @@ class Benchmarker:
     ) -> float:
         """Dispatch benchmark request to CPU or GPU depending on device of `fn_args` and `fn_kwargs`"""
         if is_cpu_device(list(fn_args) + list(fn_kwargs.values())):
-            return self.benchmark_cpu(
-                lambda: fn(*fn_args, **fn_kwargs), **kwargs
-            )
+            return self.benchmark_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
         return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
     def benchmark_cpu(
