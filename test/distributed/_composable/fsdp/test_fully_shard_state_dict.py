@@ -180,8 +180,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         # TODO: remove ``assertRaisesRegex`` once uneven sharding is supported
         if mlp_dim % dp_mesh.size() != 0:
             with self.assertRaisesRegex(
-                NotImplementedError,
-                "does not support uneven sharding"
+                NotImplementedError, "does not support uneven sharding"
             ):
                 for mlp in model:
                     fully_shard(mlp, mesh=dp_mesh)
