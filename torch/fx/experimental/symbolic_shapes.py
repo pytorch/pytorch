@@ -16,6 +16,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
 import sys
 import threading
@@ -84,15 +85,19 @@ DimList = List
 
 log = logging.getLogger(__name__)
 
-class GuardOnDataDependentSymNode(RuntimeError):
-    pass
-
-class PendingUnbackedSymbolNotFound(RuntimeError):
-    pass
-
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence, PRECEDENCE
+
+class GuardOnDataDependentSymNode(RuntimeError):
+    cond: sympy.Expr
+
+    def __init__(self, cond, *args):
+        super().__init__(*args)
+        self.cond = cond
+
+class PendingUnbackedSymbolNotFound(RuntimeError):
+    pass
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -376,6 +381,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
 
     lhs = 0
+    rhs = _reduce_to_lowest_terms(rhs)
     if isinstance(rhs, sympy.Add):
         pos = []
         neg = []
@@ -390,6 +396,31 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         # lhs == 0
         lhs, rhs = -rhs, 0
     return t(lhs, rhs)
+
+
+def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
+    """
+    Eliminates any integer factor from a given expression.
+    E.g., 6x + 4y reduces to 3x + 2y.
+
+    Useful when an expression is == or != to 0.
+    """
+    def integer_coefficient(x):
+        if isinstance(x, sympy.Integer):
+            return abs(int(x))
+        elif isinstance(x, sympy.Mul):
+            return math.prod([abs(int(arg)) for arg in x.args if isinstance(arg, sympy.Integer)])
+        else:
+            return 1
+
+    if isinstance(expr, sympy.Add):
+        atoms = expr.args
+        factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
+        atoms = [x / factor for x in atoms]
+        return sympy.Add(*atoms)
+    else:
+        return expr / integer_coefficient(expr)
+
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     r""" Utility to check if underlying object
@@ -1019,6 +1050,8 @@ class DimDynamic(Enum):
     STATIC = 2
     # Treat the dimension as a size-like unbacked
     SIZE_LIKE_UNBACKED = 3
+    # Infer the strides from stride. If size is static, strides will be static as well.
+    INFER_STRIDE = 4
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -1208,6 +1241,15 @@ def _is_supported_equivalence(expr):
         )
     return isinstance(expr, sympy.Symbol)
 
+def _has_unsupported_sympy_function(expr) -> bool:
+    return expr.has(
+        torch.utils._sympy.functions.ToFloat,
+        torch.utils._sympy.functions.TruncToInt,
+        torch.utils._sympy.functions.CeilToInt,
+        # add more sympy functions that involve float<->int conversion here
+        # since our solver does not know what to do with them
+    )
+
 @dataclass(frozen=True)
 class SymbolicContext:
     """
@@ -1230,7 +1272,9 @@ class StatelessSymbolicContext(SymbolicContext):
     This will cause fresh symbols to be allocated
     """
     dynamic_sizes: DimList[DimDynamic]
+    dynamic_strides: DimList[DimDynamic] = None
     constraint_sizes: DimList[DimConstraint] = None
+    constraint_strides: DimList[DimConstraint] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -1238,8 +1282,13 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
+        if self.dynamic_strides is None:
+            object.__setattr__(self, 'dynamic_strides', [DimDynamic.INFER_STRIDE] * len(self.dynamic_sizes))
         if self.constraint_sizes is None:
             object.__setattr__(self, 'constraint_sizes', [None] * len(self.dynamic_sizes))
+        if self.constraint_strides is None:
+            object.__setattr__(self, 'constraint_strides', [None] * len(self.dynamic_sizes))
+        assert all(stride in (DimDynamic.INFER_STRIDE, DimDynamic.DYNAMIC, DimDynamic.DUCK) for stride in self.dynamic_strides)
 
 
 # note [Tensor Fakification and Symbol Caching]
@@ -1291,6 +1340,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
+        super().__post_init__()
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
         if not self.shape_env_to_source_to_symbol_cache:
@@ -1687,7 +1737,7 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
-        if isinstance(expr, sympy.Ne):
+        if isinstance(expr, sympy.Ne) or _has_unsupported_sympy_function(expr):
             # we're not going to do anything useful with these, so drop them
             return False
         free_symbols = expr.free_symbols
@@ -2174,7 +2224,7 @@ class DimConstraints:
                     'For more information, run with TORCH_LOGS="+dynamic".\n'
                 )
                 for s, val in forced_specializations.items():
-                    buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
+                    buf += f"  - solving the guards generated for {s} resulted in a specialized value of {val}.\n"
 
             self._process_derived_dim_roots(results, name_to_dim)
 
@@ -2376,6 +2426,16 @@ class ShapeEnv:
         self.events: List[ShapeEnvEvent] = (
             [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
+
+        # FakeTensor per-ShapeEnv operation cache. This is used for caching
+        # operations that contain symbolic shapes which have guards on the
+        # ShapeEnv (so are ShapeEnv-dependent).
+        #
+        # NOTE: It's important that SymNodes in this cache have their ShapeEnv
+        # stripped otherwise you end up with cycles which can only be cleaned
+        # with the GC.
+        self.fake_tensor_cache: Dict[torch._subclasses.fake_tensor._DispatchCacheKey,
+                                     torch._subclasses.fake_tensor._DispatchCacheEntry] = {}
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -2674,7 +2734,7 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
-            elif key in ["symbol_guard_counter", "pending_fresh_unbacked_symbols"]:
+            elif key in ("symbol_guard_counter", "pending_fresh_unbacked_symbols", "fake_tensor_cache"):
                 # Skip this for comparisons
                 return None
             return value
@@ -3093,8 +3153,10 @@ class ShapeEnv:
 
         # Reimplement the legacy behavior
         if symbolic_context is None:
-            constraint_dims = [None] * dim
+            constraint_sizes = [None] * dim
+            constraint_strides = [None] * dim
             dynamic_dims = []
+            dynamic_strides = []
             for i in range(dim):
                 # NB: This is encapsulation breaking!  Legacy behavior was
                 # bad.
@@ -3105,13 +3167,22 @@ class ShapeEnv:
                 else:
                     r = DimDynamic.DUCK
                 dynamic_dims.append(r)
+                dynamic_strides.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
+            dynamic_strides = [DimDynamic.INFER_STRIDE] * dim
             # symbolic_context is None - set one
-            symbolic_context = StatelessSymbolicContext(dynamic_sizes=dynamic_dims, constraint_sizes=constraint_dims)
+            symbolic_context = StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                dynamic_strides=dynamic_strides,
+                constraint_sizes=constraint_sizes,
+                constraint_strides=constraint_strides,
+            )
         # We got a StatelessSymbolicContext
         _assert_symbol_context(symbolic_context)
-        constraint_dims = symbolic_context.constraint_sizes
-        dynamic_dims = symbolic_context.dynamic_sizes
+        constraint_sizes = symbolic_context.constraint_sizes
+        constraint_strides = symbolic_context.constraint_strides
+        dynamic_sizes = symbolic_context.dynamic_sizes
+        dynamic_strides = symbolic_context.dynamic_strides
 
         # TODO: make this configurable from outside symbolic_context; we made a symbolic_context
         # decision here where if all sizes are static, we are going to
@@ -3119,10 +3190,13 @@ class ShapeEnv:
         # do this, and arguably we should ALWAYS allow for dynamic offset,
         # this is cheap.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_sizes) else DimDynamic.DUCK
+        are_sizes_static = all(r == DimDynamic.STATIC for r in dynamic_sizes)
 
-        assert len(dynamic_dims) == dim, f"{len(dynamic_dims)} != {dim}"
-        assert len(constraint_dims) == dim
+        assert len(dynamic_sizes) == dim, f"{len(dynamic_sizes)} != {dim}"
+        assert len(dynamic_strides) == dim, f"{len(dynamic_sizes)} != {dim}"
+        assert len(constraint_sizes) == dim
+        assert len(constraint_strides) == dim
 
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(ex_size, source, symbolic_context)
@@ -3150,7 +3224,8 @@ class ShapeEnv:
                 key=_nested_int_aware_sort,
             )
             for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
+                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                if stride[i] is None and dynamic_strides[i] == DimDynamic.INFER_STRIDE and ex_stride[i] in candidates:
                     stride[i] = candidates[ex_stride[i]]
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]
 
@@ -3163,11 +3238,15 @@ class ShapeEnv:
                         if stride[i] is None
                     ], key=_nested_int_aware_sort
                 )
+                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                dyn_stride = dynamic_strides[i]
+                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
+                    dyn_stride = DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
-                    constraint_dim=None,
+                    dynamic_dim=dyn_stride,
+                    constraint_dim=constraint_strides[i],
                     symbolic_context=symbolic_context,
                 )
         assert all(x is not None for x in stride)
@@ -3191,7 +3270,7 @@ class ShapeEnv:
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-                dynamic_dim=dynamic_strides_offset,
+                dynamic_dim=dynamic_offset,
                 constraint_dim=None,
                 symbolic_context=symbolic_context
             ),
@@ -3477,7 +3556,7 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            if type(val) is int:
+            if type(val) is int or is_nested_int(val):
                 sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             else:
                 sympy_expr = make_symbol(SymT.FLOAT, len(self.var_to_val), positive=positive, real=True)
@@ -3656,7 +3735,9 @@ class ShapeEnv:
             return StatelessSymbolicContext(
                 # Ignored; only the constraints part is relevant below.
                 dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
-                constraint_sizes=[None] * t.dim()
+                dynamic_strides=[DimDynamic.INFER_STRIDE] * t.dim(),
+                constraint_sizes=[None] * t.dim(),
+                constraint_strides=[None] * t.dim()
             )
 
         # Expand optional inputs, or verify invariants are upheld
@@ -3742,7 +3823,7 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(set)
-        constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
+        constraint_violations : List[Tuple[bool, str, Callable[[], str]]] = []
 
         def record_constraint_violation(warn_only, debug_name, msg, hint=None):
             constraint_violations.append(
@@ -3918,7 +3999,7 @@ class ShapeEnv:
                 # For subclasses, we need to track symints on BOTH the outer
                 # and inner tensors.
                 sources_tensors_constraints = [
-                    (source, t, context.constraint_sizes)
+                    (source, t, context.constraint_sizes, context.constraint_strides)
                 ]
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
@@ -3927,22 +4008,24 @@ class ShapeEnv:
                     sources_tensors_constraints.append((
                         AttrSource(source, attr),
                         inner_t,
-                        inner_context.constraint_sizes
+                        inner_context.constraint_sizes,
+                        inner_context.constraint_strides
                     ))
             else:
-                sources_tensors_constraints = [(source, t, context.constraint_sizes)]
+                sources_tensors_constraints = [(source, t, context.constraint_sizes, context.constraint_strides)]
 
-            for src, curr_t, constraint in sources_tensors_constraints:
+            for src, curr_t, constraint_size, constraint_stride in sources_tensors_constraints:
                 if is_sparse_any(curr_t):
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                        track_symint(property_source, ss, constraint[i])
+                        track_symint(property_source, ss, constraint_size[i])
                 else:
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                        track_symint(property_source, ss, constraint[i])
+                        track_symint(property_source, ss, constraint_size[i])
                     for i, ss in enumerate(curr_t.stride()):
-                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                        property_source = TensorPropertySource(src, TensorProperty.STRIDE, i)
+                        track_symint(property_source, ss, constraint_stride[i])
                     track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
@@ -4670,11 +4753,11 @@ class ShapeEnv:
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
-            msg = "Could not extract specialized integer from data-dependent expression"
+            desc = "Could not extract specialized integer from data-dependent expression"
         else:
-            msg = "Could not guard on data-dependent expression"
-        return GuardOnDataDependentSymNode(
-            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
+            desc = "Could not guard on data-dependent expression"
+        msg = (
+            f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
@@ -4689,6 +4772,7 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+        return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(self, symbol, vr):
         lower, upper = vr.lower, vr.upper
@@ -5482,3 +5566,124 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         result = super().run_node(n)
         rebind_unbacked(detect_fake_mode().shape_env, n, result)
         return result
+
+
+def _blame_user_code(e, frame):
+    frame_summary = traceback.FrameSummary(
+        frame.f_code.co_filename,
+        frame.f_lineno,
+        frame.f_code.co_name,
+    )
+    msg = e.args[0]
+    msg += (
+        '\n\nThe following call raised this error:\n' +
+        ''.join(traceback.StackSummary.from_list([frame_summary]).format())
+    )
+    e.args = (msg,)
+
+
+class _PythonPrinter(sympy.printing.str.StrPrinter):
+    """
+    Util printer that replaces sympy symbols with their source-level names
+    and renders sympy relational operators (e.g., Eq, Ne, Ge, Le) inline
+    (i.e., as ==, !=, >, <).
+    """
+
+    def __init__(self, src_map):
+        super().__init__()
+        self.src_map = src_map
+
+    def _print_Symbol(self, sym):
+        return self.src_map[sym.name][0]
+
+    def _print_Relational(self, expr):
+        lhs = self.parenthesize(expr.lhs, sympy.printing.precedence.precedence(expr))
+        rel_op = expr.rel_op
+        rhs = self.parenthesize(expr.rhs, sympy.printing.precedence.precedence(expr))
+        return f"{lhs} {rel_op} {rhs}"
+
+
+def _suggest_torch_checks(e, src_map):
+    # extract the unresolved condition on unbacked symints in the error
+    cond = e.cond
+    diff = ", ".join(s for s in cond.free_symbols if s.name not in src_map)
+    if diff:
+        log.warning("Unable to find user code corresponding to {%s}", diff)
+        return
+    printer = _PythonPrinter(src_map)
+    msg = e.args[0]
+    msg += "\nTo fix the error, insert one of the following checks before this call:"
+    # suggested fixes to resolve `cond`` are to tell the compiler to assume
+    # either `cond` or its negation (the user will need to select which)
+    suggested_fixes = [
+        f"torch._check({printer.doprint(cond)})",
+        f"torch._check({printer.doprint(sympy.Not(cond))})",
+    ]
+    for i, fix in enumerate(suggested_fixes):
+        msg += f"\n  {i+1}. {fix}"
+    src_mapped = ', '.join(
+        f"`{s}` with {' or '.join(src_map[s])}"
+        for s in sorted(s.name for s in cond.free_symbols)
+    )
+    msg += f"\n\n(These suggested fixes were derived by replacing {src_mapped} in {cond} and its negation.)"
+    e.args = (msg,)
+
+
+def _suggest_fixes_for_data_dependent_error_non_strict(e):
+    """
+    Given a raised data-dependent error, add the following to the error message:
+    1. the closest user code location that raised the error;
+    2. suggested fixes for the error in terms of live variables at that location.
+    """
+
+    frame = inspect.currentframe()
+    while frame is not None:
+        # walk the stack up from the data-dependent error until a non-torch frame is found
+        if not frame.f_code.co_filename.startswith(os.path.dirname(inspect.getfile(torch))):
+            # add frame info to error message
+            _blame_user_code(e, frame)
+
+            # map symbol names reachable via frame locals to their source-level names
+            src_map = defaultdict(list)
+            for var, val in frame.f_locals.items():
+                # figure out how to access any symbol inside `val` through `var`
+                for path, leaf in pytree.tree_leaves_with_path(val):
+                    name = var + pytree.keystr(path)
+                    if isinstance(leaf, torch.SymInt):
+                        src_map[str(leaf.node.expr)].append(name)
+                    elif isinstance(leaf, torch.Tensor):
+                        for i, dim in enumerate(leaf.shape):
+                            if isinstance(dim, torch.SymInt):
+                                src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
+
+            # add suggested torch.check()s based on `src_map` to the error message
+            # replacing unbacked symints in the unresolved condition in the error
+            _suggest_torch_checks(e, src_map)
+            break
+        frame = frame.f_back
+
+
+class _DataDependentErrorHandlerNonStrict(torch.overrides.TorchFunctionMode):
+    """
+    Handles data-dependent errors raised by torch function calls.
+
+    Any data-dependent error is due to some condition on unbacked symints
+    that cannot be resolved. A mechanical way of fixing the error is to use
+    a torch._check() call to assert either that condition or its negation.
+    The handler suggests these options as code and points to the location
+    of the torch function call that raised the error as part of the error
+    message shown to the user, who can then simply select and copy-paste
+    a suggested fix at that location.
+
+    NOTE: Not all data-dependent errors are raised by torch function calls.
+    In particular, conditions on unbacked symints can appear outside such
+    calls, and as such are not handled here.
+    """
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        try:
+            return func(*args, **kwargs)
+        except GuardOnDataDependentSymNode as e:
+            _suggest_fixes_for_data_dependent_error_non_strict(e)
+            raise

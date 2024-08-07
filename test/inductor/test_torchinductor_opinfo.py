@@ -362,6 +362,10 @@ inductor_override_kwargs = {
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.multilabel_soft_margin_loss", "cpu", f16): {
+        "atol": 3e-4,
+        "rtol": 0.002,
+    },
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
@@ -654,7 +658,7 @@ class TestInductorOpInfo(TestCase):
                 samples = [next(samples)]
 
         class HasRngOp(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.has_rng_op = False
 

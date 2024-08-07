@@ -98,9 +98,9 @@ class TORCH_API Context {
   }
   bool isPinnedPtr(
       const void* data,
-      std::optional<DeviceType> device_type = std::nullopt) {
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
     auto opt_device_type =
-        device_type.has_value() ? device_type.value() : at::getAccelerator();
+        device_type.has_value() ? device_type : at::getAccelerator();
     if (!opt_device_type.has_value() || // there is no accelerator
         !at::isAccelerator(
             opt_device_type.value())) { // passed device not an accelerator
@@ -110,7 +110,7 @@ class TORCH_API Context {
         .isPinnedPtr(data);
   }
   Allocator* getPinnedMemoryAllocator(
-      std::optional<DeviceType> device_type = std::nullopt) {
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
   static bool hasOpenMP();

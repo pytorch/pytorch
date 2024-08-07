@@ -353,16 +353,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            torch.library.opcheck(
-                op.op,
-                args,
-                kwargs,
-            )
+            torch.library.opcheck(op.op, args, kwargs)
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            ...
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
         @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
@@ -626,19 +621,24 @@ class TestCustomOp(CustomOpTestCaseBase):
         def a(x: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(a), """(Tensor x) -> Tensor""")
+        self.assertExpectedInline(
+            infer_schema(a, mutates_args=()), """(Tensor x) -> Tensor"""
+        )
 
         def kwonly1(x: Tensor, *, y: int, z: float) -> Tensor:
             return torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(kwonly1), """(Tensor x, *, SymInt y, float z) -> Tensor"""
+            infer_schema(kwonly1, mutates_args=()),
+            """(Tensor x, *, SymInt y, float z) -> Tensor""",
         )
 
         def kwonly2(*, y: Tensor) -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(kwonly2), """(*, Tensor y) -> Tensor""")
+        self.assertExpectedInline(
+            infer_schema(kwonly2, mutates_args=()), """(*, Tensor y) -> Tensor"""
+        )
 
         def b(
             x: Tensor,
@@ -652,7 +652,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.empty([]), 1, 0.1, True
 
         self.assertExpectedInline(
-            infer_schema(b),
+            infer_schema(b, mutates_args=()),
             """(Tensor x, SymInt y, bool z, float a, ScalarType b, Device c, Scalar d) -> (Tensor, SymInt, float, bool)""",
         )
 
@@ -665,7 +665,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])]
 
         self.assertExpectedInline(
-            infer_schema(c),
+            infer_schema(c, mutates_args=()),
             """(Tensor x, Tensor[] y, Tensor? z, Tensor?[] w) -> Tensor[]""",
         )
 
@@ -673,18 +673,20 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.empty([])], torch.empty([])
 
         self.assertExpectedInline(
-            infer_schema(d), """(Tensor x) -> (Tensor[], Tensor)"""
+            infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
         def e() -> Tensor:
             return torch.empty([])
 
-        self.assertExpectedInline(infer_schema(e), """() -> Tensor""")
+        self.assertExpectedInline(infer_schema(e, mutates_args=()), """() -> Tensor""")
 
         def f(x: Tensor) -> None:
             pass
 
-        self.assertExpectedInline(infer_schema(f), """(Tensor x) -> ()""")
+        self.assertExpectedInline(
+            infer_schema(f, mutates_args=()), """(Tensor x) -> ()"""
+        )
 
         def g(
             x: Tensor, y: List[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
@@ -692,7 +694,8 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(g), """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()"""
+            infer_schema(g, mutates_args=()),
+            """(Tensor x, Tensor[] y, Tensor[] z, Tensor?[] w) -> ()""",
         )
 
         self.assertExpectedInline(
@@ -721,7 +724,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             pass
 
         self.assertExpectedInline(
-            infer_schema(h),
+            infer_schema(h, mutates_args=()),
             (
                 """(Tensor x, SymInt? a=None, float b=3.14, bool c=True, SymInt d=3, str e="foo", """
                 """ScalarType f=float32, ScalarType g=float32, ScalarType h=int32, Device i="cpu:0", Device j="cpu") -> ()"""
@@ -740,28 +743,28 @@ class TestCustomOp(CustomOpTestCaseBase):
             def foo(*args):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "varkwargs"):
 
             def foo(**kwargs):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "must have a type annotation"):
 
             def foo(x):
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
                 raise NotImplementedError
 
-            infer_schema(foo)
+            infer_schema(foo, mutates_args=())
 
         with self.assertRaisesRegex(ValueError, "can be mutated"):
 
@@ -880,7 +883,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         # Sequence[int] gets automagically turned into int[] in the schema.
         # This test checks that we actually do support arbitrary sequence types.
         class MySequence(collections.abc.Sequence):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._container = [1, 2, 3]
 
             def __getitem__(self, idx):
@@ -1919,9 +1922,7 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     def test_autogen_aten_ops_are_pt2_compliant(self):
-        for op in [
-            torch.ops.aten.fill.Tensor_out,
-        ]:
+        for op in [torch.ops.aten.fill.Tensor_out]:
             self.assertIn(torch.Tag.generated, op.tags)
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
@@ -2327,6 +2328,12 @@ class TestCustomOpAPI(TestCase):
                     setup_context=lambda ctx, inputs, keyword_only_inputs, output: None,
                 )
 
+            with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
+                torch.library.register_vmap(
+                    "_torch_testing::foo",
+                    lambda info, in_dims, x, *, y: (x, 0),
+                )
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_kwargonly_low_level(self):
         with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
@@ -2642,9 +2649,7 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "string"):
 
             @torch.library.custom_op("_torch_testing::f3", mutates_args="x")
-            def f3(
-                x: Tensor,
-            ) -> None:
+            def f3(x: Tensor) -> None:
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
@@ -3342,9 +3347,7 @@ Please use `add.register_fake` to add an fake impl.""",
             return x + 1
 
         self.assertEqual(f(x), x + 1)
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("gpu", enabled=False):
                 self.assertEqual(f(x), x + 1)
             self.assertIn(
@@ -3357,9 +3360,7 @@ Please use `add.register_fake` to add an fake impl.""",
 
         self.assertEqual(f(x), x + 2)
 
-        with self.assertLogs(
-            "torch._library.custom_ops",
-        ) as captured:
+        with self.assertLogs("torch._library.custom_ops") as captured:
             with f.set_kernel_enabled("cpu", enabled=True):
                 self.assertEqual(f(x), x + 2)
             self.assertIn("already enabled", captured.output[0])
@@ -3367,9 +3368,7 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
-            with self.assertLogs(
-                "torch._library.custom_ops",
-            ) as captured:
+            with self.assertLogs("torch._library.custom_ops") as captured:
                 with f.set_kernel_enabled("cpu", enabled=False):
                     self.assertEqual(f(x), x + 1)
                 self.assertIn("already disabled", captured.output[0])
@@ -3381,6 +3380,235 @@ Please use `add.register_fake` to add an fake impl.""",
 
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_vmap_kwargonly_low_level(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, *, float y) -> Tensor")
+            called = False
+
+            def foo_impl(x, *, y):
+                return x * y
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            def vmap(info, in_dims, x, *, y):
+                nonlocal called
+                called = True
+                return x * y, 0
+
+            torch.library.register_vmap("_torch_testing::foo", vmap, lib=lib)
+
+            x = torch.ones(3)
+            result = torch.vmap(torch.ops._torch_testing.foo)(x, y=3.14)
+            self.assertTrue(called)
+            self.assertEqual(result, torch.tensor([3.14, 3.14, 3.14]))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_vmap_defaults(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("foo(Tensor w, int x = 2, *, int y = 3, int z) -> Tensor")
+
+            def foo_impl(w, x=2, *, y=3, z):
+                return w * x * y * z
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            called = False
+
+            def vmap(info, in_dims, w, x=2, *, y=3, z):
+                nonlocal called
+                called = True
+                return w * x * y * z, 0
+
+            torch.library.register_vmap("_torch_testing::foo", vmap, lib=lib)
+
+            w = torch.ones(3)
+            result = torch.vmap(torch.ops._torch_testing.foo)(w, z=42)
+            self.assertTrue(called)
+            self.assertEqual(result, w * 2 * 3 * 42)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap(self):
+        for mode in ["function", "qualname", "opoverload", "c_opdef"]:
+
+            @torch.library.custom_op("mylib::f", mutates_args=())
+            def f(x: Tensor, y: Tensor) -> Tensor:
+                return x * y
+
+            called = False
+
+            def fvmap(info, in_dims, x, y):
+                nonlocal called
+                called = True
+                x_bdim, y_bdim = in_dims
+                x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+                y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+                result = x * y
+                result = result.movedim(-1, 0)
+                return result, 0
+
+            if mode == "function":
+                torch.library.register_vmap(f, fvmap)
+            elif mode == "qualname":
+                torch.library.register_vmap("mylib::f", fvmap)
+            elif mode == "opoverload":
+                torch.library.register_vmap(torch.ops.mylib.f.default, fvmap)
+            elif mode == "c_opdef":
+                f.register_vmap(fvmap)
+
+            x = torch.randn(2, 2)
+            y = torch.randn(2, 2)
+
+            result = torch.vmap(f)(x, y)
+            self.assertTrue(called)
+            self.assertEqual(result, x * y)
+
+            called = False
+            result = torch.vmap(f, out_dims=1)(x, y)
+            self.assertEqual(result, (x * y).T)
+            self.assertTrue(called)
+
+            called = False
+            result = torch.vmap(f, in_dims=1)(x, y)
+            self.assertEqual(result, (x * y).T)
+            self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_library_decorator(self):
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_op_decorator(self):
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @f.register_vmap
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_register_multiple_times(self):
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @f.register_vmap
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+        called = False
+
+        @f.register_vmap
+        def fvmap2(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x + y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x + y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_vmap_register_multiple_times_2(self):
+        @torch.library.custom_op("mylib::f", mutates_args=())
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return x * y
+
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x * y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x * y)
+        called = False
+
+        @torch.library.register_vmap("mylib::f")
+        def fvmap2(info, in_dims, x, y):
+            nonlocal called
+            called = True
+            x_bdim, y_bdim = in_dims
+            x = x.movedim(x_bdim, -1) if x_bdim is not None else x.unsqueeze(-1)
+            y = y.movedim(y_bdim, -1) if y_bdim is not None else y.unsqueeze(-1)
+            result = x + y
+            result = result.movedim(-1, 0)
+            return result, 0
+
+        result = torch.vmap(f)(x, y)
+        self.assertTrue(called)
+        self.assertEqual(result, x + y)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
@@ -3395,10 +3623,7 @@ class MiniOpTestOther(CustomOpTestCaseBase):
 optests.generate_opcheck_tests(
     MiniOpTest,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
@@ -3408,10 +3633,7 @@ optests.generate_opcheck_tests(
 optests.generate_opcheck_tests(
     MiniOpTestOther,
     ["aten", "mini_op_test"],
-    get_file_path_2(
-        os.path.dirname(__file__),
-        "minioptest_failures_dict.json",
-    ),
+    get_file_path_2(os.path.dirname(__file__), "minioptest_failures_dict.json"),
     test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
@@ -3573,12 +3795,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         result = torch.library.opcheck(
             torch.ops.aten.sin.default, (x,), test_utils="test_schema"
         )
-        self.assertEqual(
-            result,
-            {
-                "test_schema": "SUCCESS",
-            },
-        )
+        self.assertEqual(result, {"test_schema": "SUCCESS"})
 
         result = torch.library.opcheck(
             torch.ops.aten.sin.default,

@@ -5,8 +5,7 @@
 #include <string>
 #include <variant>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // allow_typevars: If true, we assume that lowercase types that we don't
 // understand are type variables. This is only needed for TorchScript (and not
@@ -21,5 +20,4 @@ TORCH_API c10::FunctionSchema parseSchema(
     bool allow_typevars = true);
 TORCH_API c10::OperatorName parseName(const std::string& name);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

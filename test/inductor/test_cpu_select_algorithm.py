@@ -193,6 +193,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
     @parametrize("bias", (True, False))
     @parametrize(
         "epilogue",
@@ -213,11 +216,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_pointwise(self, bias, epilogue, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_linear_with_pointwise(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
                 super().__init__()
@@ -245,6 +247,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             and epilogue != "mul"
             and epilogue != "div"
             or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype == torch.float32
+                and epilogue == "add"
+                and not bias
+                and dynamo_config.dynamic_shapes
+                and not dynamo_config.assume_static_by_default
+            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
@@ -253,6 +262,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    div fusion which is not supported for oneDNN linear.
             # 2. For float16, since oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
+            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
+            #    and linear w/o bias plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -261,6 +272,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (128, 129))
     @parametrize("bias", (True, False))
     @parametrize(
         "epilogue",
@@ -273,11 +287,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_transpose(self, bias, epilogue, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 128
-
+    def test_linear_with_transpose(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
                 super().__init__()
@@ -301,6 +313,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
     @parametrize("bias", (True, False))
     @parametrize(
         "unary",
@@ -316,11 +331,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_linear_with_unary_binary(self, bias, unary, binary, dtype):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-
+    def test_linear_with_unary_binary(
+        self, batch_size, in_features, out_features, bias, unary, binary, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias, unary, binary, other):
                 super().__init__()
@@ -343,13 +356,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    def test_linear_amx(self, bias):
-        batch_size = 1024
-        in_features = 1024
-        out_features = 1024
-        dtype = torch.bfloat16
-
+    @dtypes(torch.bfloat16)
+    def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
@@ -370,13 +382,14 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384,))
     @parametrize("bias", (True, False))
-    def test_linear_with_embedding(self, bias):
-        batch_size = 384
-        in_features = 196
-        out_features = 384
-        dtype = torch.bfloat16
-
+    @dtypes(torch.bfloat16)
+    def test_linear_with_embedding(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
@@ -399,10 +412,67 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (16,))
+    @parametrize("seq_lens", (128,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.bfloat16)
+    def test_linear_with_indirect_indexing(
+        self, batch_size, in_features, seq_lens, out_features, bias, dtype
+    ):
+        # Reproducer from the GPT2ForSequenceClassification model in HuggingFace
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.wte = torch.nn.Embedding(128, seq_lens)
+                self.wpe = torch.nn.Embedding(in_features, seq_lens)
+                self.linear = torch.nn.Linear(out_features, seq_lens, bias)
+
+            def forward(self, view_12, input_ids, view_9):
+                inputs_embeds = self.wte(input_ids)
+
+                position_ids = torch.arange(0, in_features, dtype=torch.long)
+                position_ids = position_ids.unsqueeze(0)
+                position_embeds = self.wpe(position_ids)
+
+                add = inputs_embeds + position_embeds
+                add_4 = view_9 + add
+
+                _linear_pointwise_default_45 = self.linear(view_12)
+
+                view_13 = torch.ops.aten.reshape.default(
+                    _linear_pointwise_default_45, [batch_size, in_features, seq_lens]
+                )
+                out = torch.ops.aten.add.Tensor(add_4, view_13)
+
+                return out
+
+        view_12 = torch.randn(batch_size * in_features, out_features)
+        input_ids = torch.randint(0, 128, (batch_size, in_features))
+        view_9 = torch.randn(batch_size, in_features, seq_lens)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (
+                    view_12,
+                    input_ids,
+                    view_9,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
-    @parametrize("out_features", (64,))
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @dtypes(torch.float32, torch.bfloat16)
@@ -468,7 +538,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
-    @parametrize("out_features", (64,))
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (False, True))
     @parametrize("input_3d", (False, True))
     @parametrize("int8_mixed_bf16", (False, True))
@@ -558,7 +628,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @parametrize("batch_size", (3, 16, 32, 49))
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
-    @parametrize("out_features", (32, 64))  # n should be a multiple of block_n
+    @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
@@ -581,6 +651,43 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.gemm_max_k_slices": 0})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (1000,))
+    @parametrize("out_features", (2,))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "epilogue",
+        (
+            "none",
+            "relu",
+        ),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_k_slicing(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, epilogue, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue, other)
+
+            def forward(self, x):
+                return self.epilogue(self.linear(x))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
