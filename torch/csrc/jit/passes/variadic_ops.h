@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Try to replace an op that takes a list input with another op that takes a
 // variadic number of arguments.
@@ -27,5 +26,4 @@ TORCH_API bool UseVariadicStack(const std::shared_ptr<Graph>& graph);
 TORCH_API bool RemoveListMutationAndUseVariadicStack(
     const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
