@@ -582,9 +582,8 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
 // kernel for transposing mxn where m, n <= 16
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, float>::value && M <= 16 && N <= 16, int> = 0>
-inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
+template <>
+inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
   // load from src to registers
   __mmask16 src_mask = (1 << N) - 1;
   __m512 input[16];
@@ -650,6 +649,12 @@ inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t 
     }
     _mm512_mask_storeu_ps(&dst[i * ld_dst], dst_mask, input[i]);
   }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same<T, float>::value && M <= 16 && N <= 16, int> = 0>
+inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
+  transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }
 
 #endif
