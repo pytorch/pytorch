@@ -271,13 +271,14 @@ if RUN_CPU:
             "test_lstm_packed_change_input_sizes",
             "cpu",
             test_cpu_repro.CPUReproTests(),
-            condition=torch.backends.mkldnn.is_available(),
+            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         ),
         BaseTest("test_max_pool2d6"),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
+            condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
             code_string_count={"py::gil_scoped_release release;": 2},
         ),
