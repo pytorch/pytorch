@@ -143,8 +143,8 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /third_party/xpu.txt @EikanWang @gujinghui
 
 # torch.export
-/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
-/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki

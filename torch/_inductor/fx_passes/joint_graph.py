@@ -27,6 +27,7 @@ from ..pattern_matcher import (
 )
 from .replace_random import replace_random_passes
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
@@ -195,7 +196,7 @@ class UniformValueConstantFolder(ConstantFolder):
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
-    def __init__(self, gm, skip_constructors=False):
+    def __init__(self, gm, skip_constructors=False) -> None:
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}

@@ -38,7 +38,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sub = Sub()
 
             def forward(self, x):
@@ -96,6 +96,7 @@ _COPY_META_FIELDS = [
     "from_node",
     "quantization_tag",
     "_numeric_debug_handle",
+    "partitioner_tag"
 ]
 
 
@@ -396,6 +397,25 @@ class Proxy:
         # note: not added to the graph yet, if this is a method call
         # we peephole optimize to the method invocation
         return Attribute(self, k)
+
+    def __getstate__(self) -> Dict:
+        raise NotImplementedError(
+            """__getstate__ not implemented for Proxy. """
+            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
+
+    def __deepcopy__(self, memo) -> Dict:
+        raise NotImplementedError(
+            """__deepcopy__ not implemented for Proxy. """
+            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
+
+    def __setstate__(self, d):
+        # This is called when being unpickled/loaded.
+        raise NotImplementedError(
+            """__setstate__ not implemented for Proxy. """
+            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)

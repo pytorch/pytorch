@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -42,11 +43,12 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     ModularIndexing,
 )
-from .._dynamo.utils import import_submodule
 
+from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
+    DtypeView,
     ExpandView,
     IndexingConstant,
     is_triton,
@@ -71,6 +73,7 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -445,6 +448,17 @@ def make_pointwise(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
+        # in tracing, we will annotate pointwise nodes that correspond to the output of
+        # a pointwise node that would have been run in eager. intermediary pointwise nodes
+        # during decompositions are not annotated.
+        emulate_precision_casts = (
+            V.graph is not None
+            and getattr(V.graph, "current_node", None) is not None
+            and V.graph.current_node.meta is not None
+            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+            and dtype in (torch.bfloat16, torch.float16)
+        )
+
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
@@ -452,7 +466,21 @@ def make_pointwise(
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
-                return fn(*[load(index) for load in loaders])
+                inputs_loaded = []
+                for load in loaders:
+                    out = load(index)
+                    if emulate_precision_casts:
+                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, dtype)
+                    inputs_loaded.append(out)
+
+                out = fn(*inputs_loaded)
+                if emulate_precision_casts:
+                    # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
+                    # then upcasting again, to emulate casts that eager would do.
+                    downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                    return ops.to_dtype(downcast, dtype)
+                return out
 
         if not override_device:
             device = None
@@ -524,7 +552,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            buffer_list = []
+            operation_list: List[str] = []
             for (
                 output_ind,
                 args,
@@ -541,10 +569,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     and use_foreach
                     and realize_outputs
                 ):
-                    buffer_list.append(output.realize())
+                    output.realize()
+                    operation_list.append(output.get_operation_name())
 
-            if buffer_list:
-                V.graph.register_list(buffer_list)
+            if operation_list:
+                V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
         return outputs
@@ -595,16 +624,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
         return fallback_handler(aten.view.dtype)(x, dtype)
-
-    def _to_dtype_bitcast(x):
-        # Because we may promote tensor type from float16 or bfloat16
-        # to float, we will need to pass the original src dtype (i.e. x_dtype),
-        # which is used for correctly constructing type conversion before bitcast,
-        # which requires the bitwidth of the input tensor type is the same as the
-        # target type.
-        return ops.to_dtype_bitcast(x, dtype, x_dtype)
-
-    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+    else:
+        return TensorBox(DtypeView.create(x, dtype))
 
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
@@ -613,7 +634,7 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
         return TensorBox.create(
             ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
         )
-    return to_dtype_bitcast(x, dtype, copy=True)
+    return to_dtype_bitcast(x, dtype)
 
 
 def to_device(x: TensorBox, device: torch.device, *, copy=False):
@@ -678,10 +699,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]
+        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]
+        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -1633,8 +1654,11 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
@@ -1649,7 +1673,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1663,7 +1687,7 @@ def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -2314,7 +2338,6 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
-make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
@@ -2605,6 +2628,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
@@ -3182,6 +3206,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -3367,7 +3392,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         ndim = len(shape)
         indirect_idx = list(idx)
         indirect_idx[dim] = ops.indirect_indexing(
-            index_loader(idx), 1 if ndim == 0 else shape[dim]
+            index_loader(idx), 1 if ndim == 0 else shape[dim], wrap_neg=False
         )
         return indirect_idx
 
@@ -3402,6 +3427,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             zero_out,
         )
         buffer.name = V.graph.register_buffer(buffer)
+        V.graph.register_operation(buffer)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -3420,6 +3446,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
 
     if ndim == 0:
         self = view(self, [])
@@ -5565,7 +5592,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5595,7 +5622,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -5669,8 +5696,11 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         return clone(x), _full(0, device, torch.int64, shape)
 
     dim_size = shape[dim] if len(shape) else 1
+    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(torch.int16).max):
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+
     indices = iota(
-        dim_size, start=0, step=1, dtype=torch.int64, device=device, requires_grad=False
+        dim_size, start=0, step=1, dtype=torch.int16, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
     if len(shape):
@@ -5690,7 +5720,8 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
     if values is None:
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
-    return values, indices
+    assert indices is not None
+    return values, to_dtype(indices, torch.int64)
 
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
@@ -6100,6 +6131,7 @@ def resize(x, size, *, memory_format=None):
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
+
 make_fallback(auto_functionalized)
 
 
@@ -6181,7 +6213,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(input, input)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
@@ -6192,7 +6224,11 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
-    result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
+    result = ir.Scan.create(
+        combine_fn=wrapped_combine_fn,
+        can_fallback_to_aten=False,
+        **kwargs,
+    )
     if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
@@ -6383,17 +6419,21 @@ except (AttributeError, ImportError):
 # populate lowerings defined in kernel/*
 from . import kernel
 
+
 import_submodule(kernel)
 
 from . import quantized_lowerings
+
 
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
 
 from . import mkldnn_lowerings
 
+
 mkldnn_lowerings.register_onednn_fusion_ops()
 
 from . import jagged_lowerings
+
 
 jagged_lowerings.register_jagged_ops()

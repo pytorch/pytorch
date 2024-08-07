@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """
 # Inductor Pattern Matcher
 
@@ -33,12 +34,9 @@ implements a `_match` method which returns either a `Match` object for a
 successful match or a `FailedMatch` object for a failure to match.
 """
 
-# mypy: disallow-untyped-defs
-
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import functools
 import importlib
@@ -95,6 +93,7 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -1615,6 +1614,12 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     return node.kwargs.get("out") is not None
 
 
+def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+    assert "mutation_region_id" in a.meta
+    assert "mutation_region_id" in b.meta
+    return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
+
+
 def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     n = node
     while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
@@ -1802,12 +1807,19 @@ def fx_to_pattern(
 
 @torch.no_grad()
 def fwd_only(
-    fn: Callable[..., Any], args: Sequence[Any], *, run_dce: bool = True
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    *,
+    run_dce: bool = True,
+    get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+        decompositions = (
+            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
+        )
+        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 

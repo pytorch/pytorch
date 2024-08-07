@@ -128,7 +128,7 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 }
 
 int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale){
+    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale, bool enable_gqa){
   auto backend = sdp::SDPBackend::overrideable;
   return static_cast<int64_t>(backend);
 }
@@ -362,8 +362,15 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
                 self.storage().nbytes());
   } else {
     // Using cpu tensor to accomplishment stride copy.
-    at::Tensor cpu_self = unsafe_create_cpu_tensor_from_dummy_tensor(self);
-    at::Tensor cpu_dst = unsafe_create_cpu_tensor_from_dummy_tensor(dst);
+    auto convert_to_cpu_tensor = [](const at::Tensor& src) -> at::Tensor {
+      if (src.device().type() == c10::DeviceType::PrivateUse1) {
+        return unsafe_create_cpu_tensor_from_dummy_tensor(src);
+      } else {
+        return src;
+      }
+    };
+    at::Tensor cpu_self = convert_to_cpu_tensor(self);
+    at::Tensor cpu_dst = convert_to_cpu_tensor(dst);
     cpu_dst.copy_(cpu_self);
   }
 
@@ -521,6 +528,7 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("_fused_adamw_", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("triu_indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
@@ -573,7 +581,10 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
 // a global flag used for dummy pin_memory of custom device
 bool custom_pinned_flag = false;
 
+struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
+
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
+    FooHooksInterface(FooHooksArgs) {}
     ~FooHooksInterface() override = default;
     const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
       static auto device_gen = make_generator_privateuse1(device_index);
@@ -591,32 +602,47 @@ struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     }
 };
 
-struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
-
 TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
-#define REGISTER_PRIVATEUSE1_HOOKS(clsname) \
-  C10_REGISTER_CLASS(PrivateUse1HooksRegistry, clsname, clsname)
-
 C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs)
+// Using Create function to get PrivateUse1HooksInterface point from PrivateUse1HooksRegistry class.
+C10_REGISTER_TYPED_CLASS(PrivateUse1HooksRegistry, "FooHooks", FooHooksInterface)
 
+static at::PrivateUse1HooksInterface* privateuse1_hooks_local = nullptr;
 static at::PrivateUse1HooksInterface* get_private_hooks() {
-  static at::PrivateUse1HooksInterface* privateuse1_hooks;
   static c10::once_flag once;
   c10::call_once(once, [] {
-    privateuse1_hooks = PrivateUse1HooksRegistry()->Create("PrivateUse1Hooks", {}).release();
-    if (!privateuse1_hooks) {
-      privateuse1_hooks = new FooHooksInterface();
+    privateuse1_hooks_local = PrivateUse1HooksRegistry()->Create("FooHooks", {}).release();
+    if (!privateuse1_hooks_local) {
+      privateuse1_hooks_local = new FooHooksInterface(FooHooksArgs{});
     }
   });
-  return privateuse1_hooks;
+  return privateuse1_hooks_local;
 }
 
 void register_hook() {
   at::RegisterPrivateUse1HooksInterface(get_private_hooks());
 }
 
+bool is_register_hook() {
+  return privateuse1_hooks_local != nullptr;
+}
+
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
+}
+
+void fallback_with_undefined_tensor() {
+  at::Tensor first = at::empty((2,3)).to(at::DeviceType::PrivateUse1);
+  at::Tensor second = at::Tensor();
+  at::Tensor step = at::empty({}).fill_(2).to(at::DeviceType::PrivateUse1);
+  at::Tensor grad_scale = at::empty({}).fill_(0.00001).to(at::DeviceType::PrivateUse1);
+  at::Tensor found_inf = at::empty({}).fill_(1).to(at::DeviceType::PrivateUse1);
+  at::TensorList tensors = {first, first};
+  at::TensorList undefined_tensors = {first, second};
+  at::TensorList steps = {step, step};
+  return at::_fused_adamw_(tensors, tensors, tensors, tensors, undefined_tensors,
+                           steps, 0.001, 0.9, 0.999, 1e-2, 1e-8, false, false,
+                           grad_scale, found_inf);
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
@@ -665,7 +691,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
     m.def("register_hook", &register_hook, "register_hook for privateuse1");
+    m.def("is_register_hook", &is_register_hook, "is_register_hook for privateuse1");
     m.def("default_generator", &default_generator, "default_generator for privateuse1");
+    m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
 
     // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
     m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);

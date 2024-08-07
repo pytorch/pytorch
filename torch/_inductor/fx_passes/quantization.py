@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import functools
@@ -10,11 +11,13 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -702,7 +705,9 @@ def _register_quantization_unary_fusion():
     )
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -898,7 +903,7 @@ def _register_quantization_binary_fusion():
             unary_op_name: str = "none",
             scalars_attr=None,
             algorithm_attr=None,
-        ):
+        ) -> None:
             self.binary_op_name = binary_op_name
             self.alpha = alpha if alpha else 1.0
             self.unary_op_name = unary_op_name

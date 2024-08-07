@@ -17,12 +17,12 @@ from torch.utils._pytree import (
 
 from .exported_program import ExportedProgram
 
+
 if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._guards import Source
-
-    from ..fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
 
 __all__ = [
     "Constraint",
@@ -206,6 +206,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _min = 0 if min is None else min
     _max = int_oo if max is None else max
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
         inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
@@ -629,7 +630,7 @@ def _tree_map(
     return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> Dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
