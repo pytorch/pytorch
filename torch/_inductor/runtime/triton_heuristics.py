@@ -1356,7 +1356,7 @@ def triton_config_reduction(
     if register_intensive:
         max_num_warps = max_num_warps // 2
     min_num_warps = 1 if torch.version.hip else 2
-    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
+    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
