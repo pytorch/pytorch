@@ -67,7 +67,6 @@ from .cpp_utils import (
     cexpr_index,
     CppCSEVariable,
     DTYPE_TO_CPP,
-    get_export_declaration,
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
@@ -77,6 +76,12 @@ from .cpp_utils import (
 
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
