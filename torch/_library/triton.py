@@ -1,4 +1,6 @@
-from typing import Callable, Iterable, Optional, Union
+import contextlib
+import threading
+from typing import Callable, Generator, Iterable, Optional, Union
 
 from .custom_ops import custom_op
 from .infer_schema import infer_schema
@@ -92,10 +94,6 @@ def triton_op(
 
     def dec(fn: Callable) -> Callable:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
-            from torch._higher_order_ops.triton_kernel_wrap import (
-                set_capture_triton_enabled,
-            )
-
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
             with set_capture_triton_enabled(False):
@@ -134,6 +132,31 @@ def triton_op(
         return dec
     else:
         return dec(fn)
+
+
+capture_triton_enabled = threading.local()
+capture_triton_enabled_default = True
+
+
+@contextlib.contextmanager
+def set_capture_triton_enabled(enabled: bool) -> Generator[None, None, None]:
+    """If triton kernels annotated with @capture_triton should dispatch via HOP
+    or go straight to the triton kernel execution.
+
+    We have this switch because eager-mode performance of HOP dispatch is slow
+    enough to matter (~1ms) and we know that capture_triton isn't necessary in
+    some situations (eager-mode with regular Tensors)
+    """
+    try:
+        prev = is_capture_triton_enabled()
+        capture_triton_enabled.value = enabled
+        yield
+    finally:
+        capture_triton_enabled.value = prev
+
+
+def is_capture_triton_enabled() -> bool:
+    return getattr(capture_triton_enabled, "value", capture_triton_enabled_default)
 
 
 def capture_triton(triton_kernel: Callable, /) -> Callable:
@@ -205,4 +228,6 @@ def capture_triton(triton_kernel: Callable, /) -> Callable:
         raise RuntimeError(
             "capture_triton only works on functions annotated with triton.jit or triton.autotune"
         )
+    if not is_capture_triton_enabled():
+        return triton_kernel
     return TraceableTritonKernelWrapper(triton_kernel, None, None)

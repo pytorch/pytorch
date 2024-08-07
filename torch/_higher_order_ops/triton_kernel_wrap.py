@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import collections
-import contextlib
 import copy
 import dataclasses
 import inspect
@@ -1010,27 +1009,6 @@ class TracingTritonHOPifier(TritonHOPifier):
 tracing_triton_hopifier_singleton = TracingTritonHOPifier()
 
 
-capture_triton_enabled = threading.local()
-capture_triton_enabled_default = True
-
-
-@contextlib.contextmanager
-def set_capture_triton_enabled(enabled: bool):
-    """If triton kernels annotated with @capture_triton should dispatch via HOP
-    or go straight to the triton kernel execution.
-
-    We have this switch because eager-mode performance of HOP dispatch is slow
-    enough to matter (~1ms) and we know that capture_triton isn't necessary in
-    some situations (eager-mode with regular Tensors)
-    """
-    try:
-        prev = getattr(capture_triton_enabled, "value", capture_triton_enabled_default)
-        capture_triton_enabled.value = enabled
-        yield
-    finally:
-        capture_triton_enabled.value = prev
-
-
 class TraceableTritonKernelWrapper:
     def __init__(self, kernel, kernel_idx, grid):
         self.kernel = None
@@ -1042,14 +1020,18 @@ class TraceableTritonKernelWrapper:
         return tracing_triton_hopifier_singleton.call_getitem(self, args)
 
     def run(self, *args, **kwargs):
-        if getattr(capture_triton_enabled, "value", capture_triton_enabled_default):
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
             return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
         else:
             assert self.kernel is not None
             return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        if getattr(capture_triton_enabled, "value", capture_triton_enabled_default):
+        from torch._library.triton import is_capture_triton_enabled
+
+        if is_capture_triton_enabled():
             return tracing_triton_hopifier_singleton.call_triton_kernel(
                 self, args, kwargs, None
             )
