@@ -357,6 +357,7 @@ class BisectionManager:
             cls.delete_bisect_status()
             cls.bisection_enabled = True
 
+            # TODO - cli interface, and in-process different directories
             class DisableBisect:
                 def __del__(self) -> None:
                     cls.bisection_enabled = bisection_enabled_orig
