@@ -168,10 +168,7 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
 def associative_scan_proxy_mode(mode, combine_fn, input, dim):
-    if mode.enable_tracing:
-        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
-    else:
-        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim)
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
