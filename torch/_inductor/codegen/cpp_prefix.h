@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -130,6 +131,14 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
   return result;
 }
 
+template <typename T>
+struct IndexValue {
+  int64_t index;
+  T value;
+  IndexValue(int64_t idx, T val) :index(idx), value(val) {};
+  IndexValue() {};
+};
+
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
@@ -199,7 +208,194 @@ inline bool less_or_nan(scalar_t a, scalar_t b, int64_t idx_a, int64_t idx_b) {
   return (a == b) ? idx_a < idx_b : (a < b);
 }
 
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(less_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, T next_value, int64_t next_index){
+  if(!(greater_or_nan(a.value, next_value, a.index, next_index))){
+    a.value = next_value;
+    a.index = next_index;
+  }
+  return a;
+}
+template <typename T>
+inline IndexValue<T>& argmin_combine(IndexValue<T>& a, const IndexValue<T>& next){
+  return argmin_combine(a, next.value, next.index);
+}
+template <typename T>
+inline IndexValue<T>& argmax_combine(IndexValue<T>& a, const IndexValue<T>& next){
+  return argmax_combine(a, next.value, next.index);
+}
+
 #if INDUCTOR_USE_VECTOR_TYPES()
+
+template <typename T, int NV, int NI>
+struct IndexValueVec {
+  at::vec::VectorizedN<T, NV> value;
+  at::vec::VectorizedN<int64_t, NI> index;
+
+  IndexValueVec(const T _value) {
+    value = at::vec::VectorizedN<T, NV>(_value);
+    index = at::vec::VectorizedN<int64_t, NI>(0);
+  };
+
+  IndexValueVec() {};
+};
+
+
+template <typename T, int NV, int NI,
+          typename std::enable_if_t<at::vec::is_floating_point_v<T>, int> = 0>
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
+  const at::vec::VecMask<T, NV>& vmask,
+  const IndexValueVec<T, NV, NI>& a,
+  const at::vec::VectorizedN<T, NV>& value,
+  const at::vec::VectorizedN<int64_t, NI>& index
+){
+  /*
+  vec impl for less_or_nan and greater_or_nan
+  example for argmin:
+  a.value = [NaN, NaN, 0, 2, 1, 0]
+  value = [NaN, 0, 0, 1, 2, NaN]
+  vmask = [false, false, false, false, true, false]
+  all_nan_or_equal = [true, false, true, false, false, false]
+  imask = [a.index[0] < index[0], ..., a.index[-1] < index[-1]]
+  iv_mask = blendv (vmask, imask, all_nan_or_equal)
+          [a.index[0] < index[0], false, a.index[2] < index[2], false, true, false]
+  a_nan_b_not: [false, false, false, false, false, true]
+  mask = iv_mask | a_nan_b_not
+          [a.index[0] < index[0], false, a.index[2] < index[2], false, true, true]
+  */
+  using v_t = at::vec::VecMask<T, NV>;
+  using i_t = at::vec::VecMask<int64_t, NI>;
+  i_t vmask_itype = vmask.template cast<int64_t, NI>();
+  // use itype here since there is vec impl for operator~ for itype
+  // while there may not vec impl for vtype
+  v_t isnan_a = a.value.isnan();
+  i_t isnan_a_itype = isnan_a.template cast<int64_t, NI>();
+  v_t isnan_b = value.isnan();
+  i_t isnan_b_type = isnan_b.template cast<int64_t, NI>();
+  i_t all_nan_mask = isnan_a_itype & isnan_b_type;
+  v_t equal_mask = (a.value == value);
+  i_t equal_mask_itype = equal_mask.template cast<int64_t, NI>();
+  i_t all_nan_or_equal = all_nan_mask | equal_mask_itype;
+  i_t imask(a.index < index);
+  i_t iv_mask = i_t::blendv(vmask_itype, imask, all_nan_or_equal);
+  i_t isnan_a_notnan_b = isnan_a_itype & (~isnan_b_type);
+  return iv_mask | isnan_a_notnan_b;
+}
+
+template <typename T, int NV, int NI,
+          typename std::enable_if_t<!at::vec::is_floating_point_v<T>, int> = 0>
+at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
+  const at::vec::VecMask<T, NV>& vmask,
+  const IndexValueVec<T, NV, NI>& a,
+  const at::vec::VectorizedN<T, NV>& value,
+  const at::vec::VectorizedN<int64_t, NI>& index
+){
+  using v_t = at::vec::VecMask<T, NV>;
+  using i_t = at::vec::VecMask<int64_t, NI>;
+  i_t vmask_itype = vmask.template cast<int64_t, NI>();
+  v_t equal_mask = (a.value == value);
+  i_t imask(a.index < index);
+  return i_t::blendv(vmask_itype, imask, equal_mask);
+}
+
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index, std::optional<int64_t> tail_size){
+  at::vec::VecMask<T, NV> vmask(a.value < value);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
+  if (tail_size.has_value()) {
+    a.value = at::vec::VectorizedN<T, NV>::set(a.value, at::vec::minimum(a.value, value), tail_size.value());
+    a.index = at::vec::VectorizedN<int64_t, NI>::set(a.index, at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask), tail_size.value());
+  } else {
+    a.value = at::vec::minimum(a.value, value);
+    a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
+  }
+  return a;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_vec_impl(IndexValueVec<T, NV, NI>& a,  at::vec::VectorizedN<T, NV> value, at::vec::VectorizedN<int64_t, NI> index, std::optional<int64_t> tail_size){
+  at::vec::VecMask<T, NV> vmask(a.value > value);
+  at::vec::VecMask<int64_t, NI> final_mask = get_mask_for_argmin_argmax<T, NV, NI>(vmask, a, value, index);
+  if (tail_size.has_value()) {
+    a.value = at::vec::VectorizedN<T, NV>::set(a.value, at::vec::maximum(a.value, value), tail_size.value());
+    a.index = at::vec::VectorizedN<int64_t, NI>::set(a.index, at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask), tail_size.value());
+  } else {
+    a.value = at::vec::maximum(a.value, value);
+    a.index = at::vec::VecMask<int64_t, NI>::blendv(index, a.index, final_mask);
+  }
+  return a;
+}
+
+template <typename T, int NI, bool horizontal>
+inline at::vec::VectorizedN<int64_t, NI> create_index(int64_t next_index){
+  at::vec::VectorizedN<int64_t, NI> next_idx;
+  if constexpr (horizontal) {
+    next_idx = at::vec::VectorizedN<int64_t, NI>::arange(next_index, 1);
+  } else {
+    next_idx = at::vec::VectorizedN<int64_t, NI>(next_index);
+  }
+  return next_idx;
+}
+
+template <typename T, int NV, int NI, bool horizontal>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(IndexValueVec<T, NV, NI>& a, at::vec::VectorizedN<T, NV> next_value, int64_t next_index, std::optional<int64_t> tail_size = std::nullopt){
+  auto next_idx = create_index<T, NI, horizontal>(next_index);
+  return argmin_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI, bool horizontal>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(IndexValueVec<T, NV, NI>& a, at::vec::VectorizedN<T, NV> next_value, int64_t next_index, std::optional<int64_t> tail_size = std::nullopt){
+  auto next_idx = create_index<T, NI, horizontal>(next_index);
+  return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValue<T> argmin_vec_reduce_all(const IndexValueVec<T, NV, NI>& vec){
+  constexpr int len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
+  IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
+  for (int i = 1; i < len; i++){
+    res = argmin_combine(res, tmpval[i], tmpidx[i]);
+  }
+  return res;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValue<T> argmax_vec_reduce_all(const IndexValueVec<T, NV, NI>& vec){
+  constexpr int len = at::vec::VectorizedN<T, NV>::size();
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
+  IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
+  for (int i = 1; i < len; i++){
+    res = argmax_combine(res, tmpval[i], tmpidx[i]);
+  }
+  return res;
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(IndexValueVec<T, NV, NI>& vec_a, const IndexValueVec<T, NV, NI>& vec_b, std::optional<int64_t> tail_size = std::nullopt){
+  return argmin_vec_impl(vec_a, vec_b.value, vec_b.index, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(IndexValueVec<T, NV, NI>& vec_a, const IndexValueVec<T, NV, NI>& vec_b, std::optional<int64_t> tail_size = std::nullopt){
+  return argmax_vec_impl(vec_a, vec_b.value, vec_b.index, tail_size);
+}
+
 template <typename scalar_t>
 inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
@@ -287,11 +483,13 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
   auto Welford0 = Welford<at::vec::Vectorized<scalar_t>>{
     acc.mean[0],
     acc.m2[0],
+    acc.weight[0],
     acc.index
   };
   auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
     acc.mean[1],
     acc.m2[1],
+    acc.weight[1],
     acc.index
   };
   return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
