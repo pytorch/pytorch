@@ -12,12 +12,13 @@ import torch.nn as nn
 from torch.distributed._tensor._collective_utils import (
     check_tensor_meta,
     mesh_broadcast,
+    get_padded_tensor,
 )
 from torch.distributed._tensor._redistribute import (
     Redistribute,
     redistribute_local_tensor,
 )
-from torch.distributed._tensor._utils import compute_global_tensor_info
+from torch.distributed._tensor._utils import compute_global_tensor_info, compute_global_padding
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Partial,
@@ -673,6 +674,8 @@ def distribute_tensor(
         return tensor
 
     local_tensor = tensor.detach()
+    padding = compute_global_padding(local_tensor.shape, device_mesh, placements)
+    local_tensor = get_padded_tensor(local_tensor, padding)
 
     # distribute the tensor according to the placements.
     placements = list(placements)
