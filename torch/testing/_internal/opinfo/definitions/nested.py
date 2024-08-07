@@ -180,6 +180,23 @@ def sample_inputs_njt_reduction(
                     njt, kwargs={**op_kwargs, "dim": dim, "keepdim": keepdim}
                 )
 
+        for dim in range(njt._ragged_idx + 1, njt.dim() - 1):
+            for keepdim in [False, True]:
+                yield SampleInput(
+                    njt, kwargs={**op_kwargs, "dim": (dim, dim + 1), "keepdim": keepdim}
+                )
+
+        for dim in range(njt._ragged_idx + 1, njt.dim() - 2):
+            for keepdim in [False, True]:
+                yield SampleInput(
+                    njt,
+                    kwargs={
+                        **op_kwargs,
+                        "dim": (dim, dim + 1, dim + 2),
+                        "keepdim": keepdim,
+                    },
+                )
+
         # full reduction
         yield SampleInput(njt, kwargs=dict(op_kwargs))
 
@@ -205,12 +222,54 @@ def unsupported_reference(op_name):
 
 
 # === BEGIN OP-SPECIFIC SAMPLE INPUTS FUNCS ===
+def sample_inputs_layer_norm(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
+    ):
+        # dim-wise normalization; includes normalization over the ragged dim
+        # NB: reduction over the batch dim is not supported!
+        # TODO: Cover this in the set of error inputs
+        for dim in range(2, njt.dim()):
+            normalized_shape = (*njt.shape[dim:],)
+            yield SampleInput(
+                njt,
+                kwargs={
+                    "normalized_shape": normalized_shape,
+                    "weight": None,
+                    "bias": None,
+                    "eps": 1e-6,
+                },
+            )
+
+        for dim in range(2, njt.dim()):
+            yield SampleInput(
+                njt,
+                kwargs={
+                    "normalized_shape": normalized_shape,
+                    "weight": torch.ones(normalized_shape, device=device, dtype=dtype),
+                    "bias": torch.zeros(normalized_shape, device=device, dtype=dtype),
+                    "eps": 1e-6,
+                },
+            )
+
+
 def sample_inputs_mvl_gamma(p):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"p": p})
 
 
 def sample_inputs_polygamma_n(n):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"n": n})
+
+
+def sample_inputs_softmax(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # dim-wise reduction; includes reduction over the ragged dim
+        # NB: reduction over the batch dim is not supported!
+        # TODO: Cover this in the set of error inputs
+        for dim in range(1, njt.dim()):
+            yield SampleInput(njt, kwargs={"dim": dim})
 
 
 def sample_inputs_special_polygamma_n(n):
@@ -230,10 +289,12 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
+    "native_layer_norm": sample_inputs_layer_norm,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
+    "softmax": sample_inputs_softmax,
 }
 
 

@@ -6988,8 +6988,10 @@ FORWARD_FAILURES = {
     "var",
     "var.unbiased",
     # === BEGIN UNSUPPORTED SECTION ===
-    # RuntimeError: mean(): not supported for NestedTensor on dim=1
+    # RuntimeError: mean(): not supported when keepdim=False for NestedTensor
     "mean",
+    # NotImplementedError: aten.sum.default
+    "sum",
     # ValueError: expects strided tensor (got torch.jagged tensor)
     "masked.amax",
     "masked.amin",
@@ -7016,12 +7018,12 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
     "nanmean",
+    # AssertionError: assert not isinstance(out_ref_component, (list, tuple))
+    "native_layer_norm",
 }
 
 BACKWARD_FAILURES = {
@@ -7043,6 +7045,7 @@ BACKWARD_FAILURES = {
     "pow",
     "sgn",
     "sinc",
+    "softmax",  # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
     "special.i1",
     "special.i1e",
 }
