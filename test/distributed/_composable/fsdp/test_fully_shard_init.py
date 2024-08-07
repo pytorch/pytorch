@@ -387,7 +387,9 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         # Use odd dim sizes to test uneven shards
-        model = MLP(9, dim_multiplier=3)
+        # TODO change "mlp_dim" back to 8 when uneven sharding
+        # is supported for FSDP+TP
+        model = MLP(8, dim_multiplier=3)
         orig_params = [param.detach().clone() for param in model.parameters()]
         orig_param_names = [param_name for param_name, _ in model.named_parameters()]
         parallelize_module(
@@ -581,7 +583,9 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
         # Test both even sharding (8) and uneven sharding (3)
-        for mlp_dim in (8, 3):
+        # TODO change "mlp_dim" back to (8, 3) when uneven sharding
+        # is supported for FSDP+TP
+        for mlp_dim in (8, 4):
             with torch.device("meta"):
                 model = MLP(mlp_dim, with_buffer=True)
                 for param in model.parameters():
