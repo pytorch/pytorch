@@ -1,17 +1,16 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
 from .optimizer import (
-    _default_to_fused_or_foreach,
     _disable_dynamo_if_unsupported,
-    _foreach_doc,
     _get_scalar_dtype,
     _maximize_doc,
     Optimizer,
     ParamsT,
+    TensorListList,
 )
 
 __all__ = ["Adafactor", "adafactor"]
@@ -241,7 +240,13 @@ Adafactor.__doc__ = (
         d (float, optional): the clipping threshold, used to avoid larger-than-desired
             updates.
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
-        {_foreach_doc}
+        foreach (bool, optional): whether foreach implementation of optimizer is used. Note
+            that the foreach implementation uses ~ sizeof(params) more peak memory than the
+            for-loop version due to the intermediates being a tensorlist vs just one tensor.
+            As Adafactor is commonly used when memory is prohibitive, Adafactor will default
+            to the slower single tensor for-loop implementation unless this flag is explicitly
+            True. This behavior is contrary to other optimizers, which will attempt defaulting
+            to foreach on CUDA for faster runtime. (default: None)
         {_maximize_doc}"""
     + r"""
     .. Note::
@@ -362,7 +367,7 @@ def _single_tensor_adafactor(
         step_t += 1
         step_float = step_t.item()
 
-        beta2_t = 1 - step_float**beta2_decay
+        one_minus_beta2_t = step_float**beta2_decay
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
@@ -378,12 +383,12 @@ def _single_tensor_adafactor(
             row_mean = (
                 torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
             )
-            row_var.lerp_(row_mean, 1 - beta2_t)
+            row_var.lerp_(row_mean, one_minus_beta2_t)
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_mean = (
                 torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
             )
-            col_var.lerp_(col_mean, 1 - beta2_t)
+            col_var.lerp_(col_mean, one_minus_beta2_t)
             var_estimate = row_var @ col_var
             var_estimate.div_(row_var.mean(dim=-2, keepdim=True).clamp_(min=eps1))
         else:
@@ -391,7 +396,7 @@ def _single_tensor_adafactor(
                 variance is not None
             ), "variance should be defined when grad is a vector"
             grad_squared = grad * grad
-            variance.lerp_(grad_squared, 1 - beta2_t)
+            variance.lerp_(grad_squared, one_minus_beta2_t)
             # avoid writing into variance during update
             var_estimate = variance.clone()
 
@@ -403,7 +408,7 @@ def _single_tensor_adafactor(
 
 
 def _group_tensors_by_device_dtype_and_is_multidim(
-    tensorlists: List[List[Optional[Tensor]]],
+    tensorlists: TensorListList,
 ) -> Dict[Tuple[torch.device, torch.dtype, bool], List[List[Optional[Tensor]]]]:
     """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
     has multiple dims or just one dim (is a vector). This allows the foreach impl of
@@ -413,18 +418,20 @@ def _group_tensors_by_device_dtype_and_is_multidim(
         Tuple[torch.device, torch.dtype, bool], List[List[Optional[Tensor]]]
     ] = {}
     for (device, dtype), (tensorlists, _) in grouped_tensors.items():
+        assert device, f"device should not be None, but is {device}"
+        assert dtype, f"dtype should not be None, but is {dtype}"
         matrix_key = (device, dtype, True)
         vector_key = (device, dtype, False)
 
         # assumes grad is the second tensorlist
         for j, tensor in enumerate(tensorlists[1]):
+            assert tensor is not None, "grad should not be None"
             if tensor.dim() > 1:
                 if matrix_key not in ultra_grouped_tensors:
                     ultra_grouped_tensors[matrix_key] = [[] for _ in tensorlists]
                 for i in range(len(tensorlists)):
                     ultra_grouped_tensors[matrix_key][i].append(tensorlists[i][j])
             else:
-                print("I GET CALLED")
                 if vector_key not in ultra_grouped_tensors:
                     ultra_grouped_tensors[vector_key] = [[] for _ in tensorlists]
                 for i in range(len(tensorlists)):
@@ -463,9 +470,9 @@ def _multi_tensor_adafactor(
     ), "Grad scaling should occur outside of optimizer.step()"
 
     grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
-        [params, grads, row_vars, col_vars, variances, state_steps]
+        [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]
     )
-    for (device, dtype, is_multidim), (
+    for (_, dtype, is_multidim), (
         (
             device_params,
             device_grads,
@@ -478,8 +485,11 @@ def _multi_tensor_adafactor(
         if eps1 is None:
             eps1 = torch.finfo(dtype).eps
 
+        if TYPE_CHECKING:
+            assert device_state_steps[0] is not None
+
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment,arg-type]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -487,24 +497,27 @@ def _multi_tensor_adafactor(
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
-                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0  # type: ignore[arg-type]
             )
         else:
-            torch._foreach_add_(device_state_steps, 1)
+            torch._foreach_add_(device_state_steps, 1)  # type: ignore[arg-type]
 
-        one_minus_beta2_ts = torch._foreach_pow(device_state_steps, beta2_decay)
-        one_minus_beta2_ts = [
-            v.to(device=device, dtype=dtype) for v in one_minus_beta2_ts
-        ]
-        rho_ts = [min(lr, 1 / (s.item() ** 0.5)) for s in device_state_steps]
+        one_minus_beta2_ts = []
+        beta2_ts = []
+        rho_ts = []
+        for s in device_state_steps:
+            one_minus_beta2_ts.append(s.item() ** beta2_decay)  # type: ignore[union-attr]
+            beta2_ts.append(1 - s.item() ** beta2_decay)  # type: ignore[union-attr]
+            rho_ts.append(min(lr, 1 / (s.item() ** 0.5)))  # type: ignore[union-attr]
+
         alphas = [
-            max(eps2, p.norm(2).item() / ((p.numel() ** 0.5) * r))
-            for p, r in zip(params, rho_ts)
+            max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r  # type: ignore[union-attr]
+            for p, r in zip(device_params, rho_ts)
         ]
 
         # Perform stepweight decay
         if weight_decay != 0:
-            torch._foreach_mul_(device_params, 1 - lr * weight_decay)
+            torch._foreach_mul_(device_params, 1 - lr * weight_decay)  # type: ignore[arg-type]
 
         if is_multidim:
             assert (
@@ -514,54 +527,64 @@ def _multi_tensor_adafactor(
             row_means = [
                 torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
             ]
-            torch._foreach_pow_(row_means, 2)
-            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
-            torch._foreach_lerp_(device_row_vars, row_means, one_minus_beta2_ts)
+            torch._foreach_mul_(row_means, row_means)
+            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])  # type: ignore[union-attr]
+            torch._foreach_mul_(device_row_vars, beta2_ts)  # type: ignore[arg-type]
+            torch._foreach_mul_(row_means, one_minus_beta2_ts)
+            torch._foreach_add_(device_row_vars, row_means)  # type: ignore[arg-type]
+            # torch._foreach_lerp_(device_row_vars, row_means, one_minus_beta2_ts)
+            del row_means
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_means = [
                 torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
             ]
-            torch._foreach_pow_(col_means, 2.0)
-            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
-            torch._foreach_lerp_(device_col_vars, col_means, one_minus_beta2_ts)
+            torch._foreach_mul_(col_means, col_means)
+            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])  # type: ignore[union-attr]
+            torch._foreach_mul_(device_col_vars, beta2_ts)  # type: ignore[arg-type]
+            torch._foreach_mul_(col_means, one_minus_beta2_ts)
+            torch._foreach_add_(device_col_vars, col_means)  # type: ignore[arg-type]
+            # torch._foreach_lerp_(device_col_vars, col_means, one_minus_beta2_ts)
+            del col_means
 
             var_estimates = [
-                row_var @ col_var
+                row_var @ col_var  # type: ignore[operator]
                 for row_var, col_var in zip(device_row_vars, device_col_vars)
             ]
             row_var_means = [
-                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
+                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars  # type: ignore[union-attr]
             ]
             torch._foreach_clamp_min_(row_var_means, eps1)
             torch._foreach_div_(var_estimates, row_var_means)
+            del row_var_means
         else:
             assert (
                 device_variances[0] is not None
             ), "variance should be defined when grad is a vector"
 
-            # if maximize, reuse device_grads. otherwise, create new.
-            if maximize:
-                torch._foreach_pow_(device_grads, 2.0)
-            else:
-                device_grads = torch._foreach_pow(device_grads, 2.0)
-            torch._foreach_lerp_(device_variances, device_grads, one_minus_beta2_ts)
+            grads_squared = torch._foreach_mul(device_grads, device_grads)  # type: ignore[arg-type]
+            torch._foreach_mul_(device_variances, beta2_ts)  # type: ignore[arg-type]
+            torch._foreach_mul_(grads_squared, one_minus_beta2_ts)
+            torch._foreach_add_(device_variances, grads_squared)  # type: ignore[arg-type]
+            # torch._foreach_lerp_(device_variances, grads_squared, one_minus_beta2_ts)
+            del grads_squared
+
             # avoid writing into variance during update
-            var_estimates = [v.clone() for v in device_variances]
+            var_estimates = [v.clone() for v in device_variances]  # type: ignore[union-attr]
 
         # square the eps1 as we sqrt after to keep eps1's magnitude
         torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
         torch._foreach_sqrt_(var_estimates)
         torch._foreach_reciprocal_(var_estimates)
-        torch._foreach_mul_(var_estimates, device_grads)
+        torch._foreach_mul_(var_estimates, device_grads)  # type: ignore[arg-type]
         updates = var_estimates
 
         alphas = [
-            a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
+            -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
             for a, update in zip(alphas, updates)
         ]
         torch._foreach_mul_(updates, alphas)
-        torch._foreach_add_(device_params, updates)
+        torch._foreach_add_(device_params, updates)  # type: ignore[arg-type]
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adafactor)
@@ -597,9 +620,6 @@ def adafactor(
         raise RuntimeError(
             "`state_steps` argument must contain a list of singleton tensors"
         )
-
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, False, use_fused=False)
 
     if foreach:
         func = _multi_tensor_adafactor
