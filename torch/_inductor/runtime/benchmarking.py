@@ -1,19 +1,45 @@
 import time
 from functools import cached_property
+from functools import cached_property, wraps
 from statistics import median
 from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Self
 
+import torch
 from torch._inductor.utils import is_cpu_device
 
 
+log = torch._logging.getArtifactLogger(__name__, "benchmarking")
+
+
 MILLISECONDS_PER_SECOND = 1000
+
+
+def maybe_time(fn: Callable[..., Any]) -> Callable[..., Any]:
+    if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
+        return fn
+
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        start_s = time.perf_counter()
+        result = fn(*args, **kwargs)
+        log.debug(
+            "fn:%r args:[%r, %r] took %f seconds.",
+            fn.__name__,
+            args,
+            kwargs,
+            time.perf_counter() - start_s,
+        )
+        return result
+
+    return wrapper
 
 
 class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
+    @maybe_time
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
@@ -39,6 +65,7 @@ class Benchmarker:
             return self.benchmark_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
         return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
+    @maybe_time
     def benchmark_cpu(
         self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
     ) -> float:
@@ -75,6 +102,7 @@ class Benchmarker:
 
 
 class TritonBenchmarker(Benchmarker):
+    @maybe_time
     @cached_property
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's do_bench."""
@@ -84,6 +112,7 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
+    @maybe_time
     def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
         """Benchmark a GPU callable using Triton's do_bench.
 
