@@ -71,6 +71,7 @@ from tools.testing.test_selections import (
     THRESHOLD,
 )
 
+# This PR is to get all ROCm testing results.
 
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
