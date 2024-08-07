@@ -42,8 +42,9 @@ static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
   "TORCH_NCCL_BCAST_UNIQUEID"};
 
 // Control EagerInit P2P serialization warning
-static std::vector<std::string> TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING = {
-  "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING"};
+static std::vector<std::string>
+    TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING = {
+        "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING"};
 
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
