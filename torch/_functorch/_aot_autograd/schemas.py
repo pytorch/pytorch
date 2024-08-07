@@ -181,8 +181,8 @@ class SubclassCreationMeta:
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
     attrs: Dict[str, Union["SubclassCreationMeta", None]]
-    outer_size: List[int]
-    outer_stride: List[int]
+    outer_size: List[Union[int, torch.SymInt]]
+    outer_stride: List[Union[int, torch.SymInt]]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -194,7 +194,38 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
 
-    def creation_fn(self, all_args, *, is_runtime: bool):
+    def compute_outer_size_and_stride(
+        self,
+        all_args,
+        *,
+        curr_start_idx: int,
+        is_runtime: bool,
+        is_subclass: bool,
+    ):
+        symint_placeholders = [type(i) is not int for i in self.outer_size]
+        has_symbolic = any(symint_placeholders)
+        num_symbolic = sum(symint_placeholders)
+
+        if is_runtime and has_symbolic and not is_subclass:
+            start = curr_start_idx
+            end = start + num_symbolic
+            it = iter(all_args[start:end])
+            outer_size = pytree.tree_map_only(
+                torch.SymInt, lambda _: next(it), self.outer_size
+            )
+
+            outer_stride = self.outer_stride
+            return outer_size, outer_stride
+
+        return self.outer_size, self.outer_stride
+
+    def creation_fn(
+        self,
+        all_args,
+        *,
+        is_runtime: bool,
+        is_subclass: bool,
+    ):
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
@@ -203,7 +234,9 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                subclass = creation_meta.creation_fn(
+                    all_args, is_runtime=is_runtime, is_subclass=True
+                )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
 
@@ -213,8 +246,15 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
+        outer_size, outer_stride = self.compute_outer_size_and_stride(
+            all_args,
+            curr_start_idx=curr_start_idx,
+            is_runtime=is_runtime,
+            is_subclass=is_subclass,
+        )
+
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, self.outer_size, self.outer_stride
+            inner_tensors, self.meta, outer_size, outer_stride
         )
 
         if not is_runtime:

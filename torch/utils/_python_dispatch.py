@@ -293,6 +293,14 @@ class TensorWithFlatten(Protocol):
         ...
 
     @overload
+    def size(self) -> torch._C.Size:
+        ...
+
+    @overload
+    def size(self, dim: int) -> int:
+        ...
+
+    @overload
     def to(
             self,
             dtype: torch.types._dtype,
