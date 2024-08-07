@@ -4106,16 +4106,15 @@ class CPUReproTests(TestCase):
             torch.min,
             torch.max,
         ):
-            print(op)
 
             def fn(x1, x2, x3):
                 return op(x1), op(x2), op(x3)
 
-            c = [False] * 64
+            c = [False] * 63
             input1 = torch.Tensor(c).to(torch.bool)
             c[10] = True
             input2 = torch.Tensor(c).to(torch.bool)
-            input3 = torch.Tensor([True] * 64).to(torch.bool)
+            input3 = torch.Tensor([True] * 63).to(torch.bool)
             metrics.reset()
             self.common(
                 fn,

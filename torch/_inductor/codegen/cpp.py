@@ -2344,16 +2344,15 @@ class CppVecKernel(CppKernel):
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
-                if reduction_type == "min":
-                    next_value = f"{acc_vec}.all_masked()"
-                elif reduction_type in (
+                if reduction_type in (
                     "any",
                     "sum",
+                    "max",
                 ):
                     next_value = f"!{acc_vec}.all_zero()"
                 else:
-                    assert reduction_type == "max"
-                    next_value = f"{acc_vec}.all_zero()"
+                    assert reduction_type == "min"
+                    next_value = f"{acc_vec}.all_masked()"
             else:
                 reduce_all_body = (
                     "{ return "
