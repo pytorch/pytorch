@@ -2221,6 +2221,21 @@ Arguments:
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
 
+  // ProcessGroup::Options binding
+  intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
+      processGroup, "Options", R"(Class for processes group options.)")
+      .def(
+          py::init([](const std::string& backend,
+                      const std::chrono::milliseconds& timeout) {
+            return c10::make_intrusive<::c10d::ProcessGroup::Options>(
+                backend, timeout);
+          }),
+          py::arg("backend"),
+          py::arg("timeout") = kProcessGroupDefaultTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
+      .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
+
 #ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
@@ -2541,7 +2556,7 @@ Arguments:
           backend,
           "Options",
           R"(
-Base class for all processes group options implementations, such as the nccl
+Base class for all backend options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def(
