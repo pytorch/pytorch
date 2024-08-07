@@ -214,22 +214,7 @@ class SubclassCreationMeta:
                 torch.SymInt, lambda _: next(it), self.outer_size
             )
 
-            # Use the fact that size and strides share symbolic objects
-            # to map the ones from strides back into concrete values.
-            # Open questions:
-            # (1) Is this safe for caching? We need the original outer_size with
-            # symints and they might be harder to serialize
-            # (2) Feels like a hack doing this. Should we just add the outer_strides
-            # as argument to the FX graph as well?
-            from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-
-            sym_dict = _SymHashingDict()
-            for k, v in zip(self.outer_size, outer_size):
-                sym_dict[k] = v
-
-            outer_stride = pytree.tree_map_only(
-                torch.SymInt, lambda k: sym_dict[k], self.outer_stride
-            )
+            outer_stride = self.outer_stride
             return outer_size, outer_stride
 
         return self.outer_size, self.outer_stride
