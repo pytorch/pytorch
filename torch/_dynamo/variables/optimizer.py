@@ -255,7 +255,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             break
 
             group_source = group_vt.source
-            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
