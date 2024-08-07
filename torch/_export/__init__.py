@@ -118,7 +118,7 @@ def capture_pre_autograd_graph(
     capture_pre_autograd_graph_warning()
 
     if sys.platform == "win32":
-        raise RuntimeError("capture_pre_autograd_graph not yet supported for inductor")
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
