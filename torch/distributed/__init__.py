@@ -3,9 +3,10 @@ import logging
 import pdb
 import sys
 import traceback
-from typing import Any, Dict
+import typing
 
 import torch
+
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    _breakpoint_cache: Dict[int, Any] = {}
+    _breakpoint_cache: typing.Dict[int, typing.Any] = {}
 
     def breakpoint(rank: int = 0, skip: int = 0):
         """
