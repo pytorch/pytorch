@@ -371,7 +371,9 @@ def _init_device_handle(
     If a device is specified by ``device_id``,
     then returns device handle corresponds to that device type. Otherwise, If the
     module is already on a non-CPU device, then the device type is that non-CPU device type.
-    If the module is on CPU or meta, then the device type is the current device.
+    If the module is on CPU or meta, then the device type is the current accelerator device.
+    See the :ref:`Accelerators<accelerators>` for details.
+
 
     This method will be called once ignored paramters was determined, as the device handle maybe needed
     for other initialization.
@@ -395,7 +397,11 @@ def _init_device_handle(
                         f"FSDP does not support modules with different device types "
                         f"but got params on {determined_device.type} and {param.device.type}"
                     )
-        determined_device = determined_device or torch._C._get_accelerator(check=True)
+        determined_device = determined_device or torch._C._get_accelerator()
+        if determined_device.type == "cpu":
+            raise RuntimeError(
+                "FSDP needs a non-CPU accelerator device, but no accelerator device is detected."
+            )
 
     state._device_handle = _FSDPDeviceHandle.from_device(determined_device)
     return state
