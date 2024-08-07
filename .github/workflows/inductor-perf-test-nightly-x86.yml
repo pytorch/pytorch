@@ -25,13 +25,28 @@ on:
         required: false
         type: boolean
         default: true
+      freezing_default:
+        description: Run inductor_default with freezing for inference?
+        required: false
+        type: boolean
+        default: true
       dynamic:
         description: Run inductor_dynamic_shapes?
         required: false
         type: boolean
         default: false
+      freezing_dynamic:
+        description: Run inductor_dynamic_shapes with freezing?
+        required: false
+        type: boolean
+        default: false
       aotinductor:
         description: Run aot_inductor for inference?
+        required: false
+        type: boolean
+        default: false
+      freezing_aotinductor:
+        description: Run aot_inductor with freezing for inference?
         required: false
         type: boolean
         default: false
@@ -81,7 +96,7 @@ jobs:
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-py3.8-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-aotinductor-true
+      dashboard-tag: training-false-inference-true-default-true-freezing_default-true-dynamic-true-freezing_dynamic-true-aotinductor-true-freezing_aotinductor-true
       docker-image: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_8-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
