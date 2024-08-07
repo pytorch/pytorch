@@ -170,7 +170,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
+
     try:
         output_msg = (
             subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
@@ -205,7 +205,6 @@ def is_msvc_cl() -> bool:
 
 
 def get_compiler_version_info(compiler: str) -> str:
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
     try:

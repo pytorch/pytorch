@@ -52,6 +52,8 @@ def matches_module_function_pattern(
     return True
 
 
+# Check the pattern: (F.function/torch.Tensor.method, F.function/torch.Tensor.method) matched.
+# Works for length 2 patterns with 2 functions/methods.
 def matches_function_pattern(
     pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
     node: torch.fx.node.Node,
@@ -62,8 +64,8 @@ def matches_function_pattern(
         node, torch.fx.Node
     ):
         return False
-    # the second node is call_function or call_method
-    if node.op != "call_function" and node.op != "call_method":
+    # the first node is call_function or call_method
+    if node.args[0].op != "call_function" and node.args[0].op != "call_method":
         return False
     if node.args[0].target != pattern[0]:
         return False
