@@ -61,7 +61,7 @@ case ${GPU_ARCH_TYPE} in
     cpu-s390x)
         TARGET=final
         DOCKER_TAG=cpu-s390x
-        GPU_IMAGE=redhat/ubi9
+        GPU_IMAGE=s390x/almalinux:8
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
