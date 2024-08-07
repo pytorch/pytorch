@@ -88,7 +88,7 @@ RUN cp $(which patchelf) /patchelf
 
 FROM patchelf as python
 # build python
-COPY .ci/docker/manywheel/build_scripts /build_scripts
+COPY manywheel/build_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
 ENV SSL_CERT_FILE=
 RUN bash build_scripts/build.sh && rm -r build_scripts
