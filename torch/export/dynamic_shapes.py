@@ -924,6 +924,7 @@ def _process_dynamic_shapes(
             else:
                 constraints.append(primary)
 
+    breakpoint()
     return constraints  # type: ignore[return-value]
 
 

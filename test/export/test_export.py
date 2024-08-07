@@ -6577,6 +6577,55 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    def test_dynamo_export_auto(self):
+        def _dynamo_export(model, args, kwargs, dynamic_shapes):
+            gm = torch._dynamo.export(
+                model,
+                dynamic_shapes=dynamic_shapes,
+                assume_static_by_default=False,
+                tracing_mode="symbolic",
+                disable_constraint_solver=False,
+                prefer_deferred_runtime_asserts_over_guards=True,
+                allow_complex_guards_as_runtime_asserts=False,
+                automatic_dynamic_shapes=True,
+            )(
+                *args,
+                **kwargs,
+            ).graph_module
+            (
+                fake_args,
+                fake_kwargs,
+                fake_mode,
+            ) = torch.export._trace._extract_fake_inputs(gm, args, kwargs)
+            return gm, fake_mode.shape_env
+
+        class M1(torch.nn.Module):
+            def forward(self, x, y):
+                torch._check(x.shape[0] >= 8)
+                if y.shape[0] >= 16:
+                    return x.flatten() + y.flatten()
+
+        inputs = (torch.randn(16, 8), torch.randn(32, 4))
+        # shapes = {
+        #     "x": (Dim("dx0"), Dim("dx1")),
+        #     "y": (Dim("dy0"), Dim("dy1")),
+        # }
+        shapes = None
+        gm, shape_env = _dynamo_export(M1(), inputs, {}, shapes)
+
+        class M2(torch.nn.Module):
+            def forward(self, x, y):
+                return x[1::3] + y
+
+        inputs = (torch.randn(16, 3), torch.randn(5, 3))
+        dy = Dim("dy", min=1, max=16)
+        shapes = {
+            "x": (3*dy+1, None),
+            "y": (dy, None),
+        }
+        gm, shape_env = _dynamo_export(M2(), inputs, {}, shapes)
+        breakpoint()
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

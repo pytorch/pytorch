@@ -1238,6 +1238,7 @@ def export(
     prefer_deferred_runtime_asserts_over_guards: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
+    automatic_dynamic_shapes: bool = False,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1410,7 +1411,7 @@ def export(
         with config.patch(
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
+            automatic_dynamic_shapes=automatic_dynamic_shapes,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
