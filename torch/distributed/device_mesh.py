@@ -126,8 +126,6 @@ else:
                 not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
-            # sort dims to flatten based on the order of the dims in the root mesh.
-            flatten_dims_in_root.sort()
             if mesh_dim_name:
                 flatten_mesh_dim_name = mesh_dim_name
             else:
