@@ -1578,11 +1578,31 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
+// We want to have both PG ID and global unique ID (guid) for the logging
+// prefix. PG ID records how many ProcessGroupNCCL objects were created on a
+// specific rank and is a stable index across ranks, which lets users reason
+// about, for example, the second PG we initialized on this rank is for FSDP,
+// and corresponds with PG ID = 1 on other ranks as well. Unlike PG ID, guid (or
+// group name) is a global unique ID across ranks. The guid is either a hash of
+// all the ranks in the group or a counter of how many times
+// `_process_group_name` is called, essentially it means how many times we
+// have PGs users have created. Before using split_group, even if
+// we are creating a new sub-PG, all ranks have to call the API at the same
+// time, and this makes `group_name` a unique identifier for a group (PG).
 std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
-    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+    return c10::str(
+        "[PG ID ",
+        uid_,
+        "PG GUID ",
+        pg_name_,
+        "(",
+        pg_desc_,
+        ") Rank ",
+        rank_,
+        "] ");
   }
-  return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  return c10::str("[PG ID ", uid_, "PG GUID ", pg_name_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
