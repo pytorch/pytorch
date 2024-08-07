@@ -1316,16 +1316,16 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
 
     def test_keep_composite_ops_linear_convd_for_training_ir(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("weight", torch.randn(20, 98))
-                self.register_buffer("bias", torch.randn(20))
+                self.weight = torch.nn.Buffer(torch.randn(20, 98))
+                self.bias = torch.nn.Buffer(torch.randn(20))
 
             def forward(self, x):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.conv1d = torch.nn.Conv1d(16, 33, 3)
