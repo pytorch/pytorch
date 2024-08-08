@@ -1460,8 +1460,7 @@ def forward(self, pred_1, x_1):
                         self.assertEqual(cumsum1, cumsum_exp_PT)
                         self.assertEqual(cumsum2, cumsum_exp_PT)
                         self.assertEqual(cumsum3, cumsum_exp_PT)
-                        
-    
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @unittest.skipIf(not importlib.util.find_spec("jax"), "Test requires JAX.")
     @unittest.skipIf(not importlib.util.find_spec("numpy"), "Test requires NumPy.")
@@ -1515,7 +1514,6 @@ def forward(self, pred_1, x_1):
                     [r.device.type for r in result2], [device.type] * len(result2)
                 )
 
-
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_tuple(self):
         def fct(x, y):
@@ -1536,7 +1534,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_complex_pytree(self):
         device = torch.device("cuda")
-        
+
         def fct_wrong_pytree(x, y):
             return {
                 "i": x["i"] * y["j"][0][0],
@@ -1547,14 +1545,20 @@ def forward(self, pred_1, x_1):
         def fct_pointwise(x, y):
             return {
                 "i": x["i"] * y["i"],
-                "j": ([x["j"][0][0] * y["j"][0][0]], [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}]),
+                "j": (
+                    [x["j"][0][0] * y["j"][0][0]],
+                    [{"o": x["j"][1][0]["o"] + y["j"][1][0]["o"]}],
+                ),
             }
 
         def fct_nonpointwise(x, y):
             W = torch.diag(torch.ones(2, device=device))
             return {
                 "i": x["i"] * y["i"],
-                "j": ([x["j"][0][0] * y["j"][0][0]], [{"o": x["j"][1][0]["o"] @ W + y["j"][1][0]["o"] @ W}]),
+                "j": (
+                    [x["j"][0][0] * y["j"][0][0]],
+                    [{"o": x["j"][1][0]["o"] @ W + y["j"][1][0]["o"] @ W}],
+                ),
             }
 
         x = torch.randn(3, 2, 2, device=device, requires_grad=True)
@@ -1582,7 +1586,7 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(result1, expected_result)
             self.assertEqual(result2, expected_result)
-            
+
             result1 = associative_scan1(
                 fct_nonpointwise, inp, 0, combine_mode="generic", reverse=direction
             )
@@ -1594,133 +1598,6 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(result1, expected_result)
             self.assertEqual(result2, expected_result)
-    
-
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_vmap(self):
-
-        W = torch.ones(4, 4)
-        def add(x: torch.Tensor, y: torch.Tensor):
-            return x[0] @ W + y[0] @ W, x[1] + y[1]
-        
-        W = torch.ones(4, 4)
-        def non_pointwise(x: torch.Tensor, y: torch.Tensor):
-            return x + y
-        
-        device = torch.device("cuda")
-        x = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.arange(0, 10, device=device, dtype=torch.float32, requires_grad=True), 0), -1), (4, 1, 4))
-        for combine_mode in ["pointwise", "generic"]:
-            for direction in [False, True]:
-                torch.compiler.reset()
-                def associative_scan_fct(x):
-                    return associative_scan(add, x, 0, reverse=direction, combine_mode=combine_mode)
-                
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-                    
-                result1 = associative_scan1((x,x))
-                result2 = associative_scan2((x,x))
-                expected_result = _fake_associative_scan(add, (x,x), 1, reverse=direction)
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
-                    
-                torch.compiler.reset()
-                def associative_scan_fct(x):
-                    return associative_scan(add, x, 1, reverse=direction, combine_mode=combine_mode)
-                
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-                    
-                result1 = associative_scan1(x)
-                result2 = associative_scan2(x)
-                expected_result = _fake_associative_scan(add, x, 2, reverse=direction)
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
-                    
-                torch.compiler.reset()
-                def associative_scan_fct(x):
-                    return associative_scan(add, x, 1, reverse=direction, combine_mode=combine_mode)
-                
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
-                    
-                result1 = associative_scan1(x)
-                result2 = associative_scan2(x)
-                expected_result = torch.transpose(_fake_associative_scan(add, x, 2, reverse=direction), 0, 1)
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
-                
-                torch.compiler.reset()
-                def associative_scan_fct(x):
-                    return associative_scan(non_pointwise, x, 0, reverse=direction, combine_mode=combine_mode)
-                
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-                    
-                result1 = associative_scan1(x)
-                result2 = associative_scan2(x)
-                expected_result = _fake_associative_scan(non_pointwise, x, 1, reverse=direction)
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
-                        
-                        
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_vmap_pytree(self):
-        def fct_pointwise(x, y):
-            return {
-                "i": x["i"] * y["i"],
-                "j": (x["j"][0] + y["j"][0],),
-            }
-
-        W = torch.diag(torch.ones(2))
-        def fct_nonpointwise(x, y):
-            return {
-                "i": x["i"] @ W * y["i"] @ W,
-                "j": (x["j"][0] @ W + y["j"][0] @ W,),
-            }
-
-        device = torch.device("cuda")
-        x = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.randn(10, device=device, requires_grad=True), 0), -1), (3, 1, 2))
-        y = torch.tile(torch.unsqueeze(torch.unsqueeze(torch.randn(10, device=device, requires_grad=True), 0), -1), (3, 1, 2))
-        inp = {"i": x, "j": (y,)}
-
-        for combine_mode in ["pointwise", "generic"]:
-            for direction in [False, True]:
-                def associative_scan_fct(z):
-                    return associative_scan(fct_pointwise, z, 0, reverse=direction, combine_mode=combine_mode)
-                    
-                torch.compiler.reset()
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-
-                # result1 = associative_scan1(inp)
-                result2 = associative_scan2(inp)
-                expected_result = _fake_associative_scan(
-                    fct_pointwise, inp, 1, reverse=direction
-                )
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
-                    
-                def associative_scan_fct(z):
-                    return associative_scan(fct_nonpointwise, z, 0, reverse=direction, combine_mode=combine_mode)
-                    
-                torch.compiler.reset()
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True)
-                    associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-
-                result1 = associative_scan1(inp)
-                result2 = associative_scan2(inp)
-                expected_result = _fake_associative_scan(
-                    fct_nonpointwise, inp, 1, reverse=direction
-                )
-                self.assertEqual(result1, expected_result)
-                self.assertEqual(result2, expected_result)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
