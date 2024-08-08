@@ -413,6 +413,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
 
+    def test_list_slice(self):
+        class Mock:
+            def __init__(self):
+                self.ets = []
+                self.counter = 0
+
+            @torch.compile(backend="eager")
+            def run(self, x):
+                self.ets = self.ets[-3:]
+                self.ets.append(x)
+                return torch.sin(x)
+
+        mock = Mock()
+        mock.run(torch.randn(4))
+        self.assertEqual(len(mock.ets), 1)
+
     @make_test
     def test_deque(a, b):
         d = collections.deque([a, b])

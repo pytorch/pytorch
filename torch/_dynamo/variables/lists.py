@@ -14,7 +14,7 @@ from torch._guards import Source
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -95,17 +95,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutable_local=MutableLocal() if self.mutable_local else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
