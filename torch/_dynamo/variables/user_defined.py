@@ -439,6 +439,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
+        elif (
+            not self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            method = variables.UserMethodVariable(
+                polyfill.instantiate_user_defined_class_object, self
+            )
+            return method.call_function(tx, args, kwargs)
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.CustomizedDictVariable.create(
