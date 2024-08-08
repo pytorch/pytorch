@@ -11,16 +11,13 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 class TestBenchmarker(TestCase):
-    ThisBenchmarker = Benchmarker
-
-    @classmethod
-    def setUpClass(cls):
-        return super().setUpClass()
-
-    @classmethod
-    def setUp(cls):
+    def setUpGeneric(self):
         torch.manual_seed(12345)
         counters.clear()
+
+    def setUp(self):
+        self.setUpGeneric()
+        self.ThisBenchmarker = Benchmarker
 
     def make_sum(self, device, size=100):
         fn, args, kwargs = torch.sum, (torch.randn(size, device=device),), {}
