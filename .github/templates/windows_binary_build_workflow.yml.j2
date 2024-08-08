@@ -88,9 +88,9 @@ jobs:
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: windows.8xlarge.nvidia.gpu
+    runs-on: windows.g4dn.xlarge
 {%- else %}
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.g4dn.xlarge.nonephemeral
 {%- endif %}
 {%- else %}
     runs-on: windows.4xlarge.nonephemeral
