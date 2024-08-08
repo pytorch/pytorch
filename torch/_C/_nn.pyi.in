@@ -1,7 +1,7 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
-from typing import List, Optional, overload, Sequence, Tuple, Union
+from typing import List, Literal, Optional, overload, Sequence, Tuple, Union
 
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _int, _size
@@ -59,11 +59,12 @@ def _parse_to(
     memory_format: memory_format,
 ) -> Tuple[_device, _dtype, _bool, memory_format]: ...
 
-# Defined in aten/src/ATen/native/PadSequence.cpp
+# Defined in aten/src/ATen/native/PackedSequence.cpp
 def pad_sequence(
-    sequences: List[Tensor],
+    sequences: Union[List[Tensor], Tuple[Tensor, ...]],
     batch_first: bool = False,
-    padding_value: float = ...,
+    padding_value: float = 0.0,
+    padding_side: Union[Literal["left", "right"], str] = "right",
 ) -> Tensor: ...
 def flatten_dense_tensors(tensors: List[Tensor]) -> Tensor: ...
 def unflatten_dense_tensors(flat: Tensor, tensors: List[Tensor]) -> List[Tensor]: ...
