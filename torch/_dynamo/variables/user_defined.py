@@ -489,6 +489,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
             options = {"mutable_local": MutableLocal()}
             return variables.EnumVariable.create(self.value, args[0], options)
+        elif self.value is random.Random:
+            return RandomVariable(self.value, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -1238,3 +1240,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return variables.UserMethodVariable(polyfill.mapping_get, self)
         else:
             return super().var_getattr(tx, name)
+
+
+class RandomVariable(UserDefinedObjectVariable):
+    pass
