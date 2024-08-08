@@ -2,7 +2,8 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union, List
+from collections import defaultdict
 
 import torch
 import torch.utils._pytree as pytree
@@ -160,6 +161,7 @@ class FunctionalTensor(torch.Tensor):
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        print("hi")
         unrecognized_types = [
             t
             for t in types
@@ -308,6 +310,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
+        # we use this to track what tensors are aliases of each other
+        self.storage_to_tensors = defaultdict(set)
+
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -335,6 +340,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+     
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                self.storage_to_tensors[arg.untyped_storage()._cdata].add(arg)
+        print(func)
+        print(self.storage_to_tensors)
         unrecognized_types = [
             t
             for t in types
@@ -420,7 +431,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, args, kwargs)
+            return do_auto_functionalize(func, self.storage_to_tensors, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -435,7 +446,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
         )
-
+        
         # Expectation: functionalization should not **already** be enabled above our mode.
         # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
         # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
@@ -630,8 +641,8 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             )
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
