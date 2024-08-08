@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -76,6 +77,34 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+def _fake_associative_scan(combine_fn, input, dim, reverse=False):
+    inp_leaves, spec = pytree.tree_flatten(input)
+    result_flat = []
+    num_leaves = len(inp_leaves)
+    op = reversed if reverse else lambda x: x
+
+    for ind in op(range(inp_leaves[0].size(dim))):
+        r = [
+            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
+            for leave_ind in range(num_leaves)
+        ]
+        if (ind > 0 and not reverse) or (
+            ind < (inp_leaves[0].size(dim) - 1) and reverse
+        ):
+            r = combine_fn(
+                pytree.tree_unflatten(result_flat[-1], spec),
+                pytree.tree_unflatten(r, spec),
+            )
+        r_flat, _ = pytree.tree_flatten(r)
+        result_flat.append(r_flat)
+
+    results = [
+        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        for leave_ind in range(num_leaves)
+    ]
+    return pytree.tree_unflatten(results, spec)
 
 
 def _while_loop_tests():
@@ -1173,6 +1202,170 @@ def forward(self, pred_1, x_1):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_simple(self):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        for reverse in [False, True]:
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(op, x, 0, reverse=reverse)
+                cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+                self.assertEqual(cumsum1, cumsum_exp)
+                if not reverse:
+                    cumsum_exp_PT = op_pt(x, 0)
+                    self.assertEqual(cumsum1, cumsum_exp_PT)
+                else:
+                    # Check whether the graph contains at least two flip operations
+                    def f(op, inp, dim):
+                        result = associative_scan(op, inp, dim)
+                        return result
+
+                    # gm = make_fx(f, tracing_mode="symbolic")(op, x, 0)
+                    # self.assertExpectedInline(
+                    #     gm.code.strip(),
+                    #     """""",  # noqa: B950
+                    # )
+                    # self.assertNotRegex(
+                    #     gm.code.strip(),
+                    #     ".*.*",
+                    # )
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=torch.device("cuda"))
+        cumsum1 = associative_scan(add, x, 0, reverse=False)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+
+        cumsum1 = associative_scan(add, x, 0, reverse=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+
+        # TODO: If the number 2 is increased to a larger number,
+        # e.g., 10, then the test fails with some errors arising from
+        # FakeTensors
+        num_dims = [random.randint(2, 5) for _ in range(2)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            x = torch.randn(*shapes, device=torch.device("cuda"))
+
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(op, x, 0)
+                cumsum_exp = _fake_associative_scan(op, x, 0)
+                self.assertEqual(cumsum1, cumsum_exp)
+                cumsum_exp_PT = op_pt(x, 0)
+                self.assertEqual(cumsum1, cumsum_exp_PT)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_compile(self):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        torch.compiler.reset()
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                associative_scan, fullgraph=True, dynamic=False
+            )
+            associative_scan2 = torch.compile(
+                associative_scan, fullgraph=True, dynamic=True
+            )
+            associative_scan3 = associative_scan
+
+        for reverse in [False, True]:
+            torch.compiler.reset()
+            with torch._dynamo.utils.disable_cache_limit():
+                associative_scan1 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=False
+                )
+                associative_scan2 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=True
+                )
+                associative_scan3 = associative_scan
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan1(op, x, 0, reverse=reverse)
+                cumsum2 = associative_scan2(op, x, 0, reverse=reverse)
+                cumsum3 = associative_scan3(op, x, 0, reverse=reverse)
+                cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+                self.assertEqual(cumsum1, cumsum_exp)
+                self.assertEqual(cumsum2, cumsum_exp)
+                self.assertEqual(cumsum3, cumsum_exp)
+                if not reverse:
+                    cumsum_exp_PT = op_pt(x, 0)
+                    self.assertEqual(cumsum1, cumsum_exp_PT)
+                    self.assertEqual(cumsum2, cumsum_exp_PT)
+                    self.assertEqual(cumsum3, cumsum_exp_PT)
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=torch.device("cuda"))
+        cumsum1 = associative_scan1(add, x, 0, reverse=False)
+        cumsum2 = associative_scan2(add, x, 0, reverse=False)
+        cumsum3 = associative_scan3(add, x, 0, reverse=False)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+        self.assertEqual(cumsum2, cumsum_exp)
+        self.assertEqual(cumsum3, cumsum_exp)
+
+        cumsum1 = associative_scan1(add, x, 0, reverse=True)
+        cumsum2 = associative_scan2(add, x, 0, reverse=True)
+        cumsum3 = associative_scan2(add, x, 0, reverse=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+        self.assertEqual(cumsum2, cumsum_exp)
+        self.assertEqual(cumsum3, cumsum_exp)
+
+        x = torch.randn(3, 2, 2, device=torch.device("cuda"))
+
+        def f(op, x, dim, reverse):
+            result = associative_scan(op, x, dim, reverse)
+            return result
+
+        # TODO: If the number 2 is increased to a larger number,
+        # e.g., 10, then the test fails with some errors arising from
+        # FakeTensors
+        num_dims = [random.randint(2, 5) for _ in range(2)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            x = torch.randn(*shapes, device=torch.device("cuda"))
+
+            torch.compiler.reset()
+            with torch._dynamo.utils.disable_cache_limit():
+                associative_scan1 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=False
+                )
+                associative_scan2 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=True
+                )
+                associative_scan3 = associative_scan
+
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan1(op, x, 0)
+                cumsum2 = associative_scan2(op, x, 0)
+                cumsum3 = associative_scan3(op, x, 0)
+                cumsum_exp = _fake_associative_scan(op, x, 0)
+                self.assertEqual(cumsum1, cumsum_exp)
+                self.assertEqual(cumsum2, cumsum_exp)
+                self.assertEqual(cumsum3, cumsum_exp)
+                cumsum_exp_PT = op_pt(x, 0)
+                self.assertEqual(cumsum1, cumsum_exp_PT)
+                self.assertEqual(cumsum2, cumsum_exp_PT)
+                self.assertEqual(cumsum3, cumsum_exp_PT)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
