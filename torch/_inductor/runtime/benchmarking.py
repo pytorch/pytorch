@@ -40,13 +40,15 @@ def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
     return wrapper
 
 
-def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
+def count(
+    fn: Callable[Concatenate["Benchmarker", P], T]
+) -> Callable[Concatenate["Benchmarker", P], T]:
     """Wrapper that increments dynamo counters on function call for subclasses of `Benchmarker`;
     counter scheme is `counters["inductor"]["benchmarking.Foo.bar"]` where "Foo" is the subclass
     and "bar" is the function."""
 
     @wraps(fn)
-    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
+    def wrapper(self: "Benchmarker", *args: P.args, **kwargs: P.kwargs) -> T:
         counters["inductor"][
             "benchmarking." + type(self).__name__ + "." + fn.__name__
         ] += 1
