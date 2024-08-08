@@ -1276,7 +1276,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[57:71])
+        kernel_code = "\n".join(code[0].split("\n")[58:72])
         self.assertExpectedInline(
             kernel_code,
             """\
