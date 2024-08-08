@@ -89,6 +89,7 @@ def _interleave(a, b, dim):
         pad[
             (b.ndim - dim - 1) * 2 + 1
         ] = 1  # +1=always end of dim, pad-order is reversed so start is at end
+        # pad2 = [0] * ((b.ndim - dim - 1) * 2 + 1) + [1] + [0] * (b.ndim * 2 - ((b.ndim - dim - 1) * 2 + 2))
         b = torch.nn.functional.pad(b, pad)
 
     stacked = torch.stack([a, b], dim=dim + 1)
