@@ -168,7 +168,7 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self.dynamo_ctx, DisableContext):
+        if isinstance(self.dynamo_ctx, CompileEnabledContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif isinstance(self._orig_mod.forward, types.MethodType) and (
@@ -589,26 +589,22 @@ class RunOnlyContext(_TorchDynamoContext):
         return (self.__class__, ())
 
 
-class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
-        super().__init__(callback=None)
+class CompileEnabledContext:
+    def __init__(self, enabled):
+        self.enabled = enabled
 
     def __call__(self, fn):
-        # Earlier this code was in the base class _TorchDynamoContext. But we
-        # moved it here to have better code organization. For disable, we just
-        # want to disable the eval frame callback mechanism. We don't have to check trace_rules or
-        # create any wrapper.
-        fn = innermost_fn(fn)
-
+        # This code is a simplified version of _TorchDynamoContext.__call__.
+        # We just want to enable/disable the eval frame callback mechanism, so we
+        # don't have to check trace_rules or create any wrapper.
+        # But we still need to return a proper callable/wrapped module/wraped class.
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if inspect.isclass(fn):
-            # User has wrapped the class with compile/disable decorator. Apply
-            # disable to init/call method.
+            # User has wrapped the class with enable/disable decorator. Apply to init/call method.
             cls_obj = fn
             # Disable on init is useful for reconstruction of bytecodes where we
             # want to prevent Dynamo from tracing into the init function. Check
@@ -616,7 +612,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__init__ = self(cls_obj.__init__)
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # NN module variable tracker directly inlines the _call_impl. Enable/disable it.
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -626,22 +622,18 @@ class DisableContext(_TorchDynamoContext):
         def _fn(*args, **kwargs):
             from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
 
-            prior = set_eval_frame_callback_enabled(False)
+            prior = set_eval_frame_callback_enabled(self.enabled)
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame_callback_enabled(prior)
 
-        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
-
-        # Save the function pointer to find the original callable while nesting
-        # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        if not self.enabled:
+            # NOTE using `disable` can still result in a graph break even if immediately
+            # cancelled by an `enable` call!
+            _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
         return _fn
-
-    def __reduce__(self):
-        return (self.__class__, ())
 
 
 def _optimize_catch_errors(
