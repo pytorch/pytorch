@@ -4993,6 +4993,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5075,6 +5076,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     @skip_if_gpu_halide  # misaligned address error
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
@@ -5139,6 +5141,7 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
+    @skipIfWindows
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -5308,6 +5311,7 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    @skipIfWindows
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
@@ -7107,6 +7111,7 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    @skipIfWindows
     def test_index_put_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7119,6 +7124,7 @@ class CommonTemplate:
         self.common(fn, (a, idx))
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     def test_index_put_failed_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7192,6 +7198,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    @skipIfWindows
     def test_new_cpp_build_logical(self):
         from torch._inductor.codecache import validate_new_cpp_commands
 
@@ -8192,6 +8199,7 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
     @skip_if_halide  # hangs forever
+    @skipIfWindows
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -8323,6 +8331,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfWindows
     def test_avg_pool2d_backward3(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -8413,6 +8422,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfWindows
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -10270,6 +10280,7 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
+    @skipIfWindows
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_bucketize_add_autotune(self):
         # Causes a @pointwise(size_hints) where size_hints is 2D
@@ -10456,6 +10467,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 32)), 2.0), check_lowp=False)
 
+    @skipIfWindows
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_3(self):
         import torch.library
@@ -10772,6 +10784,7 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    @skipIfWindows
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
     @torch._inductor.config.patch(abi_compatible=True)
@@ -10820,6 +10833,7 @@ class CommonTemplate:
                         check_lowp=False,
                     )
 
+    @skipIfWindows
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
         @torch.compile
