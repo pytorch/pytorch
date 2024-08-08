@@ -23,7 +23,7 @@ class TestBenchmarker(TestCase):
         counters.clear()
 
     def make_sum(self, device, size=100):
-        fn, args, kwargs = torch.sum, (torch.randn(size, device=device)), {}
+        fn, args, kwargs = torch.sum, (torch.randn(size, device=device),), {}
         _callable = lambda: fn(*args, **kwargs)  # noqa: E731
         return (fn, args, kwargs), _callable
     
