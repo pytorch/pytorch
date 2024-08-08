@@ -428,6 +428,11 @@ at::Tensor cholesky_inverse_jvp(
     bool upper);
 Tensor pinv_jvp(const Tensor& A, const Tensor& pinvA, const Tensor& dA);
 Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A);
+Tensor chunk_backward_nested(
+    const std::vector<torch::autograd::Variable>& grads,
+    const Tensor& self,
+    int64_t chunks,
+    int64_t dim);
 at::Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
