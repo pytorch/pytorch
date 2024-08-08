@@ -8,7 +8,12 @@ import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
 from torch._higher_order_ops.utils import (
     _set_compilation_env,
     autograd_not_implemented,
@@ -110,7 +115,12 @@ def trace_associative_scan(
 ):
     with disable_proxy_modes_tracing():
         sample_inputs = [
-            torch.full((), False, dtype=x.dtype, device=x.device)
+            torch.empty_like(
+                x,
+                dtype=x.dtype,
+                device=x.device,
+                requires_grad=x.requires_grad,
+            )
             for x in itertools.chain(input, input)
         ]
         combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
@@ -133,12 +143,6 @@ def trace_associative_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
@@ -189,25 +193,33 @@ def associative_scan_functionalize(ctx, combine_fn, input, dim):
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
-    input_ = [get_unwrapped(x) for x in input]
-    input_bdims = [maybe_get_bdim(x) for x in input]
+def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
+    input_bdims = [maybe_get_bdim(x) if is_batchedtensor(x) else None for x in input]
 
     batch_size = None
     for inp, bdim in zip(input, input_bdims):
         if bdim is not None:
-            batch_size = get_unwrapped(inp).shape[bdim]
+            batch_size = (
+                get_unwrapped(inp).shape[bdim]
+                if is_batchedtensor(inp)
+                else inp.shape[bdim]
+            )
 
     assert batch_size
     input_unwrapped = []
     for x, bdim in zip(input, input_bdims):
-        unwrap = get_unwrapped(x)
+        unwrap = get_unwrapped(x) if is_batchedtensor(x) else x
         if dim is None:
             unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
         else:
-            unwrap = unwrap.movedim(bdim, 0)
+            if bdim is None:
+                unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
+            else:
+                unwrap = unwrap.movedim(bdim, 0)
         input_unwrapped.append(unwrap)
 
-    res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
+    with interpreter.lower():
+        res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
+
     lvl = interpreter.level()
     return [_add_batch_dim(x, 0, lvl) for x in res]
