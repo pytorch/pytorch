@@ -4,10 +4,10 @@ import dataclasses
 import os
 
 from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
-from triton.testing import do_bench
 
 import torch
 import torch.nn as nn
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch.utils.flop_counter import FlopCounterMode
 
 
@@ -71,7 +71,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_mod(x)) * 1000
             flops_utilization += us_per_iter * flops / 1e9 / A100_40G_BF16_TFLOPS
 
         flops_utilization = flops_utilization / len(input_shapes)
@@ -108,7 +108,7 @@ def run_layer_norm(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_mod(x)) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -151,7 +151,9 @@ def run_gather_gemv(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, score_idxs, x)
 
-            us_per_iter = do_bench(lambda: compiled_fn(W, score_idxs, x)) * 1000
+            us_per_iter = (
+                benchmarker.benchmark_gpu(lambda: compiled_fn(W, score_idxs, x)) * 1000
+            )
             memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
@@ -192,7 +194,7 @@ def run_gemv(device: str = "cuda"):
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, x)
 
-            us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
+            us_per_iter = benchmarker.benchmark_gpu(lambda: compiled_fn(W, x)) * 1000
             memory_bandwidth += (1e6 / us_per_iter) * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
