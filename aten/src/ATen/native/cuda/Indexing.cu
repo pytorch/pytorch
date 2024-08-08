@@ -1353,7 +1353,7 @@ void index_select_out_cuda_impl(
     uint64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
-  uint64_t selfDims = self.dim() == 0 ? 1 : self.dim();
+  auto selfDims = self.dim() == 0 ? 1 : self.dim();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
