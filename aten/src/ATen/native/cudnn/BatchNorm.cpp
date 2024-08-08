@@ -135,6 +135,9 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 }
 
 // Param `reserve` is a placeholder, just passing an empty tensor.
+// usage:
+// auto reserve = torch::empty({0}, torch::device(torch::kCUDA));
+// at::native::cudnn_batch_norm_out(..., epsilon, output, save_mean, save_var, reserve);
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
     const Tensor& input_t,
     const Tensor& weight_t,
