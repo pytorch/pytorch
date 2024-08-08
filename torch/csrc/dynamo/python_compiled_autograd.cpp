@@ -393,10 +393,6 @@ void set_ivalue_proxies(
       arg.proxy = at::IValue(
           py::cast<c10::SymInt>(PyList_GET_ITEM(fake_ivalue_args, i)));
       TORCH_INTERNAL_ASSERT(arg.proxy.isSymInt());
-    } else if (arg.actual_ptr->isDouble()) {
-      arg.proxy = at::IValue(
-          py::cast<c10::SymFloat>(PyList_GET_ITEM(fake_ivalue_args, i)));
-      TORCH_INTERNAL_ASSERT(arg.proxy.isSymFloat());
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
     }
