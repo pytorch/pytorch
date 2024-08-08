@@ -172,7 +172,7 @@ def insert_weight_and_bias_get_attr_node_from_get_attr_to_scriptobject(
 ) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     """Directly inline tensor from a get_attr fx node."""
     mod = get_script_object(gm, param_node)
-    w_qtensor, b_qtensor = mod.unpack()
+    w_qtensor, b_qtensor = mod.unpack()  # type: ignore[attr-defined]
     w_attr_name, b_attr_name = (
         f"dequantized_{param_node.target}_w",
         f"dequantized_{param_node.target}_b",
@@ -337,10 +337,10 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
                 inp_node,
                 param_0,
                 param_1,
-                param.stride(),
-                param.padding(),
-                param.dilation(),
-                param.groups(),
+                param.stride(),  # type: ignore[attr-defined]
+                param.padding(),  # type: ignore[attr-defined]
+                param.dilation(),  # type: ignore[attr-defined]
+                param.groups(),  # type: ignore[attr-defined]
             ),
         )
     return op_res_node, scale_node, zero_point_node
