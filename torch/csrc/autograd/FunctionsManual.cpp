@@ -22,6 +22,7 @@
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/accumulate.h>
@@ -7485,8 +7486,73 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
   return grad_self;
 }
 
-static inline Tensor _lbeta(const Tensor& x, const Tensor& y) {
-  return at::lgamma(x) + at::lgamma(y) - at::lgamma(x + y);
+Tensor _log_gamma_correction(const Tensor& x) {
+  const std::vector<double> const_vec = {
+      0.833333333333333e-01L,
+      -0.277777777760991e-02L,
+      0.793650666825390e-03L,
+      -0.595202931351870e-03L,
+      0.837308034031215e-03L,
+      -0.165322962780713e-02L,
+  };
+  Tensor minimax_coeff = at::tensor(
+      const_vec, at::TensorOptions().dtype(x.dtype()).device(x.device()));
+
+  Tensor inverse_x = at::reciprocal(x);
+  Tensor inverse_x_squared = inverse_x * inverse_x;
+  Tensor accum = minimax_coeff[5];
+  for (int i = 4; i >= 0; i--) {
+    accum = accum * inverse_x_squared + minimax_coeff[i];
+  }
+  return accum * inverse_x;
+}
+
+Tensor _log_gamma_difference_big_y(const Tensor& x, const Tensor& y) {
+  at::ScalarType dtype = at::promoteTypes(x.scalar_type(), y.scalar_type());
+  auto options = at::TensorOptions().dtype(dtype).device(x.device());
+  const Tensor half = at::scalar_tensor(0.5, options);
+  const Tensor one = at::scalar_tensor(1.0, options);
+
+  Tensor cancelled_stirling =
+      (-one * (x + y - half) * at::log1p(x / y) - x * at::log(y) + x);
+
+  Tensor correction = _log_gamma_correction(y) - _log_gamma_correction(x + y);
+  return correction + cancelled_stirling;
+}
+
+Tensor _lbeta(const Tensor& x, const Tensor& y) {
+  // dtype
+  at::ScalarType dtype = at::promoteTypes(x.scalar_type(), y.scalar_type());
+  auto options = at::TensorOptions().dtype(dtype).device(x.device());
+  const Tensor half = at::scalar_tensor(0.5, options);
+  const Tensor two = at::scalar_tensor(2.0, options);
+  const Tensor eight = at::scalar_tensor(8.0, options);
+
+  Tensor _x = at::minimum(x, y);
+  Tensor _y = at::maximum(x, y);
+
+  Tensor log2pi = at::log(
+      two *
+      at::scalar_tensor(
+          c10::pi<double>,
+          at::TensorOptions().dtype(dtype).device(x.device())));
+
+  // Two large arguments case: _y >= _x >= 8
+  Tensor log_beta_two_large =
+      (half * log2pi - half * at::log(_y) + _log_gamma_correction(_x) +
+       _log_gamma_correction(_y) - _log_gamma_correction(_x + _y) +
+       (_x - half) * at::log(_x / (_x + _y)) - _y * at::log1p(_x / _y));
+  // Small arguments case: _x < 8, _y >= 8.
+  Tensor log_beta_one_large =
+      at::lgamma(_x) + _log_gamma_difference_big_y(_x, _y);
+
+  // Small arguments case: _x <= _y < 8.
+  Tensor log_beta_small = at::lgamma(_x) + at::lgamma(_y) - at::lgamma(_x + _y);
+
+  return at::where(
+      _x >= eight,
+      log_beta_two_large,
+      at::where(_y >= eight, log_beta_one_large, log_beta_small));
 }
 
 static inline std::tuple<Tensor, Tensor> _betainc_even_partial_numerator(
