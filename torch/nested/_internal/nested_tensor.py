@@ -565,3 +565,12 @@ def nested_view_from_values_offsets_lengths(
         min_seqlen_tensor,
         max_seqlen_tensor,
     )  # type: ignore[return-value]
+
+
+def nested_from_padded(padded, offsets, ragged_idx=1, sum_S=None):
+    if ragged_idx != 1:
+        raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
+
+    return torch._nested_from_padded_tensor(
+        padded, offsets, _nt_view_dummy(), ragged_idx, sum_S
+    )
