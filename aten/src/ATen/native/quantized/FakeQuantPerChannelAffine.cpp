@@ -8,8 +8,8 @@
 #include <c10/util/irange.h>
 
 // FakeQuantize Op for PerChannelAffine quantization scheme.
-namespace at {
-namespace native {
+
+namespace at::native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_per_channel_cachemask_stub);
@@ -256,5 +256,4 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

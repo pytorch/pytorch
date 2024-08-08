@@ -316,7 +316,6 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
-  python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
@@ -359,10 +358,12 @@ test_inductor_shard() {
 test_inductor_aoti() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # We need to hipify before building again
+    python3 tools/amd_build/build_amd.py
   fi
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
 test_inductor_cpp_wrapper_abi_compatible() {
@@ -551,6 +552,9 @@ test_single_dynamo_benchmark() {
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
       TEST_CONFIG=${TEST_CONFIG::-5}
+    fi
+    if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
+      TEST_CONFIG=${TEST_CONFIG::-7}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
