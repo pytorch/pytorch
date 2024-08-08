@@ -4,7 +4,7 @@ import unittest
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor.runtime.benchmarking import Benchmarker
+from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -81,6 +81,55 @@ class TestBenchmarker(TestCase):
         _, _callable = self.make_sum(GPU_TYPE)
         self.assertExpectedRaises(
             NotImplementedError, lambda: benchmarker.benchmark_gpu(_callable)
+        )
+        self.assertEqual(
+            counters["inductor"][
+                f"benchmarking.{type(self.ThisBenchmarker)}.benchmark_gpu"
+            ],
+            1,
+        )
+
+
+class TestTritonBenchmarker(TestBenchmarker):
+    ThisBenchmarker = TritonBenchmarker
+
+    @unittest.skipIf(not HAS_CPU or not HAS_GPU)
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_benchmark(self, device):
+        benchmarker = self.ThisBenchmarker()
+        fn, args, kwargs, _ = self.make_sum(device)
+        _ = benchmarker.benchmark(fn, *args, **kwargs)
+        self.assertEqual(
+                counters["inductor"][
+                    f"benchmarking.{type(self.ThisBenchmarker)}.benchmark"
+                ],
+                1,
+            )
+        if device == "cpu":
+            self.assertEqual(
+                counters["inductor"][
+                    f"benchmarking.{type(self.ThisBenchmarker)}.benchmark_cpu"
+                ],
+                1,
+            )
+        else:
+            self.assertEqual(
+                counters["inductor"][
+                    f"benchmarking.{type(self.ThisBenchmarker)}.benchmark_gpu"
+                ],
+                1,
+            )
+
+    @unittest.skipIf(not HAS_GPU)
+    def test_benchmark_gpu(self):
+        benchmarker = self.ThisBenchmarker()
+        _, _callable = self.make_sum(GPU_TYPE)
+        _ = benchmarker.benchmark_gpu(_callable)
+        self.assertEqual(
+            counters["inductor"][
+                f"benchmarking.{type(self.ThisBenchmarker)}.triton_do_bench"
+            ],
+            1,
         )
         self.assertEqual(
             counters["inductor"][
