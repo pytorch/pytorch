@@ -348,17 +348,8 @@ class BlockMask:
             mask_mod=mask_mod,
         )
 
-    def as_tuple(self, flatten: bool = True):
-        """
-        Returns a tuple of the attributes of the BlockMask.
-
-        Args:
-            flatten (bool): If True, it will flatten the tuple of (KV_BLOCK_SIZE, Q_BLOCK_SIZE)
-        """
-        block_size = (
-            (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1]) if flatten else (self.BLOCK_SIZE,)
-        )
-
+    def as_tuple(self) -> Tuple:
+        """Returns a tuple of the attributes of the BlockMask."""
         return (
             self.kv_num_blocks,
             self.kv_indices,
@@ -368,7 +359,8 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
-            *block_size,
+            self.BLOCK_SIZE[0],
+            self.BLOCK_SIZE[1],
             self.mask_mod,
         )
 
@@ -383,7 +375,7 @@ class BlockMask:
         mapped_attributes = tree_map_only(
             torch.Tensor,
             lambda x: x[index],
-            self.as_tuple(flatten=False),
+            self.as_tuple(),
         )
         return BlockMask(*mapped_attributes)
 
@@ -528,7 +520,7 @@ class BlockMask:
         mapped_attributes = tree_map_only(
             torch.Tensor,
             lambda x: x.to(device),
-            self.as_tuple(flatten=False),
+            self.as_tuple(),
         )
         return BlockMask(*mapped_attributes)
 
