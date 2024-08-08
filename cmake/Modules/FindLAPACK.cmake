@@ -244,7 +244,6 @@ if(BLAS_FOUND)
      endif()
     endif()
   endif()
-  
   set(CMAKE_REQUIRED_LIBRARIES)
   if(APL_LAPACK_WORKS)
     SET(LAPACK_INFO "apl")
