@@ -307,9 +307,9 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         module.recompile()
 
     if num_tokens > 0:
-        from torch._dynamo.utils import lazy_format_graph_code
-
         if aot_config.enable_log:
+            from torch._dynamo.utils import lazy_format_graph_code
+
             aot_graphs_effects_log.info(
                 "%s",
                 lazy_format_graph_code(
@@ -325,6 +325,8 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
 
     if bw_module is not None and num_bw_out_tokens > 0:
         if aot_config.enable_log:
+            from torch._dynamo.utils import lazy_format_graph_code
+
             aot_graphs_effects_log.info(
                 "%s",
                 lazy_format_graph_code(
