@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import (
@@ -81,13 +81,16 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
-    def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
+    def begin_capture(
+        self, inputs: List[torch.Tensor], sizes: List[int], int_scalars: Tuple[int]
+    ):
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
+        scalars_proxy = self.fx_tracer.create_proxy("placeholder", "scalars", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
 
         # tensor inputs to fake tensors
@@ -95,8 +98,7 @@ class AutogradCompilerInstance:
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [args_proxy[i] for i in range(len(inputs))]
-        self.bind_tensors_to_proxies(inputs, proxies)
+        self.bind_tensors_to_proxies(inputs, args_proxy)
 
         # size inputs to symints
         sizes = [
@@ -109,6 +111,16 @@ class AutogradCompilerInstance:
         ]
         self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
+        int_scalars = [
+            self.shape_env.create_unspecified_symint_and_symbol(
+                val,
+                self.source("scalars", idx),
+                DimDynamic.DYNAMIC,
+            )
+            for idx, val in enumerate(int_scalars)
+        ]
+        self.bind_tensors_to_proxies(int_scalars, scalars_proxy)
+
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
@@ -116,7 +128,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
-        return inputs, sizes
+        return inputs, sizes, int_scalars
 
     def proxy_call_backward(
         self,
@@ -297,14 +309,14 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
-        def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
+        def runtime_wrapper(compiled_fn, inputs, sizes, cppnode_ints, hooks):
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                return compiled_fn(inputs, sizes, hooks)
+                return compiled_fn(inputs, sizes, cppnode_ints, hooks)
             finally:
                 in_compiled_autograd_region = False
 
