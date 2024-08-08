@@ -208,12 +208,12 @@ class BlockMask:
 
     The essentials of our format are:
 
-    - num_blocks_in_row: Tensor[ROWS]
-        Describes the number of blocks present in each row.
+    num_blocks_in_row: Tensor[ROWS]:
+    Describes the number of blocks present in each row.
 
-    - col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]
-        `col_indices[i]` is the sequence of block positions for row i. The values of
-        this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
+    col_indices: Tensor[ROWS, MAX_BLOCKS_IN_COL]:
+    `col_indices[i]` is the sequence of block positions for row i. The values of
+    this row after `col_indices[i][num_blocks_in_row[i]]` are undefined.
 
     For example, to reconstruct the original tensor from this format:
 
@@ -691,13 +691,12 @@ def _create_block_mask_inner(
 
 def create_block_mask(
     mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
-    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
@@ -718,28 +717,35 @@ def create_block_mask(
         _compile (bool): Whether to compile the mask creation.
 
     Returns:
-        block_mask (tuple): A tuple of (kv_num_blocks, kv_indices, q_num_blocks, q_indices,
-                            KV_BLOCK_SIZE, Q_BLOCK_SIZE) which represents the block mask.
+        BlockMask:  A BlockMask object that contains the block mask information.
 
     Example Usage:
-    .. code-block:: python
+        .. code-block:: python
 
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
+            def causal_mask(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
-
-        query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-        key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-        value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
-
-        output = flex_attention(query, key, value, block_mask=block_mask)
+            block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
+            query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
+            output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
     assert (
         mod_type == _ModificationType.MASK_MOD
     ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
     inner_func = _create_block_mask_inner
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
+    if isinstance(BLOCK_SIZE, int):
+        Q_BLOCK_SIZE = BLOCK_SIZE
+        KV_BLOCK_SIZE = BLOCK_SIZE
+    else:
+        Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
     if Q_LEN < 128:
         Q_BLOCK_SIZE = Q_LEN
     else:
@@ -773,7 +779,7 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 
 def _apply_kernel_options(query, key, value, kernel_options):
-    kernel_options = {} if kernel_options is None else kernel_options
+    kernel_options = {} if kernel_options is None else dict(kernel_options)
 
     if "ROWS_GUARANTEED_SAFE" not in kernel_options:
         kernel_options["ROWS_GUARANTEED_SAFE"] = False
@@ -832,9 +838,8 @@ def flex_attention(
         value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
-        scale (Optional[float]): Scaling factor applied prior to softmax. If
-        none, the default value is set to :math`\frac{1}{\sqrt{E}}`
-        enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
+        scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
+        enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads. 
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
@@ -904,11 +909,16 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass hop to it. So we wrap it in a dummy function.
+    def _flex_attention_hop_wrapper(*args, **kwargs):
+        return flex_attention_hop(*args, **kwargs)
+
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
                 out, _ = torch.compile(
-                    flex_attention_hop, backend="eager", fullgraph=True
+                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
                 )(
                     query,
                     key,
