@@ -51,7 +51,7 @@ class CondBranchNonlocalVariables(torch.nn.Module):
             [x, my_tensor_var, torch.tensor(my_primitive_var)],
         )
 
-example_inputs = (torch.randn(6),)
+example_args = (torch.randn(6),)
 tags = {
     "torch.cond",
     "torch.dynamic-shape",

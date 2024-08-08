@@ -254,7 +254,7 @@ def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
     if dim is None:
         amax = torch.max(torch.abs(x))
     else:
-        amax = torch.max(torch.abs(x), dim=dim).values
+        amax = torch.max(torch.abs(x), dim=dim, keepdim=True).values
 
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
@@ -668,8 +668,8 @@ class TestFP8MatmulCuda(TestCase):
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
 
-        x_fp8 = to_fp8_saturated(x * x_scales[:, None], e4m3_type)
-        y_fp8 = to_fp8_saturated(y * y_scales[None, :], e4m3_type)
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
 
         # Calculate actual F8 mm
         out_scaled_mm = mm_float8(
@@ -678,7 +678,7 @@ class TestFP8MatmulCuda(TestCase):
 
         # Calculate emulated F8 mm
         out_emulated = mm_float8_emulated(
-            x_fp8, x_scales[:, None], y_fp8, y_scales[None, :], output_dtype
+            x_fp8, x_scales, y_fp8, y_scales, output_dtype
         )
 
         if base_dtype in {torch.bfloat16, torch.float16}:

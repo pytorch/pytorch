@@ -5,14 +5,12 @@ import unittest
 import torch
 import torch._inductor.test_case
 import torch._inductor.utils
-
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
-
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import HAS_CUDA
-
 from torch.utils._triton import has_triton
+
 
 HAS_TRITON = has_triton()
 

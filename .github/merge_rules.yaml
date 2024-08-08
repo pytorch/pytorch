@@ -286,6 +286,7 @@
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
   approved_by:
+  - wconstab
   - mrshenli
   - pritamdamania87
   - zhaojuanmao
@@ -311,6 +312,25 @@
   - EasyCLA
   - Lint
   - pull
+
+- name: DCP
+  patterns:
+  - torch/distributed/checkpoint/**
+  approved_by:
+  - LucasLLC
+  - fegin
+  - wz337
+  - saumishr
+  - daulet-askarov
+  - pradeepdfb
+  - kirtiteja
+  - mhorowitz
+  - saiteja64
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 
 - name: IDEEP
   patterns:
@@ -387,7 +407,7 @@
   - torch/_inductor/codegen/cpp_template.py
   - torch/_inductor/codegen/cpp_gemm_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
-  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
   - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
@@ -503,6 +523,13 @@
   - Skylion007
   - ngimel
   - peterbell10
+  - eqy
+  - jansel
+  - jeffdaily
+  - eellison
+  - anijain2305
+  - bdhirsh
+  - zou3519
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -517,6 +544,8 @@
   - ezyang
   - dzhulgakov
   - malfet
+  - albanD
+  - ptrblck
   mandatory_checks_name:
   - EasyCLA
   - Lint

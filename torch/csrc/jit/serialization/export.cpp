@@ -5,7 +5,6 @@
 #include <ATen/core/functional.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/symbolic.h>
@@ -20,6 +19,7 @@
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
+#include <optional>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>

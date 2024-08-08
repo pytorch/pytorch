@@ -14,6 +14,6 @@ class DynamicShapeMap(torch.nn.Module):
 
         return map(body, xs, y)
 
-example_inputs = (torch.randn(3, 2), torch.randn(2))
+example_args = (torch.randn(3, 2), torch.randn(2))
 tags = {"torch.dynamic-shape", "torch.map"}
 model = DynamicShapeMap()

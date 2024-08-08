@@ -80,7 +80,7 @@ def evaluate(model, criterion, data_loader):
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], image.size(0))
             top5.update(acc5[0], image.size(0))
-    print('')
+    print()
 
     return top1, top5
 

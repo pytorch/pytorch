@@ -29,6 +29,11 @@ if [[ "${USE_SPLIT_BUILD:-false}" == "true" ]]; then
   UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_pkg"
 fi
 
+# this is special build with all dependencies packaged
+if [[ ${BUILD_NAME} == *-full* ]]; then
+  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
+fi
+
 # Sleep 2 minutes between retries for conda upload
 retry () {
   "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")

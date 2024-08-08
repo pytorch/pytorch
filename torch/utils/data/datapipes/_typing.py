@@ -11,9 +11,11 @@ import sys
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
+
+# TODO: Use TypeAlias when Python 3.6 is deprecated
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
-    _GenericAlias,  # TODO: Use TypeAlias when Python 3.6 is deprecated
+    _GenericAlias,
     _tp_cache,
     _type_check,
     _type_repr,
@@ -266,8 +268,8 @@ class _DataPipeType:
 
 
 # Default type for DataPipe without annotation
-T_co = TypeVar("T_co", covariant=True)
-_DEFAULT_TYPE = _DataPipeType(Generic[T_co])
+_T_co = TypeVar("_T_co", covariant=True)
+_DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
 class _DataPipeMeta(GenericMeta):

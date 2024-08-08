@@ -28,8 +28,8 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <stdexcept>
 #include <vector>
@@ -53,7 +53,7 @@ thread_local bool kOnlyLiftCPUTensors = false;
 TensorOptions build_options(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
-    const std::optional<Device>& device = c10::nullopt) {
+    const std::optional<Device>& device = std::nullopt) {
   options = options.dtype(scalar_type);
   if (device.has_value()) {
     return options.device(device);
@@ -69,7 +69,7 @@ TensorOptions build_options(
 Tensor new_with_sizes(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
-    const optional<Device>& device,
+    const std::optional<Device>& device,
     c10::SymIntArrayRef sizes) {
   maybe_initialize_device(options.device());
   pybind11::gil_scoped_release no_gil;
@@ -332,7 +332,17 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type =
         type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : options.device();
+
+    // Device preference is:
+    //  - explicitly user specified device in `device_opt`
+    //      - either by setting device='...'
+    //      - or setting torch.set_default_device(...)
+    //  - device of already constructed tensor
+    // This prevents an unnecessary device -> host copy when the tensor is
+    // already on the device, while respecting a default device and allows the
+    // user to overwrite the behavior explicitly.
+    at::Device device = device_opt.has_value() ? *device_opt : tensor.device();
+
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_device(device);
     return tensor.to(
@@ -936,6 +946,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
       at::globalContext().checkSparseTensorInvariants();
 
   if (r.idx == 0) {
+    const bool pin_memory = r.toBool(ARG_PIN_MEMORY);
     bool type_inference = r.isNone(ARG_TYPE);
     const auto inferred_options =
         typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
@@ -946,7 +957,6 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     // CheckSparseTensorInvariantsContext destructor
     at::globalContext().setCheckSparseTensorInvariants(
         r.toBoolWithDefault(ARG_CHECK_INVARIANTS, default_check_invariants));
-
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -975,7 +985,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT));
-    if (required_layout && layout) {
+    if (required_layout) {
       TORCH_CHECK(
           layout.value() == required_layout.value(),
           name,
@@ -989,7 +999,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
                plain_indices,
                values,
                r.intlist(ARG_SIZE),
-               values.options().layout(layout))
+               values.options().layout(layout).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(ARG_TYPE1);
@@ -998,11 +1008,11 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     const auto inferred_scalar_type =
         r.scalartypeWithDefault(ARG_TYPE1, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE1));
+    const bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
     // the global state of invariants check flag will be restored via
     // CheckSparseTensorInvariantsContext destructor
     at::globalContext().setCheckSparseTensorInvariants(
         r.toBoolWithDefault(ARG_CHECK_INVARIANTS1, default_check_invariants));
-
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -1031,7 +1041,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT1, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT1));
-    if (required_layout && layout) {
+    if (required_layout) {
       TORCH_CHECK(
           layout.value() == required_layout.value(),
           name,
@@ -1044,7 +1054,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
                compressed_indices,
                plain_indices,
                values,
-               values.options().layout(layout))
+               values.options().layout(layout).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
   throw std::runtime_error(name + ": invalid arguments");
@@ -1131,6 +1141,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_VALUES,
     ARG_TYPE,
     ARG_DEVICE,
+    ARG_PIN_MEMORY,
     ARG_REQUIRES_GRAD,
     ARG_CHECK_INVARIANTS,
     ARGS_COUNT
@@ -1141,6 +1152,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_SIZE1,
     ARG_TYPE1,
     ARG_DEVICE1,
+    ARG_PIN_MEMORY1,
     ARG_REQUIRES_GRAD1,
     ARG_CHECK_INVARIANTS1,
     ARG_IS_COALESCED1,
@@ -1161,6 +1173,7 @@ Tensor sparse_coo_tensor_ctor(
       at::globalContext().checkSparseTensorInvariants();
 
   if (r.idx == 0) {
+    bool pin_memory = r.toBool(ARG_PIN_MEMORY);
     bool type_inference = r.isNone(ARG_TYPE);
     const auto inferred_options =
         typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
@@ -1189,9 +1202,12 @@ Tensor sparse_coo_tensor_ctor(
         /*copy_numpy=*/true,
         /*type_inference=*/false);
     return at::sparse_coo_tensor(
-               indices, values, values.options().layout(at::kSparse))
+               indices,
+               values,
+               values.options().layout(at::kSparse).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
+    bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
     bool type_inference = r.isNone(ARG_TYPE1);
     const auto inferred_options =
         typeIdWithDefault(r, ARG_DEVICE1, dispatch_key);
@@ -1222,7 +1238,7 @@ Tensor sparse_coo_tensor_ctor(
                indices,
                values,
                r.intlist(ARG_SIZE1),
-               values.options().layout(at::kSparse),
+               values.options().layout(at::kSparse).pinned_memory(pin_memory),
                r.toBoolOptional(ARG_IS_COALESCED1))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   } else if (r.idx == 2) {
@@ -1257,7 +1273,7 @@ void _validate_sparse_coo_tensor_args(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(1),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1266,7 +1282,7 @@ void _validate_sparse_coo_tensor_args(
   Tensor indices = internal_new_from_data(
       values.options(),
       kLong,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(0),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1298,7 +1314,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_VALUES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1307,7 +1323,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor compressed_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_COMPRESSED_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1315,7 +1331,7 @@ void _validate_sparse_compressed_tensor_args(
   Tensor plain_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1369,7 +1385,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor values = internal_new_from_data(
       options,
       scalar_type,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_VALUES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1378,7 +1394,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor compressed_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_COMPRESSED_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,
@@ -1386,7 +1402,7 @@ void _validate_sparse_compressed_tensor_args_template(
   Tensor plain_indices = internal_new_from_data(
       values.options(),
       kInt,
-      c10::nullopt,
+      std::nullopt,
       r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false,
       /*copy_numpy=*/true,

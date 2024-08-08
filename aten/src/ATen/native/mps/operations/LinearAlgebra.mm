@@ -97,8 +97,8 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       mtl_setBuffer(computeEncoder, self, 0);
       mtl_setBuffer(computeEncoder, other, 1);
       mtl_setBuffer(computeEncoder, output, 2);
-      [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, strides, 3);
+      mtl_setBytes(computeEncoder, sizes, 4);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -160,8 +160,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
   for (C10_UNUSED const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, c10::nullopt, kMPS, c10::nullopt));
-    pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
+    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
   // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
@@ -448,13 +448,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* productTensor = nil;
       MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
+      auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
@@ -847,7 +844,7 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 }
 
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
   return out;
 }
@@ -861,7 +858,7 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
  const Tensor& result,
  const Tensor& clone_A) {
   clone_A.copy_(A);
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
   result.resize_(out.sizes());
   result.copy_(out);

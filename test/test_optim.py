@@ -14,7 +14,6 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
@@ -46,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
@@ -739,7 +739,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             models, optimizers = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
             for flag_value in (False, True):
@@ -834,7 +834,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-            if kwargs.get("capturable", False) and str(device) == "cpu":
+            if kwargs.get("capturable", False) and _get_device_type(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
             for use_impl in (False, True):
@@ -1094,14 +1094,7 @@ class TestOptimRenewed(TestCase):
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
         opt_name = optim_cls.__name__
-        if (
-            opt_name
-            in (
-                "SGD",
-                "Adagrad",
-            )
-            and impl == "capturable"
-        ):
+        if opt_name in ("SGD", "Adagrad") and impl == "capturable":
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
         if _get_device_type(device) == "cpu":
@@ -1327,6 +1320,11 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                if w.grad is not None:
+                    w.grad = w.grad.to_sparse()
+                if b.grad is not None:
+                    b.grad = b.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
@@ -1378,7 +1376,6 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_can_load_older_state_dict(self, device, dtype, optim_info):
-        new_flags = ["maximize", "foreach", "fused", "differentiable", "capturable"]
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1412,7 +1409,7 @@ class TestOptimRenewed(TestCase):
             old_state_dict = deepcopy(optimizer.state_dict())
             old_state_dict_pg = old_state_dict["param_groups"]
             for group in old_state_dict_pg:
-                for flag in new_flags:
+                for flag in optim_info.not_og_supported_flags:
                     if flag in group:
                         del group[flag]
 

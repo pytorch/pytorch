@@ -49,7 +49,7 @@ void fillQConfigMap(
     const QConfigDict& qconfig_dict,
     ModuleQConfigMap& map,
     const std::string& key = "",
-    const std::optional<QConfig>& parent_qconfig = c10::nullopt) {
+    const std::optional<QConfig>& parent_qconfig = std::nullopt) {
   std::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
     GRAPH_DEBUG("Got module config for key:", key);
@@ -1414,7 +1414,7 @@ InsertObserversHelper::insertObserversFor(
       if (!isObserved(v, block_observed_values)) {
         block_output_observers.emplace_back(getObserverFor(v));
       } else {
-        block_output_observers.emplace_back(c10::nullopt);
+        block_output_observers.emplace_back(std::nullopt);
       }
     }
   }

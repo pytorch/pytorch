@@ -113,7 +113,7 @@
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
 #     variable in a graph. The result of this function is `c10::optional<Tensor>`,
-#     and it is `c10::nullopt` when the condition evalutes to `false`,
+#     and it is `::std::nullopt` when the condition evalutes to `false`,
 #     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
@@ -396,6 +396,14 @@
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
+
+- name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
+  dispatch:
+    Default:
+      # the default case will use the CompositeImplicitAutograd
+      self: not_implemented("chunk")
+    AutogradNestedTensor:
+      self: chunk_backward_nested(grads, self, chunks, dim)
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
@@ -1949,6 +1957,18 @@
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
+- name: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
+  self: "_nested_view_from_jagged(grad.values().view_as(at::_nested_get_values(self)),
+          at::_nested_get_offsets(self),
+          at::_nested_get_jagged_dummy(self),
+          at::_nested_get_lengths(self),
+          at::_nested_get_ragged_idx(self),
+          at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt,
+          at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
+
+- name: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
+  self: at::_nested_jagged_to_strided(grad)
+
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
 - name: _values(Tensor(a) self) -> Tensor(a)
@@ -2009,11 +2029,22 @@
   weight: _embedding_bag_backward_symint(grad, indices, offsets, result1, result2, result3, weight.sym_size(0), scale_grad_by_freq, mode, sparse, per_sample_weights, padding_idx)
   per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode, padding_idx)
 
+- name: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, SymInt num_weights, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
+  grad: not_implemented("_embedding_bag_backward")
+  indices: non_differentiable
+  offsets: non_differentiable
+  offset2bag: non_differentiable
+  bag_size: non_differentiable
+  maximum_indices: non_differentiable
+  per_sample_weights: not_implemented("_embedding_bag_backward")
+
 - name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, SymInt num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
+  grad: not_implemented("_embedding_bag_dense_backward")
   indices: non_differentiable
   offset2bag: non_differentiable
   bag_size: non_differentiable
   maximum_indices: non_differentiable
+  per_sample_weights: not_implemented("_embedding_bag_dense_backward")
 
 - name: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
   indices: non_differentiable
@@ -2262,6 +2293,10 @@
 
 - name: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   self: pixel_shuffle(grad, downscale_factor)
+  result: auto_linear
+
+- name: channel_shuffle(Tensor self, SymInt groups) -> Tensor
+  self: channel_shuffle_symint(grad, grad.sym_size(1) / groups)
   result: auto_linear
 
 - name: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
@@ -2817,7 +2852,7 @@
   dummy: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
+  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
 
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)

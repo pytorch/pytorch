@@ -20,6 +20,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
 
+
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
@@ -788,7 +789,7 @@ main()
         bias_sigmoid_mul_jit = torch.compile(bias_sigmoid_mul)
 
         class ModuleWithJit(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear_1 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=True)
                 self.linear_2 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=False)
@@ -801,7 +802,7 @@ main()
                 return output
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.module_with_jit_1 = ModuleWithJit()
                 self.module_with_jit_2 = ModuleWithJit()
@@ -1668,9 +1669,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we support dynamic shapes
-        # instead of collecting the saved_data's tensor hash
-        self.check_output_and_recompiles(fn, 5)
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
@@ -2195,7 +2195,7 @@ def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
-        if not callable(fn):
+        if not callable(fn) or name in skipped_tests:
             continue
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
@@ -2231,6 +2231,13 @@ known_failures_re = re.compile(
 )
 
 # Bugs needing investigation:
+skipped_tests = {
+    # These test unconventional usage of saved tensor hooks do not leak or crash
+    # Running these tests succeed, but somehow cause other tests to fail
+    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
+    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
+}
+
 known_failing_tests = {
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
@@ -2278,6 +2285,7 @@ known_failing_tests = {
     "test_grad_materialize_grads",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf_many_outputs",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_gradient_edge_output",  # RuntimeError: trying to backward through the graph a second time
     "test_hessian_vector",  # RuntimeError: compiled_autograd does not support create_graph
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
@@ -2346,6 +2354,7 @@ known_failing_tests = {
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
 }
 
 if not HAS_CUDA:

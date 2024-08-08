@@ -134,6 +134,7 @@ endif()
 # find lbnvrtc.so
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+  find_package(Python COMPONENTS Interpreter)
   execute_process(
     COMMAND Python::Interpreter -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"

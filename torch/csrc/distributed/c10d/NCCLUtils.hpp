@@ -12,9 +12,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <optional>
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
@@ -173,39 +173,46 @@
   } while (0)
 
 namespace c10d {
-
-static c10::IValue entries_key = "entries";
-static c10::IValue nccl_comm_key = "nccl_comm_state";
-static c10::IValue version_key = "version";
+#define DEFINE_CONSTANT(name, value) \
+  static c10::IValue name = value;   \
+  static std::string name##_str = value;
+DEFINE_CONSTANT(entries_key, "entries");
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
+DEFINE_CONSTANT(version_key, "version");
 // Update whenever changing contents or formatting of the dump
 // (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.2";
-static c10::IValue pg_config_key = "pg_config";
-static c10::IValue record_id_key = "record_id";
-static c10::IValue pg_id_key = "pg_id";
-static c10::IValue pg_name_key = "process_group";
-static c10::IValue collective_seq_id_key = "collective_seq_id";
-static c10::IValue p2p_seq_id_key = "p2p_seq_id";
-static c10::IValue is_p2p_key = "is_p2p";
-static c10::IValue op_id_key = "op_id";
-static c10::IValue profiling_name_key = "profiling_name";
-static c10::IValue input_sizes_key = "input_sizes";
-static c10::IValue input_dtypes_key = "input_dtypes";
-static c10::IValue output_sizes_key = "output_sizes";
-static c10::IValue output_dtypes_key = "output_dtypes";
-static c10::IValue time_created_key = "time_created_ns";
-static c10::IValue duration_key = "duration_ms";
-static c10::IValue timeout_key = "timeout_ms";
-
-static c10::IValue frames_key = "frames";
-static c10::IValue state_key = "state";
-static c10::IValue line_key = "line";
-static c10::IValue name_key = "name";
-static c10::IValue filename_key = "filename";
-static c10::IValue retired_key = "retired";
-static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-static c10::IValue time_discovered_completed_key =
-    "time_discovered_completed_ns";
+// Also update both JSON and Pickle dumps to make use of the newly defined
+// field(s).
+DEFINE_CONSTANT(version_val, "2.3");
+DEFINE_CONSTANT(pg_config_key, "pg_config");
+DEFINE_CONSTANT(pg_status_key, "pg_status");
+DEFINE_CONSTANT(record_id_key, "record_id");
+DEFINE_CONSTANT(pg_id_key, "pg_id");
+DEFINE_CONSTANT(pg_name_key, "process_group");
+DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
+DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
+DEFINE_CONSTANT(is_p2p_key, "is_p2p");
+DEFINE_CONSTANT(op_id_key, "op_id");
+DEFINE_CONSTANT(profiling_name_key, "profiling_name");
+DEFINE_CONSTANT(input_sizes_key, "input_sizes");
+DEFINE_CONSTANT(input_dtypes_key, "input_dtypes");
+DEFINE_CONSTANT(output_sizes_key, "output_sizes");
+DEFINE_CONSTANT(output_dtypes_key, "output_dtypes");
+DEFINE_CONSTANT(time_created_key, "time_created_ns");
+DEFINE_CONSTANT(duration_key, "duration_ms");
+DEFINE_CONSTANT(timeout_key, "timeout_ms");
+DEFINE_CONSTANT(frames_key, "frames");
+DEFINE_CONSTANT(state_key, "state");
+DEFINE_CONSTANT(line_key, "line");
+DEFINE_CONSTANT(name_key, "name");
+DEFINE_CONSTANT(filename_key, "filename");
+DEFINE_CONSTANT(retired_key, "retired");
+DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns");
+DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns");
+DEFINE_CONSTANT(completed_state, "completed");
+DEFINE_CONSTANT(scheduled_state, "scheduled");
+DEFINE_CONSTANT(started_state, "started");
+#undef DEFINE_CONSTANT
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
@@ -218,7 +225,7 @@ bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 // thrown in the NCCL codebase.
 TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason = c10::nullopt);
+    std::optional<std::string> processGroupFailureReason = std::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constrains we set for the debug info writer:
@@ -256,7 +263,7 @@ class NCCLComm {
       : ncclComm_(ncclComm),
         aborted_(false),
         ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(c10::nullopt),
+        commFailureReason_(std::nullopt),
         initialized_(false) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
@@ -284,7 +291,7 @@ class NCCLComm {
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
-        c10::nullopt);
+        std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     comm->initialized_ = true;
@@ -306,12 +313,12 @@ class NCCLComm {
       C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          c10::nullopt);
+          std::nullopt);
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          c10::nullopt);
+          std::nullopt);
       // under blocking mode, comm is initialized after NCCL CHECK
       isInitialized = true;
     }
@@ -320,7 +327,6 @@ class NCCLComm {
     comm->initialized_ = isInitialized;
     return comm;
   }
-#endif
 
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
@@ -328,6 +334,7 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
+#endif
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
@@ -336,7 +343,7 @@ class NCCLComm {
       LOG(INFO) << "Communicator was aborted before trying to dump its state.";
       return dump;
     }
-    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), c10::nullopt);
+    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), std::nullopt);
     return dump;
   }
 #endif
@@ -371,7 +378,7 @@ class NCCLComm {
   }
 
   void ncclCommAbort(
-      std::optional<std::string> commFailureReason = c10::nullopt) {
+      std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
@@ -636,6 +643,7 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
 
@@ -651,9 +659,14 @@ struct NCCLTraceBuffer {
       Event* start,
       Event* end,
       std::chrono::milliseconds timeout_ms,
+      std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P) {
     if (!enabled_) {
-      return c10::nullopt;
+      return std::nullopt;
+    }
+    if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
+      // Current pg_status is not in FR.
+      all_pg_status_[pg_id] = pg_status;
     }
     auto traceback =
         torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
@@ -765,7 +778,7 @@ struct NCCLTraceBuffer {
     bool can_compute_duration = false;
     Event* startEvent = nullptr;
     Event* endEvent = nullptr;
-    std::optional<float> duration = c10::nullopt;
+    std::optional<float> duration = std::nullopt;
 
     std::unique_lock<std::mutex> guard(mutex_);
 
@@ -833,7 +846,6 @@ struct NCCLTraceBuffer {
       if (onlyActive && e.time_discovered_completed_.has_value()) {
         continue;
       }
-
       if (includeStacktraces) {
         auto& tb = stracebacks.tracebacks.at(i);
         auto frames = new_list();
@@ -860,8 +872,7 @@ struct NCCLTraceBuffer {
         auto sizes = new_list();
         for (auto dim : dims) {
           auto arg_sizes = new_list();
-          for (auto i : c10::irange(dim)) {
-            (void)i;
+          for (C10_UNUSED auto i : c10::irange(dim)) {
             arg_sizes.push_back(*it++);
           }
           sizes.push_back(arg_sizes);
@@ -884,11 +895,11 @@ struct NCCLTraceBuffer {
       }
       dict.insert(output_dtypes_key, output_dtypes_strs);
       if (e.time_discovered_completed_.has_value()) {
-        dict.insert(state_key, "completed");
+        dict.insert(state_key, completed_state);
       } else if (e.time_discovered_started_.has_value()) {
-        dict.insert(state_key, "started");
+        dict.insert(state_key, started_state);
       } else {
-        dict.insert(state_key, "scheduled");
+        dict.insert(state_key, scheduled_state);
       }
 
       dict.insert(
@@ -923,6 +934,54 @@ struct NCCLTraceBuffer {
     return pg_config;
   }
 
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgConfigJson() {
+    std::map<std::string, std::map<std::string, std::string>> result;
+    for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
+      auto pg_info = std::map<std::string, std::string>();
+      pg_info["name"] = std::get<0>(pg_name);
+      pg_info["desc"] = std::get<1>(pg_name);
+      pg_info["ranks"] = ranks_str(ranks);
+      result.emplace(std::get<0>(pg_name), pg_info);
+    }
+    return result;
+  }
+
+  // dump pg_status
+  const c10::Dict<c10::IValue, c10::IValue> getPgStatus() {
+    auto all_pg_status = new_dict();
+    for (const auto& [pg_id, status] : all_pg_status_) {
+      auto pg_status = new_dict();
+      pg_status.insert("last_enqueued_collective", status->lastEnqueuedSeq);
+      pg_status.insert("last_started_collective", status->lastStartedSeq);
+      pg_status.insert("last_completed_collective", status->lastCompletedSeq);
+      all_pg_status.insert(std::to_string(pg_id), pg_status);
+    }
+    return all_pg_status;
+  }
+
+  const std::map<std::string, std::map<std::string, std::string>>
+  getPgStatusJson() {
+    std::map<std::string, std::map<std::string, std::string>> result;
+    for (const auto& [pg_id, status] : all_pg_status_) {
+      auto pg_status = std::map<std::string, std::string>();
+      pg_status["last_enqueued_collective"] =
+          std::to_string(status->lastEnqueuedSeq);
+      pg_status["last_started_collective"] =
+          std::to_string(status->lastStartedSeq);
+      pg_status["last_completed_collective"] =
+          std::to_string(status->lastCompletedSeq);
+      result[std::to_string(pg_id)] = pg_status;
+    }
+    return result;
+  }
+
+  std::string dump_json(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+      bool includeCollectives,
+      bool onlyActive);
   // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
@@ -935,6 +994,7 @@ struct NCCLTraceBuffer {
     // common values
     result.insert(version_key, version_val);
     result.insert(pg_config_key, getPgConfig());
+    result.insert(pg_status_key, getPgStatus());
 
     // collective trace
     if (includeCollectives) {
@@ -959,7 +1019,6 @@ struct NCCLTraceBuffer {
     return pickle_str(result);
   }
 };
-
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

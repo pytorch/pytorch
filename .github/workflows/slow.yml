@@ -21,19 +21,17 @@ concurrency:
 permissions: read-all
 
 jobs:
-  # Often fails due to conda availability issues
-  # See https://github.com/pytorch/pytorch/issues/129717
-  # llm-td:
-  #   name: before-test
-  #   uses: ./.github/workflows/llm_td_retrieval.yml
-  #   permissions:
-  #     id-token: write
-  #     contents: read
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    # needs: llm-td
+    needs: llm-td
     permissions:
       id-token: write
       contents: read
@@ -151,17 +149,17 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
       sync-tag: asan-build
 
