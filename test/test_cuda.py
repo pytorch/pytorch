@@ -4022,6 +4022,52 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    def test_cachingAllocator_raw_alloc(self):
+        # Test that raw_alloc respects the environment variable that
+        # activates/deactivates the caching allocator
+        # PYTORCH_NO_[HIP,CUDA]_CACHING_ALLOCATOR
+
+        # Helper function that calls raw_alloc and returns
+        # relevant field in data structure
+        def requested_bytes_alloc_stats(raw_alloc_size, stream):
+            start = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+            torch._C._cuda_cudaCachingAllocator_raw_alloc(raw_alloc_size, stream)
+            finish = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+
+            return finish - start
+
+        torch.cuda.empty_cache()
+        device = torch._C._cuda_getDevice()
+        stream = torch._C._cuda_getCurrentRawStream(device)
+        torch._C._cuda_resetAccumulatedMemoryStats(device)
+
+        # size of allocation
+        raw_alloc_size = 1024 * 1024  # 1 MB
+
+        # Place in TRY-FINALLY block to avoid state leakage
+        # in case the test fails
+        if torch.version.hip:
+            ENV_NO_MEMORY_CACHING = "PYTORCH_NO_HIP_MEMORY_CACHING"
+        elif torch.version.cuda:
+            ENV_NO_MEMORY_CACHING = "PYTORCH_NO_CUDA_MEMORY_CACHING"
+
+        import os
+        try:
+            # Deactivate the caching allocator
+            os.environ[ENV_NO_MEMORY_CACHING] = "1"
+
+            # For a deactivated caching allocator, result is zero
+            cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
+            self.assertEqual(cuda_alloc_size, 0)
+
+        finally:
+            # Make sure we get back to the default state that is
+            # an activated caching allocator
+            del os.environ[ENV_NO_MEMORY_CACHING]
+
+            # For an active caching allocator, result matches raw_alloc_size
+            cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
+            self.assertEqual(cuda_alloc_size, raw_alloc_size)
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
