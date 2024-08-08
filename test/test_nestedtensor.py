@@ -4177,12 +4177,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_expected = torch.cat(
                 [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
             )
+            if keepdim:
+                out_expected = out_expected.unsqueeze(reduce_dim[0])
 
             self.assertFalse(
                 out_actual.is_nested,
                 f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
-            self.assertTrue(torch.allclose(out_actual, out_expected))
+            self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -4242,12 +4244,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         for t in nt_transposed.unbind()
                     ]
                 )
+                if keepdim:
+                    out_expected = out_expected.unsqueeze(reduce_dim[0])
 
                 self.assertFalse(
                     out_actual.is_nested,
                     f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
-                self.assertTrue(torch.allclose(out_actual, out_expected, rtol=1e-4))
+                self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -6490,8 +6494,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
@@ -6519,10 +6521,8 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
-    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
-    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
-    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
-    "clone",
+    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
+    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
