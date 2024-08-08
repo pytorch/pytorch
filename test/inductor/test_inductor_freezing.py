@@ -10,6 +10,7 @@ import weakref
 
 import torch
 from torch import nn
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
@@ -434,8 +435,8 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn(self):
-        for use_bias, inline_inbuilt_nn_modules, dtype in itertools.product(
-            [True, False], [True, False], [torch.float16, torch.bfloat16, torch.float32]
+        for use_bias, dtype in itertools.product(
+            [True, False], [torch.float16, torch.bfloat16, torch.float32]
         ):
             if self.device == "cpu" and dtype == torch.float16:
                 continue
@@ -459,7 +460,7 @@ class OptimizeForInferenceTemplate(TestCase):
             # TODO - bias is separate kernel right now, we should only unfuse it
             # from conv if it can be fused
 
-            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline_inbuilt_nn_modules), torch.no_grad():
+            with torch.no_grad():
                 out_eager = mod(x)
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
@@ -472,12 +473,13 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
-        for inline_inbuilt_nn_modules in [True, False]:
+        for use_bias in [True, False]:
             mod = (
-                ConvBN(32, 32, bias=True, kernel_size=3, stride=2)
+                ConvBN(32, 32, bias=use_bias, kernel_size=3, stride=2)
                 .to(self.device)
                 .to(torch.float32)
             )
@@ -493,17 +495,20 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod(x)
                 return mod(x)
 
-            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline_inbuilt_nn_modules), torch.no_grad():
+            with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
                     torch.compile(foo), mod, x
                 )
 
-            self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
-        for inline_inbuilt_nn_modules in [True, False]:
+        for use_bias in [True, False]:
             x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
             running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
             running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
@@ -512,7 +517,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 ConvFunctionalBN(
                     32,
                     32,
-                    bias=True,
+                    bias=use_bias,
                     kernel_size=3,
                     stride=2,
                     running_mean=running_mean,
@@ -529,19 +534,22 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod(x)
                 return mod(x)
 
-            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline_inbuilt_nn_modules), torch.no_grad():
+            with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
                     torch.compile(foo), mod, x
                 )
 
-            self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_bn_with_multi_bn_share_conv(self):
-        for inline_inbuilt_nn_modules in [True, False]:
+        for use_bias in [True, False]:
             mod = (
-                ConvMultiBN(32, 32, bias=True, kernel_size=3, stride=2)
+                ConvMultiBN(32, 32, bias=use_bias, kernel_size=3, stride=2)
                 .to(self.device)
                 .to(torch.float32)
             )
@@ -556,17 +564,20 @@ class OptimizeForInferenceTemplate(TestCase):
             def foo(mod, x):
                 return mod(x)
 
-            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline_inbuilt_nn_modules), torch.no_grad():
+            with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
                     torch.compile(foo), mod, x
                 )
 
-            self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_functional_bn_with_multi_bn_share_conv(self):
-        for inline_inbuilt_nn_modules in [True, False]:
+        for use_bias in [True, False]:
             x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
             running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
             running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
@@ -576,7 +587,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 ConvMultiFunctionalBN(
                     32,
                     32,
-                    bias=True,
+                    bias=use_bias,
                     kernel_size=3,
                     stride=2,
                     running_mean=running_mean,
@@ -593,12 +604,15 @@ class OptimizeForInferenceTemplate(TestCase):
             def foo(mod, x):
                 return mod(x)
 
-            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline_inbuilt_nn_modules), torch.no_grad():
+            with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
                     torch.compile(foo), mod, x
                 )
-            self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            self.assertEqual(counters["inductor"]["binary_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
