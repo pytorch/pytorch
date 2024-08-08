@@ -1599,6 +1599,145 @@ def forward(self, pred_1, x_1):
             self.assertEqual(result1, expected_result)
             self.assertEqual(result2, expected_result)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_CUDA_flip(self):
+        device = torch.device("cuda")
+
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        # This specific length was failing in the past
+        fails_for_backend = []
+        n = 9
+        x = torch.arange(n, device=device)
+        for combine_mode in ["pointwise", "generic"]:
+            # for backend in ['eager', 'aot_eager', 'aot_eager_decomp_partition', 'inductor']:
+            for backend in ["inductor"]:
+                torch.compiler.reset()
+                with torch._dynamo.utils.disable_cache_limit():
+                    associative_scan1 = torch.compile(
+                        associative_scan, backend=backend, fullgraph=True
+                    )
+                    associative_scan2 = associative_scan
+
+                try:
+                    # Flip only non-compiled and compare with compiled reverse=True
+                    result1 = associative_scan1(
+                        fct, x, 0, reverse=True, combine_mode=combine_mode
+                    )
+                except torch._dynamo.debug_utils.AccuracyError:
+                    fails_for_backend.append(backend)
+                result2 = torch.flip(
+                    associative_scan2(
+                        fct,
+                        torch.flip(x, [0]),
+                        0,
+                        reverse=False,
+                        combine_mode=combine_mode,
+                    ),
+                    [0],
+                )
+                result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
+            self.assertEqual(len(fails_for_backend), 0)
+
+            for n in range(20):
+                x = torch.arange(n, device=device)
+                torch.compiler.reset()
+                with torch._dynamo.utils.disable_cache_limit():
+                    associative_scan1 = torch.compile(associative_scan, fullgraph=True)
+                    associative_scan2 = associative_scan
+
+                result1 = associative_scan1(
+                    fct, x, 0, reverse=False, combine_mode=combine_mode
+                )
+                result2 = associative_scan2(
+                    fct, x, 0, reverse=False, combine_mode=combine_mode
+                )
+                result3 = torch.cumsum(x, 0)
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
+                # Flip only non-compiled and compare with compiled reverse=True
+                result1 = associative_scan1(
+                    fct, x, 0, reverse=True, combine_mode=combine_mode
+                )
+                result2 = torch.flip(
+                    associative_scan2(
+                        fct,
+                        torch.flip(x, [0]),
+                        0,
+                        reverse=False,
+                        combine_mode=combine_mode,
+                    ),
+                    [0],
+                )
+                result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
+                # Flip only compiled and compare with non-compiled reverse=True
+                result1 = torch.flip(
+                    associative_scan1(
+                        fct,
+                        torch.flip(x, [0]),
+                        0,
+                        reverse=False,
+                        combine_mode=combine_mode,
+                    ),
+                    [0],
+                )
+                result2 = associative_scan2(
+                    fct, x, 0, reverse=True, combine_mode=combine_mode
+                )
+                result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
+                # Use reverse=False, but flip both results before and after
+                result1 = torch.flip(
+                    associative_scan1(
+                        fct,
+                        torch.flip(x, [0]),
+                        0,
+                        reverse=False,
+                        combine_mode=combine_mode,
+                    ),
+                    [0],
+                )
+                result2 = torch.flip(
+                    associative_scan2(
+                        fct,
+                        torch.flip(x, [0]),
+                        0,
+                        reverse=False,
+                        combine_mode=combine_mode,
+                    ),
+                    [0],
+                )
+                result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
+                # Reverse=True
+                result1 = associative_scan1(
+                    fct, x, 0, reverse=True, combine_mode=combine_mode
+                )
+                result2 = associative_scan2(
+                    fct, x, 0, reverse=True, combine_mode=combine_mode
+                )
+                result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+                self.assertEqual(result1, result2)
+                self.assertEqual(result1, result3)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
