@@ -14,17 +14,7 @@ bool_flag(
     build_setting_default = True,
 )
 
-bool_flag(
-    name = "use_glog",
-    build_setting_default = True,
-)
-
 config_setting(
     name = "using_gflags",
     flag_values = {":use_gflags": "true"},
-)
-
-config_setting(
-    name = "using_glog",
-    flag_values = {":use_glog": "true"},
 )

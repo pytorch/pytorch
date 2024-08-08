@@ -1496,13 +1496,7 @@ def use_fb_internal_macros() -> str:
         # the v1 version for aoti_torch_create_tensor_from_blob
         create_tensor_from_blob_v1 = "-D AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
         openmp_lib = build_paths.openmp_lib()
-        preprocessor_flags = " ".join(
-            (
-                "-D C10_USE_GLOG",
-                "-D C10_USE_MINIMAL_GLOG",
-                "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
-            )
-        )
+        preprocessor_flags = " ".join(("-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",))
         return f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags} {create_tensor_from_blob_v1}"
     else:
         return ""

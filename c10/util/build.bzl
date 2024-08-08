@@ -39,9 +39,6 @@ def define_targets(rules):
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
-        }) + rules.select({
-            "//c10:using_glog": ["@com_github_glog//:glog"],
-            "//conditions:default": [],
         }),
         # This library uses flags and registration. Do not let the
         # linker remove them.

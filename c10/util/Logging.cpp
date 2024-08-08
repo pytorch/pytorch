@@ -219,116 +219,12 @@ void setLogLevelFlagFromEnv();
 } // namespace detail
 } // namespace c10
 
-#if defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
-// When GLOG depends on GFLAGS, these variables are being defined in GLOG
-// directly via the GFLAGS definition, so we will use DECLARE_* to declare
-// them, and use them in Caffe2.
-// GLOG's minloglevel
-DECLARE_int32(minloglevel);
-// GLOG's verbose log value.
-DECLARE_int32(v);
-// GLOG's logtostderr value
-DECLARE_bool(logtostderr);
-#endif // defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
-
-#if !defined(C10_USE_GLOG)
 // This backward compatibility flags are in order to deal with cases where
 // Caffe2 are not built with glog, but some init flags still pass in these
 // flags. They may go away in the future.
 C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel");
 C10_DEFINE_int32(v, 0, "Equivalent to glog verbose");
 C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
-#endif // !defined(c10_USE_GLOG)
-
-#ifdef C10_USE_GLOG
-
-// Provide easy access to the above variables, regardless whether GLOG is
-// dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
-// consistent between GLOG and GFLAGS, so we can do the below declaration
-// consistently.
-namespace c10 {
-using fLB::FLAGS_logtostderr;
-using fLI::FLAGS_minloglevel;
-using fLI::FLAGS_v;
-} // namespace c10
-
-C10_DEFINE_int(
-    caffe2_log_level,
-    google::GLOG_WARNING,
-    "The minimum log level that caffe2 will output.");
-
-// Google glog's api does not have an external function that allows one to check
-// if glog is initialized or not. It does have an internal function - so we are
-// declaring it here. This is a hack but has been used by a bunch of others too
-// (e.g. Torch).
-namespace google {
-namespace glog_internal_namespace_ {
-bool IsGoogleLoggingInitialized();
-} // namespace glog_internal_namespace_
-} // namespace google
-
-namespace c10 {
-namespace {
-
-void initGoogleLogging(char const* name) {
-#if !defined(_MSC_VER)
-  // This trick can only be used on UNIX platforms
-  if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
-#endif
-  {
-    ::google::InitGoogleLogging(name);
-#if !defined(_MSC_VER)
-    // This is never defined on Windows
-    ::google::InstallFailureSignalHandler();
-#endif
-  }
-}
-
-} // namespace
-
-void initLogging() {
-  detail::setLogLevelFlagFromEnv();
-
-  UpdateLoggingLevelsFromFlags();
-}
-
-bool InitCaffeLogging(int* argc, char** argv) {
-  if (*argc == 0) {
-    return true;
-  }
-
-  initGoogleLogging(argv[0]);
-
-  UpdateLoggingLevelsFromFlags();
-
-  return true;
-}
-
-void UpdateLoggingLevelsFromFlags() {
-#ifdef FBCODE_CAFFE2
-  // TODO(T82645998): Fix data race exposed by TSAN.
-  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
-#endif
-  // If caffe2_log_level is set and is lower than the min log level by glog,
-  // we will transfer the caffe2_log_level setting to glog to override that.
-  FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
-  // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_WARNING) {
-    FLAGS_logtostderr = 1;
-  }
-  // Also, transfer the caffe2_log_level verbose setting to glog.
-  if (FLAGS_caffe2_log_level < 0) {
-    FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
-  }
-}
-
-void ShowLogInfoToStderr() {
-  FLAGS_logtostderr = 1;
-  FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::GLOG_INFO);
-}
-} // namespace c10
-
-#else // !C10_USE_GLOG
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -458,8 +354,6 @@ MessageLogger::~MessageLogger() {
 }
 
 } // namespace c10
-
-#endif // !C10_USE_GLOG
 
 namespace c10::detail {
 namespace {
