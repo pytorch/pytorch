@@ -476,6 +476,27 @@ inline static PyObject* eval_custom_code_impl(
   return result;
 }
 
+static const char* get_compile_context(PyThreadState* tstate) {
+    // Import the torch module
+    PyObject* torch_module = PyImport_ImportModule("torch._guards");
+    // // Get the CompileContext attribute from the _guards attribute
+    PyObject* result = PyObject_GetAttrString(torch_module, "profiler_graph_id_cache");
+    const char *trace_id;
+    if (result == Py_None) {
+        trace_id = "None";
+    } else {
+        // Get the result as a string using the __str__ method
+        PyObject* str_result = PyObject_Str(result);
+        const char* result_str = PyUnicode_AsUTF8(str_result);
+        trace_id = result_str;
+        Py_DECREF(str_result);
+    }
+    // Clean up
+    Py_DECREF(result);
+    Py_DECREF(torch_module);
+    return trace_id;
+}
+
 // This wrapper function adds a profiler event
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
@@ -483,7 +504,8 @@ inline static PyObject* eval_custom_code(
     PyCodeObject* code,
     int throw_flag,
     int free_vars_copied) {
-  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  const char* trace_id = get_compile_context(tstate);
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter_with_context("Torch-Compiled Region", trace_id);
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,

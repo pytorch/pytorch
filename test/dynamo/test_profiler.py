@@ -173,10 +173,18 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         for _ in range(2):
             opt_fn(*inputs)
 
-        with torch.profiler.profile() as prof:
+        with torch.profiler.profile(record_shapes=True) as prof:
             opt_fn(*inputs)
 
-        self.assertTrue(any(e.name == "Torch-Compiled Region" for e in prof.events()))
+        for e in prof.events():
+            print(e.name)
+            print(e.kwinputs)
+        self.assertTrue(
+            any(
+                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "0/0"
+                for e in prof.events()
+            )
+        )
 
 
 if __name__ == "__main__":

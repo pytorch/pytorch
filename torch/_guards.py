@@ -554,6 +554,13 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 _TLS = threading.local()
 
+""" This var acts as a cache for the profiler to be able to get the current
+graph section as determined by the last compile context to be exited. This
+var will be directly accessed in the eval frame when recording a Torch-Compiled Region
+"""
+
+profiler_graph_id_cache = "N/A"
+
 """
 TracingContext is the source of truth for all currently accumulated information
 needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
@@ -776,11 +783,14 @@ class TracingContext:
 
 @contextmanager
 def compile_context(context: Optional[CompileContext]):
+    global profiler_graph_id_cache
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
         yield context
     finally:
+        if context is not None:
+            profiler_graph_id_cache = str(context.current_trace_id())
         _TLS.compile_context = old_context
 
 
