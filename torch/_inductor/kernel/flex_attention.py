@@ -720,8 +720,10 @@ def flex_attention(
         + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(full_kv_indices),
+        4: create_num_blocks_fake_generator(kv_indices),
         5: create_indices_fake,
+        6: create_num_blocks_fake_generator(full_kv_indices),
+        7: create_indices_fake,
     }
     return (
         autotune_select_algorithm(
