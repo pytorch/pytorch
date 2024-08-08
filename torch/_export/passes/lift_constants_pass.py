@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import warnings
 from typing import Any, Dict, List, Union
 
 import torch
@@ -183,6 +184,15 @@ def lift_constants_pass(
                     constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
+                # Remove the parameterness of constant_val
+                if isinstance(constant_val, torch.nn.Parameter):
+                    warnings.warn(
+                        f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
+                        f"it's not registered with register_parameter(). export will treat it as a constant tensor"
+                    )
+                    # We get the real data out of the parameter by disabling the surrounding fake mode.
+                    with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
+                        constant_val = constant_val.data
                 constant_kind = InputKind.CONSTANT_TENSOR
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
