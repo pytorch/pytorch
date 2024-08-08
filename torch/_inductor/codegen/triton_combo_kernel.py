@@ -4,7 +4,6 @@ import logging
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
-
 from typing import Any, cast, Dict, List, Optional, Tuple, Type, Union
 
 from sympy import Integer
@@ -150,14 +149,21 @@ class ComboKernel(Kernel):
         subkernel_nodes: List[BaseSchedulerNode],
         triton_scheduling: SIMDScheduling,
         node_info_map: Dict[BaseSchedulerNode, Tuple[Any, Any, Any, Any]],
+        custom_algorithm: bool,
     ):
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
         for each subkernel node where each sublist is guaranteed to not exceed CUDA limits for number of args
         (read/writes) and to have the same 2D or 1D blocking strategy."""
         # TODO support combination of kernels with different block dimensions
         assert len(subkernel_nodes) >= 1
+        mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
+            config.combo_kernel_allow_mixed_sizes == 1 and custom_algorithm
+        )
 
         ndim_to_partition_state: Dict[int, PartitionState] = defaultdict(
+            lambda: PartitionState([], [], 0)
+        )
+        yelem_to_partition_state: Dict[int, PartitionState] = defaultdict(
             lambda: PartitionState([], [], 0)
         )
 
@@ -169,11 +175,25 @@ class ComboKernel(Kernel):
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
 
             ndim = len(tiled_groups)
-            partition_state = ndim_to_partition_state[ndim]
-            ComboKernel._update_partition(partition_state, read_write_count, node_info)
+            assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
+            if not mixed_sizes and ndim == 3:
+                y_elem = tiled_groups[0]
+                partition_state = yelem_to_partition_state[y_elem]
+                ComboKernel._update_partition(
+                    partition_state, read_write_count, node_info
+                )
+            else:
+                assert mixed_sizes or ndim <= 3, f"No mixed sizes: tile {tiled_groups}"
+                partition_state = ndim_to_partition_state[ndim]
+                ComboKernel._update_partition(
+                    partition_state, read_write_count, node_info
+                )
 
         all_partitions = []
         for partition_state in ndim_to_partition_state.values():
+            partition_state.finalize()
+            all_partitions.extend(partition_state.partitions)
+        for partition_state in yelem_to_partition_state.values():
             partition_state.finalize()
             all_partitions.extend(partition_state.partitions)
 
@@ -209,7 +229,7 @@ class ComboKernel(Kernel):
         for raw_partition in raw_partitions:
             all_partitions.extend(
                 ComboKernel._base_horizontal_partition(
-                    raw_partition, triton_scheduling, node_info_map
+                    raw_partition, triton_scheduling, node_info_map, custom_algorithm
                 )
             )
         return all_partitions
@@ -317,7 +337,7 @@ class ComboKernel(Kernel):
             )
             return numels
 
-    def __init__(self, enable_autotune=False):
+    def __init__(self, enable_autotune=False, mixed_sizes=False):
         super().__init__()
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
@@ -325,6 +345,7 @@ class ComboKernel(Kernel):
         self.min_x_blocks_list = []
         self.x_numels_list = []
         self.enable_autotune = enable_autotune
+        self.mixed_sizes = mixed_sizes
         self.dispatch_class: Optional[
             Union[
                 Type[ComboKernel.SequentialDispatch],
@@ -348,14 +369,16 @@ class ComboKernel(Kernel):
         return sub_kernel
 
     @staticmethod
-    def create_triton_kernel(*groups, index_dtype, mutations, reduction_hint):
+    def create_triton_kernel(
+        *groups, index_dtype, mutations, reduction_hint, optimize_mask
+    ):
         return TritonKernel(
             *groups,
             index_dtype=index_dtype,
             mutations=mutations,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             reduction_hint=reduction_hint,
-            optimize_mask=False,
+            optimize_mask=optimize_mask,
         )
 
     def codegen_static_numels_sub_kernel(self, code, sub_kernel, num):
@@ -488,6 +511,9 @@ class ComboKernel(Kernel):
     def select_dispatch_strategy(self):
         if self.dispatch_class is not None:
             return
+        if not self.mixed_sizes:
+            self.dispatch_class = ComboKernel.SequentialDispatch
+            return
         # A negative x_blocks_list element means the kernel is not tunable,
         # i.e., no_x_dim = True
         x_numels_list = [abs(e) for e in self.x_numels_list]
@@ -502,14 +528,14 @@ class ComboKernel(Kernel):
     def jit_line(
         self, heuristics, size_hints, selected_kernel, pointwise_with_reduce=False
     ):
+        can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
+        size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature, _ = self.args.python_argdefs()
-        # TODO Is it ok to just use sub_kernel[0].index_dtype?
-        index_dtype = self.sub_kernels[0].index_dtype
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "signature": signature_to_meta(signature, size_dtype=size_dtype),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()
             ),
@@ -739,12 +765,14 @@ class ComboKernel(Kernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline("from triton.testing import do_bench")
+            result.writeline(
+                "from torch._inductor.runtime.benchmarking import benchmarker"
+            )
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")

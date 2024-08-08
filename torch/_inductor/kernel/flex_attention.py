@@ -113,6 +113,7 @@ def build_subgraph_buffer(
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
 
+# Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
 def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK):
@@ -126,10 +127,7 @@ def get_offset_for_next_block(loop_iter, col_indices, total_blocks, SPARSE_BLOCK
     return offset
 """
 
-flex_attention_template = TritonTemplate(
-    name="flex_attention",
-    grid=flex_attention_grid,
-    source=r"""
+compute_flex_attention = r"""
 {{def_kernel("Q", "K", "V", "LSE", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
     # Sub notation for this kernel:
     #
@@ -248,6 +246,7 @@ flex_attention_template = TritonTemplate(
         acc, l_i, m_i,
         off_z, off_h, offs_m, offs_n,
         kv_indices, kv_num_blocks,
+        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
         {{gen_argdefs()}},
         IS_FULL_BLOCKS=False
@@ -285,6 +284,7 @@ flex_attention_template = TritonTemplate(
             acc, l_i, m_i,
             off_z, off_h, offs_m, offs_n,
             kv_indices, kv_num_blocks,
+            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             {{gen_argdefs()}},
             IS_FULL_BLOCKS=True
@@ -311,8 +311,10 @@ flex_attention_template = TritonTemplate(
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
+ """
 
 
+compute_forward_block = r"""
 @triton.jit
 def forward_inner(
     q, K_block_ptr, V_block_ptr,
@@ -322,6 +324,8 @@ def forward_inner(
     off_z, off_h, offs_m, offs_n,
     # blocksparse data
     kv_indices, kv_num_blocks,
+    # start kv and end kv block
+    block_n_start, block_n_end,
     MATMUL_PRECISION,
     {{gen_argdefs()}},
     IS_FULL_BLOCKS,
@@ -339,19 +343,17 @@ def forward_inner(
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator
-    lo = 0
-    hi = kv_num_blocks * SPARSE_KV_MULTIPLE
-
-    for start_n in range(0, hi):
+    for start_n in range(block_n_start, block_n_end):
         # -- load k --
         k = tl.load(K_block_ptr)
         # -- compute qk ---
-        qk = tl.dot(q, k)
+        qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
         if not PRESCALE_QK:
             qk *= SM_SCALE
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = offs_n[None, :]
+        # TODO: Add load mask in modification when M/N Boundary is not safe
         {{ modification(
             subgraph_number=0,
             output_name="post_mod_scores",
@@ -413,8 +415,14 @@ def forward_inner(
         offs_n = offs_n + offset
 
     return acc, l_i, m_i
- """
-    + compute_next_offset_func,
+
+"""
+
+
+flex_attention_template = TritonTemplate(
+    name="flex_attention",
+    grid=flex_attention_grid,
+    source=compute_flex_attention + compute_forward_block + compute_next_offset_func,
 )
 
 
@@ -541,6 +549,7 @@ def flex_attention(
     subgraph,
     block_mask,
     scale,
+    kernel_options,
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
@@ -570,17 +579,6 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(
-            subgraph_buffer,
-            query,
-            key,
-            value,
-            subgraph,
-            block_mask,
-            scale,
-            *score_mod_other_buffers,
-        )
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -593,6 +591,19 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
     for buf in [
         query,
         key,
@@ -623,13 +634,17 @@ def flex_attention(
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
+    kernel_options = dict(kernel_options)
+    kernel_options["SM_SCALE"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
-    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
     if full_kv_num_blocks is None:
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
+    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
@@ -652,6 +667,13 @@ def flex_attention(
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
             continue
+
+        # Performance tuning
+        kernel_options["BLOCK_M"] = BLOCK_M
+        kernel_options["BLOCK_N"] = BLOCK_N
+        # Blocksparse options
+        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
+        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -676,19 +698,7 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            OUTPUT_LOGSUMEXP=True,
-            SM_SCALE=scale,
-            BLOCK_DMODEL=query.get_size()[-1],
-            # Performance tuning
-            BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
-            # Blocksparse options
-            SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
-            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-            # For now, we always assume the "sound" option
-            ROWS_GUARANTEED_SAFE=False,
-            PRESCALE_QK=False,
-            HAS_FULL_BLOCKS=has_full_blocks,
+            **kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -705,8 +715,10 @@ def flex_attention(
         + list(mask_mod_other_buffers)
     )
     input_gen_fns = {
-        4: create_num_blocks_fake_generator(full_kv_indices),
+        4: create_num_blocks_fake_generator(kv_indices),
         5: create_indices_fake,
+        6: create_num_blocks_fake_generator(full_kv_indices),
+        7: create_indices_fake,
     }
     return (
         autotune_select_algorithm(
@@ -1196,6 +1208,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_graph,
         block_mask,
         scale,
+        kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
@@ -1290,13 +1303,16 @@ def flex_attention_backward(*args, **kwargs):
         value.get_size(), value.get_stride(), dtype=dtype, device=device
     )
 
+    kernel_options = dict(kernel_options)
+    kernel_options["SM_SCALE"] = scale
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
-    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
     if full_kv_num_blocks is None:
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
+    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1321,6 +1337,15 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
             continue
+
+        # Performance tuning
+        kernel_options["BLOCK_M1"] = BLOCK1
+        kernel_options["BLOCK_N1"] = BLOCK2
+        kernel_options["BLOCK_M2"] = BLOCK2
+        kernel_options["BLOCK_N2"] = BLOCK1
+        # Blocksparse options
+        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
+        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1348,19 +1373,7 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
-            SM_SCALE=scale,
-            BLOCK_DMODEL=query.get_size()[-1],
-            # Performance tuning
-            BLOCK_M1=BLOCK1,
-            BLOCK_N1=BLOCK2,
-            BLOCK_M2=BLOCK2,
-            BLOCK_N2=BLOCK1,
-            # Blocksparse options
-            SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
-            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-            # For now, we always assume the "sound" option
-            PRESCALE_QK=False,
-            HAS_FULL_BLOCKS=has_full_blocks,
+            **kernel_options,
         )
     inputs_for_autotuning = (
         [

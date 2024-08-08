@@ -5606,137 +5606,164 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
-    r"""
-scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
+    r"""scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+        is_causal=False, scale=None, enable_gqa=False) -> Tensor:
 
-Computes scaled dot product attention on query, key and value tensors, using
-an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified. The optional scale argument can only be specified as a keyword argument.
-
-.. code-block:: python
-
-    # Efficient implementation equivalent to the following:
-    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
-        L, S = query.size(-2), key.size(-2)
-        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
-        if is_causal:
-            assert attn_mask is None
-            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
-            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            attn_bias.to(query.dtype)
-
-        if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
-            else:
-                attn_bias = attn_mask + attn_bias
-        attn_weight = query @ key.transpose(-2, -1) * scale_factor
-        attn_weight += attn_bias
-        attn_weight = torch.softmax(attn_weight, dim=-1)
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
-        return attn_weight @ value
-
-.. warning:: This function is beta and subject to change.
-
-.. warning::
-
-    This function always applies dropout according to the specified ``dropout_p`` argument.
-    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
-    that makes the function call is not in training mode.
-
-    For example:
+    Computes scaled dot product attention on query, key and value tensors, using an optional attention mask if passed,
+    and applying dropout if a probability greater than 0.0 is specified. The optional scale argument can only be
+    specified as a keyword argument.
 
     .. code-block:: python
 
-        class MyModel(nn.Module):
-            def __init__(self, p=0.5):
-                super().__init__()
-                self.p = p
+        # Efficient implementation equivalent to the following:
+        def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+                is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+            L, S = query.size(-2), key.size(-2)
+            scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+            attn_bias = torch.zeros(L, S, dtype=query.dtype)
+            if is_causal:
+                assert attn_mask is None
+                temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+                attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+                attn_bias.to(query.dtype)
 
-            def forward(self, ...):
-                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
+            if attn_mask is not None:
+                if attn_mask.dtype == torch.bool:
+                    attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                else:
+                    attn_bias += attn_mask
 
-Note:
+            if enable_gqa:
+                key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+                value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
 
-    There are currently three supported implementations of scaled dot product attention:
+            attn_weight = query @ key.transpose(-2, -1) * scale_factor
+            attn_weight += attn_bias
+            attn_weight = torch.softmax(attn_weight, dim=-1)
+            attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+            return attn_weight @ value
 
-        - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
-        - `Memory-Efficient Attention`_
-        - A PyTorch implementation defined in C++ matching the above formulation
+    .. warning::
+        This function is beta and subject to change.
 
-    The function may call optimized kernels for improved performance when using the CUDA backend.
-    For all other backends, the PyTorch implementation will be used.
+    .. warning::
+        This function always applies dropout according to the specified ``dropout_p`` argument.
+        To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+        that makes the function call is not in training mode.
 
-    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
-    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
-    is used, the following functions are provided for enabling and disabling implementations.
-    The context manager is the preferred mechanism:
+        For example:
 
-        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
-        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
-        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
-        - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
+        .. code-block:: python
 
-    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
-    disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
-    In the event that a fused implementation is not available, a warning will be raised with the
-    reasons why the fused implementation cannot run.
+            class MyModel(nn.Module):
+                def __init__(self, p=0.5):
+                    super().__init__()
+                    self.p = p
 
-    Due to the nature of fusing floating point operations, the output of this function may be different
-    depending on what backend kernel is chosen.
-    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+                def forward(self, ...):
+                    return F.scaled_dot_product_attention(...,
+                        dropout_p=(self.p if self.training else 0.0))
+
+    Note:
+
+        There are currently three supported implementations of scaled dot product attention:
+
+            - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
+            - `Memory-Efficient Attention`_
+            - A PyTorch implementation defined in C++ matching the above formulation
+
+        The function may call optimized kernels for improved performance when using the CUDA backend.
+        For all other backends, the PyTorch implementation will be used.
+
+        All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+        most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+        is used, the following functions are provided for enabling and disabling implementations.
+        The context manager is the preferred mechanism:
+
+            - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
+            - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
+            - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
+            - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
+
+        Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+        disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
+        In the event that a fused implementation is not available, a warning will be raised with the
+        reasons why the fused implementation cannot run.
+
+        Due to the nature of fusing floating point operations, the output of this function may be different
+        depending on what backend kernel is chosen.
+        The c++ implementation supports torch.float64 and can be used when higher precision is required.
+        For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-Note:
-    {cudnn_reproducibility_note}
-""".format(
+        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
+        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Constraints for GQA:
+
+            - number_of_heads_query % number_of_heads_key_value == 0 and,
+            - number_of_heads_key == number_of_heads_value
+
+    Note:
+
+        {cudnn_reproducibility_note}
+    """.format(
         **reproducibility_notes
     )
     + r"""
-Args:
-    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
-    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
-    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
-    attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-        which is :math:`(N,..., L, S)`. Two types of masks are supported.
-        A boolean mask where a value of True indicates that the element *should* take part in attention.
-        A float mask of the same type as query, key, value that is added to the attention score.
-    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
-        square matrix. The attention masking has the form of the upper left causal bias due to the alignment
-        (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
-        An error is thrown if both attn_mask and is_causal are set.
-    scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
-        to :math:`\frac{1}{\sqrt{E}}`.
+    Args:
+        query (Tensor): Query tensor; shape :math:`(N, ..., Hq, L, E)`.
+        key (Tensor): Key tensor; shape :math:`(N, ..., H, S, E)`.
+        value (Tensor): Value tensor; shape :math:`(N, ..., H, S, Ev)`.
+        attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
+            which is :math:`(N,..., L, S)`. Two types of masks are supported.
+            A boolean mask where a value of True indicates that the element *should* take part in attention.
+            A float mask of the same type as query, key, value that is added to the attention score.
+        dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+        is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
+            square matrix. The attention masking has the form of the upper left causal bias due to the alignment
+            (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
+            An error is thrown if both attn_mask and is_causal are set.
+        scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
+            to :math:`\frac{1}{\sqrt{E}}`.
+        enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
+
+    Returns:
+        output (Tensor): Attention output; shape :math:`(N, ..., Hq, L, Ev)`.
+
+    Shape legend:
+        - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+        - :math:`S: \text{Source sequence length}`
+        - :math:`L: \text{Target sequence length}`
+        - :math:`E: \text{Embedding dimension of the query and key}`
+        - :math:`Ev: \text{Embedding dimension of the value}`
+        - :math:`Hq: \text{Number of heads of query}`
+        - :math:`H: \text{Number of heads of key and value}`
+
+    Examples:
+
+        >>> # Optionally use the context manager to ensure one of the fused kernels is run
+        >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+        >>>     F.scaled_dot_product_attention(query,key,value)
 
 
-Returns:
-    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
-
-Shape legend:
-    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
-    - :math:`S: \text{Source sequence length}`
-    - :math:`L: \text{Target sequence length}`
-    - :math:`E: \text{Embedding dimension of the query and key}`
-    - :math:`Ev: \text{Embedding dimension of the value}`
-
-Examples:
-
-    >>> # Optionally use the context manager to ensure one of the fused kernels is run
-    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
-    >>>     F.scaled_dot_product_attention(query,key,value)
+        >>> # Sample for GQA for llama3
+        >>> query = torch.rand(32, 32, 128, 64, dtype=torch.float16, device="cuda")
+        >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        >>> with sdpa_kernel(backends=[SDPBackend.MATH]):
+        >>>     F.scaled_dot_product_attention(query,key,value,enable_gqa=True)
 
 
-.. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
-    https://arxiv.org/abs/2307.08691
-.. _Memory-Efficient Attention:
-    https://github.com/facebookresearch/xformers
-
-""",
+    .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
+        https://arxiv.org/abs/2307.08691
+    .. _Memory-Efficient Attention:
+        https://github.com/facebookresearch/xformers
+    .. _Grouped-Query Attention:
+        https://arxiv.org/pdf/2305.13245
+    """,
 )
 
 

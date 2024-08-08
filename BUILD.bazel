@@ -413,7 +413,6 @@ cc_library(
         "@cuda//:nvrtc",
         "@cudnn",
         "@cudnn_frontend",
-        "@cuda//:cufile",
     ],
     alwayslink = True,
 )

@@ -1,7 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, Tensor
@@ -9,6 +9,7 @@ from torch._prims_common import corresponding_real_dtype
 from torch.masked import _docs
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor
+
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -22,16 +23,13 @@ else:
 
 __all__: List[str] = []
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
 # All masked reduction/normalization operations have the same
 # signatures. Here we introduce docstring templates that are applied
 # to docstrings of reduction/normalization functions via
 # _apply_docstring_templates decorator.
 
 
-def _apply_docstring_templates(func: Callable[_P, _T]) -> Callable[_P, _T]:
+def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
     """

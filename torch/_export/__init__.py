@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import dataclasses
@@ -115,6 +116,9 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _combine_args
 
     capture_pre_autograd_graph_warning()
+
+    if sys.platform == "win32":
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 

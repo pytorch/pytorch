@@ -418,12 +418,8 @@ class TestSortAndSelect(TestCase):
 
         shapes = (
             [],
-            [
-                0,
-            ],
-            [
-                20,
-            ],
+            [0],
+            [20],
             [1, 20],
             [30, 30],
             [10, 20, 30],

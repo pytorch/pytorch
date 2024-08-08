@@ -9,6 +9,7 @@ import dis
 import enum
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import linecache
@@ -26,7 +27,7 @@ import typing
 import warnings
 import weakref
 from contextlib import contextmanager
-from functools import lru_cache, wraps
+from functools import lru_cache
 from types import MethodWrapperType
 from typing import (
     Any,
@@ -50,12 +51,23 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, ParamSpec, TypeGuard
+from typing_extensions import Literal, TypeGuard
 
-from ..utils.hooks import RemovableHandle
+import torch
+import torch._functorch.config
+import torch._inductor.config as inductor_config
+import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
+from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import Source, TracingContext
+from torch._subclasses.meta_utils import is_sparse_compressed
+from torch._utils_internal import log_compilation_event
+from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._triton import has_triton, has_triton_package
+from torch.utils.hooks import RemovableHandle
 
-T = TypeVar("T")
-_P = ParamSpec("_P")
 
 try:
     import numpy as np
@@ -67,6 +79,7 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401n
     from torch._logging import LazyString
+
     from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
@@ -92,23 +105,8 @@ try:
 except ImportError:
     pass
 
-import importlib
 
-import torch
-import torch._functorch.config
-import torch._inductor.config as inductor_config
-import torch.fx.experimental.symbolic_shapes
-import torch.utils._pytree as pytree
-from torch import fx
-from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import TracingContext
-from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_compilation_event
-
-from torch.fx._utils import _format_graph_code, lazy_format_graph_code
-from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._triton import has_triton, has_triton_package
-
+T = TypeVar("T")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 
@@ -212,17 +210,23 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
     frame_phase_timing[key][phase_name] += time_spent
 
 
-# dynamo_timed API works as a function decorator
+# dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
 # For example:
 #
-#  @dynamo_timed
-#  def _foo(...):
+#   def _foo(...):
+#       with dynamo_timed("_foo"):
+#           ...
 #
 # Would show up as an entry in our timing dict:
-# OrderedDict([('bar.<locals>._foo', [0.083690, 0.23949, 3.1425e-05])])
+# OrderedDict([('_foo', [0.083690, 0.23949, 3.1425e-05])])
 # This is extremely useful for granular debugging.
+#
+# Although it is tempting to use dynamo_timed as a decorator, please do not.
+# In its decorator form it makes cProfile traces less useful as dynamo_timed
+# suddenly becomes a bottleneck for lots of function calls (as only one parent
+# pointer is recorded).
 #
 # For a higher-level mode, pass a phase_name into dynamo_timed
 # phase_names record an extra record into a separate compilation timing structure,
@@ -233,106 +237,76 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
 # The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
-@overload
+@contextmanager
 def dynamo_timed(
-    original_function: Callable[_P, T],
-    phase_name: Optional[str] = None,
-    fwd_only: bool = True,
-) -> Callable[_P, T]:
-    ...
-
-
-@overload
-def dynamo_timed(
-    original_function: Literal[None] = None,
-    phase_name: Optional[str] = None,
-    fwd_only: bool = True,
-) -> Callable[[Callable[_P, T]], Callable[_P, T]]:
-    ...
-
-
-def dynamo_timed(
-    original_function: Optional[Callable[_P, T]] = None,
+    key: str,
     phase_name: Optional[str] = None,
     fwd_only: bool = True,
 ):
-    def dynamo_timed_inner(func: Callable[_P, T]) -> Callable[_P, T]:
-        @wraps(func)
-        def time_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> T:
-            key = func.__qualname__
-            if key not in compilation_time_metrics:
-                compilation_time_metrics[key] = []
+    if key not in compilation_time_metrics:
+        compilation_time_metrics[key] = []
 
-            fail_type: Optional[str] = None
-            fail_reason: Optional[str] = None
-            time_spent = float("-inf")
-            try:
-                with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-                    t0 = time.time()
-                    r = func(*args, **kwargs)
-                    time_spent = time.time() - t0
-                compilation_time_metrics[key].append(time_spent)
-            except Exception as e:
-                fail_type = str(type(e))
-                fail_reason = str(e)
-                raise
-            finally:
-                # Only record backward compilation metrics if phase_name is not None!
-                if phase_name:
-                    frame_key = str(curr_frame)
-                    # fwd only compilation stages: entire_frame_compile, backend_compile.
-                    # use frame_key as time aggregation key.
-                    if fwd_only and fail_type is None:
+    fail_type: Optional[str] = None
+    fail_reason: Optional[str] = None
+    time_spent = float("-inf")
+    try:
+        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+            t0 = time.time()
+            yield
+            time_spent = time.time() - t0
+        compilation_time_metrics[key].append(time_spent)
+    except Exception as e:
+        fail_type = str(type(e))
+        fail_reason = str(e)
+        raise
+    finally:
+        # Only record backward compilation metrics if phase_name is not None!
+        if phase_name:
+            frame_key = str(curr_frame)
+            # fwd only compilation stages: entire_frame_compile, backend_compile.
+            # use frame_key as time aggregation key.
+            if fwd_only and fail_type is None:
+                _add_time_spent(frame_key, phase_name, time_spent)
+            else:
+                # fwd + bwd compilation stages: inductor_compile, code_gen.
+                # use frame_key as time aggregation key for fwd graphs;
+                # use compile_id as time aggregation key for bwd graphs.
+                if torch._guards.TracingContext.try_get() is not None:
+                    aot_graph_name = str(
+                        torch._guards.TracingContext.get().aot_graph_name
+                    )
+                    if (
+                        "forward" in aot_graph_name or "inference" in aot_graph_name
+                    ) and fail_type is None:
                         _add_time_spent(frame_key, phase_name, time_spent)
-                    else:
-                        # fwd + bwd compilation stages: inductor_compile, code_gen.
-                        # use frame_key as time aggregation key for fwd graphs;
-                        # use compile_id as time aggregation key for bwd graphs.
-                        if torch._guards.TracingContext.try_get() is not None:
-                            aot_graph_name = str(
-                                torch._guards.TracingContext.get().aot_graph_name
-                            )
-                            if (
-                                "forward" in aot_graph_name
-                                or "inference" in aot_graph_name
-                            ) and fail_type is None:
-                                _add_time_spent(frame_key, phase_name, time_spent)
-                            elif "backward" in aot_graph_name:
-                                compile_id = str(
-                                    torch._guards.CompileContext.current_compile_id()
+                    elif "backward" in aot_graph_name:
+                        compile_id = str(
+                            torch._guards.CompileContext.current_compile_id()
+                        )
+                        if fail_type is None:
+                            _add_time_spent(compile_id, phase_name, time_spent)
+
+                        # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                        # one record for one bwd graph.
+                        if phase_name == "inductor_compile":
+                            if fail_type is None:
+                                inductor_compile_time = frame_phase_timing[
+                                    compile_id
+                                ].get("inductor_compile", None)
+                                code_gen_time = frame_phase_timing[compile_id].get(
+                                    "code_gen", None
                                 )
-                                if fail_type is None:
-                                    _add_time_spent(compile_id, phase_name, time_spent)
-
-                                # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
-                                # one record for one bwd graph.
-                                if phase_name == "inductor_compile":
-                                    if fail_type is None:
-                                        inductor_compile_time = frame_phase_timing[
-                                            compile_id
-                                        ].get("inductor_compile", None)
-                                        code_gen_time = frame_phase_timing[
-                                            compile_id
-                                        ].get("code_gen", None)
-                                    else:
-                                        inductor_compile_time = None
-                                        code_gen_time = None
-                                    metrics = BwdCompilationMetrics(
-                                        compile_id,
-                                        inductor_compile_time,
-                                        code_gen_time,
-                                        fail_type,
-                                        fail_reason,
-                                    )
-                                    record_compilation_metrics(metrics)
-
-            return r
-
-        return time_wrapper
-
-    if original_function:
-        return dynamo_timed_inner(original_function)
-    return dynamo_timed_inner
+                            else:
+                                inductor_compile_time = None
+                                code_gen_time = None
+                            metrics = BwdCompilationMetrics(
+                                compile_id,
+                                inductor_compile_time,
+                                code_gen_time,
+                                fail_type,
+                                fail_reason,
+                            )
+                            record_compilation_metrics(metrics)
 
 
 @overload
@@ -351,7 +325,7 @@ def compile_times(repr="str", aggregate: bool = False):
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
-    Accumulates information from functions tagged with `@dynamo_timed`.
+    Accumulates information from functions tagged with `dynamo_timed`.
 
     repr='str' returns a printable string for user interaction, and 'csv'
     returns headers, rows which can be logged for output
@@ -768,6 +742,7 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: bool
+    possibly_missed_reinplacing_opportunities: Optional[int]
 
 
 @dataclasses.dataclass
@@ -1413,12 +1388,8 @@ def same(
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
-    if isinstance(
-        ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
-    ):
-        assert isinstance(
-            res, (list, tuple, collections.deque)
-        ), f"type mismatch {type(ref)} {type(res)}"
+    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
+        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -1850,6 +1821,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         by further wrapping them as this graph's fakes.
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
+
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -2043,7 +2015,7 @@ def get_real_value(node, tracer):
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -2156,7 +2128,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    guard_source: "torch._guards.GuardSource",
+    tensor_source: Source,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2169,9 +2141,20 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if guard_source.is_nn_module() and config.force_nn_module_property_static_shapes:
+    from .source import is_from_unspecialized_param_buffer_source
+
+    if (
+        tensor_source.guard_source().is_specialized_nn_module()
+        # Marking the tensor attributes of nn modules static to keep the behavior same as before
+        # inline_inbuilt_nn_module flag was introduced.
+        or tensor_source.guard_source().is_unspecialized_nn_module()
+    ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
+
+    if (
+        type(tensor) is torch.nn.Parameter
+        or is_from_unspecialized_param_buffer_source(tensor_source)
+    ) and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
@@ -2403,6 +2386,7 @@ def is_utils_checkpoint(obj):
 
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
+
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary situation where we have two versions of
@@ -2931,3 +2915,27 @@ def verify_guard_fn_signature(value):
         raise InternalTorchDynamoError(
             "Tensor subclass method __metadata_guard__ must be a classmethod"
         )
+
+
+def does_not_override_dict_iter_methods(user_cls):
+    return (
+        user_cls.items in (dict.items, collections.OrderedDict.items)
+        and user_cls.values in (dict.values, collections.OrderedDict.values)
+        and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
+        and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
+    )
+
+
+# Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
+# To avoid ref cycles, it's important that no tensors are present here, so leave those out.
+def _extract_tensor_dict(t):
+    KEYS_TO_COPY = [
+        "_dynamo_static_input_type",
+        "tag",
+    ]
+
+    tensor_dict = {
+        key: copy.copy(t.__dict__[key]) for key in KEYS_TO_COPY if key in t.__dict__
+    }
+
+    return tensor_dict
