@@ -769,7 +769,7 @@ else()
     message(WARNING
       "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
     caffe2_update_option(USE_FAKELOWP OFF)
-  endif()  
+  endif()
 endif()
 
 if(USE_OPENCL)
