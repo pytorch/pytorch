@@ -189,7 +189,7 @@ def aot_dispatch_base_graph(
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
-        unlift_tokens(fw_module, fw_metadata)
+        unlift_tokens(fw_module, fw_metadata, aot_config)
         saved_updated_flat_args_subclasses_desugared = (
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )
@@ -308,8 +308,10 @@ def aot_dispatch_autograd_graph(
                     # Naming with tangents as partitioner counts all inputs without "tangents" as forward inputs
                     bw_input_token = fx_g.graph.placeholder("tangents_bw_token")
                     node_meta = bw_input_token.meta
-                    fake_mode = placeholders[0].meta["val"].fake_mode
-                    node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
+                    # fake_mode = placeholders[0].meta["val"].fake_mode
+                    # node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
+                    node_meta["val"] = torch.tensor([])
+                    node_meta["tensor_meta"] = torch.tensor([])
 
                     old_arg = node.args[0]
 
