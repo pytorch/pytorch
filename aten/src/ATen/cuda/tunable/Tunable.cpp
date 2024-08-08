@@ -528,7 +528,7 @@ void TuningContext::SetFilename(const std::string& filename, bool insert_device_
     }
     else {
       // no %d present, so append device ordinal before final '.'
-      found = filename_.rfind(".");
+      found = filename_.rfind('.');
       if (found != std::string::npos) {
         filename_.insert(found, device);
       }
