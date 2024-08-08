@@ -4571,7 +4571,8 @@ def forward(self, b_pred, b_t, x, y):
 def forward(self, b_t, x, y):
     submod_3 = self.submod_1
     add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
-    return (add_1,)""",
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)""",
         )
 
         self.assertExpectedInline(
@@ -4581,7 +4582,7 @@ def forward(self, x, b_t, y):
     sub = torch.ops.aten.sub.Tensor(x, 1);  x = None
     add = torch.ops.aten.add.Tensor(sub, b_t);  sub = b_t = None
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
-    return add_1""",
+    return (add_1,)""",
         )
 
     def test_predispatch_grad_wrappers(self):
@@ -5127,7 +5128,7 @@ def forward(self, x):
     lt_1 = item < 6
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
-    return foo_unbacked""",
+    return (foo_unbacked,)""",
         )
         ep_aot = ep_pre.run_decompositions()
         self.assertExpectedInline(
