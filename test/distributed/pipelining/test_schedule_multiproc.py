@@ -21,6 +21,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
+from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -348,7 +349,8 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
-    def test_grad_with_manual_interleaved(self, ScheduleClass):
+    @parametrize("use_new_runtime", [False, True])
+    def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
@@ -395,6 +397,53 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Attach to a schedule
         schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+        if use_new_runtime:
+            old_schedule = schedule
+            tmp_schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            tmp_schedule._load_actions(old_schedule.pipeline_order)
+            # test that csv round-trip works for compute_comms schedule
+            schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            with tempfile.NamedTemporaryFile() as f:
+                tmp_schedule._dump_csv(f.name)
+                f.seek(0)
+                schedule._load_csv(f.name, format="compute_comms")
+            one_more_schedule = _PipelineScheduleRuntime(
+                stages,
+                chunks,
+                loss_fn=loss_fn,
+                stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
+            )
+            one_more_schedule._load_actions(
+                schedule.pipeline_order_with_comms, format="compute_comms"
+            )
+            self.assertEqual(
+                len(schedule.pipeline_order_with_comms),
+                len(
+                    one_more_schedule.pipeline_order_with_comms,
+                ),
+            )
+            for rank in schedule.pipeline_order_with_comms:
+                self.assertEqual(
+                    len(schedule.pipeline_order_with_comms[rank]),
+                    len(
+                        one_more_schedule.pipeline_order_with_comms[rank],
+                    ),
+                )
+                for a, b in zip(
+                    schedule.pipeline_order_with_comms[rank],
+                    one_more_schedule.pipeline_order_with_comms[rank],
+                ):
+                    self.assertEqual(a, b)
 
         # Run
         for _ in range(2):
