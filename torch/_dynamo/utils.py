@@ -742,6 +742,7 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: bool
+    possibly_missed_reinplacing_opportunities: Optional[int]
 
 
 @dataclasses.dataclass
@@ -1387,12 +1388,8 @@ def same(
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
-    if isinstance(
-        ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
-    ):
-        assert isinstance(
-            res, (list, tuple, collections.deque)
-        ), f"type mismatch {type(ref)} {type(res)}"
+    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
+        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2148,7 +2145,9 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        # Marking the tensor attributes of nn modules static to keep the behavior same as before
+        # inline_inbuilt_nn_module flag was introduced.
+        or tensor_source.guard_source().is_unspecialized_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2915,3 +2914,27 @@ def verify_guard_fn_signature(value):
         raise InternalTorchDynamoError(
             "Tensor subclass method __metadata_guard__ must be a classmethod"
         )
+
+
+def does_not_override_dict_iter_methods(user_cls):
+    return (
+        user_cls.items in (dict.items, collections.OrderedDict.items)
+        and user_cls.values in (dict.values, collections.OrderedDict.values)
+        and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
+        and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
+    )
+
+
+# Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
+# To avoid ref cycles, it's important that no tensors are present here, so leave those out.
+def _extract_tensor_dict(t):
+    KEYS_TO_COPY = [
+        "_dynamo_static_input_type",
+        "tag",
+    ]
+
+    tensor_dict = {
+        key: copy.copy(t.__dict__[key]) for key in KEYS_TO_COPY if key in t.__dict__
+    }
+
+    return tensor_dict

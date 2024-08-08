@@ -446,7 +446,7 @@ custom_scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_bias,
+    const std::optional<at::Tensor> & attn_bias,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,

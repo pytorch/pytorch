@@ -417,7 +417,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                     )
                 elif compiles == 1:
                     self.assertFalse(
-                        "_dynamo_statc_input_type" in input_node.meta["tensor_dict"]
+                        "_dynamo_static_input_type" in input_node.meta["tensor_dict"]
                     )
                 else:
                     raise RuntimeError(f"Unexpected number of compiles: {compiles}")

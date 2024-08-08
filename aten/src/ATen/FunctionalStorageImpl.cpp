@@ -2,6 +2,7 @@
 
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 #include <vector>
@@ -53,7 +54,7 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
   }
-  for(int i = update.view_metas.size()-1; i >= 0; --i) {
+  for(int64_t i = update.view_metas.size()-1; i >= 0; --i) {
     int64_t out_idx = update.view_metas[i].out_index;
     // Each view inverse is implemented in ViewInverses.cpp.
     t = update.view_metas[i].reverse_fn(tmp_values[i], t, out_idx);
@@ -71,7 +72,7 @@ static c10::SymInt get_nbytes(const Tensor& value) {
   // for these tensors (which is wrong), but we don't give them any space.
   // A more proper fix would be to have a SparseFunctionalTensorWrapper that
   // models sparse correctly.
-  if (value.is_sparse()) {
+  if (value.is_sparse() || at::sparse_csr::is_sparse_compressed(value)) {
     return 0;
   }
   if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
