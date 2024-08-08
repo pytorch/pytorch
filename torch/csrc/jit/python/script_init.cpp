@@ -1268,7 +1268,6 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
             int i = 0;
-            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
@@ -1582,7 +1581,6 @@ void initJitScriptBindings(PyObject* module) {
             pp.printMethod(self.function());
             std::map<std::string, at::IValue> consts;
             int i = 0;
-            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
