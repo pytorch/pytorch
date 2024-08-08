@@ -118,9 +118,19 @@ nn.Parameter in order to see the result of .set_.
 def set__functionalize(tensor, data):
     torch._sync(tensor)
     torch._sync(data)
+    # AOTDispatcher needs to know if any inputs had their storages mutated.
+    # (Why? It sometimes detaches inputs before sending them into the graph,
+    #  when it sees that they do not need to have any gradients computed)
+    torch._functionalize_set_storage_changed(tensor)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
-    tensor_inner.set_(data_inner)  # type: ignore[call-overload]
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.set_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
 
 
 class ShardedState(Enum):
@@ -251,8 +261,8 @@ class FSDPParam:
             ):
                 raise NotImplementedError("Using TP with HSDP is not supported")
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            dp_global_mesh = _mesh_resources.get_parent_mesh(dp_mesh)
-            tp_global_mesh = _mesh_resources.get_parent_mesh(tp_mesh)
+            dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
+            tp_global_mesh = _mesh_resources.get_root_mesh(tp_mesh)
             if dp_global_mesh != tp_global_mesh or (
                 dp_global_mesh is None or tp_global_mesh is None
             ):
@@ -264,20 +274,17 @@ class FSDPParam:
             name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
-
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
-
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             self._spmd_placements: Tuple[Placement, ...] = (
                 Shard(0),
                 self._tp_spec.placements[0],
             )
-
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -444,8 +451,10 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
-            with torch.no_grad():
-                torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                self._unsharded_param
+            ):
+                torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
@@ -687,6 +696,9 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+
+    def __repr__(self):
+        return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

@@ -6,7 +6,6 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 

@@ -7,13 +7,10 @@ import torch
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.fx as fx
 from torch._dynamo.utils import counters
-
 from torch._inductor import config
 from torch._inductor.lowering import lowerings as L
 from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
-
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -111,7 +108,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
     # custom post grad pass
     class _CustomPass(PatternMatcherPass):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
 
         def __call__(self, g: torch.fx.graph.Graph):

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+
+# pyre-unsafe
 import argparse
 import io
 import os
@@ -297,12 +299,12 @@ if __name__ == "__main__":
     print("-------------------------------------------")
     print("                  Info                     ")
     print("-------------------------------------------")
-    print("")
+    print()
     print(f"* PyTorch version: {torch.__version__}")
     print(f"* CUDA version: {torch.version.cuda}")
-    print("")
+    print()
     print("------------ nvidia-smi topo -m -----------")
-    print("")
+    print()
     print(output[0])
     print("-------------------------------------------")
     print("PyTorch Distributed Benchmark (DDP and RPC)")

@@ -17,7 +17,7 @@ class ConstrainAsSizeExample(torch.nn.Module):
         return torch.zeros((a, 5))
 
 
-example_inputs = (torch.tensor(4),)
+example_args = (torch.tensor(4),)
 tags = {
     "torch.dynamic-value",
     "torch.escape-hatch",

@@ -231,7 +231,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
       if (p->type()->isSubtypeOf(*FloatType::get())) {
-        flat_inputs.emplace_back(p, c10::nullopt);
+        flat_inputs.emplace_back(p, std::nullopt);
       }
       if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
