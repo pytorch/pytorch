@@ -1097,13 +1097,13 @@ PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPModule_getAccelerator(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  auto device_type = at::getAccelerator(false).value();
+  auto device_type = at::getAccelerator(false);
   if (device_type.has_value()) {
     return THPUtils_packString(c10::DeviceTypeName(
         device_type.value(),
         /*lower_case=*/true));
   } else {
-    Py_RETURN_NONE
+    Py_RETURN_NONE;
   }
   END_HANDLE_TH_ERRORS
 }
