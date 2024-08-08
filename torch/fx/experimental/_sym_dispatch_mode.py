@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import List, Optional, Type
 
 
@@ -58,3 +59,14 @@ def handle_sym_dispatch(func, args, kwargs):
 
 def sym_function_mode():
     return SYM_FUNCTION_MODE
+
+
+@contextlib.contextmanager
+def disable_sym_dispatch():
+    global SYM_FUNCTION_MODE
+    old = SYM_FUNCTION_MODE
+    SYM_FUNCTION_MODE = None
+    try:
+        yield
+    finally:
+        SYM_FUNCTION_MODE = old
