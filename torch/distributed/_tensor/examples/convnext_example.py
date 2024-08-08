@@ -11,13 +11,12 @@ import time
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.distributed._tensor import (
+    DeviceMesh,
     distribute_module,
     distribute_tensor,
     init_device_mesh,
-    DeviceMesh,
     Replicate,
     Shard,
 )
