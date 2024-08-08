@@ -40,7 +40,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
@@ -116,6 +117,9 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _combine_args
 
     capture_pre_autograd_graph_warning()
+
+    if sys.platform == "win32":
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 

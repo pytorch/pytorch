@@ -769,7 +769,7 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 
 def _apply_kernel_options(query, key, value, kernel_options):
-    kernel_options = {} if kernel_options is None else kernel_options
+    kernel_options = {} if kernel_options is None else dict(kernel_options)
 
     if "ROWS_GUARANTEED_SAFE" not in kernel_options:
         kernel_options["ROWS_GUARANTEED_SAFE"] = False
