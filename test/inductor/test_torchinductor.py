@@ -12018,6 +12018,26 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("start_graph" in code)
             self.assertTrue("end_graph" in code)
 
+        def test_comment_graph_fragment(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(x):
+                x = x.sin()
+                x = x.relu()
+                return x
+
+            inp = torch.randn(4, 4, device=GPU_TYPE)
+            code = run_and_get_triton_code(fn, inp)
+            fn(inp)
+            self.assertTrue("Graph fragment" in code)
+            self.assertTrue(
+                "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                in code
+            )
+            self.assertTrue(
+                "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                in code
+            )
+
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 # split(tensor, sympy.Integer), split(tensor, sympy.Expr)

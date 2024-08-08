@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -806,7 +806,10 @@ def _are_we_tracing() -> bool:
         is not None
     ):
         return True
-    return get_proxy_mode() is not None
+    mode = get_innermost_proxy_mode()
+    if mode is None:
+        return False
+    return mode.tracer is not None
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
