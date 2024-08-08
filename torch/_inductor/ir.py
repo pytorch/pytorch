@@ -4736,7 +4736,10 @@ class ExternKernel(InputsKernel):
                 return x
             elif isinstance(x.get_layout(), FixedLayout) and (
                 (order and x.get_layout().is_stride_ordered(order))
-                or (actual_strides and x.get_layout().stride == actual_strides)
+                or (
+                    actual_strides
+                    and list(x.get_layout().stride) == list(actual_strides)
+                )
             ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):

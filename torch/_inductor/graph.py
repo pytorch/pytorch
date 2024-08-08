@@ -1339,12 +1339,13 @@ class GraphLowering(torch.fx.Interpreter):
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
-                    result = ir.ExternKernel.require_stride_order(
-                        result,
-                        stride_order if stride_order else None,
-                        allow_padding=allow_padding,
-                        actual_strides=strides,
-                    )
+                    if dense or not isinstance(result.data, ir.ReinterpretView):
+                        result = ir.ExternKernel.require_stride_order(
+                            result,
+                            stride_order if stride_order else None,
+                            allow_padding=allow_padding,
+                            actual_strides=strides,
+                        )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
