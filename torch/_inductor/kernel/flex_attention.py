@@ -345,46 +345,59 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
-    if not IS_DIVISIBLE and block_n_end * BLOCK_N > KV_LEN:
-        run_last = True
-        block_n_end = block_n_end - 1
+    # tl.device_print(block_n_end)
+    # tl.device_print(block_n_end * BLOCK_N > KV_LEN)
+    if not IS_DIVISIBLE:
+        # tl.device_print("AAAAAAAA")
+        # loop over k, v and update accumulator
+        for start_n in range(block_n_start, block_n_end):
+            acc, l_i, m_i = forward_loop_inner_mod(
+                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                # accumulated values
+                acc, l_i, m_i,
+                # Offsets
+                off_z, off_h, offs_m, offs_n,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}},
+                IS_FULL_BLOCKS,
+            )
+
+            # update pointers
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N
+            )
+
+            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+
+            offs_n = offs_n + offset
+
     else:
-        run_last = False
-        block_n_end = block_n_end
+        # tl.device_print("BBBBBBBB")
+        # loop over k, v and update accumulator
+        for start_n in range(block_n_start, block_n_end):
+            acc, l_i, m_i = forward_loop_inner(
+                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                # accumulated values
+                acc, l_i, m_i,
+                # Offsets
+                off_z, off_h, offs_m, offs_n,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}},
+                IS_FULL_BLOCKS,
+            )
 
-    # loop over k, v and update accumulator
-    for start_n in range(block_n_start, block_n_end):
-        acc, l_i, m_i = forward_loop_inner(
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
-            # accumulated values
-            acc, l_i, m_i,
-            # Offsets
-            off_z, off_h, offs_m, offs_n,
-            MATMUL_PRECISION, RCP_LN2,
-            {{gen_argdefs()}},
-            IS_FULL_BLOCKS,
-        )
+            # update pointers
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N
+            )
 
-        # update pointers
-        offset = get_offset_for_next_block(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
+            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
 
-        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
-        offs_n = offs_n + offset
-
-    if run_last:
-        # We need to do one more iteration for the last block
-        acc, l_i, m_i = forward_loop_inner_last(
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
-            # accumulated values
-            acc, l_i, m_i,
-            # Offsets
-            off_z, off_h, offs_m, offs_n,
-            MATMUL_PRECISION, RCP_LN2,
-            {{gen_argdefs()}},
-            IS_FULL_BLOCKS,
-        )
+            offs_n = offs_n + offset
 
     return acc, l_i, m_i
 
@@ -473,9 +486,9 @@ def forward_loop_inner(
 """
 
 
-foward_loop_inner_last_block = r"""
+foward_loop_inner_mod_block = r"""
 @triton.jit
-def forward_loop_inner_last(
+def forward_loop_inner_mod(
     q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
@@ -509,8 +522,7 @@ def forward_loop_inner_last(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if not IS_DIVISIBLE:
-        post_mod_scores = tl.where(offs_n[None, :] < KV_LEN, post_mod_scores, float("-inf"))
+    post_mod_scores = tl.where(offs_n[None, :] < KV_LEN, post_mod_scores, float("-inf"))
 
     if not IS_FULL_BLOCKS:
         {{ modification(
@@ -566,7 +578,7 @@ flex_attention_template = TritonTemplate(
     + compute_forward_block
     + compute_next_offset_func
     + foward_loop_inner_block
-    + foward_loop_inner_last_block,
+    + foward_loop_inner_mod_block,
 )
 
 
