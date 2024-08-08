@@ -24,19 +24,19 @@ void ThroughputBenchmark::addInput(py::args args, py::kwargs kwargs) {
 }
 
 py::object ThroughputBenchmark::runOnce(
-    py::args&& args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   CHECK(script_module_.initialized() ^ module_.initialized());
   if (script_module_.initialized()) {
     c10::IValue result;
     {
       pybind11::gil_scoped_release no_gil_guard;
-      result = script_module_.runOnce(std::move(args), kwargs);
+      result = script_module_.runOnce(args, kwargs);
     }
     return jit::toPyObject(std::move(result));
   } else {
     CHECK(module_.initialized());
-    return module_.runOnce(std::move(args), kwargs);
+    return module_.runOnce(args, kwargs);
   }
 }
 
@@ -92,8 +92,9 @@ void ModuleBenchmark::runOnce(ModuleInput&& input) const {
 }
 
 template <>
-ModuleOutput ModuleBenchmark::runOnce(py::args&& args, const py::kwargs& kwargs)
-    const {
+ModuleOutput ModuleBenchmark::runOnce(
+    const py::args& args,
+    const py::kwargs& kwargs) const {
   CHECK(initialized_);
   pybind11::gil_scoped_acquire gil_guard;
   return model_(*args, **kwargs);

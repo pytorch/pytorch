@@ -970,7 +970,9 @@ void initJitScriptBindings(PyObject* module) {
       object_class.def(
           mm_name,
           [mm_name](
-              const Object& self, py::args args, const py::kwargs& kwargs) {
+              const Object& self,
+              const py::args& args,
+              const py::kwargs& kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
               std::string msg = fmt::format(
@@ -979,8 +981,7 @@ void initJitScriptBindings(PyObject* module) {
                   self.type()->str());
               throw c10::NotImplementedError(msg);
             }
-            return invokeScriptMethodFromPython(
-                *method, args, kwargs);
+            return invokeScriptMethodFromPython(*method, args, kwargs);
           });
     }
   }
@@ -1267,7 +1268,6 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
             int i = 0;
-            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
@@ -1581,7 +1581,6 @@ void initJitScriptBindings(PyObject* module) {
             pp.printMethod(self.function());
             std::map<std::string, at::IValue> consts;
             int i = 0;
-            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
