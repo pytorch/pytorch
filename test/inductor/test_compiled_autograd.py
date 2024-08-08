@@ -1672,7 +1672,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_saved_int(self):
+    def test_autograd_cpp_node_saved_scalar(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1696,7 +1696,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     c10::SymInt y = ctx->saved_data["int"].toSymInt();
     c10::SymInt ys = ctx->saved_data["symint"].toSymInt();
 
-    torch::autograd::variable_list grad_inputs(4);
+    torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = x + y + ys;
     return grad_inputs;
   }
@@ -1706,13 +1706,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, int64_t y)
   return CustomOpAutogradFunction::apply(x, y);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_saved_scalar, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="test_autograd_cpp_node_saved_int",
+            name="test_autograd_cpp_node_saved_scalar",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -1721,7 +1721,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
         def fn():
             for y in [1, 2, 3, 1]:
                 x = torch.ones(10, 10, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
+                out = torch.ops.test_autograd_cpp_node_saved_scalar.custom_op_backed_by_autograd_fn(
                     x, y
                 )
                 loss = out.sum()
