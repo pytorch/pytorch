@@ -3062,11 +3062,12 @@ class Scheduler:
 
     def update_zero_dim_cpu_tensor(self) -> None:
         for node in self.nodes:
-            if node.get_device().type == "cuda":
+            if node.get_device() and is_gpu(node.get_device().type):
                 for read in node.read_writes.reads:
                     buffer = V.graph.name_to_buffer.get(read.name)
                     if (
                         buffer
+                        and buffer.get_device()
                         and buffer.get_device().type == "cpu"
                         and not isinstance(buffer.layout, MultiOutputLayout)
                         and buffer.get_size() == []
