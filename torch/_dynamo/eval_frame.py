@@ -44,6 +44,14 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+from torch._C._dynamo.eval_frame import (  # noqa: F401
+    reset_code,
+    set_guard_error_hook,
+    skip_code,
+    unsupported,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
@@ -72,14 +80,6 @@ if TYPE_CHECKING:
     from .types import CacheEntry, DynamoCallback
 
 
-# see discussion at https://github.com/pytorch/pytorch/issues/120699
-reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
-
-set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
-skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
-unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
-
-
 log = logging.getLogger(__name__)
 
 
@@ -100,7 +100,8 @@ unset = Unset.token
 def _maybe_set_eval_frame(callback: DynamoCallback):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
-    set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+    from torch._C._dynamo.eval_frame import set_eval_frame
+
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         log.warning(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
