@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
+#include <ATen/OpMathType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -372,7 +373,7 @@ inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-inline double calc_digamma(double x) {
+inline C10_HOST_DEVICE double calc_digamma(double x) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
@@ -430,7 +431,7 @@ inline double calc_digamma(double x) {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-inline float calc_digamma(float x) {
+inline C10_HOST_DEVICE float calc_digamma(float x) {
   // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
@@ -452,8 +453,8 @@ inline float calc_digamma(float x) {
     // the computation of pi * x is a source of error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
-    return calc_digamma(1 - x) - pi_over_tan_pi_x;
+    float pi_ovr_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
+    return calc_digamma(1 - x) - pi_ovr_tan_pi_x;
   }
 
   // Push x to be >= 10
@@ -502,7 +503,7 @@ inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
       zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
-// regularized lower incomplete gamma
+// regularized incomplete gamma
 // the regularized lower, upper incomplete gamma, as well as their
 // helper functions follow SciPy's implementation
 
@@ -518,23 +519,30 @@ inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
  * gammainc, Cephes's igam and igamc, and Boost's Lanczos approximations.
  * See NOTICE for the licenses.
  */
-template <typename scalar_t>
-scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
-    const scalar_t denom[], int64_t N) {
+template <typename opmath_t>
+C10_HOST_DEVICE opmath_t
+ratevl(
+  opmath_t x,
+  const opmath_t num[],
+  int64_t M,
+  const opmath_t denom[],
+  int64_t N
+) {
   // evaluating rational function, i.e., the ratio of two polynomials
   // the coefficients for numerator are given by `num` while coeffs for
-  // denumerator are given by `denom`
-
+  // denominator are given by `denom`
+  constexpr opmath_t ONE = opmath_t(1.0);
+  const opmath_t* p;
+  const bool ABSX_GT_ONE = std::fabs(x) > ONE;
   int64_t i, dir;
-  scalar_t y, num_ans, denom_ans;
-  scalar_t absx = std::fabs(x);
-  const scalar_t *p;
+  opmath_t y, num_ans, denom_ans;
 
-  if (absx > 1) {
+  /* Evaluate the numerator */
+  if (ABSX_GT_ONE) {
     /* Evaluate as a polynomial in 1/x. */
     dir = -1;
     p = num + M;
-    y = 1 / x;
+    y = ONE / x;
   }
   else {
     dir = 1;
@@ -542,15 +550,15 @@ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
     y = x;
   }
 
-  /* Evaluate the numerator */
   num_ans = *p;
   p += dir;
   for (i = 1; i <= M; i++) {
     num_ans = num_ans * y + *p;
     p += dir;
   }
+
   /* Evaluate the denominator */
-  if (absx > 1) {
+  if (ABSX_GT_ONE) {
     p = denom + N;
   }
   else {
@@ -563,14 +571,15 @@ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
     denom_ans = denom_ans * y + *p;
     p += dir;
   }
-  if (absx > 1) {
-    i = N - M;
-    return std::pow(x, i) * num_ans / denom_ans;
+
+  if (ABSX_GT_ONE) {
+    opmath_t pwr = static_cast<opmath_t>(N - M);
+    return std::pow(x, pwr) * num_ans / denom_ans;
   }
   else {
     return num_ans / denom_ans;
   }
-}
+} // ratevl
 
 // SciPy's lanczos implementation is taken from Boost
 /* (C) Copyright John Maddock 2006.
@@ -578,10 +587,11 @@ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
  * Boost Software License, Version 1.0. See
  * https://www.boost.org/LICENSE_1_0.txt or see NOTICE.
  */
-template <typename scalar_t>
-static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+lanczos_sum_expg_scaled(opmath_t x) {
   // lanczos approximation
-  static const scalar_t lanczos_sum_expg_scaled_num[13] = {
+  static const opmath_t NUM[13] = {
     0.006061842346248906525783753964555936883222,
     0.5098416655656676188125178644804694509993,
     19.51992788247617482847860966235652136208,
@@ -596,7 +606,7 @@ static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     103794043.1163445451906271053616070238554,
     56906521.91347156388090791033559122686859
   };
-  static const scalar_t lanczos_sum_expg_scaled_denom[13] = {
+  static const opmath_t DENOM[13] = {
     1.,
     66.,
     1925.,
@@ -611,108 +621,122 @@ static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     39916800.,
     0.
   };
-  return ratevl(x, lanczos_sum_expg_scaled_num,
-      sizeof(lanczos_sum_expg_scaled_num) / sizeof(lanczos_sum_expg_scaled_num[0]) - 1,
-      lanczos_sum_expg_scaled_denom,
-      sizeof(lanczos_sum_expg_scaled_denom) / sizeof(lanczos_sum_expg_scaled_denom[0]) - 1);
-}
 
-template <typename scalar_t>
-static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
+  return ratevl(
+    x,
+    NUM,
+    sizeof(NUM) / sizeof(NUM[0]) - 1,
+    DENOM,
+    sizeof(DENOM) / sizeof(DENOM[0]) - 1
+  );
+} // lanczos_sum_expg_scaled
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igam_helper_fac(opmath_t a, opmath_t x) {
   // compute x^a * exp(-a) / gamma(a)
   // corrected from (15) and (16) in [igam2] by replacing exp(x - a) with
   // exp(a - x).
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t HALF = opmath_t(0.5);
+  constexpr opmath_t LARGE = opmath_t(200.0);
+  const opmath_t MAXLOG = std::is_same<opmath_t, double>::value ?
+    opmath_t(7.09782712893383996843E2) : opmath_t(88.72283905206835);
+  const opmath_t EXP1 = opmath_t(2.718281828459045);
+  const opmath_t LANCZOS_G = opmath_t(6.024680040776729583740234375);
+  opmath_t ax, fac, res, num, numfac;
 
-  scalar_t ax, fac, res, num, numfac;
-  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static scalar_t EXP1 = 2.718281828459045;
-  static scalar_t lanczos_g = 6.024680040776729583740234375;
-
-  if (std::fabs(a - x) > 0.4 * std::fabs(a)) {
+  if (std::fabs(a - x) > opmath_t(0.4) * std::fabs(a)) {
     ax = a * std::log(x) - x - std::lgamma(a);
     if (ax < -MAXLOG) {
-      return 0.0;
+      return ZERO;
     }
     return std::exp(ax);
   }
 
-  fac = a + lanczos_g - 0.5;
+  fac = a + LANCZOS_G - HALF;
   res = std::sqrt(fac / EXP1) / lanczos_sum_expg_scaled(a);
 
-  if ((a < 200) && (x < 200)) {
+  if ((a < LARGE) && (x < LARGE)) {
     res *= std::exp(a - x) * std::pow(x / fac, a);
   }
   else {
-    num = x - a - lanczos_g + 0.5;
+    num = x - a - LANCZOS_G + HALF;
     numfac = num / fac;
-    res *= std::exp(a * (std::log1p(numfac) - numfac) + x * (0.5 - lanczos_g) / fac);
+    res *= (
+      std::exp(a * (std::log1p(numfac) - numfac) + x * (HALF - LANCZOS_G) / fac)
+    );
   }
   return res;
-}
+} // _igam_helper_fac
 
-template <typename scalar_t>
-static scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igam_helper_series(opmath_t a, opmath_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static int MAXITER = 2000;
-
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
   int i;
-  scalar_t ans, ax, c, r;
+  opmath_t ans, ax, c, r;
 
   ax = _igam_helper_fac(a, x);
-  if (ax == 0.0) {
-    return 0.0;
+  if (ax == ZERO) {
+    return ZERO;
   }
 
   /* power series */
   r = a;
-  c = 1.0;
-  ans = 1.0;
+  c = ONE;
+  ans = ONE;
 
   for (i = 0; i < MAXITER; i++) {
-    r += 1.0;
+    r += ONE;
     c *= x / r;
     ans += c;
     if (c <= MACHEP * ans) {
       break;
     }
   }
-  return (ans * ax / a);
-}
+  return ans * ax / a;
+} // _igam_helper_series
 
-template <typename scalar_t>
-static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igamc_helper_series(opmath_t a, opmath_t x) {
   // Compute igamc using DLMF 8.7.3 [igam1]. This is related to the series in
   // _igam_helper_series but extra care is taken to avoid cancellation.
-
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
   int n;
-  scalar_t fac = 1;
-  scalar_t sum = 0;
-  scalar_t term, logx;
-  static scalar_t MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  opmath_t fac = ONE;
+  opmath_t sum = ZERO;
+  opmath_t logx = std::log(x);
+  opmath_t term;
 
   for (n = 1; n < MAXITER; n++) {
-    fac *= -x / n;
-    term = fac / (a + n);
+    fac *= -x / static_cast<opmath_t>(n);
+    term = fac / (a + static_cast<opmath_t>(n));
     sum += term;
     if (std::fabs(term) <= MACHEP * std::fabs(sum)) {
         break;
     }
   }
 
-  logx = std::log(x);
-  term = -std::expm1(a * logx - std::lgamma(1+a));
+  term = -std::expm1(a * logx - std::lgamma(ONE + a));
   return term - std::exp(a * logx - std::lgamma(a)) * sum;
-}
+} // _igamc_helper_series
 
-template <typename scalar_t>
-static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam) {
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igam_helper_asymptotic_series(opmath_t a, opmath_t x, bool igam) {
   // Compute igam/igamc using DLMF 8.12.3/8.12.4 [igam1]
-  static const scalar_t d[25][25] =
+  static const opmath_t d[25][25] =
     {{-3.3333333333333333e-1, 8.3333333333333333e-2, -1.4814814814814815e-2,
       1.1574074074074074e-3, 3.527336860670194e-4, -1.7875514403292181e-4,
       3.9192631785224378e-5, -2.1854485106799922e-6, -1.85406221071516e-6,
@@ -938,36 +962,34 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
       -4.1690817945270892, 3.1008219800117808e-3, 1.1220095449981468,
       -7.6052379926149916e-1, 3.6262236505085254e-1, 2.216867741940747e-1,
       4.8683443692930507e-1}};
-
-  int k, n, sgn;
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t HALF = opmath_t(0.5);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t TWO = opmath_t(2.0);
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  int k, n;
   int maxpow = 0;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  scalar_t lambda = x / a;
-  scalar_t sigma = (x - a) / a;
-  scalar_t eta, res, ck, ckterm, term, absterm;
-  scalar_t absoldterm = INFINITY;
-  scalar_t etapow[25] = {1};
-  scalar_t sum = 0;
-  scalar_t afac = 1;
+  opmath_t lambda = x / a;
+  opmath_t sigma = (x - a) / a;
+  opmath_t absoldterm = opmath_t(INFINITY);
+  opmath_t etapow[25] = {ONE};
+  opmath_t sum = ZERO;
+  opmath_t afac = ONE;
+  opmath_t eta, res, ck, ckterm, term, absterm;
 
-  if (igam) {
-    sgn = -1;
+  opmath_t sgn = igam ? -ONE : +ONE;
+
+  if (lambda > ONE) {
+    eta = std::sqrt(-TWO * (std::log1p(sigma) - sigma));
+  }
+  else if (lambda < ONE) {
+    eta = -std::sqrt(-TWO * (std::log1p(sigma) - sigma));
   }
   else {
-    sgn = 1;
+    eta = ZERO;
   }
-
-  if (lambda > 1) {
-    eta = std::sqrt(-2 * (std::log1p(sigma) - sigma));
-  }
-  else if (lambda < 1) {
-    eta = -std::sqrt(-2 * (std::log1p(sigma) - sigma));
-  }
-  else {
-    eta = 0;
-  }
-  res = 0.5 * std::erfc(sgn * eta * std::sqrt(a / 2));
+  res = HALF * std::erfc(sgn * eta * std::sqrt(HALF * a));
 
   for (k = 0; k < 25; k++) {
     ck = d[k][0];
@@ -976,7 +998,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
         etapow[n] = eta * etapow[n-1];
         maxpow += 1;
       }
-      ckterm = d[k][n]*etapow[n];
+      ckterm = d[k][n] * etapow[n];
       ck += ckterm;
       if (std::fabs(ckterm) < MACHEP * std::fabs(ck)) {
         break;
@@ -994,54 +1016,60 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * c10::pi<float> * a);
+  res += (
+    sgn * sum * std::exp(-HALF * a * eta * eta) /
+      std::sqrt(TWO * c10::pi<float> * a)
+  );
 
   return res;
-}
+} // _igam_helper_asymptotic
 
-template <typename scalar_t>
-static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igamc_helper_continued_fraction(opmath_t a, opmath_t x) {
   // Compute igamc using DLMF 8.9.2. [igam1]
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t TWO = opmath_t(2.0);
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  const opmath_t BIG = std::is_same<opmath_t, double>::value ?
+    opmath_t(4.503599627370496e15) : opmath_t(16777216.);
+  const opmath_t BIGINV = std::is_same<opmath_t, double>::value ?
+    opmath_t(2.22044604925031308085e-16) : opmath_t(5.9604644775390625E-8);
   int i;
-  scalar_t ans, ax, c, yc, r, t, y, z;
-  scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  int MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
-    4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
-    2.22044604925031308085e-16 : 5.9604644775390625E-8;
+  opmath_t ans, ax, c, yc, r, t, y, z, pk, pkm1, pkm2, qk, qkm1, qkm2;
 
   ax = _igam_helper_fac(a, x);
-  if (ax == 0.0) {
-    return 0.0;
+  if (ax == ZERO) {
+    return ZERO;
   }
 
   /* continued fraction */
-  y = 1.0 - a;
-  z = x + y + 1.0;
-  c = 0.0;
-  pkm2 = 1.0;
+  y = ONE - a;
+  z = x + y + ONE;
+  c = ZERO;
+  pkm2 = ONE;
   qkm2 = x;
-  pkm1 = x + 1.0;
+  pkm1 = x + ONE;
   qkm1 = z * x;
   ans = pkm1 / qkm1;
 
   for (i = 0; i < MAXITER; i++) {
-    c += 1.0;
-    y += 1.0;
-    z += 2.0;
+    c += ONE;
+    y += ONE;
+    z += TWO;
     yc = y * c;
     pk = pkm1 * z - pkm2 * yc;
     qk = qkm1 * z - qkm2 * yc;
-    if (qk != 0) {
+    if (qk != ZERO) {
       r = pk / qk;
       t = std::fabs((ans - r) / r);
       ans = r;
     }
     else {
-      t = 1.0;
+      t = ONE;
     }
     pkm2 = pkm1;
     pkm1 = pk;
@@ -1058,10 +1086,11 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
     }
   }
   return ans * ax;
-}
+} // _igamc_helper_continued_fraction
 
 template <typename scalar_t>
-inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igammac(scalar_t a_, scalar_t x_) {
   /* the calculation of the regularized upper incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1072,76 +1101,83 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (5)
    */
-  scalar_t absxma_a;
-
-  static scalar_t SMALL = 20.0;
-  static scalar_t LARGE = 200.0;
-  static scalar_t SMALLRATIO = 0.3;
-  static scalar_t LARGERATIO = 4.5;
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t SMALL = opmath_t(20.0);
+  constexpr opmath_t LARGE = opmath_t(200.0);
+  constexpr opmath_t SMALLRATIO = opmath_t(0.3);
+  constexpr opmath_t LARGERATIO = opmath_t(4.5);
+  opmath_t absxma_a;
 
   // note that in SciPy, a and x are non-negative, with exclusive 0s (i.e.,
   // at most 1 of them can be 0), where igammac(0, x) = 0.0 iff x > 0.
-  if ((x < 0) || (a < 0)) {
+  if ((x < ZERO) || (a < ZERO)) {
     // out of defined-region of the function
-    return std::numeric_limits<scalar_t>::quiet_NaN();
+    return std::numeric_limits<opmath_t>::quiet_NaN();
   }
-  else if (a == 0) {
-    if (x > 0) {
-      return 0.0;
+  else if (a == ZERO) {
+    if (x > ZERO) {
+      return ZERO;
     }
     else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<opmath_t>::quiet_NaN();
     }
   }
-  else if (x == 0) {
-    return 1.0;
+  else if (x == ZERO) {
+    return ONE;
   }
   else if (std::isinf(a)) {
     if (std::isinf(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<opmath_t>::quiet_NaN();
     }
-    return 1.0;
+    return ONE;
   }
   else if (std::isinf(x)) {
-    return 0.0;
+    return ZERO;
   }
 
+  // Asymptotic regime where a is large and a ~ x, see [dlmf] 8.12.4
   absxma_a = std::fabs(x - a) / a;
   if ((a > SMALL) && (a < LARGE) && (absxma_a < SMALLRATIO)) {
-     return _igam_helper_asymptotic_series(a, x, 0);
+    return _igam_helper_asymptotic_series(a, x, false);
   }
   else if ((a > LARGE) && (absxma_a < LARGERATIO / std::sqrt(a))) {
-     return _igam_helper_asymptotic_series(a, x, 0);
+    return _igam_helper_asymptotic_series(a, x, false);
   }
 
-  if (x > 1.1) {
+  if (x > opmath_t(1.1)) {
     if (x < a) {
-      return 1.0 - _igam_helper_series(a, x);
+      return ONE - _igam_helper_series(a, x);
     }
     else {
       return _igamc_helper_continued_fraction(a, x);
     }
   }
-  else if (x <= 0.5) {
-    if (-0.4 / std::log(x) < a) {
-      return 1.0 - _igam_helper_series(a, x);
+  else if (x <= opmath_t(0.5)) {
+    if (-opmath_t(0.4) / std::log(x) < a) {
+      return ONE - _igam_helper_series(a, x);
     }
     else {
       return _igamc_helper_series(a, x);
     }
   }
   else {
-    if (x * 1.1 < a) {
-      return 1.0 - _igam_helper_series(a, x);
+    if (x * opmath_t(1.1) < a) {
+      return ONE - _igam_helper_series(a, x);
     }
     else {
       return _igamc_helper_series(a, x);
     }
   }
-}
+
+} // calc_igammac
 
 template <typename scalar_t>
-scalar_t calc_igamma(scalar_t a, scalar_t x) {
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igamma(scalar_t a_, scalar_t x_) {
   /* the calculation of the regularized lower incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
@@ -1152,75 +1188,352 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (4)
    */
-  scalar_t absxma_a;
-  static scalar_t SMALL = 20.0;
-  static scalar_t LARGE = 200.0;
-  static scalar_t SMALLRATIO = 0.3;
-  static scalar_t LARGERATIO = 4.5;
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t SMALL = opmath_t(20.0);
+  constexpr opmath_t LARGE = opmath_t(200.0);
+  constexpr opmath_t SMALLRATIO = opmath_t(0.3);
+  constexpr opmath_t LARGERATIO = opmath_t(4.5);
+  opmath_t absxma_a;
 
   // boundary values following SciPy
   // note that in SciPy, a and x are non-negative, with exclusive 0s (i.e.,
   // at most 1 of them can be 0), where igamma(0, x) = 1.0 iff x > 0.
-  if ((x < 0) || (a < 0)) {
+  if ((x < ZERO) || (a < ZERO)) {
     // out of defined-region of the function
-    return std::numeric_limits<scalar_t>::quiet_NaN();
+    return std::numeric_limits<opmath_t>::quiet_NaN();
   }
-  else if (a == 0) {
-    if (x > 0) {
-      return 1.0;
+  else if (a == ZERO) {
+    if (x > ZERO) {
+      return ONE;
     }
     else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<opmath_t>::quiet_NaN();
     }
   }
-  else if (x == 0) {
-    return 0.0; // zero integration limit
+  else if (x == ZERO) {
+    return ZERO; // zero integration limit
   }
   else if (std::isinf(a)) {
     if (std::isinf(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<opmath_t>::quiet_NaN();
     }
-    return 0.0;
+    return ZERO;
   }
   else if (std::isinf(x)) {
-    return 1.0;
+    return ONE;
   }
 
   /* Asymptotic regime where a ~ x. See [igam2] */
   absxma_a = std::fabs(x - a) / a;
   if ((a > SMALL) && (a < LARGE) && (absxma_a < SMALLRATIO)) {
-    return _igam_helper_asymptotic_series(a, x, 1);
+    return _igam_helper_asymptotic_series(a, x, true);
   }
   else if ((a > LARGE) && (absxma_a < LARGERATIO / std::sqrt(a))) {
-    return _igam_helper_asymptotic_series(a, x, 1);
+    return _igam_helper_asymptotic_series(a, x, true);
   }
 
-  if ((x > 1.0) && (x > a)) {
-    return 1.0 - calc_igammac(a, x);
+  if ((x > ONE) && (x > a)) {
+    return ONE - calc_igammac(a, x);
   }
 
   return _igam_helper_series(a, x);
-}
 
-template <>
-C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
-  return calc_igamma<float>(float(a), float(x));
-}
+} // calc_igamma
 
-template <>
-C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
-  return calc_igamma<float>(float(a), float(x));
-}
+// The derivative w.r.t. the first argument of the regularized upper incomplete
+// gamma function and the regularized lower incomplete gamma function
+// follow Stan's implementation:
+// https://mc-stan.org/math/namespacestan_1_1math_aa7076052d3d28135e69e58879c7117a4.html
+// https://mc-stan.org/math/namespacestan_1_1math_aea6ed1d1dc571bed0cf3a123cccab1e0.html
+//
+// See NOTICE for the licenses.
+//
+// References
+// [dlmf] "The Digital Library of Mathematical Functions", dlmf.nist.gov
+// [gautschi] Gautschi, Walter,
+//   "A Computational Procedure for Incomplete Gamma Functions",
+//   (1979) ACM Transactions on Mathematical Software. 5(4): 466-481.
+//   https://www.cs.purdue.edu/homes/wxg/selected_works/section_02/068.pdf
 
-template <>
-C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
-  return calc_igammac<float>(float(a), float(x));
-}
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igammac_grada_helper_asymptotic_series(opmath_t a, opmath_t x) {
+  // Compute igammac gradient from [dlmf] 8.11.2
+  //
+  //   gammac(a,z) = (
+  //     \frac{z^{a-1} e^{-z}}{\Gamma(a)} \sum_{k=0}^{n-1} \frac{u_k}{z^k}
+  //   )
+  //
+  //   u_k = (a-1)(a-2)...(a-k) = u_{k-1} * (a-k)
+  //   (d/da)u_k = u_{k-1} + du_{k-1}/da * (a-k)
+  //
+  //   (d/da)gammac = (
+  //     gammac(a,z) (log(z) - digamma(a)) +
+  //     \frac{z^{a-1} e^{-z}}{\Gamma(a)} \sum_{k=0}^{n-1} \frac{(d/da)u_k}{z^k}
+  //   )
+  //
+  //   9 terms of expansion are used as in stan::math::gammac_grad_asymptotic
+  //
+  //   variables:
+  //     sum = \frac{(d/da)u_k}{z^k} incrementing
+  //     uk = u_k
+  //     du = (d/da)u_k
+  //     uterm = (a-k)
+  const int NTERMS = 9;
+  constexpr opmath_t ONE = opmath_t(1.0);
+  opmath_t sum = opmath_t(0.0);
+  opmath_t uk = opmath_t(1.0);
+  opmath_t du = opmath_t(1.0);
+  opmath_t uterm = opmath_t(a);
+  opmath_t logx = std::log(x);
+  int k;
 
-template <>
-C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
-  return calc_igammac<float>(float(a), float(x));
-}
+  for (k = 1; k <= NTERMS; ++k) {
+    // update uterm
+    uterm -= ONE;
+
+    if (k > 1) {
+      // du(this k) = u(last k) + du(last k) * (this uterm)
+      du = uk + du * uterm;
+    }
+
+    // update falling factorial
+    uk *= uterm;
+
+    // add to rolling sum value of du / z^k
+    sum += du / std::pow(x, static_cast<opmath_t>(k));
+  }
+
+  return (
+    calc_igammac(a, x) * (logx - calc_digamma(a)) +
+      sum * std::exp((a - ONE) * logx - x - std::lgamma(a))
+  );
+
+} // _igammac_grada_helper_asymptotic_series
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igammac_grada_helper_series(opmath_t a, opmath_t x) {
+  // Compute igammac gradient from [dlmf] 8.7.3
+  //
+  //   gammac(a,z) = (1 -
+  //     \frac{z^a}{\Gamma(a)} \sum_{k=0}^{\infty} \frac{(-1)^k z^k}{k! (a+k)}
+  //   )
+  //
+  //  (d/da)gammac = (
+  //    (1 - gammac(a,z)) (digamma(a) - log(z)) +
+  //    \frac{z^a}{\Gamma(a)} \sum_{k=0}^{\infty} \frac{(-1)^k z^k}{k! (a+k)^2}
+  //  )
+  //  express sum term as exp[k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...]
+  //
+  //   variables:
+  //     sum = \frac{(d/da)u_k}{z^k} incrementing
+  //     sgn = (-1)^k
+  //     term = k log(z) - 2 log(a+k) - log(k) - log(k-1) - ...
+  //     subterm = log(z) + log(z) + ... - log(k) - log(k-1) - ...
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  constexpr opmath_t TWO = opmath_t(2.0);
+  opmath_t sum = opmath_t(0.0);
+  opmath_t subterm = opmath_t(0.0);
+  opmath_t a_plus_k = a;
+  opmath_t logx = std::log(x);
+  opmath_t term;
+  int k;
+
+  for (k = 0; k <= MAXITER; ++k) {
+    term = std::exp(subterm - TWO * std::log(a_plus_k));
+    sum += ((k % 2) ? -ONE : +ONE) * term;
+    if (std::fabs(term) <= MACHEP) {
+      break;
+    }
+    a_plus_k += ONE;
+    subterm += logx - std::log1p(k);
+  }
+
+  return (
+    (ONE - calc_igammac(a, x)) * (calc_digamma(a) - logx) +
+      sum * std::exp(a * logx - std::lgamma(a))
+  );
+
+} // _igammac_grada_helper_series
+
+template <typename opmath_t>
+static C10_HOST_DEVICE opmath_t
+_igamma_grada_helper_series(opmath_t a, opmath_t x) {
+  // Compute igamma gradient from [gautschi] 5.4
+  //
+  //   gamma(a,x) = x^{a} e^{-x} \sum_{k=0}^{\infty} \frac{x^k}{\Gamma(a+k+1)}
+  //     = e^{-x} \sum_{k=0}^{\infty} exp[(a+k) log(x) - log(\Gamma(a+k+1))]
+  //
+  //  (d/da)gamma = (
+  //    e^{-x} \sum_{k=0}^{\infty} exp[...] log(x)
+  //    - e^{-x} \sum_{k=0}^{\infty} exp[...] (d/da)log(\Gamma(a+k+1))
+  //  )
+  //  second sum:
+  //    (d/da)log(\Gamma(a+k+1)) = 1/(a+k) + (d/da)log(\Gamma(a+k))
+  //    for k=0: 1/a + (d/da)log(\Gamma(a)) = 1/a + digamma(a) = digamma(a+1)
+  //    for k=1: 1/(a+1) + (d/da)log(\Gamma(a+1)) = digamma(a+1) + 1/(a+1)
+  //    for k=2: digamma(a+1) + 1/(a+1) + 1/(a+2)
+  //    ...
+  //  in expo:
+  //    log(\Gamma(a+k+1)) = log(\Gamma(a+k)) + log(a+k)
+  //    for k=0: log(\Gamma(a+1))
+  //    for k=1: log(\Gamma(a+1)) + log(a+1)
+  //    for k=2: log(\Gamma(a+1)) + log(a+1) + log(a+2)
+  //    ...
+  //
+  //   variables:
+  //     coef = (d/da)log(\Gamma(a+k+1))
+  //     expo = (a+k) logx - log(\Gamma(a+k+1))
+  //     terma = logx * exp[expo]
+  //     termb = coef * exp[expo]
+  //     suma = cumulative sum of terma until convergence
+  //     sumb = cumulative sum of termb until convergence
+  const int MAXITER = 2000;
+  const opmath_t MACHEP = std::is_same<opmath_t, double>::value ?
+    opmath_t(1.11022302462515654042E-16) : opmath_t(5.9604644775390625E-8);
+  constexpr opmath_t ONE = opmath_t(1.0);
+  opmath_t suma = opmath_t(0.0);
+  opmath_t sumb = opmath_t(0.0);
+  opmath_t terma = opmath_t(1.0);
+  opmath_t termb = opmath_t(1.0);
+  opmath_t a_plus_k = a;
+  opmath_t logx = std::log(x);
+  opmath_t coef = calc_digamma(a + ONE);
+  opmath_t expo = a * logx - std::lgamma(a + ONE);
+  int k;
+
+  for (k = 0; k <= MAXITER; ++k) {
+    if (std::fabs(terma) > MACHEP) {
+      terma = std::exp(expo);
+      suma += terma;
+    }
+    if (std::fabs(termb) > MACHEP) {
+      termb = coef * std::exp(expo);
+      sumb += termb;
+    }
+    if ((std::fabs(terma) <= MACHEP) && (std::fabs(termb) <= MACHEP)) {
+      break;
+    }
+    expo += logx - std::log1p(a_plus_k);
+    a_plus_k += ONE;
+    coef += ONE / a_plus_k;
+  }
+
+  return std::exp(-x) * (logx * suma - sumb);
+
+} // _igamma_grada_helper_series
+
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igammac_grada(scalar_t a_, scalar_t x_) {
+  /* the calculation of the regularized upper incomplete gamma function's
+   * gradient with respect to the first argument (a)
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if x is large and a is bounded by x, then use asymptotic expansion
+   *   ([dlmf] 8.11.2)
+   * - otherwise, calculate from the series expansion ([dlmf] 8.7.3)
+   */
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t LARGE = opmath_t(8.0);
+
+  // boundary values following Stan
+  // note that in Stan, a is strictly positive and x is non-negative
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO; // zero integration limit
+  }
+
+  // Asymptotic regime where x is large and a <= x, see [dlmf] 8.11.2
+  if ((x >= LARGE) && (x >= a)) {
+    return _igammac_grada_helper_asymptotic_series(a, x);
+  }
+
+  // Series regime otherwise, see [dlmf] 8.7.3
+  return _igammac_grada_helper_series(a, x);
+
+} // calc_igammac_grada
+
+template <typename scalar_t>
+C10_HOST_DEVICE at::opmath_type<scalar_t>
+calc_igamma_grada(scalar_t a_, scalar_t x_) {
+  /* the calculation of the regularized lower incomplete gamma function's
+   * gradient with respect to the first argument (a)
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if x is large or other specific bounded values,
+   *   then use negative gradient of upper incomplete gamma function
+   * - otherwise, calculate from the series expansion ([gautschi] 5.4)
+   */
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t a = static_cast<opmath_t>(a_);
+  opmath_t x = static_cast<opmath_t>(x_);
+  constexpr opmath_t ZERO = opmath_t(0.0);
+  constexpr opmath_t SMALLA1 = opmath_t(0.8);
+  constexpr opmath_t LARGEX1 = opmath_t(15.0);
+  constexpr opmath_t SMALLA2 = opmath_t(12.0);
+  constexpr opmath_t LARGEX2 = opmath_t(30.0);
+  opmath_t REGION = std::sqrt(-x * x + 60.0 * x - 756.0);
+
+  // boundary values following Stan
+  // note that in Stan, a is strictly positive and x is non-negative
+  if (std::isnan(a) || std::isnan(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if ((a <= ZERO) || (x < ZERO)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(x)) {
+    return std::numeric_limits<opmath_t>::quiet_NaN();
+  }
+  else if (std::isinf(a)) {
+    return ZERO;
+  }
+  else if (x == ZERO) {
+    return ZERO; // zero integration limit
+  }
+
+  // Regime where gammac is more computationally stable
+  if ((x > LARGEX1) && (a < SMALLA1)) {
+    return -calc_igammac_grada(a_, x_);
+  }
+  else if ((x > LARGEX2) && (a < SMALLA2)) {
+    return -calc_igammac_grada(a_, x_);
+  }
+  else if (a < REGION) {
+    return -calc_igammac_grada(a_, x_);
+  }
+
+  // Series regime otherwise, see [gautschi] 5.4
+  return _igamma_grada_helper_series(a, x);
+
+} // calc_igamma_grada
+
+// end of regularized lower & upper incomplete gamma
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
 

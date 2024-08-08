@@ -63,6 +63,8 @@
 #include <ATen/ops/igamma_native.h>
 #include <ATen/ops/igammac.h>
 #include <ATen/ops/igammac_native.h>
+#include <ATen/ops/igamma_self_backward_native.h>
+#include <ATen/ops/igammac_self_backward_native.h>
 #include <ATen/ops/lcm_native.h>
 #include <ATen/ops/ldexp.h>
 #include <ATen/ops/ldexp_native.h>
@@ -329,6 +331,8 @@ CREATE_BINARY_META_FUNC(hypot);
 CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
 CREATE_BINARY_META_FUNC(nextafter);
+CREATE_BINARY_META_FUNC(igamma_self_backward);
+CREATE_BINARY_META_FUNC(igammac_self_backward);
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
@@ -429,6 +433,8 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(igamma_self_backward_stub);
+DEFINE_DISPATCH(igammac_self_backward_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -547,6 +553,8 @@ CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma_self_backward_out, igamma_self_backward_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac_self_backward_out, igammac_self_backward_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub);
