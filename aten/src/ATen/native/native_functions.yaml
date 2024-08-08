@@ -14414,7 +14414,7 @@
     CPU, CUDA: _segment_reduce_backward_kernel
   autogen: _segment_reduce_backward.out
 
-- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
+- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0, str padding_side="right") -> Tensor
   python_module: nn
   variants: function
 
