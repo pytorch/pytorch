@@ -1331,6 +1331,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    @skipIfWindows
     def test_vertical_fusion1(self):
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -7336,6 +7337,7 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @skipIfWindows
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -8008,6 +8010,7 @@ class CommonTemplate:
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
+    @skipIfWindows
     # Already on by default, just want to make sure
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_reuse_buffers_with_aliasing(self):
@@ -8601,6 +8604,7 @@ class CommonTemplate:
             self.assertEqual(len(source_codes), 1)
             self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
+    @skipIfWindows
     def test_roll(self):
         def fn(a):
             return (
@@ -10848,6 +10852,7 @@ class CommonTemplate:
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
