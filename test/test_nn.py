@@ -377,8 +377,15 @@ class TestNN(NNTestCase):
                 self.register_buffer('buffer2', torch.empty(3, 5), persistent=False)
 
         foo = Foo()
+        # persistent = True
         self.assertEqual(len(list(foo.buffers(persistent=True))), 1)
         self.assertEqual(names(foo.named_buffers(persistent=True)), ["buffer1"])
+        # persistent = False
+        self.assertEqual(len(list(foo.buffers(persistent=False))), 1)
+        self.assertEqual(names(foo.named_buffers(persistent=False)), ["buffer2"])
+        # persistent = None
+        self.assertEqual(len(list(foo.buffers(persistent=None))), 2)
+        self.assertEqual(names(foo.named_buffers(persistent=None)), ["buffer1", "buffer2"])
 
     def test_buffer_bad_module_subclass(self):
         class MyBadModule(nn.Linear):
