@@ -13,6 +13,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import getArtifactLogger
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -31,6 +32,8 @@ KNOWN_TYPES = [
 ]
 
 original_zip = zip
+
+aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 
 
 def strict_zip(*iterables, strict=True, **kwargs):
@@ -234,15 +237,15 @@ def maybe_to_fresh_input(idx, t, meta):
     return t
 
 
-def unlift_tokens(fw_module, fw_metadata, bw_module=None):
+def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
-    num_backward_discovered_tokens = fw_metadata.num_backward_discovered_tokens
+    num_bw_out_tokens = fw_metadata.num_bw_out_tokens
 
-    def rewrite_first_with_effects(module, node):
+    def rewrite_with_effects_input_token(module, node):
         with module.graph.inserting_before(node):
             new_token_node = module.graph.call_function(
                 torch.ops.prims._make_token.default, ()
@@ -268,56 +271,35 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
             )
             node.args = (other_output_args,)
 
-    def do_forward(module):
-        input_token_nodes = []
-        for i, node in enumerate(module.graph.nodes):
-            if node.op == "placeholder":
-                if i < num_tokens:
-                    input_token_nodes.append(node)
-            elif node.op == "call_function" and node.target.__name__ == "with_effects":
-                if node.args[0] in input_token_nodes:
-                    rewrite_first_with_effects(module, node)
-            elif node.op == "output":
-                # forward output tokens are at the start
-                output_token_nodes = node.args[0][:num_tokens]
-
-                # Also remove tokens saved for backward
-                other_output_args = tuple(
-                    [
-                        n
-                        for n in node.args[0][num_tokens:]
-                        if n not in output_token_nodes
-                    ]
-                )
-
-                rewrite_output(module, node, output_token_nodes, other_output_args)
-
-        for input_token_node in input_token_nodes:
-            module.graph.erase_node(input_token_node)
-
-        module.recompile()
-
-    def do_backward(module):
+    def do(module):
         input_nodes = []
         input_token_nodes = []
-        num_bw_tokens = num_tokens + num_backward_discovered_tokens
-        assert num_bw_tokens > 0
-
+        with_effect_nodes = []
+        output_token_nodes = []
+        other_output_nodes = []
         for i, node in enumerate(module.graph.nodes):
             if node.op == "placeholder":
                 input_nodes.append(node)
             elif node.op == "call_function" and node.target.__name__ == "with_effects":
+                with_effect_nodes.append(node)
                 if node.args[0] in input_nodes:
                     input_token_nodes.append(node.args[0])
-                    rewrite_first_with_effects(module, node)
+                    rewrite_with_effects_input_token(module, node)
             elif node.op == "output":
-                # backward output tokens are at the end
-                output_token_nodes = node.args[0][-num_bw_tokens:]
-                other_output_args = node.args[0][:-num_bw_tokens]
+                outs = node.args[0]
+                for out in outs:
+                    if (
+                        isinstance(out, torch.fx.node.Node)
+                        and out.op == "call_function"
+                        and out.target == operator.getitem
+                        and out.args[1] == 0
+                        and out.args[0] in with_effect_nodes
+                    ):
+                        output_token_nodes.append(out)
+                    else:
+                        other_output_nodes.append(out)
 
-                rewrite_output(module, node, output_token_nodes, other_output_args)
-
-        assert len(input_token_nodes) == num_bw_tokens
+                rewrite_output(module, node, output_token_nodes, other_output_nodes)
 
         for input_token_node in input_token_nodes:
             module.graph.erase_node(input_token_node)
@@ -325,10 +307,36 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
         module.recompile()
 
     if num_tokens > 0:
-        do_forward(fw_module)
+        from torch._dynamo.utils import lazy_format_graph_code
 
-    if bw_module is not None and num_tokens + num_backward_discovered_tokens > 0:
-        do_backward(bw_module)
+        if aot_config.enable_log:
+            aot_graphs_effects_log.info(
+                "%s",
+                lazy_format_graph_code(
+                    "Forward graph before unlifting tokens",
+                    fw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
+        do(fw_module)
+
+    if bw_module is not None and num_bw_out_tokens > 0:
+        if aot_config.enable_log:
+            aot_graphs_effects_log.info(
+                "%s",
+                lazy_format_graph_code(
+                    "Backward graph before unlifting tokens",
+                    bw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
+        do(bw_module)
 
     # No need to update fw_metadata.num_forward_returns and fw_metadata.num_forward as num_tokens are not part of it.
     # As CompiledFunction.forward runs function wrapped in EffectTokensWrapper, that will toss out output tokens.
