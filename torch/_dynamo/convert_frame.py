@@ -356,7 +356,8 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             prof.dump_stats(profile_path)
         except PermissionError:
-            log.warning("Cannot write to %s", str(profile_path))
+            log.exception("Cannot write to %s", profile_path)
+        log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
             gprof2dot_process = subprocess.Popen(
@@ -375,7 +376,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
             )
-            log.warning("Generated SVG from profile at %s", str(svg_path))
+            log.warning("Generated SVG from profile at %s", svg_path)
         except FileNotFoundError:
             log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
@@ -560,7 +561,6 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-@_use_lazy_graph_module(config.use_lazy_graph_module)
 def _compile(
     code: CodeType,
     globals: Dict[str, object],
@@ -586,19 +586,11 @@ def _compile(
         ValidationException,
     )
 
+    # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
-    restart_reasons: set[str] = set()
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
-    # This is shared across restarts
-    mutated_closure_cell_contents: Set[str] = set()
-    speculation_log = SpeculationLog()
-    if compile_pg := get_compile_pg():
-        distributed_state = DistributedState(compile_pg, LocalState())
-    else:
-        distributed_state = None
-    torch._dynamo.callback_handler.run_start_callbacks()
 
     @preserve_global_state
     def transform(
@@ -667,9 +659,7 @@ def _compile(
         hooks: Hooks,
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
-        nonlocal output
         nonlocal dynamo_time_before_restart
-        nonlocal restart_reasons
         last_attempt_start_time = start_time = time.time()
 
         def log_bytecode(
@@ -756,6 +746,8 @@ def _compile(
                 + bool(code.co_flags & inspect.CO_VARKEYWORDS)
             )
 
+        assert out_code is not None
+
         total_argcount_old = count_args(code)
         total_argcount_new = count_args(out_code)
         msg = "arg mismatch: "
@@ -804,7 +796,19 @@ def _compile(
 
         return guarded_code
 
-    with compile_context(CompileContext(compile_id)):
+    with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
+        CompileContext(compile_id)
+    ):
+        restart_reasons: set[str] = set()
+        # This is shared across restarts
+        mutated_closure_cell_contents: Set[str] = set()
+        speculation_log = SpeculationLog()
+        if compile_pg := get_compile_pg():
+            distributed_state = DistributedState(compile_pg, LocalState())
+        else:
+            distributed_state = None
+        torch._dynamo.callback_handler.run_start_callbacks()
+
         # Check recompilations
         recompile_reasons = None
         if is_recompilation(cache_size) and frame:
@@ -1123,8 +1127,10 @@ def replay(filename: str) -> None:
             export_constraints=None,
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
+            cache_entry=None,
             frame=None,
             frame_state={},
+            compile_id=CompileId(42, 999),
         )
     finally:
         config.replay_record_enabled = original_replay_val
