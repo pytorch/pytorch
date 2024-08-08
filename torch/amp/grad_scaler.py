@@ -275,16 +275,17 @@ class GradScaler:
                     ].append(to_unscale)
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    if device == torch.device(type='cuda', index=0):
-                        grads[0]._local_tensor[0,0].fill_(float("inf"))  
-                    print("prev: ", torch.distributed.get_rank(), grads)
+                    # if device == torch.device(type='cuda', index=0):
+                    #    grads[0]._local_tensor[0,0].fill_(float("inf"))
                     torch._amp_foreach_non_finite_check_and_unscale_(
                         grads,
                         per_device_found_inf.get(device),
                         per_device_inv_scale.get(device),
                     )
-                    print("after: ", torch.distributed.get_rank(), grads)
-                    print("find inf: ", per_device_found_inf.get(device))
+                    if isinstance(grads[0], torch.distributed._tensor.DTensor):
+                        torch.distributed.all_reduce(
+                            per_device_found_inf.get(device), op=torch.distributed.ReduceOp.MAX
+                        )
 
         return per_device_found_inf._per_device_tensors
 

@@ -19,9 +19,7 @@ from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
-    infer_broadcast_dims_map,
     is_tensor_evenly_shardable,
-    map_placements_after_broadcast,
     normalize_dim,
     normalize_dims,
     normalize_to_torch_size,
@@ -1057,111 +1055,78 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
 
+
 @register_op_strategy(
     [aten._amp_foreach_non_finite_check_and_unscale_.default],
     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
 )
-def distribute_tensor_scale(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def distribute_tensor_scale(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
     assert len(op_schema.args_schema) == 3
     (
-        scaled_grad,  # Shard(dim=0),
-        found_inf,  # Partial -> Replicate(),
-        inv_scale,  # Replicate(),
+        scaled_grad,
+        found_inf,
+        inv_scale,
     ) = op_schema.args_schema
-
-    maxPartial: List[Placement] = []
-    maxPartial.append(Partial("max"))
-    maxPartial = tuple(maxPartial)
-
-    normPartical: List[Placement] = []
-    normPartical.append(_NormPartial(norm_type="inf"))
-    normPartical = tuple(normPartical)
-
-    args_schema = op_schema.args_schema
-    input_tuple_strategy = scaled_grad
-    common_shape = torch.broadcast_shapes(
-        *[arg.shape for arg in args_schema if isinstance(arg, OpStrategy)]
-    )
-    found_inf.strategies[0].output_specs.placements = tuple([Partial("max")])
-    if torch.distributed.get_rank() ==1:
-        #print(vars(scaled_grad.childs[0].strategies[0]))
-        print(vars(found_inf.strategies[0]))
-        #print(vars(inv_scale.strategies[0]))
-    assert isinstance(input_tuple_strategy, TupleStrategy)
+    assert isinstance(scaled_grad, TupleStrategy)
+    assert isinstance(found_inf, OpStrategy)
+    assert isinstance(inv_scale, OpStrategy)
 
     output_tuple_strategy_childs: List[OpStrategy] = []
-    for op_strategy in input_tuple_strategy.childs:
+    for op_strategy in scaled_grad.childs:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
-        reduce_dims = list(range(op_strategy.ndim))
-        output_strategy = common_reduction_strategy(
-            mesh,
-            op_strategy,
-            reduce_dims,
-            reduction_linear=True,
-            #reduction_op=tuple([Shard(dim=0), _NormPartial(norm_type='inf'), Replicate()]),
-            reduction_op=tuple([Shard(dim=0)]),
-        )
-        output_strategy.strategies[0].input_specs = list(
-            output_strategy.strategies[0].input_specs
-        )
-        output_strategy.strategies[0].redistribute_cost = list(
-            output_strategy.strategies[0].redistribute_cost
-        )
 
-        input_arg = found_inf
-        input_arg_spec = input_arg.strategies[0].output_spec
-        input_arg_target_spec = DTensorSpec(
+        output_strategy = OpStrategy([])
+        scaled_grad_spec = op_strategy.strategies[0].output_spec
+        scaled_grad_target_spec = DTensorSpec(
             mesh=mesh,
-            placements=tuple([Partial("max")]),
-            tensor_meta=input_arg_spec.tensor_meta,
+            placements=scaled_grad_spec.placements,
+            tensor_meta=scaled_grad_spec.tensor_meta,
         )
-        output_strategy.strategies[0].input_specs.append(input_arg_target_spec)
-        output_strategy.strategies[0].redistribute_cost.append(
-            generate_redistribute_costs(input_arg, input_arg_target_spec)
-        )
+        input_specs = [scaled_grad_target_spec]
 
-        input_arg = inv_scale
-        input_arg_spec = input_arg.strategies[0].output_spec
-        input_arg_target_spec = DTensorSpec(
+        out_placements: List[Placement] = []
+        for placement in scaled_grad_spec.placements:
+            assert isinstance(placement, Shard)
+            out_placements.append(placement)
+
+        redistribute_cost = [
+            generate_redistribute_costs(op_strategy, scaled_grad_target_spec)
+        ]
+
+        found_inv_output_placements: List[Placement] = []
+        found_inv_output_placements.append(Replicate())
+        found_inf_spec = found_inf.strategies[0].output_spec
+        found_inf_target_spec = DTensorSpec(
             mesh=mesh,
-            placements=tuple([Replicate()]),
-            tensor_meta=input_arg_spec.tensor_meta,
+            placements=tuple(found_inv_output_placements),
+            tensor_meta=found_inf_spec.tensor_meta,
         )
-        output_strategy.strategies[0].output_specs.placements = tuple([Shard(dim=0), Replicate(), Replicate()])
-        output_strategy.strategies[0].input_specs.append(input_arg_target_spec)
-        output_strategy.strategies[0].redistribute_cost.append(
-            generate_redistribute_costs(input_arg, input_arg_target_spec)
+        input_specs.append(found_inf_target_spec)
+        redistribute_cost.append(
+            generate_redistribute_costs(found_inf, found_inf_target_spec)
         )
 
-        output_strategy.strategies[0].input_specs = tuple(
-            output_strategy.strategies[0].input_specs
+        inv_scale_spec = inv_scale.strategies[0].output_spec
+        inv_scale_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=inv_scale_spec.placements,
+            tensor_meta=inv_scale_spec.tensor_meta,
         )
-        output_strategy.strategies[0].redistribute_cost = tuple(
-            output_strategy.strategies[0].redistribute_cost
+        input_specs.append(inv_scale_target_spec)
+        redistribute_cost.append(
+            generate_redistribute_costs(inv_scale, inv_scale_target_spec)
+        )
+
+        output_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=mesh,
+                    placements=tuple(out_placements),
+                ),
+                input_specs=tuple(input_specs),
+                redistribute_cost=redistribute_cost,
+            )
         )
 
         output_tuple_strategy_childs.append(output_strategy)
-    if torch.distributed.get_rank() ==1:
-        print("\n", vars(output_strategy))
     return TupleStrategy(output_tuple_strategy_childs)
-
-
-@register_op_strategy(
-    [aten.isinf.default],
-    schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
-)
-def distribute_tensor_isinf(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy = op_schema.args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
-    dims = None
-    reduce_dims = list(range(input_strategy.ndim))
-    keep_dim = False
-    reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
-    return common_reduction_strategy(
-        mesh,
-        input_strategy,
-        reduce_dims,
-        keep_dim=keep_dim,
-        reduction_linear=True,
-        reduction_op=reduction_op,
-    )
