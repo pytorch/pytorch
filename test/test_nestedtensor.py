@@ -6525,6 +6525,13 @@ BACKWARD_FAILURES = {
     "sum",
 }
 
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
+}
+
 COMPILE_BACKWARD_FAILURES = {
     *BACKWARD_FAILURES,
     # mvlgamma_backward calls arange() passing self.options() and layout=torch.jagged
@@ -6591,7 +6598,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
