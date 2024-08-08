@@ -577,21 +577,25 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         updated_weights: Dict[str, Any] = {}
         for node in bn_node_to_fuse:
             conv_node = node.args[0]
-            bn_running_mean = fetch_attr(node.args[1].target, gm)
-            bn_running_var = fetch_attr(node.args[2].target, gm)
-            bn_eps = node.args[7]
-            bn_weight = fetch_attr(node.args[3].target, gm) if node.args[3] else None
-            bn_bias = fetch_attr(node.args[4].target, gm) if node.args[4] else None
-            conv_weight = fetch_attr(conv_node.args[1].target, gm)
-            conv_bias = (
-                fetch_attr(conv_node.args[2].target, gm) if conv_node.args[2] else None
-            )
             if conv_node.args[1].name in updated_weights:
                 if conv_node.args[2] is None:
                     conv_node.update_arg(2, updated_weights[conv_node.args[1].name][1])
                 node.replace_all_uses_with(node.args[0])
                 node.graph.erase_node(node)
             else:
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_eps = node.args[7]
+                bn_weight = (
+                    fetch_attr(node.args[3].target, gm) if node.args[3] else None
+                )
+                bn_bias = fetch_attr(node.args[4].target, gm) if node.args[4] else None
+                conv_weight = fetch_attr(conv_node.args[1].target, gm)
+                conv_bias = (
+                    fetch_attr(conv_node.args[2].target, gm)
+                    if conv_node.args[2]
+                    else None
+                )
                 new_conv_weight, new_conv_bias = fuse_conv_bn_weights(
                     conv_weight,
                     conv_bias,
