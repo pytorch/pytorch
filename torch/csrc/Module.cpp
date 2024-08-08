@@ -1095,6 +1095,19 @@ PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getAccelerator(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  auto device_type = at::getAccelerator(false).value();
+  if (device_type.has_value()) {
+    return THPUtils_packString(c10::DeviceTypeName(
+        device_type.value(),
+        /*lower_case=*/true));
+  } else {
+    Py_RETURN_NONE
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_deviceCount(
     PyObject* _unused,
     PyObject* args,
@@ -1841,6 +1854,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
+    {"current_accelerator", THPModule_getAccelerator, METH_NOARGS, nullptr},
     {"device_count",
      castPyCFunctionWithKeywords(THPModule_deviceCount),
      METH_VARARGS | METH_KEYWORDS,
@@ -1937,6 +1951,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -2094,6 +2109,7 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+  THCPMemPool_init(module);
 #endif
 
 #ifdef USE_XPU
@@ -2371,6 +2387,13 @@ Call this whenever a new thread is created in order to propagate values from
       .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
+  py_module.def("_is_flash_attention_available", []() {
+#ifdef USE_CUDA
+    return sdp::is_flash_attention_available();
+#else
+    return false;
+#endif
+  });
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {

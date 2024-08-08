@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import itertools
-
 import sys
 from enum import Enum
 
@@ -27,6 +26,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfTorchDynamo
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("Windows CI still has some issue to be fixed.\n")
@@ -560,6 +560,9 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
+        torch._export.utils.remove_proxy_from_state_dict(
+            m.__dict__["_buffers"], in_place=True
+        )
         prepare_model = copy.deepcopy(m)
         m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
@@ -2032,7 +2035,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.relu1 = torch.nn.ReLU(inplace=False)
@@ -2045,7 +2048,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Sub()
@@ -2094,7 +2097,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """Test that if a module name has an underscore, we can still quantize it."""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # This module name has underscores, which can be part of a mangled name.
                 self.foo_bar = torch.nn.Linear(2, 2)
@@ -2147,7 +2150,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2201,7 +2204,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2380,7 +2383,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
