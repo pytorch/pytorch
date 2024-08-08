@@ -22,13 +22,13 @@ import warnings
 import weakref
 
 from ._backward_state import BackwardState
+from ._sym_dispatch_mode import SymDispatchMode
 from .sym_node import SymNode
 from torch.utils._thunk import Thunk
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext, AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from torch import SymInt, SymBool, Tensor
-import torch._ops
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
@@ -59,10 +59,7 @@ if TYPE_CHECKING:
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
-__all__ = [
-    "PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter",
-    "py_sym_types", "get_innermost_proxy_mode", "get_proxy_mode", "handle_sym_dispatch"
-]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
 
@@ -1009,10 +1006,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    # Ensure this is read-only; this exists only for legacy reasons
-    @property
-    def enable_tracing(self) -> bool:
-        return True
+    _managers: List[AbstractContextManager]
 
     def __init__(
         self,
@@ -1026,9 +1020,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         super().__init__(dk)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
+        self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
         self._allow_fake_constant = _allow_fake_constant
         self._error_on_data_dependent_ops = _error_on_data_dependent_ops
+        self.sym_mode = ProxySymDispatchMode(tracer)
+        self._managers = []
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.PROXY
@@ -1048,10 +1045,14 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             args: Tuple[object, ...] = (),
             kwargs: Optional[Dict[str, object]] = None
     ) -> object:
-        with set_original_aten_op(func):
+        with self.sym_mode.enable(False), set_original_aten_op(func):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
     def __enter__(self) -> Self:
+        # sym mode first, then us...
+        m = self.sym_mode.enable(True)
+        self._managers.append(m)
+        m.__enter__()
         # Stash and store the previous proxy mode (there may or may not be one)
         maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
         self.enter_stack.append(maybe_prev_proxy_mode)
@@ -1063,6 +1064,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             exc_value: Optional[BaseException],
             traceback: Optional[types.TracebackType]
     ) -> Optional[bool]:
+        m = self._managers.pop()
+        # ...exit us first, then sym mode
         b = super().__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
@@ -1070,7 +1073,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if mb_previous_proxy_mode is not None:
             _push_mode(mb_previous_proxy_mode)
 
-        return b
+        if not b:
+            return m.__exit__(exc_type, exc_value, traceback)
+        else:
+            return m.__exit__(None, None, None)
+
 
     def inner_torch_dispatch(
             self,
@@ -1081,6 +1088,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     ) -> object:
         kwargs = kwargs or {}
 
+        if not self.enable_tracing:
+            return func(*args, **kwargs)
+
         if func in (prim.device.default,):
             return func(*args, **kwargs)
 
@@ -1089,6 +1099,25 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def is_infra_mode(cls) -> bool:
         return True
+
+
+class ProxySymDispatchMode(SymDispatchMode):
+    def __init__(self, tracer: _ProxyTracer) -> None:
+        super().__init__()
+        self.tracer = tracer
+        # When false, we don't trace operations.  If you do this, you MUST
+        # call track_tensor/track_tensor_tree on all results of the operation
+        # to ensure we can adequately track the results
+        self.enable_tracing = True
+
+    @contextmanager
+    def enable(self, b: bool) -> Generator[None, None, None]:
+        old = self.enable_tracing
+        self.enable_tracing = b
+        try:
+            yield
+        finally:
+            self.enable_tracing = old
 
     def _compute_proxy(self, func: OpOverload, args: Tuple[object, ...], out: PySymType) -> Proxy:
         n_args = tuple(
@@ -1110,6 +1139,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             args: Tuple[object, ...],
             kwargs: Dict[str, object]
     ) -> object:
+        if not self.enable_tracing:
+            return func(*args, **kwargs)
+
         # Peephole optimize multiply by one
         # NB: be careful not to trigger guards here!
         if func == operator.mul:
@@ -1695,6 +1727,7 @@ class _MakefxTracer:
                 stack.enter_context(self.fake_tensor_mode)
             stack.enter_context(self.python_dispatcher_mode)
             stack.enter_context(self.proxy_function_mode)
+            stack.enter_context(proxy_mode.sym_mode)
             stack.enter_context(self.torch_fn_metadata_mode)
             stack.enter_context(proxy_mode)
             stack.enter_context(disable_autocast_cache())
@@ -1754,13 +1787,8 @@ def make_fx(
         _allow_fake_constant: bool = False,
         _error_on_data_dependent_ops: bool = True) -> Callable[..., GraphModule]:
 
-    """
-    Given a function f, return a new function which when executed with valid
-    arguments to f, returns an FX GraphModule representing the set of operations that
-    were executed during the course of execution.
-    """
-
     assert tracing_mode in ["real", "fake", "symbolic"]
+
 
     make_fx_tracer = _MakefxTracer(
         decomposition_table,
@@ -1782,38 +1810,8 @@ def get_torch_dispatch_modes() -> List[TorchDispatchMode]:
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
 
 
-# TODO: this is a legacy name, there is only ever one proxy mode as it's an
-# infra mode
-def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
-    return get_proxy_mode()
-
-
-def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
-    """
-    Current the currently active proxy tracing mode, or None if
-    we are not currently tracing.  This includes pre-dispatch proxy
-    tracing.
-    """
-    pre_dispatch_mode = torch._ops._get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
-    mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-    assert pre_dispatch_mode is None or mode is None, f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}"
-    return pre_dispatch_mode or mode
-
-
-def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs) -> R:
-    """
-    Call into the currently active proxy tracing mode to do a
-    SymInt/SymFloat/SymBool dispatch trace on a function that operates on
-    these arguments.
-    """
-    mode = get_proxy_mode()
-    assert mode
-    # Have to do it manually, because we're not doing the normal torch
-    # dispatch machinery which disables it for us
-    with disable_proxy_modes_tracing():
-        # TODO: properly compute types
-        types: List[Type] = []
-        return mode.__sym_dispatch__(func, types, args, kwargs)  # type: ignore[arg-type, return-value]
+def get_innermost_proxy_mode() -> ProxyTorchDispatchMode:
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 @contextmanager

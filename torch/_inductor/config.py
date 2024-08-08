@@ -884,6 +884,15 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
 
+    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
+    # for debugging purpose
+    debug_intermediate_value_printer = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    )
+
+    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
