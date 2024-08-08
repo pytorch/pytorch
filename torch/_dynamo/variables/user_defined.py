@@ -494,10 +494,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            method = variables.UserMethodVariable(
-                polyfill.instantiate_user_defined_class_object, self
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(
+                    tx, polyfill.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
             )
-            return method.call_function(tx, args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
