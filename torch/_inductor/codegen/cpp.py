@@ -9,7 +9,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -38,6 +38,7 @@ from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
     get_fused_kernel_name,
+    has_free_symbols,
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
@@ -65,15 +66,23 @@ from .common import (
 from .cpp_utils import (
     cexpr,
     cexpr_index,
+    CppCSEVariable,
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferContext,
+    promote_args,
     unify_mask_base_type,
     value_to_cpp,
 )
 
 
 _IS_WINDOWS = sys.platform == "win32"
+
+
+def get_export_declaration():
+    return "__declspec(dllexport)" if _IS_WINDOWS else ""
+
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
@@ -97,6 +106,9 @@ VECTORIZABLE_RTYPES = {
     "xor_sum",
     "welford_reduce",
     "welford_combine",
+    "argmin",
+    "argmax",
+    "any",
 }
 
 PYTHON_TO_CPP = {
@@ -114,7 +126,7 @@ PYTHON_TO_CPP = {
 
 CONTAINER_PYTHON_TO_CPP = {
     "List": "std::vector",
-    "Optional": "c10::optional",
+    "Optional": "std::optional",
 }
 
 DTYPE_LOWP_FP = [
@@ -135,17 +147,23 @@ def reduction_init(reduction_type, dtype):
         return 0
     if reduction_type == "prod":
         return 1
-    if reduction_type in {"max", "argmax"}:
-        return (
-            f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+    if reduction_type in ("max", "argmax", "min", "argmin"):
+        cdtype = DTYPE_TO_CPP[dtype]
+        min_var = (
+            f"-std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
+            else f"std::numeric_limits<{cdtype}>::min()"
         )
-    if reduction_type in {"min", "argmin"}:
-        return (
-            f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        max_var = (
+            f"std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
+            else f"std::numeric_limits<{cdtype}>::max()"
+        )
+        init_var = min_var if reduction_type in ("max", "argmax") else max_var
+        return (
+            init_var
+            if reduction_type in ("max", "min")
+            else f"IndexValue<{cdtype}>{{0, {init_var}}}"
         )
     if is_welford_reduction(reduction_type):
         return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
@@ -153,15 +171,17 @@ def reduction_init(reduction_type, dtype):
 
 
 def reduction_acc_type(reduction_type, dtype):
-    assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-
+    if reduction_type in {"argmin", "argmax"}:
+        return f"IndexValue<{scalar_type}>"
     return scalar_type
 
 
-def reduction_combine(reduction_type, var, next_value):
+def reduction_combine(
+    reduction_type, var, next_value, index: Optional[sympy.Symbol] = None
+):
     if reduction_type == "sum":
         return f"{var} + {next_value}"
     if reduction_type == "prod":
@@ -180,6 +200,11 @@ def reduction_combine(reduction_type, var, next_value):
         else:
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+    if reduction_type in ("argmin", "argmax"):
+        if index is not None:
+            return f"{reduction_type}_combine({var}, {next_value}, {index})"
+        else:
+            return f"{reduction_type}_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
@@ -189,32 +214,6 @@ def reduction_project(reduction_type, acc):
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
-
-
-index_value_name_counter = 1
-
-
-def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
-    global index_value_name_counter
-    num_threads = (
-        "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-    )
-    struct_name = f"IndexValue_{index_value_name_counter}"
-    index_value_name_counter += 1
-
-    # A small annoyance, due to it being a little cumbersome to just throw {} into strings
-    prefix = [
-        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
-        f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
-    ]
-    local_init = [
-        f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
-    ]
-    tmpvar_per_thd = f"{tmpvar}_arr[{num_threads}]"
-    parallel_prefix = [
-        f"{struct_name} {tmpvar_per_thd};",
-    ]
-    return prefix, parallel_prefix, local_init
 
 
 @functools.lru_cache
@@ -493,80 +492,6 @@ class RecordOptimizationContext:
     def get_fx_node(self):
         assert self.current_node
         return self.current_node
-
-
-def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
-    return node.meta.get(OptimizationContext.key, None)
-
-
-def get_current_node_opt_ctx() -> OptimizationContext:
-    assert V.interpreter.current_node
-    return get_opt_ctx(V.interpreter.current_node)
-
-
-class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]):
-        super().__init__(name, bounds)
-        self.is_vec = False
-        self.dtype: Optional[torch.dtype] = None
-        self.dependent_itervars: Set[sympy.Symbol] = set()
-
-    def __repr__(self):
-        return (
-            f"CppCSEVariable(name: {self.name}, bounds: {self.bounds}, is_vec: {self.is_vec}, dtype: {self.dtype}, "
-            f"dependent_itervars: {self.dependent_itervars})"
-        )
-
-    def update_on_args(self, name, args, kwargs):
-        if name == "load":
-            # args[1] is index
-            self._set_dependent_itervars(args[1])
-        else:
-            # propagate relevant itervars and is_vec from args
-            self.dependent_itervars.update(
-                *[
-                    arg.dependent_itervars
-                    for arg in args
-                    if isinstance(arg, CppCSEVariable)
-                ]
-            )
-            if name == "index_expr":
-                self._set_dependent_itervars(args[0])
-            if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
-                self.is_vec = True
-        # NOTE [dtype of CppCSEVariable]
-        # Deciding dtype according to the current optimization context is not
-        # always accurate since the dtypes are initialized during dtype propagation
-        # at the beginning of the codegen. It is possible that some ops are invoked
-        # during the codegen of the current op and take different dtypes from the
-        # current op.
-        # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
-        # propagate the dtypes here inside `update_on_args`.
-        if (
-            hasattr(V.interpreter, "current_node")
-            and get_current_node_opt_ctx() is not None
-        ):
-            self.dtype = get_current_node_opt_ctx().dtype
-
-        if name in BIN_CMP_OPS:
-            self.dtype = torch.bool
-
-    def _set_dependent_itervars(self, index: sympy.Expr):
-        """
-        Set the relevant itervars for this variable based on the `index` expression.
-        This includes the itervars directly used in the `index` as well as relevant itervars
-        of other cse variables used in the `index`.
-        """
-        for s in index.free_symbols:
-            if s in V.kernel.itervars:
-                self.dependent_itervars.add(s)  # type: ignore[arg-type]
-            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
-                self.dependent_itervars.update(
-                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
-                )
-
-    def depends_on(self, itervar: sympy.Symbol):
-        return itervar in self.dependent_itervars
 
 
 class CppOverrides(OpOverrides):
@@ -875,9 +800,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
-        dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -886,10 +808,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
-
         idx_str = cexpr(V.kernel.rename_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
@@ -1019,35 +937,38 @@ class CppVecOverrides(CppOverrides):
                 ]
                 new_args = list(args)
                 if scalars and vectors:
-                    # broadcast scalar args to vector if needed
                     new_args = []
-                    vec_dtype = vectors[0].dtype
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
-                            arg_dtype = torch.int64
-                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                            assert opt_ctx
-                            if opt_ctx.dtype is not None:
-                                arg_dtype = opt_ctx.dtype
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
-                                arg = ops.index_expr(arg, arg_dtype)
+                                arg = ops.index_expr(arg, torch.int64)
                             else:
-                                arg = ops.constant(arg, arg_dtype)
+                                arg = ops.constant(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
-                        if isinstance(arg, CppCSEVariable) and not arg.is_vec:
-                            assert isinstance(V.kernel, CppVecKernel)
-                            # align scalar data type to the vector for binary ops
-                            if len(args) == 2 and arg.dtype != vec_dtype:
-                                arg = ops.to_dtype(arg, vec_dtype)
-                                arg = arg.value if isinstance(arg, OpsValue) else arg
-                                # See NOTE [dtype of CppCSEVariable]: we have to fix arg.dtype since
-                                # the dtype from optimization context could be wrong.
-                                assert isinstance(arg, CppCSEVariable)
-                                arg.dtype = vec_dtype
-                            new_arg = V.kernel.broadcast(arg)
-                            new_args.append(new_arg)
-                        else:
-                            new_args.append(arg)
+                        new_args.append(arg)
+
+                # DType Promotion
+                if vectors:
+                    # We have saw several data type mismatch issues related with index_expr in
+                    # the lowering phase of torch.int8. torch.int32, torch.int64.
+                    # 1. int32 and int64 in test_torchinductor.py::test_max_pool2d_with_indices_backward3_cpu
+                    # 2. int8 and int32 in test_torchinductor.py::test_max_pool2d5_cpu
+                    # 3. int32 and fp32 in test_torchinductor_dynamic_shapes.py::test_avg_pool2d8_dynamic_shapes_cpu
+                    if len(new_args) == 2:
+                        new_args = promote_args(new_args)
+                    elif func == CppVecOverrides.where:
+                        new_args[1:] = promote_args(new_args[1:])
+
+                # Broadcast scalar args to vector
+                if scalars and vectors:
+                    assert isinstance(V.kernel, CppVecKernel)
+                    new_args = [
+                        V.kernel.broadcast(new_arg)
+                        if isinstance(new_arg, CppCSEVariable) and not new_arg.is_vec
+                        else new_arg
+                        for new_arg in new_args
+                    ]
+
                 if vectors:
                     return func(*new_args, **kwargs)
                 else:
@@ -1422,6 +1343,7 @@ class CppVecOverrides(CppOverrides):
     def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
         assert dtype in [
             torch.bool,
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -1430,13 +1352,8 @@ class CppVecOverrides(CppOverrides):
             torch.int32,
             torch.int64,
         ], f"{__name__} does not support {dtype}"
-        node: torch.fx.Node = V.interpreter.current_node
-        assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])
-        assert opt_ctx_x
-        assert opt_ctx_x.dtype is not None
-        assert isinstance(V.kernel, CppVecKernel)
-        src_dtype = opt_ctx_x.dtype
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
@@ -1529,9 +1446,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
@@ -1586,6 +1500,9 @@ class CppKernel(Kernel):
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
+        self.weight_recps_cse = CSE(
+            self.newvar_prefix, self.suffix, name_prefix="wrecps"
+        )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
@@ -1636,15 +1553,6 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
-        if (
-            reduction_type == "welford_reduce"
-            and welford_weight_reciprocal_vec_fn
-            and hasattr(self, "weight_recp_vec_range")
-            and "vec" in f"{acc_type}"
-        ):
-            self.local_reduction_init.writeline(
-                welford_weight_reciprocal_vec_fn(dtype, num_threads)
-            )
 
     def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
@@ -1723,14 +1631,14 @@ class CppKernel(Kernel):
         indirect = free_symbol_is_type(expr, SymT.TMP)
         if indirect:
             # indexing in compute
-            csevar = ops.index_expr(expr, torch.int32).value
+            csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
         else:
             # indexing in loads
             prior_compute = V.kernel.compute
             try:
                 V.kernel.compute = self.loads
-                csevar = ops.index_expr(expr, torch.int32).value
+                csevar = ops.index_expr(expr, torch.int64).value
             finally:
                 V.kernel.compute = prior_compute
             buffer = self.loads
@@ -1749,7 +1657,7 @@ class CppKernel(Kernel):
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         csevar = self.cse.generate(self.loads, line)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
     def store(self, name, index, value, mode=None):
@@ -1772,7 +1680,6 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
-
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -1781,56 +1688,19 @@ class CppKernel(Kernel):
             self.loads, f"reduction {reduction_key}", write=False
         )
         self.is_reduction = True
-        if argmax_or_argmin:
-            prefix, parallel_prefix, local_init = argmax_argmin_prefix(
-                reduction_type, src_dtype, acc
-            )
-            self.local_reduction_init.writelines(local_init)
-            self.reduction_prefix.writelines(prefix)
-            self.parallel_reduction_prefix.writelines(parallel_prefix)
-            compare_op = (
-                "greater_or_nan" if reduction_type == "argmax" else "less_or_nan"
-            )
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
-            self.stores.writelines(
-                [
-                    f"if(!({compare_op}({acc}.value, {value}, {acc}.index, {cexpr_index(index)}))) {{",
-                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
-                    "}",
-                ]
-            )
-            acc_local = f"{acc}_local"
-            num_threads = parallel_num_threads()
-            acc_per_thread = f"{acc}_arr[{num_threads}]"
-            acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
-            self.parallel_reduction_suffix.writelines(
-                [
-                    f"for (int tid = 0; tid < {num_threads}; tid++)",
-                    "{",
-                    f"    if(!({compare_op}({acc}.value, {acc_local_in_array}.value, {acc}.index, {acc_local_in_array}.index))) {{",
-                    f"        {acc}.index = {acc_local_in_array}.index; {acc}.value = {acc_local_in_array}.value;",
-                    "    }",
-                    "}",
-                ],
-            )
-            self.local_reduction_stores.writelines(
-                [
-                    f"{acc_local_in_array} = {acc_local};",
-                ]
-            )
-        else:
-            acc_type = reduction_acc_type(reduction_type, dtype)
-
-            self.reduction_prefix.writeline(
-                f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
-            )
-            self.stores.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
-            )
-            self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, dtype)
+        init_dtype = src_dtype if argmax_or_argmin else dtype
+        acc_type = reduction_acc_type(reduction_type, init_dtype)
+        self.reduction_prefix.writeline(
+            f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
+        )
+        assert self.reduction_depth is not None
+        index = self.itervars[self.reduction_depth]
+        for i in range(self.reduction_depth + 1, len(self.itervars)):
+            index = index * self.ranges[i] + self.itervars[i]
+        self.stores.writeline(
+            f"{acc} = {reduction_combine(reduction_type, acc, value, index)};"
+        )
+        self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -2101,6 +1971,7 @@ class CppVecKernel(CppKernel):
         tiling_factor=0,
         tiling_idx=-1,
         tiling_dtype=torch.float,
+        tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = cpu_vec_isa.pick_vec_isa()
@@ -2109,6 +1980,8 @@ class CppVecKernel(CppKernel):
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
+        self.tail_size = tail_size
+        self.num_elems = tail_size if tail_size else tiling_factor
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2168,8 +2041,6 @@ class CppVecKernel(CppKernel):
            vector lanes for 8-bit data types.
         2. `torch.bool` and `torch.uint8` could mean masks and we load them as float mask vectors.
         """
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         cpp_type = DTYPE_TO_CPP[dtype]
         num_vectors = self._get_num_vectors(dtype)
         load_mask_str = None
@@ -2187,7 +2058,7 @@ class CppVecKernel(CppKernel):
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.tiling_factor})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.num_elems})"
             )
         return line
 
@@ -2221,9 +2092,9 @@ class CppVecKernel(CppKernel):
 
         def get_result_size(dtype: torch.dtype) -> int:
             if dtype.itemsize < 4:
-                return self.tiling_factor * (4 // dtype.itemsize)
+                return self.num_elems * (4 // dtype.itemsize)
             else:
-                return self.tiling_factor
+                return self.num_elems
 
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
@@ -2238,7 +2109,7 @@ class CppVecKernel(CppKernel):
                 code.writeline(
                     f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
                 )
-                line = f"{vec_var}.store(tmpbuf.data());"
+                line = f"{vec_var}.store(tmpbuf.data(), {result_size});"
                 code.writeline(line)
                 code.writeline("return tmpbuf;")
             code.writeline("()")
@@ -2246,8 +2117,6 @@ class CppVecKernel(CppKernel):
             assert isinstance(csevar, CppCSEVariable)
             return csevar
 
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
         with code.indent():
@@ -2257,7 +2126,7 @@ class CppVecKernel(CppKernel):
             )
             code.writeline(result_declare)
             if store_value:
-                code.writeline(f"{store_value}.store(tmpbuf.data());")
+                code.writeline(f"{store_value}.store(tmpbuf.data(), {result_size});")
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2283,11 +2152,13 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if cpp_builder.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
+                code.writeline(f"#pragma GCC unroll {self.num_elems}")
             else:
-                code.writeline(f"#pragma unroll {self.tiling_factor}")
+                code.writeline(f"#pragma unroll {self.num_elems}")
             code.writeline(
-                f"for (long {itervar_inner} = 0; {itervar_inner} < {self.tiling_factor}; {itervar_inner}++)"
+                f"for (long {itervar_inner} = 0; "
+                + f"{itervar_inner} < {self.num_elems}; "
+                + f"{itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
@@ -2320,7 +2191,6 @@ class CppVecKernel(CppKernel):
             return csevar
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2336,7 +2206,7 @@ class CppVecKernel(CppKernel):
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
-        csevar.update_on_args("load", (name, index), {})
+        csevar.update_on_args("load", (self, name, index), {})
         csevar.is_vec = True
         return csevar
 
@@ -2364,10 +2234,10 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            if dtype == torch.float:
+            if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
-                code.writeline(f"{value}.store({var_expr}, {self.tiling_factor});")
+                code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value
@@ -2381,24 +2251,27 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
         code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
         self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        assert reduction_type in {
-            "max",
-            "min",
-            "sum",
-            "prod",
-            "xor_sum",
-            "welford_reduce",
-            "welford_combine",
-        }
-        assert dtype == src_dtype
-        assert dtype in [torch.float, torch.int64]
+        assert reduction_type in VECTORIZABLE_RTYPES
+        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        horizontal_reduction = self.tiling_idx >= self.reduction_depth
+        if argmax_or_argmin:
+            assert src_dtype in (
+                torch.float32,
+                torch.int64,
+            )
+        else:
+            assert dtype == src_dtype
+        if reduction_type == "any":
+            assert dtype == torch.bool
+        else:
+            assert dtype in [torch.float64, torch.float, torch.int64]
+        init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -2410,8 +2283,8 @@ class CppVecKernel(CppKernel):
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-        acc_type = reduction_acc_type(reduction_type, dtype)
-        acc_type_vec = self.reduction_acc_type_vec(reduction_type, dtype)
+        acc_type = reduction_acc_type(reduction_type, init_dtype)
+        acc_type_vec = self.reduction_acc_type_vec(reduction_type, init_dtype)
 
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
@@ -2419,61 +2292,117 @@ class CppVecKernel(CppKernel):
         acc_vec = f"{acc}_vec"
         self.is_reduction = True
         self.reduction_prefix.writeline(
-            f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
+            f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
         )
         self.reduction_prefix.writeline(
-            f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
-        )
-        # save the reciprocal of weights for welford reduce if using static shape
-        reduction_size = functools.reduce(
-            lambda x, y: x * y, self.ranges[self.reduction_depth :]
+            f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, init_dtype)};"
         )
         if reduction_type == "welford_reduce":
+            # save the reciprocal of weights for welford reduce
+            assert self.reduction_depth is not None
+            # use masked acc_vec for tail vec kernel
+            self.reduction_prefix.writeline(
+                f"{acc_type_vec} masked_{acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
+            )
+            reduction_size = functools.reduce(
+                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+            )
             reduction_factor = (
                 self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
             )
             self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
-            self.non_parallel_reduction_prefix.writeline(
-                self.welford_weight_reciprocal_vec(dtype, None)
-            )
+            if self.weight_recp_vec_range not in self.weight_recps_cse.reduction_cache:
+                self.weight_recps_val = self.weight_recps_cse.generate(
+                    self.compute, f"reduction {self.weight_recp_vec_range}", write=False
+                )
+                self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ] = self.weight_recps_val
+                self.non_parallel_reduction_prefix.writeline(
+                    self.welford_weight_reciprocal_vec(dtype)
+                )
+                # generate weight_recps for parallel reduction
+                num_threads = (
+                    "max_threads"
+                    if config.cpp.dynamic_threads
+                    else parallel_num_threads()
+                )
+                self.local_reduction_init.writeline(
+                    self.welford_weight_reciprocal_vec(dtype, num_threads)
+                )
+            else:
+                self.weight_recps_val = self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ]
+            # use masked acc_vec for tail vec kernel
+            acc_vec_ = f"masked_{acc_vec}" if self.tail_size else acc_vec
             self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
             )
         else:
-            self.stores.writeline(
-                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+            assert self.reduction_depth is not None
+            index = self.itervars[self.reduction_depth]
+            for i in range(self.reduction_depth + 1, len(self.itervars)):
+                index = index * self.ranges[i] + self.itervars[i]
+            combine = self.reduction_combine_vec(
+                reduction_type,
+                acc_vec,
+                value,
+                index=index,
+                horizontal_reduction=horizontal_reduction,
+                src_dtype=src_dtype,
             )
+            self.stores.writeline(f"{acc_vec} = {combine};")
         self._gen_parallel_reduction_buffers(
             acc,
             acc_type,
             reduction_type,
-            dtype,
+            init_dtype,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
             acc_type_vec,
             reduction_type,
-            dtype,
+            init_dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
-            welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
+        if reduction_type == "welford_reduce":
+            # use masked acc_vec for tail vec kernel
+            self._gen_parallel_reduction_buffers(
+                f"masked_{acc_vec}",
+                acc_type_vec,
+                reduction_type,
+                dtype,
+                reduction_combine_fn=self.reduction_combine_vec,
+                reduction_init_fn=self.reduction_init_vec,
+            )
         tmpvar: Union[str, CSEVariable]
-        if self.tiling_idx >= self.reduction_depth:
+        if horizontal_reduction:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
-                assert (
-                    self._get_num_vectors(dtype) == 1
-                ), "Welford reduction does not support VectorizedN (N>1)"
+                assert self._get_num_vectors(dtype) in [
+                    1,
+                    2,
+                ], "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
+                masked_next_value = f"welford_vec_reduce_all(masked_{acc_vec})"
+                self.reduction_suffix.writeline(
+                    f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
+                )
+            elif argmax_or_argmin:
+                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
                     "{ return "
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+                is_any = reduction_type == "any"
+                # we are using at::vec::VecMask<float, N> for bool
+                vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
+                vec = f"at::vec::Vectorized<{vec_dtype}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2482,6 +2411,11 @@ class CppVecKernel(CppKernel):
             tmpvar = acc
         else:
             tmpvar = acc_vec
+            if is_welford_reduction(reduction_type):
+                masked_tmpvar = f"masked_{tmpvar}"
+                self.reduction_suffix.writeline(
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
+                )
 
         result = reduction_project(reduction_type, tmpvar)
         self.reduction_cse.reduction_cache[reduction_key] = result
@@ -2491,7 +2425,11 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = torch.float if out_dtype.is_floating_point else torch.int64
+        dtype = (
+            (out_dtype if out_dtype == torch.double else torch.float)
+            if out_dtype.is_floating_point
+            else torch.int64
+        )
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2546,16 +2484,40 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
+        if reduction_type in {"argmin", "argmax"}:
+            cdtype = DTYPE_TO_CPP[scalar_type]
+            acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
+            if reduction_type == "argmin":
+                val = (
+                    f"std::numeric_limits<{cdtype}>::infinity()"
+                    if is_float_dtype(dtype)
+                    else f"std::numeric_limits<{cdtype}>::max()"
+                )
+            else:
+                val = (
+                    f"-std::numeric_limits<{cdtype}>::infinity()"
+                    if is_float_dtype(dtype)
+                    else f"std::numeric_limits<{cdtype}>::min()"
+                )
+            return f"{acc_type}({val})"
+
+        if reduction_type == "any":
+            return f"{self._get_mask_type()}::from(0)"
+
         scalar_init = reduction_init(reduction_type, dtype)
         return f"{vec_type}({scalar_init})"
 
     def reduction_acc_type_vec(self, reduction_type, dtype):
-        assert reduction_type not in {"argmin", "argmax"}
         scalar_type = DTYPE_TO_COMPUTATION_DTYPE[dtype]
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-
+        if reduction_type in {"argmin", "argmax"}:
+            n_src = self._get_num_vectors(scalar_type)
+            n_idx = self._get_num_vectors(torch.int64)
+            return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
+        if reduction_type == "any":
+            return f"{self._get_mask_type()}"
         return vec_type
 
     def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
@@ -2565,26 +2527,59 @@ class CppVecKernel(CppKernel):
             else self.weight_recp_vec_range
         )
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
+        return (
+            f"static WeightRecp<{self._get_vec_type(dtype)}> {self.weight_recps_val}"
+            f"("
+            f"{vec_num_range_thread_expr}"
+            f");"
+        )
 
     def reduction_combine_vec(
-        self, reduction_type, var, next_value, use_weight_recps=False
+        self,
+        reduction_type,
+        var,
+        next_value,
+        use_weight_recps=False,
+        index: Optional[sympy.Symbol] = None,
+        horizontal_reduction: Optional[bool] = None,
+        src_dtype: Optional[torch.dtype] = torch.float32,
     ):
         if reduction_type == "max":
-            return f"at::vec::maximum({var}, {next_value})"
+            if self.tail_size:
+                return f"max_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":
-            return f"at::vec::minimum({var}, {next_value})"
+            if self.tail_size:
+                return f"min_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"at::vec::minimum({var}, {next_value})"
         elif reduction_type == "sum":
-            return f"{var} + {next_value}"
+            if self.tail_size:
+                return f"sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} + {next_value}"
         elif reduction_type == "prod":
-            return f"{var} * {next_value}"
+            if self.tail_size:
+                return f"prod_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} * {next_value}"
         elif reduction_type == "xor_sum":
-            return f"{var} ^ {next_value}"
+            if self.tail_size:
+                return f"xor_sum_masked_reduce({var}, {next_value}, {self.tail_size})"
+            else:
+                return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
             if use_weight_recps:
-                return f"welford_combine({var}, {next_value}, &weight_recps)"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size}, &{self.weight_recps_val})"
+                else:
+                    return f"welford_combine({var}, {next_value}, &{self.weight_recps_val})"
             else:
-                return f"welford_combine({var}, {next_value})"
+                if self.tail_size:
+                    return f"welford_combine({var}, {next_value}, {self.tail_size})"
+                else:
+                    return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -2592,7 +2587,30 @@ class CppVecKernel(CppKernel):
             else:
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
-            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+            if self.tail_size:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.tail_size})"
+            else:
+                return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
+        elif reduction_type in ("argmin", "argmax"):
+            assert src_dtype is not None
+            cdtype = DTYPE_TO_CPP[src_dtype]
+            n_src = self._get_num_vectors(src_dtype)
+            n_idx = self._get_num_vectors(torch.int64)
+            t_extra = ""
+            arg_extra = ""
+            if index is not None:
+                assert horizontal_reduction is not None
+                t_extra = f", {str(horizontal_reduction).lower()}"
+                arg_extra = f", {index}"
+            if self.tail_size:
+                return (
+                    f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
+                    f"({var}, {next_value}{arg_extra}, {self.tail_size})"
+                )
+            else:
+                return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
+        elif reduction_type == "any":
+            return f"{var} | {next_value}"
         else:
             raise NotImplementedError
 
@@ -2727,7 +2745,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"{DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -2739,7 +2757,6 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -2753,7 +2770,7 @@ class CppTile2DKernel(CppVecKernel):
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
-            csevar.update_on_args("load", (name, index), {})
+            csevar.update_on_args("load", (self, name, index), {})
             assert isinstance(csevar, CppCSEVariable)
             csevar.is_vec = True
             return csevar
@@ -2763,7 +2780,6 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -2824,6 +2840,8 @@ class CppVecKernelChecker(CppVecKernel):
 
         self.simd_vec = True
 
+        self.simd_masked_vec = True
+
         self.fast_vec_list = []
         for k, v in CppVecOverrides.__dict__.items():
             if isinstance(v, staticmethod):
@@ -2832,6 +2850,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         # Cache all the load result
         self.supported_dtypes: List[torch.dtype] = [
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -2842,10 +2861,23 @@ class CppVecKernelChecker(CppVecKernel):
             torch.int64,
         ]
 
+        # TODO: remove it after all data types support masked vectorization.
+        self.supported_dtypes_for_masked_vec: List[torch.dtype] = [
+            torch.float,
+            torch.bfloat16,
+            torch.float16,
+        ]
+
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Disabled vectorization: %s", msg)
         self.simd_vec = False
+        self.simd_masked_vec = False
+
+    def disable_masked_vec(self, msg=None):
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug("Disabled masked vectorization: %s", msg)
+        self.simd_masked_vec = False
 
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
@@ -2855,6 +2887,14 @@ class CppVecKernelChecker(CppVecKernel):
 
             opt_ctx.dtype = load_dtype
             var = self.cse.newvar()
+
+            if load_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(
+                    f"{load_dtype} not supported by masked vectorization"
+                )
+
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec("Symbolic ranges not supported by masked load")
 
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
@@ -2871,11 +2911,19 @@ class CppVecKernelChecker(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         with RecordOptimizationContext(__name__) as node_ctx:
+            store_dtype = V.graph.get_dtype(name)
+
+            if store_dtype not in self.supported_dtypes_for_masked_vec:
+                self.disable_masked_vec(
+                    f"{store_dtype} not supported by masked vectorization"
+                )
+
+            if has_free_symbols(self.ranges):
+                self.disable_masked_vec("Symbolic ranges not supported by masked store")
+
             if len(self.itervars) == 0:
                 self.disable_vec("not a loop")
                 return self.simd_vec
-
-            store_dtype = V.graph.get_dtype(name)
 
             opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
             assert opt_ctx
@@ -2895,8 +2943,22 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        argmin_argmax_vec = False
+        if reduction_type in ("argmin", "argmax") and src_dtype in (
+            torch.float,
+            torch.int64,
+        ):
+            assert dtype == torch.int64
+            argmin_argmax_vec = True
+
+        if has_free_symbols(self.ranges):
+            self.disable_masked_vec("Symbolic ranges not supported by masked reduction")
+
         if not (
-            (dtype == torch.float and src_dtype == torch.float)
+            argmin_argmax_vec
+            or (src_dtype == torch.bool and reduction_type == "any")
+            or (dtype == torch.float and src_dtype == torch.float)
+            or (dtype == torch.double and src_dtype == torch.double)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
@@ -2971,29 +3033,11 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    # VecKernel override dtype for constant
-                    # Vectorization only support int32/fp32 now
-                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = torch.iinfo(torch.int32)
-                    if (
-                        dtype == torch.int64
-                        and val <= i32_iinfo.max
-                        and val >= i32_iinfo.min
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
 
-                    f32_iinfo = torch.finfo(torch.float32)
-                    if dtype == torch.double:
-                        if (
-                            (val <= f32_iinfo.max and val >= f32_iinfo.min)
-                            or (val == torch.inf)
-                            or (val == -torch.inf)
-                        ):
-                            opt_ctx.dtype = torch.float32
+                    if opt_ctx.dtype not in self.supported_dtypes_for_masked_vec:
+                        self.disable_masked_vec(
+                            f"{opt_ctx.dtype} not supported by masked vectorization"
+                        )
 
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
@@ -3068,6 +3112,11 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
+                if dtype not in self.supported_dtypes_for_masked_vec:
+                    self.disable_masked_vec(
+                        f"{dtype} not supported by masked vectorization"
+                    )
+
                 if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
@@ -3415,6 +3464,7 @@ class CppKernelProxy(CppKernel):
             tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
                 could_vec = True
+                could_masked_vec = True
                 for tiling_indice in tiling_indices:
                     with CppVecKernelChecker(
                         deepcopy(self.kernel_group.args),
@@ -3424,21 +3474,28 @@ class CppKernelProxy(CppKernel):
                     ) as vec_checker:
                         run(vec_checker)
                         could_vec = could_vec and vec_checker.simd_vec
+                        could_masked_vec = (
+                            could_masked_vec and vec_checker.simd_masked_vec
+                        )
                         if not could_vec:
                             break
                 if could_vec:
                     if len(tiling_indices) == 1:
-                        return [tiling_factor], tiling_indices
+                        return [tiling_factor], tiling_indices, could_masked_vec
                     if len(tiling_indices) == 2:
-                        return [tiling_factor, tiling_factor], tiling_indices
-            return [], []
+                        return (
+                            [tiling_factor, tiling_factor],
+                            tiling_indices,
+                            could_masked_vec,
+                        )
+            return [], [], False
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling(vec_dtype)
+            tiling_factors, tiling_indices, could_masked_vec = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
@@ -3449,9 +3506,21 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(vec_kernel)
-                tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
-                tail_loop.simd_omp = True
+                if could_masked_vec and (tail_loop.size - tail_loop.offset) >= 4:
+                    tail_loop.steps = tail_loop.size - tail_loop.offset
+                    masked_vec_kernel = codegen_kernel(
+                        CppVecKernel,
+                        tiling_factors[0],
+                        tiling_indices[0],
+                        vec_dtype,
+                        tail_loop.steps,
+                    )
+                    tail_loop.set_kernel(masked_vec_kernel)
+                    tail_loop.simd_vec = True
+                else:
+                    tail_loop.set_kernel(scalar_kernel)
+                    tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
@@ -4154,9 +4223,6 @@ class KernelGroup:
         args_num = len(arg_defs)
         return args_num
 
-    def get_export_declaration(self):
-        return "__declspec(dllexport)" if _IS_WINDOWS else ""
-
     def codegen_group(self, name=None) -> str:
         self.stack.close()
         if not self.scheduled_nodes:
@@ -4164,9 +4230,10 @@ class KernelGroup:
         code = BracesBuffer()
         # 1. Include header files
         # TODO: support kernel profile on other platforms
-        enable_kernel_profile = (
-            config.cpp.enable_kernel_profile and sys.platform == "linux"
-        )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         code.writeline(codecache.cpp_prefix())
@@ -4176,7 +4243,7 @@ class KernelGroup:
         kernel_name = str(Placeholder.DESCRIPTIVE_NAME) if name is None else name
         arg_defs, _, _ = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        func_export_decl = self.get_export_declaration()
+        func_export_decl = get_export_declaration()
         code.writeline(
             f'extern "C" {func_export_decl} void {kernel_decl_name}({arg_defs})'
         )

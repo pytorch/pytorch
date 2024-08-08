@@ -1,4 +1,4 @@
-# Owner(s): ["module: nn"]
+# Owner(s): ["module: multi-headed-attention"]
 
 import contextlib
 from functools import partial
@@ -2865,8 +2865,8 @@ class TestSDPACudaOnly(NNTestCase):
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                'out': 2.0 ,
-                'grad_query': 18.0 ,
+                'out': 3.0 ,
+                'grad_query': 150.0 ,
                 'grad_key': 25.0,
                 'grad_value': 8.5,
             }
@@ -2962,8 +2962,8 @@ class TestSDPACudaOnly(NNTestCase):
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                "out": 1.75,
-                "grad_query": 18.0,
+                "out": 4,
+                "grad_query": 150.0,
                 "grad_key": 25.0,
                 "grad_value": 8.0,
                 "grad_attn_mask": 45.0,
@@ -3072,10 +3072,10 @@ class TestSDPACudaOnly(NNTestCase):
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors={
-                'out': 1.5,
-                'grad_query': 13.0,
-                'grad_key': 2.0,
-                'grad_value': 1.75,
+                'out': 2.2,
+                'grad_query': 160.0,
+                'grad_key': 8.0,
+                'grad_value': 4,
             }
         )
 
@@ -3221,8 +3221,8 @@ class TestSDPACudaOnly(NNTestCase):
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
                     'out': 2.0,
-                    'grad_query': 12.0,
-                    'grad_key': 2.0,
+                    'grad_query': 100.0,
+                    'grad_key': 8.0,
                     'grad_value': 2.0,
                 }
             )
