@@ -1118,18 +1118,8 @@ PyObject* THPModule_deviceCount(
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  device = r.deviceOptional(0);
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceType device_type = r.accelerator(0);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   return THPUtils_packDeviceIndex(impl.deviceCount());
@@ -1146,18 +1136,8 @@ PyObject* THPModule_isAvailable(
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  device = r.deviceOptional(0);
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceType device_type = r.accelerator(0);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   if (impl.deviceCount() > 0) {
@@ -1173,37 +1153,13 @@ PyObject* THPModule_setDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "set_device(Device device)",
-      "set_device(c10::string_view? device_type=None, *, int64_t device_index)",
+      "set_device(int64_t device_index, c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceIndex device_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = r.device(0);
-    TORCH_CHECK(device->has_index(), "device doesn't have device index.");
-    device_index = device->index();
-  } else {
-    device = r.deviceOptional(0);
-    if (device.has_value()) {
-      TORCH_CHECK(
-          !device->has_index(),
-          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
-    }
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
-  }
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   impl.setDevice({device_type, device_index});
@@ -1221,17 +1177,8 @@ PyObject* THPModule_getDevice(
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  std::optional<c10::Device> device = r.deviceOptional(0);
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceType device_type = r.accelerator(0);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   c10::Device current_device = impl.getDevice();
@@ -1245,39 +1192,15 @@ PyObject* THPModule_exchangeDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "_exchange_device(Device device)",
-      "_exchange_device(c10::string_view? device_type=None, *, int64_t device_index)",
+      "_exchange_device(int64_t device_index, c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceIndex device_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = r.device(0);
-    TORCH_CHECK(device->has_index(), "device doesn't have device index.")
-    device_index = device->index();
-  } else {
-    device = r.deviceOptional(0);
-    if (device.has_value()) {
-      TORCH_CHECK(
-          !device->has_index(),
-          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
-    }
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
-  }
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
-  }
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
@@ -1292,39 +1215,15 @@ PyObject* THPModule_maybeExchangeDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "_maybe_exchange_device(Device device)",
-      "_maybe_exchange_device(c10::string_view? device_type=None, *, int64_t device_index)",
+      "_maybe_exchange_device(int64_t device_index, c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceIndex device_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = r.device(0);
-    TORCH_CHECK(device->has_index(), "device doesn't have device index.")
-    device_index = device->index();
-  } else {
-    device = r.deviceOptional(0);
-    if (device.has_value()) {
-      TORCH_CHECK(
-          !device->has_index(),
-          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
-    }
-    device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
-  }
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
-  }
-  if (device.has_value()) {
-    device_type = device->type();
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
@@ -1362,39 +1261,16 @@ PyObject* THPModule_getStream(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "current_stream(Device device)",
-      "current_stream(c10::string_view? device_type=None, *, int64_t? device_index=None)",
+      "current_stream(int64_t? device_index=None, c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
   std::optional<c10::DeviceIndex> device_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = r.device(0);
-  } else {
-    device = r.deviceOptional(0);
-    if (device.has_value()) {
-      TORCH_CHECK(
-          !device->has_index(),
-          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
-    }
-    if (!r.isNone(1)) {
-      device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
-    }
+  if (!r.isNone(0)) {
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
   }
-  if (device.has_value()) {
-    device_type = device->type();
-    if (device->has_index()) {
-      device_index = device->index();
-    }
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceType device_type = r.accelerator(1);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   if (!device_index.has_value()) {
@@ -1411,39 +1287,16 @@ PyObject* THPModule_syncStreamsOnDevice(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "synchronize(Device device)",
-      "synchronize(c10::string_view? device_type=None, *, int64_t? device_index=None)",
+      "synchronize(int64_t? device_index=None, c10::string_view? device_type=None)",
   });
   torch::ParsedArgs<2> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  std::optional<c10::Device> device;
   std::optional<c10::DeviceIndex> device_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  c10::DeviceType device_type;
 
-  if (r.idx == 0) {
-    device = r.device(0);
-  } else {
-    device = r.deviceOptional(0);
-    if (device.has_value()) {
-      TORCH_CHECK(
-          !device->has_index(),
-          "device_type (string) must not include an index because device_index (int) was passed explicitly.");
-    }
-    if (!r.isNone(1)) {
-      device_index = r.toInt64(1);
-    }
+  if (!r.isNone(0)) {
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
   }
-  if (device.has_value()) {
-    device_type = device->type();
-    if (device->has_index()) {
-      device_index = device->index();
-    }
-    TORCH_CHECK(
-        at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  } else {
-    device_type = at::getAccelerator(true).value();
-  }
+  c10::DeviceType device_type = r.accelerator(1);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   if (!device_index.has_value()) {
