@@ -19,6 +19,7 @@ from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
+    nested_view_from_values_offsets_lengths,
     NestedTensor,
     ViewNestedFromBuffer,
 )
@@ -5297,6 +5298,58 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 cached_max_seqlen=expected_max_seqlen,
             )
             self.assertTrue(nt.is_pinned())
+    
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("values_is_view", [False, True])
+    def test_jagged_view_from_values_offsets_lengths(
+        self, device, dtype, requires_grad, values_is_view
+    ):
+        if values_is_view:
+            # make values a view of base
+            base = torch.randn(
+                2, 3, 4, 5, 6, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+            values = base.flatten(0, -2)
+        else:
+            values = torch.randn(
+                10, 5, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+        offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
+
+        nt = nested_view_from_values_offsets_lengths(values, offsets, offsets.diff())
+        expected_dim = values.dim() + 1
+        expected_batch_size = offsets.shape[0] - 1
+        expected_base = base if values_is_view else values
+        self._validate_nt(
+            nt,
+            device,
+            dtype,
+            torch.jagged,
+            requires_grad,
+            expected_dim,
+            expected_batch_size,
+            # ensure NT is a proper view
+            base=expected_base,
+            contiguous=True,
+            # if no min / max are passed, expect the metadata cache to be empty
+            cached_min_seqlen=None,
+            cached_max_seqlen=None,
+        )
+
+        if requires_grad:
+            # Make sure grads flow back
+            (nt * 2).backward(torch.ones_like(nt))
+
+            @torch.compiler.disable
+            def _check_grad(t):
+                self.assertTrue(t.grad is not None)
+                self.assertEqual(t.grad, torch.ones_like(t) * 2)
+
+            _check_grad(base if values_is_view else values)
+        nt2 = nested_view_from_values_offsets_lengths(values, offsets, offsets.diff())
+        self.assertEqual(nt.shape, nt2.shape)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])

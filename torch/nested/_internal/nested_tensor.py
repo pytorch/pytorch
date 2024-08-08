@@ -89,7 +89,8 @@ class NestedTensor(torch.Tensor):
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
-        ragged_source = offsets if lengths is None else lengths
+        is_contiguous =  lengths is None or torch.equal(offsets.diff(), lengths)
+        ragged_source = offsets if is_contiguous else lengths
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
