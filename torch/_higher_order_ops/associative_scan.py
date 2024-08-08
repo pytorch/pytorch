@@ -20,6 +20,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
 )
+from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -42,20 +43,23 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     return combined_leaves
 
 
-
 def _interleave(a, b, dim):
     # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
     if b_trunc := (a.shape[dim] == b.shape[dim] + 1):
-        pad = [0] * ((b.ndim - dim - 1) * 2 + 1) + [1] + [0] * (b.ndim * 2 - ((b.ndim - dim - 1) * 2 + 2))
+        pad = (
+            [0] * ((b.ndim - dim - 1) * 2 + 1)
+            + [1]
+            + [0] * (b.ndim * 2 - ((b.ndim - dim - 1) * 2 + 2))
+        )
         b = torch.nn.functional.pad(b, pad)
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
-        interleaved = interleaved[
-            slice_along_axis(0, b.shape[dim] + a.shape[dim] - 1, dim=dim)
-        ]
+        interleaved = torch.ops.aten.slice(
+            interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1
+        )
     return interleaved
 
 
@@ -70,10 +74,6 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
-
-
-def slice_along_axis(start, end, stride=None, dim=0):
-    return (slice(None),) * dim + (slice(start, end, stride),)
 
 
 def associative_scan(
@@ -104,7 +104,7 @@ def associative_scan(
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``.
-            If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations and ``input`` must be CUDA tensors. 
+            If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations and ``input`` must be CUDA tensors.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
@@ -124,10 +124,15 @@ def associative_scan(
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim, reverse=reverse
+                combine_fn, input, dim, reverse=reverse, combine_mode=combine_mode
             )
 
     leaves, spec = pytree.tree_flatten(input)
+
+    if combine_mode == "pointwise" and not all(l.device.type == "cuda" for l in leaves):
+        raise ValueError(
+            "For combine_mode='pointwise', all input tensors need to be on CUDA"
+        )
 
     if reverse:
         leaves = [torch.flip(elem, [dim]) for elem in leaves]
@@ -136,7 +141,7 @@ def associative_scan(
     assert all(
         isinstance(x, torch.Tensor) for x in leaves
     ), "input leaves must be a Tensor"
-    
+
     shape = leaves[0].shape
     ndim = len(shape)
     dim = utils.canonicalize_dim(ndim, dim)
@@ -149,17 +154,19 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
     )
     out_leaves, tree_out = pytree.tree_flatten(out)
-    assert len(leaves) == len(out_leaves), "The pytree of the output of the operator needs to match the input pytree"
+    assert len(leaves) == len(
+        out_leaves
+    ), "The pytree of the output of the operator needs to match the input pytree"
     for x in out_leaves:
-        assert x.shape == shape, "The pytree of the output of the operator needs to match the input pytree"
-    
+        assert (
+            x.shape == shape
+        ), "The pytree of the output of the operator needs to match the input pytree"
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
 
-    #result_flat = associative_scan_op(combine_fn, leaves, dim)
-    if combine_mode == 'generic':
+    if combine_mode == "generic":
         result_flat = generic_associative_scan(combine_fn, leaves, dim)
     else:
         result_flat = associative_scan_op(combine_fn, leaves, dim)
@@ -179,8 +186,8 @@ def generic_associative_scan(operator, elems_flat, dim=0):
             return elems
 
         reduced_elems = operator(
-            *[elem[slice_along_axis(0, -1, stride=2, dim=dim)] for elem in elems],
-            *[elem[slice_along_axis(1, None, stride=2, dim=dim)] for elem in elems]
+            *[torch.ops.aten.slice(elem, dim, 0, -1, 2) for elem in elems],
+            *[torch.ops.aten.slice(elem, dim, 1, None, 2) for elem in elems],
         )
 
         # Recursively compute scan for partially reduced tensors.
@@ -188,25 +195,25 @@ def generic_associative_scan(operator, elems_flat, dim=0):
 
         if num_elems % 2 == 0:
             even_elems = operator(
-                *[e[slice_along_axis(0, -1, dim=dim)] for e in odd_elems],
-                *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems]
+                *[torch.ops.aten.slice(e, dim, 0, -1) for e in odd_elems],
+                *[torch.ops.aten.slice(e, dim, 2, None, 2) for e in elems],
             )
         else:
             even_elems = operator(
                 *odd_elems,
-                *[e[slice_along_axis(2, None, stride=2, dim=dim)] for e in elems]
+                *[torch.ops.aten.slice(e, dim, 2, None, 2) for e in elems],
             )
 
         # The first element of a scan is the same as the first element
         # of the original `elems`.
         even_elems = [
-            torch.cat([elem[slice_along_axis(0, 1, dim=dim)], result], dim=dim)
+            torch.cat([torch.ops.aten.slice(elem, dim, 0, 1), result], dim=dim)
             if result.shape.numel() > 0 and elem.shape[dim] > 0
             else result
             if result.shape.numel() > 0
-            else elem[
-                slice_along_axis(0, 1, dim=dim)
-            ]  # Jax allows/ignores concat with 0-dim, Pytorch does not
+            else torch.ops.aten.slice(
+                elem, dim, 0, 1
+            )  # Jax allows/ignores concat with 0-dim, Pytorch does not
             for (elem, result) in zip(elems, even_elems)
         ]
 
@@ -243,6 +250,11 @@ def trace_associative_scan(
             assert outputs is None
             assert len(node.args) == 1
             outputs = node.args[0]
+
+        if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
+            raise ValueError(
+                "For combine_mode='pointwise', the combine_fn needs to be pointwise"
+            )
 
     assert outputs is not None
     assert len(outputs) == len(
@@ -312,7 +324,11 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
     batch_size = None
     for inp, bdim in zip(input, input_bdims):
         if bdim is not None:
-            batch_size = get_unwrapped(inp).shape[bdim] if is_batchedtensor(inp) else inp.shape[bdim]
+            batch_size = (
+                get_unwrapped(inp).shape[bdim]
+                if is_batchedtensor(inp)
+                else inp.shape[bdim]
+            )
 
     assert batch_size
     input_unwrapped = []
@@ -329,6 +345,6 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
 
     with interpreter.lower():
         res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
-    
+
     lvl = interpreter.level()
     return [_add_batch_dim(x, 0, lvl) for x in res]

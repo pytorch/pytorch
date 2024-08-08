@@ -1034,15 +1034,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         leaf.size
                         if leaf.size is not None
                         else BuiltinVariable(getattr)
-                            .call_function(
-                                tx, [leaf, ConstantVariable.create("shape")], {}
-                            )
-                            .items,
+                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        .items,
                     ),
                 ),
                 kwargs={
                     "dtype": SourcelessBuilder.create(tx, leaf.dtype),
-                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad)
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(input.items, input.items)
