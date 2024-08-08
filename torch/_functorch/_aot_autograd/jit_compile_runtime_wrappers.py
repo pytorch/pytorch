@@ -384,13 +384,17 @@ def aot_dispatch_autograd(
             )
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            if num_tokens != 0 and config.unlift_effect_tokens:
+            if (
+                num_tokens != 0
+                or fw_metadata.num_backward_discovered_tokens > 0
+                and config.unlift_effect_tokens
+            ):
                 unlift_tokens(fw_module, fw_metadata, bw_module)
 
                 num_inner_fwd_outputs -= num_tokens
                 joint_inputs = (
                     joint_inputs[0][num_tokens:],
-                    joint_inputs[1][num_tokens:],
+                    joint_inputs[1],
                 )
 
             fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]

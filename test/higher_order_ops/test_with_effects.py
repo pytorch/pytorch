@@ -464,34 +464,77 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             torch.library.register_autograd("_mylib::foo", foo_bwd)
 
             from torch._higher_order_ops.effects import (
+                _deregister_effectful_op,
                 _EffectType,
                 _register_effectful_op,
             )
 
             _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+            try:
 
-            def fn(x, y):
-                return torch.ops._mylib.foo(x) + y
+                def fn(x, y):
+                    return torch.ops._mylib.foo(x) + y
 
-            def ins_dense_req_grad():
-                return (
-                    torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
-                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
-                )
+                def ins_dense_req_grad():
+                    return (
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    )
 
-            for ins_fn in [ins_dense_req_grad]:
-                ref_ins = ins_fn()
+                for ins_fn in [ins_dense_req_grad]:
+                    ref_ins = ins_fn()
 
-                ref_out = fn(*ref_ins)
-                ref_out.sum().backward()
+                    ref_out = fn(*ref_ins)
+                    ref_out.sum().backward()
 
-                compiled_fn = torch.compile(fn, backend="aot_eager")
-                ins = ins_fn()
-                out = compiled_fn(*ins)
-                self.assertEqual(ref_out, out)
-                out.sum().backward()
-                self.assertEqual(ref_ins[1].grad, ins[1].grad)
-                self.assertEqual(ref_ins[0].grad, ins[0].grad)
+                    compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                    ins = ins_fn()
+                    out = compiled_fn(*ins)
+                    self.assertEqual(ref_out, out)
+                    out.sum().backward()
+                    self.assertEqual(ref_ins[1].grad, ins[1].grad)
+                    self.assertEqual(ref_ins[0].grad, ins[0].grad)
+            finally:
+                _deregister_effectful_op(torch.ops._mylib.foo.default)
+
+    @skipIfNoDynamoSupport
+    def test_regular_effectful_op_only_in_backward(self):
+        from torch._higher_order_ops.effects import (
+            _deregister_effectful_op,
+            _EffectType,
+            _register_effectful_op,
+        )
+
+        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        try:
+
+            def fn(x):
+                return x.sin()
+
+            inp = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+            torch.compile(fn, backend="inductor", fullgraph=True)(inp)
+        finally:
+            _deregister_effectful_op(torch.ops.aten.cos.default)
+
+    @skipIfNoDynamoSupport
+    def test_regular_effectful_op_in_forward_and_backward(self):
+        from torch._higher_order_ops.effects import (
+            _deregister_effectful_op,
+            _EffectType,
+            _register_effectful_op,
+        )
+
+        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        try:
+
+            def fn(x):
+                x = x.cos()
+                return x.sin()
+
+            inp = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+            torch.compile(fn, backend="inductor", fullgraph=True)(inp)
+        finally:
+            _deregister_effectful_op(torch.ops.aten.cos.default)
 
 
 if __name__ == "__main__":

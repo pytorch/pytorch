@@ -42,7 +42,9 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     # FunctionalTensorMode must be enabled here.
     # See Note [Accessing .grad_fn on FunctionalTensor]
     with enable_python_dispatcher(), FunctionalTensorMode(
-        pre_dispatch=aot_config.pre_dispatch, export=aot_config.is_export
+        pre_dispatch=aot_config.pre_dispatch,
+        export=aot_config.is_export,
+        _allow_token_discovery=True,
     ):
         fx_g = make_fx(
             f,
@@ -286,6 +288,45 @@ def aot_dispatch_autograd_graph(
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
+
+    # Post process graph, if new tokens were discovered in backward
+    if fw_metadata.num_backward_discovered_tokens > 0:
+        placeholders = []
+        for node in fx_g.graph.nodes:
+            if node.op == "placeholder":
+                placeholders.append(node)
+            elif node.op == "call_function" and node.target.__name__ == "with_effects":
+                import torch.utils._pytree as fx_pytree
+                from torch.fx.graph import _PyTreeInfo
+
+                assert isinstance(fx_g.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+                inps = fx_pytree.tree_unflatten(
+                    placeholders, fx_g.graph._codegen.pytree_info.in_spec
+                )
+
+                with fx_g.graph.inserting_before(node):
+                    # Naming with tangents as partitioner counts all inputs without "tangents" as forward inputs
+                    bw_input_token = fx_g.graph.placeholder("tangents_bw_token")
+                    node_meta = bw_input_token.meta
+                    fake_mode = placeholders[0].meta["val"].fake_mode
+                    node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
+
+                    old_arg = node.args[0]
+
+                    node.args = (bw_input_token, *node.args[1:])
+
+                    new_inps = (inps[0], *(*inps[1], bw_input_token))
+
+                    _, new_in_spec = fx_pytree.tree_flatten(new_inps)
+                    pytree_info = fx_g.graph._codegen.pytree_info
+                    fx_g.graph._codegen.pytree_info = _PyTreeInfo(
+                        pytree_info.orig_args, new_in_spec, pytree_info.out_spec
+                    )
+
+                    fx_g.graph.erase_node(old_arg)
+                    fx_g.graph.eliminate_dead_code()
+                    fx_g.recompile()
+                break
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
