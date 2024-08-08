@@ -411,7 +411,7 @@ def is_contiguous_general(func, *args, **kwargs):
 
     # If created from narrow() check for lengths
     if inp.lengths() is not None:
-        return False
+        return torch.equal(inp.offsets().diff(), inp.lengths())
 
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
