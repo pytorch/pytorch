@@ -160,7 +160,7 @@ class SuperVariable(VariableTracker):
                 else UserDefinedObjectVariable,
                 {},
             )
-        elif name == "__new__":
+        elif name == "__new__" and isinstance(inner_fn, types.FunctionType):
             # __new__ is a staticmethod object, but accessing __new__ from the super object, as done in
             # _resolved_getattr_and_source, results in a function object. If not specialized here, it will try to add
             # the `self` arg and fail bind arg matching later.
