@@ -8,7 +8,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import DisableContext, EnableContext, innermost_fn, RunOnlyContext
+from .eval_frame import CompileEnabledContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 
@@ -39,29 +39,69 @@ def run(fn=None):
 
 def disable(fn=None, recursive=True):
     """
-    Decorator and context manager to disable TorchDynamo
+    Decorator to disable TorchDynamo.
 
     If recursive=True, Dynamo is completely skipped on the decorated function
     frame as well as the recursively invoked functions.
 
     If recursive=False, Dynamo skips frames associated with the function code,
     but still process recursively invoked frames.
+
+    NOTE: Interaction between `compile`, `disable`, and `enable`
+
+    `compile` is is a "marker" that Dynamo should attempt to compile the function
+    and its nested calls.
+
+    `disable` is higher-priority - it signifies that a function (and its nested
+    calls in the case recursive=True) should not be compiled.
+
+    In particular, `disable` overrides `compile` - if you want to re-enable compilation,
+    use `enable`. `disable` and `enable` have the same priority.
+
+    e.g.
+    @enable
+    def a(x):
+        ...
+
+    @disable
+    def b(x):
+        a(x)
+        ...
+
+    @compile
+    def c(x):
+        b(x)
+        ...
+
+    @disable
+    def d(x):
+        c(x)
+        ...
+
+    Calling `a`  will result in no compilation.
+    Calling `b` will result in no compilation
+    Calling `c` will result in `c` and `a` being compiled.
+    Calling `d` will result in `a` being compiled.
     """
     if recursive:
         if fn is not None:
-            fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext()(fn)
-        return DisableContext()
+            return CompileEnabledContext(False)(fn)
+        return CompileEnabledContext(False)
     else:
         return skip(fn)
 
 
 def enable(fn=None):
+    """
+    Decorator to re-enable TorchDynamo - inverse of `disable`.
+
+    Compilation will only occur if there was a previous `compile` call.
+    """
     if fn is not None:
         assert callable(fn)
-        return EnableContext()(fn)
-    return EnableContext()
+        return CompileEnabledContext(True)(fn)
+    return CompileEnabledContext(True)
 
 
 def skip(fn=None):

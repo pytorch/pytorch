@@ -745,7 +745,7 @@ Tensor scaled_dot_product_attention(
           attn_mask,
           dropout_p,
           is_causal,
-          std::nullopt, /*dropout_mask*/
+          c10::nullopt, /*dropout_mask*/
           scale,
           enable_gqa));
     default:
@@ -815,6 +815,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
     attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
+
 
     // MQA/GQA handling
     auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key_acc, value_acc, enable_gqa);

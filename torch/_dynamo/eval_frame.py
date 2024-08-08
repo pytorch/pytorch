@@ -168,7 +168,7 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self.dynamo_ctx, DisableContext):
+        if isinstance(self.dynamo_ctx, CompileEnabledContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif isinstance(self._orig_mod.forward, types.MethodType) and (
@@ -589,52 +589,22 @@ class RunOnlyContext(_TorchDynamoContext):
         return (self.__class__, ())
 
 
-class EnableContext:
-    def __init__(self) -> None:
-        pass
+class CompileEnabledContext:
+    def __init__(self, enabled):
+        self.enabled = enabled
 
     def __call__(self, fn):
-        fn = innermost_fn(fn)
-
-        @functools.wraps(fn)
-        def _fn(*args, **kwargs):
-            from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
-
-            prior = set_eval_frame_callback_enabled(True)
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                set_eval_frame_callback_enabled(prior)
-
-        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
-
-        # Save the function pointer to find the original callable while nesting
-        # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-
-        return _fn
-
-
-class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
-        super().__init__(callback=None)
-
-    def __call__(self, fn):
-        # Earlier this code was in the base class _TorchDynamoContext. But we
-        # moved it here to have better code organization. For disable, we just
-        # want to disable the eval frame callback mechanism. We don't have to check trace_rules or
-        # create any wrapper.
-        fn = innermost_fn(fn)
-
+        # This code is a simplified version of _TorchDynamoContext.__call__.
+        # We just want to enable/disable the eval frame callback mechanism, so we
+        # don't have to check trace_rules or create any wrapper.
+        # But we still need to return a proper callable/wrapped module/wraped class.
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if inspect.isclass(fn):
-            # User has wrapped the class with compile/disable decorator. Apply
-            # disable to init/call method.
+            # User has wrapped the class with enable/disable decorator. Apply to init/call method.
             cls_obj = fn
             # Disable on init is useful for reconstruction of bytecodes where we
             # want to prevent Dynamo from tracing into the init function. Check
@@ -642,7 +612,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__init__ = self(cls_obj.__init__)
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # NN module variable tracker directly inlines the _call_impl. Enable/disable it.
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -652,22 +622,18 @@ class DisableContext(_TorchDynamoContext):
         def _fn(*args, **kwargs):
             from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
 
-            prior = set_eval_frame_callback_enabled(False)
+            prior = set_eval_frame_callback_enabled(self.enabled)
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame_callback_enabled(prior)
 
-        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
-
-        # Save the function pointer to find the original callable while nesting
-        # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        if not self.enabled:
+            # NOTE using `disable` can still result in a graph break even if immediately
+            # cancelled by an `enable` call!
+            _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
         return _fn
-
-    def __reduce__(self):
-        return (self.__class__, ())
 
 
 def _optimize_catch_errors(
@@ -1097,6 +1063,22 @@ def rewrite_signature(
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
+    def check_optional_input_and_error(f_sig: inspect.Signature):
+        # Check if function has optional input.
+        for name, param in f_sig.parameters.items():
+            if param.default is not inspect.Parameter.empty:
+                from torch._dynamo.exc import Unsupported
+
+                log.error(
+                    "Parameter %s is optional with a default value of %s",
+                    name,
+                    param.default,
+                )
+                raise Unsupported(
+                    "Tracing through optional input is not supported yet",
+                    case_name="optional_input",
+                )
+
     def produce_matching(debug_type, sources, candidates):
         matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
@@ -1107,9 +1089,11 @@ def rewrite_signature(
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
+                if debug_type == "inputs":
+                    check_optional_input_and_error(f_sig)
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
-                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
+                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"',
                 )
             else:
                 matched_elements_positions.append(dict_of_source_vals[id(val)])
