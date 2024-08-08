@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Union
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
