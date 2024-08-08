@@ -7,7 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import ir, mkldnn_ir
+from . import ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
@@ -27,7 +27,8 @@ from .select_algorithm import (
 )
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
 from .virtualized import ops, V
-
+if torch._C._has_mkldnn:
+    from . import mkldnn_ir
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
