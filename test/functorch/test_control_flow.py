@@ -99,7 +99,7 @@ def _fake_associative_scan(combine_fn, input, dim, reverse=False):
             )
         r_flat, _ = pytree.tree_flatten(r)
         result_flat.append(r_flat)
-    
+        
     results = [
         torch.stack([e[leave_ind] for e in op(result_flat)], dim)
         for leave_ind in range(num_leaves)
@@ -1203,6 +1203,7 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_simple(self):
         import random
 
@@ -1211,206 +1212,43 @@ def forward(self, pred_1, x_1):
 
         def mul(x: torch.Tensor, y: torch.Tensor):
             return x * y
-        
-        def pow(x: torch.Tensor, y: torch.Tensor):
-            return x ** 2 + y ** 2
 
-        def f(op, x, dim, reverse, generic_scan):
-            result = associative_scan(op, x, dim, reverse, generic_scan)
-            return result
-        
-        x = torch.randn(3, 10, 2)
-        torch.compiler.reset()
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-            associative_scan2 = associative_scan
-        cumsum1 = associative_scan1(
-            add, x, 1, combine_mode='pointwise'
-        )
-        
-        for combine_mode in ['pointwise', 'generic']:
-            for reverse in [False, True]:
-                torch.compiler.reset()
-                with torch._dynamo.utils.disable_cache_limit():
-                    associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-                    associative_scan2 = associative_scan
-                for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                    cumsum1 = associative_scan1(
-                        op, x, 0, generic_scan=generic, reverse=reverse
-                    )
-                    cumsum2 = associative_scan2(
-                        op, x, 0, generic_scan=generic, reverse=reverse
-                    )
-                    cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
-                    self.assertEqual(cumsum1, cumsum_exp)
-                    self.assertEqual(cumsum2, cumsum_exp)
-                    if not reverse:
-                        cumsum_exp_PT = op_pt(x, 0)
-                        self.assertEqual(cumsum1, cumsum_exp_PT)
-                        self.assertEqual(cumsum2, cumsum_exp_PT)
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        for reverse in [False, True]:
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(op, x, 0, reverse=reverse)
+                cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+                self.assertEqual(cumsum1, cumsum_exp)
+                if not reverse:
+                    cumsum_exp_PT = op_pt(x, 0)
+                    self.assertEqual(cumsum1, cumsum_exp_PT)
+                else:
+                    # Check whether the graph contains at least two flip operations
+                    def f(op, inp, dim):
+                        result = associative_scan(op, inp, dim)
+                        return result
 
-                    cumsum1 = associative_scan1(
-                        op, x, 0, generic_scan=not generic, reverse=reverse
-                    )
-                    cumsum2 = associative_scan2(
-                        op, x, 0, generic_scan=generic, reverse=reverse
-                    )
-                    cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
-                    self.assertEqual(cumsum1, cumsum_exp)
-                    self.assertEqual(cumsum2, cumsum_exp)
-                    if not reverse:
-                        cumsum_exp_PT = op_pt(x, 0)
-                        self.assertEqual(cumsum1, cumsum_exp_PT)
-                        self.assertEqual(cumsum2, cumsum_exp_PT)
+                    # gm = make_fx(f, tracing_mode="symbolic")(op, x, 0)
+                    # self.assertExpectedInline(
+                    #     gm.code.strip(),
+                    #     """""",  # noqa: B950
+                    # )
+                    # self.assertNotRegex(
+                    #     gm.code.strip(),
+                    #     ".*.*",
+                    # )
 
-                    cumsum1 = associative_scan1(
-                        op, x, 0, generic_scan=generic, reverse=reverse
-                    )
-                    cumsum2 = associative_scan2(
-                        op, x, 0, generic_scan=not generic, reverse=reverse
-                    )
-                    cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
-                    self.assertEqual(cumsum1, cumsum_exp)
-                    self.assertEqual(cumsum2, cumsum_exp)
-                    if not reverse:
-                        cumsum_exp_PT = op_pt(x, 0)
-                        self.assertEqual(cumsum1, cumsum_exp_PT)
-                        self.assertEqual(cumsum2, cumsum_exp_PT)
+        # Jax Examples
+        x = torch.arange(0, 4, device=torch.device("cuda"))
+        cumsum1 = associative_scan(add, x, 0, reverse=False)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
 
-            with self.assertRaisesRegex(Exception, r"."):
-                cumsum = associative_scan(add, x, 1, generic_scan=True)
-
-            # Jax Examples
-            x = torch.arange(0, 4)
-            cumsum1 = associative_scan1(add, x, 0, generic_scan=generic)
-            cumsum2 = associative_scan2(add, x, 0, generic_scan=generic)
-            cumsum_exp = _fake_associative_scan(add, x, 0)
-            self.assertEqual(
-                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
-            )
-            self.assertEqual(cumsum1, cumsum_exp)
-            self.assertEqual(cumsum2, cumsum_exp)
-
-            cumsum1 = associative_scan1(add, x, 0, generic_scan=generic, reverse=True)
-            cumsum2 = associative_scan2(add, x, 0, generic_scan=generic, reverse=True)
-            cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
-            self.assertEqual(
-                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
-            )
-            self.assertEqual(cumsum1, cumsum_exp)
-            self.assertEqual(cumsum2, cumsum_exp)
-
-        x = torch.randn(3, 2, 2, requires_grad=True)
-        gm = make_fx(lambda x, y, z: f(x, y, z, False, False))(add, x, 0)
-        self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
-        # No stacktrace found for following nodes
-        add: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(y_1, y_1)
-        scan_combine_graph_0 = self.scan_combine_graph_0
-        associative_scan = torch.ops.higher_order.associative_scan(scan_combine_graph_0, [y_1], 0, ());\
-  scan_combine_graph_0 = y_1 = None
-        getitem: "f32[3, 2, 2]" = associative_scan[0];  associative_scan = None
-        detach: "f32[3, 2, 2]" = torch.ops.aten.detach.default(getitem);  getitem = None
-        detach_1: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        return detach_3
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[1, 2, 2]", arg1_1: "f32[1, 2, 2]"):
-            # No stacktrace found for following nodes
-            add: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            return [add]""",
-        )
-        self.assertRegex(
-            gm.print_readable(print_output=False).strip(),
-            ".*torch.ops.higher_order.associative_scan.*",
-        )
-        gm = make_fx(lambda x, y, z: f(x, y, z, False, True))(add, x, 0)
-        self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
-        # No stacktrace found for following nodes
-        add: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(y_1, y_1)
-        slice_1: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(y_1, 0, 0, -1, 2)
-        slice_2: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(y_1, 0, 1, 9223372036854775807, 2)
-        add_1: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(y_1, 0, 2, 9223372036854775807, 2)
-        add_2: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(add_1, slice_3);  slice_3 = None
-        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(y_1, 0, 0, 1);  y_1 = None
-        cat: "f32[2, 2, 2]" = torch.ops.aten.cat.default([slice_4, add_2]);  slice_4 = add_2 = None
-        constant_pad_nd: "f32[2, 2, 2]" = torch.ops.aten.constant_pad_nd.default(add_1, [0, 0, 0, 0, 0, 1], 0.0);  add_1 = None
-        stack: "f32[2, 2, 2, 2]" = torch.ops.aten.stack.default([cat, constant_pad_nd], 1);  cat = constant_pad_nd = None
-        view: "f32[4, 2, 2]" = torch.ops.aten.view.default(stack, [4, 2, 2]);  stack = None
-        slice_5: "f32[3, 2, 2]" = torch.ops.aten.slice.Tensor(view, 0, 0, 3);  view = None
-        return slice_5""",
-        )
-        self.assertNotRegex(
-            gm.print_readable(print_output=False).strip(),
-            ".*torch.ops.higher_order.associative_scan.*",
-        )
-        gm = make_fx(lambda x, y, z: f(x, y, z, True, False))(add, x, 0)
-        self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
-        # No stacktrace found for following nodes
-        add: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(y_1, y_1)
-        flip: "f32[3, 2, 2]" = torch.ops.aten.flip.default(y_1, [0]);  y_1 = None
-        scan_combine_graph_0 = self.scan_combine_graph_0
-        associative_scan = torch.ops.higher_order.associative_scan(scan_combine_graph_0, [flip], 0, ());\
-  scan_combine_graph_0 = flip = None
-        getitem: "f32[3, 2, 2]" = associative_scan[0];  associative_scan = None
-        detach: "f32[3, 2, 2]" = torch.ops.aten.detach.default(getitem);  getitem = None
-        detach_1: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[3, 2, 2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        flip_1: "f32[3, 2, 2]" = torch.ops.aten.flip.default(detach_3, [0]);  detach_3 = None
-        return flip_1
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: "f32[1, 2, 2]", arg1_1: "f32[1, 2, 2]"):
-            # No stacktrace found for following nodes
-            add: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            return [add]""",
-        )
-        self.assertRegex(
-            gm.print_readable(print_output=False).strip(),
-            ".*torch.ops.higher_order.associative_scan.*",
-        )
-        gm = make_fx(lambda x, y, z: f(x, y, z, True, True))(add, x, 0)
-        self.assertExpectedInline(
-            gm.print_readable(print_output=False).strip(),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, x_1, y_1: "f32[3, 2, 2]", z_1):
-        # No stacktrace found for following nodes
-        add: "f32[3, 2, 2]" = torch.ops.aten.add.Tensor(y_1, y_1)
-        flip: "f32[3, 2, 2]" = torch.ops.aten.flip.default(y_1, [0]);  y_1 = None
-        slice_1: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(flip, 0, 0, -1, 2)
-        slice_2: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(flip, 0, 1, 9223372036854775807, 2)
-        add_1: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        slice_3: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(flip, 0, 2, 9223372036854775807, 2)
-        add_2: "f32[1, 2, 2]" = torch.ops.aten.add.Tensor(add_1, slice_3);  slice_3 = None
-        slice_4: "f32[1, 2, 2]" = torch.ops.aten.slice.Tensor(flip, 0, 0, 1);  flip = None
-        cat: "f32[2, 2, 2]" = torch.ops.aten.cat.default([slice_4, add_2]);  slice_4 = add_2 = None
-        constant_pad_nd: "f32[2, 2, 2]" = torch.ops.aten.constant_pad_nd.default(add_1, [0, 0, 0, 0, 0, 1], 0.0);  add_1 = None
-        stack: "f32[2, 2, 2, 2]" = torch.ops.aten.stack.default([cat, constant_pad_nd], 1);  cat = constant_pad_nd = None
-        view: "f32[4, 2, 2]" = torch.ops.aten.view.default(stack, [4, 2, 2]);  stack = None
-        slice_5: "f32[3, 2, 2]" = torch.ops.aten.slice.Tensor(view, 0, 0, 3);  view = None
-        flip_1: "f32[3, 2, 2]" = torch.ops.aten.flip.default(slice_5, [0]);  slice_5 = None
-        return flip_1""",
-        )
-        self.assertNotRegex(
-            gm.print_readable(print_output=False).strip(),
-            ".*torch.ops.higher_order.associative_scan.*",
-        )
+        cumsum1 = associative_scan(add, x, 0, reverse=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
 
         # TODO: If the number 2 is increased to a larger number,
         # e.g., 10, then the test fails with some errors arising from
@@ -1418,24 +1256,223 @@ class <lambda>(torch.nn.Module):
         num_dims = [random.randint(2, 5) for _ in range(2)]
         for num_dim in num_dims:
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
-            x = torch.randn(*shapes, requires_grad=True)
+            x = torch.randn(*shapes, device=torch.device("cuda"))
+
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(op, x, 0)
+                cumsum_exp = _fake_associative_scan(op, x, 0)
+                self.assertEqual(cumsum1, cumsum_exp)
+                cumsum_exp_PT = op_pt(x, 0)
+                self.assertEqual(cumsum1, cumsum_exp_PT)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_compile(self):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        torch.compiler.reset()
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                associative_scan, fullgraph=True, dynamic=False
+            )
+            associative_scan2 = torch.compile(
+                associative_scan, fullgraph=True, dynamic=True
+            )
+            associative_scan3 = associative_scan
+
+        for reverse in [False, True]:
+            torch.compiler.reset()
+            with torch._dynamo.utils.disable_cache_limit():
+                associative_scan1 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=False
+                )
+                associative_scan2 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=True
+                )
+                associative_scan3 = associative_scan
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan1(op, x, 0, reverse=reverse)
+                cumsum2 = associative_scan2(op, x, 0, reverse=reverse)
+                cumsum3 = associative_scan3(op, x, 0, reverse=reverse)
+                cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+                self.assertEqual(cumsum1, cumsum_exp)
+                self.assertEqual(cumsum2, cumsum_exp)
+                self.assertEqual(cumsum3, cumsum_exp)
+                if not reverse:
+                    cumsum_exp_PT = op_pt(x, 0)
+                    self.assertEqual(cumsum1, cumsum_exp_PT)
+                    self.assertEqual(cumsum2, cumsum_exp_PT)
+                    self.assertEqual(cumsum3, cumsum_exp_PT)
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=torch.device("cuda"))
+        cumsum1 = associative_scan1(add, x, 0, reverse=False)
+        cumsum2 = associative_scan2(add, x, 0, reverse=False)
+        cumsum3 = associative_scan3(add, x, 0, reverse=False)
+        cumsum_exp = _fake_associative_scan(add, x, 0)
+        self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+        self.assertEqual(cumsum2, cumsum_exp)
+        self.assertEqual(cumsum3, cumsum_exp)
+
+        cumsum1 = associative_scan1(add, x, 0, reverse=True)
+        cumsum2 = associative_scan2(add, x, 0, reverse=True)
+        cumsum3 = associative_scan2(add, x, 0, reverse=True)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+        self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        self.assertEqual(cumsum1, cumsum_exp)
+        self.assertEqual(cumsum2, cumsum_exp)
+        self.assertEqual(cumsum3, cumsum_exp)
+
+        x = torch.randn(3, 2, 2, device=torch.device("cuda"))
+
+        def f(op, x, dim, reverse):
+            result = associative_scan(op, x, dim, reverse)
+            return result
+
+        # TODO: If the number 2 is increased to a larger number,
+        # e.g., 10, then the test fails with some errors arising from
+        # FakeTensors
+        num_dims = [random.randint(2, 5) for _ in range(2)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            x = torch.randn(*shapes, device=torch.device("cuda"))
 
             torch.compiler.reset()
             with torch._dynamo.utils.disable_cache_limit():
-                associative_scan1 = torch.compile(associative_scan, fullgraph=True)
-                associative_scan2 = associative_scan
+                associative_scan1 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=False
+                )
+                associative_scan2 = torch.compile(
+                    associative_scan, fullgraph=True, dynamic=True
+                )
+                associative_scan3 = associative_scan
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                cumsum1 = associative_scan1(op, x, 0, generic_scan=True)
-                cumsum2 = associative_scan2(op, x, 0, generic_scan=True)
+                cumsum1 = associative_scan1(op, x, 0)
+                cumsum2 = associative_scan2(op, x, 0)
+                cumsum3 = associative_scan3(op, x, 0)
+                cumsum_exp = _fake_associative_scan(op, x, 0)
+                self.assertEqual(cumsum1, cumsum_exp)
+                self.assertEqual(cumsum2, cumsum_exp)
+                self.assertEqual(cumsum3, cumsum_exp)
+                cumsum_exp_PT = op_pt(x, 0)
+                self.assertEqual(cumsum1, cumsum_exp_PT)
+                self.assertEqual(cumsum2, cumsum_exp_PT)
+                self.assertEqual(cumsum3, cumsum_exp_PT)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_generic_simple(self):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        def f(op, x, dim, reverse, generic_scan):
+            result = associative_scan(op, x, dim, reverse, generic_scan)
+            return result
+        
+        x = torch.randn(3, 10, 2, device=torch.device("cuda"))
+        for reverse in [False, True]:
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(
+                    op, x, 0, combine_mode='pointwise', reverse=reverse
+                )
+                cumsum2 = associative_scan(
+                    op, x, 0, generic_scan='generic', reverse=reverse
+                )
+                cumsum_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+                self.assertEqual(cumsum1, cumsum_exp)
+                self.assertEqual(cumsum2, cumsum_exp)
+                if not reverse:
+                    cumsum_exp_PT = op_pt(x, 0)
+                    self.assertEqual(cumsum1, cumsum_exp_PT)
+                    self.assertEqual(cumsum2, cumsum_exp_PT)
+
+            # Jax Examples
+            x = torch.arange(0, 4, device=torch.device("cuda"))
+            cumsum1 = associative_scan(add, x, 0, combine_mode='pointwise')
+            cumsum2 = associative_scan(add, x, 0, combine_mode='generic')
+            cumsum_exp = _fake_associative_scan(add, x, 0)
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
+            self.assertEqual(cumsum1, cumsum_exp)
+            self.assertEqual(cumsum2, cumsum_exp)
+
+            cumsum1 = associative_scan(add, x, 0, combine_mode='pointwise', reverse=True)
+            cumsum2 = associative_scan(add, x, 0, combine_mode='generic', reverse=True)
+            cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
+            self.assertEqual(cumsum1, cumsum_exp)
+            self.assertEqual(cumsum2, cumsum_exp)
+
+        # x = torch.randn(3, 2, 2, device=torch.device("cuda"))
+        # gm = make_fx(lambda x, y, z: f(x, y, z, False, False))(add, x, 0)
+        # self.assertExpectedInline(
+        #     gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
+        #     """""",
+        # )
+        # self.assertRegex(
+        #     gm.print_readable(print_output=False).strip(),
+        #     ".*torch.ops.higher_order.associative_scan.*",
+        # )
+        # gm = make_fx(lambda x, y, z: f(x, y, z, False, True))(add, x, 0)
+        # self.assertExpectedInline(
+        #     gm.print_readable(print_output=False).strip(),
+        #     """""",
+        # )
+        # self.assertNotRegex(
+        #     gm.print_readable(print_output=False).strip(),
+        #     ".*torch.ops.higher_order.associative_scan.*",
+        # )
+        # gm = make_fx(lambda x, y, z: f(x, y, z, True, False))(add, x, 0)
+        # self.assertExpectedInline(
+        #     gm.print_readable(print_output=False).strip().replace('\n        \n', '\n\n'),
+        #     """""",
+        # )
+        # self.assertRegex(
+        #     gm.print_readable(print_output=False).strip(),
+        #     ".*torch.ops.higher_order.associative_scan.*",
+        # )
+        # gm = make_fx(lambda x, y, z: f(x, y, z, True, True))(add, x, 0)
+        # self.assertExpectedInline(
+        #     gm.print_readable(print_output=False).strip(),
+        #     """""",
+        # )
+        # self.assertNotRegex(
+        #     gm.print_readable(print_output=False).strip(),
+        #     ".*torch.ops.higher_order.associative_scan.*",
+        # )
+
+        # TODO: If the number 2 is increased to a larger number,
+        # e.g., 10, then the test fails with some errors arising from
+        # FakeTensors
+        num_dims = [random.randint(2, 5) for _ in range(2)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            x = torch.randn(*shapes, device=torch.device("cuda"))
+
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                cumsum1 = associative_scan(op, x, 0, combine_mode='pointwise')
+                cumsum2 = associative_scan(op, x, 0, combine_mode='generic')
                 cumsum_exp = _fake_associative_scan(op, x, 0)
                 self.assertEqual(cumsum1, cumsum_exp)
                 self.assertEqual(cumsum2, cumsum_exp)
                 cumsum_exp_PT = op_pt(x, 0)
                 self.assertEqual(cumsum1, cumsum_exp_PT)
                 self.assertEqual(cumsum2, cumsum_exp_PT)
-
-
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport

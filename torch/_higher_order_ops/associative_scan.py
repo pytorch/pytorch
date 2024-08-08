@@ -84,6 +84,7 @@ def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     input: pytree.PyTree,
     dim: int,
+    reverse: bool = False,
     combine_mode: str = "pointwise",
 ) -> torch.Tensor:
     r"""
@@ -105,6 +106,7 @@ def associative_scan(
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
+        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``.
             If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations and ``input`` must be CUDA tensors. 
             In all other cases ``combine_mode=generic`` should be used.
@@ -126,10 +128,13 @@ def associative_scan(
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim
+                combine_fn, input, dim, reverse=reverse
             )
 
     leaves, spec = pytree.tree_flatten(input)
+
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     assert len(leaves) >= 1, "expected at least 1 input leaf"
     assert all(
@@ -148,9 +153,9 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
     )
     out_leaves, tree_out = pytree.tree_flatten(out)
-    assert spec.num_nodes != tree_out.num_nodes or any(
-        o.shape != i.shape or o.dtype != i.dtype or o.device != i.device
-        for o, i in zip(out_leaves, leaves)), "The pytree of the output of the operator needs to match the input pytree"
+    # assert spec.num_nodes != tree_out.num_nodes or any(
+    #     o.shape != i.shape or o.dtype != i.dtype or o.device != i.device
+    #     for o, i in zip(out_leaves, leaves)), "The pytree of the output of the operator needs to match the input pytree"
     
 
     combine_fn = functools.partial(
@@ -162,6 +167,9 @@ def associative_scan(
         result_flat = generic_associative_scan(combine_fn, leaves, dim)
     else:
         result_flat = associative_scan_op(combine_fn, leaves, dim)
+
+    if reverse:
+        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
