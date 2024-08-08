@@ -47,16 +47,16 @@ class TestBenchmarker(TestCase):
             self.assertEqual(self.counter_value("benchmark_gpu"), 1)
 
     @unittest.skipIf(not HAS_CPU, "requires CPU")
-    def test_benchmark_cpu(self):
+    def test_benchmark_cpu(self, device="cpu"):
         benchmarker = self.benchmarker
-        _, _callable = self.make_sum("cpu")
+        _, _callable = self.make_sum(device)
         _ = benchmarker.benchmark_cpu(_callable)
         self.assertEqual(self.counter_value("benchmark_cpu"), 1)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
-    def test_benchmark_gpu(self):
+    def test_benchmark_gpu(self, device=GPU_TYPE):
         benchmarker = self.benchmarker
-        _, _callable = self.make_sum(GPU_TYPE)
+        _, _callable = self.make_sum(device)
         self.assertExpectedRaises(
             NotImplementedError, lambda: benchmarker.benchmark_gpu(_callable)
         )
@@ -81,9 +81,9 @@ class TestTritonBenchmarker(TestBenchmarker):
             self.assertEqual(self.counter_value("benchmark_gpu"), 1)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
-    def test_benchmark_gpu(self):
+    def test_benchmark_gpu(self, device=GPU_TYPE):
         benchmarker = self.benchmarker
-        _, _callable = self.make_sum(GPU_TYPE)
+        _, _callable = self.make_sum(device)
         _ = benchmarker.benchmark_gpu(_callable)
         self.assertEqual(self.counter_value("triton_do_bench"), 1)
         self.assertEqual(self.counter_value("benchmark_gpu"), 1)

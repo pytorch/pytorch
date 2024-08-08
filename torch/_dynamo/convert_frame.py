@@ -25,7 +25,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
-import torch.fx.experimental._sym_dispatch_mode
+from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
@@ -125,7 +125,7 @@ if typing.TYPE_CHECKING:
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
-GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
+
 
 compile_lock = threading.RLock()
 
@@ -1233,9 +1233,7 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
-        with (
-            compile_lock
-        ), _disable_current_modes(), torch.fx.experimental._sym_dispatch_mode.disable_sym_dispatch():
+        with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
             return self._torchdynamo_orig_callable(
                 frame, cache_entry, self.hooks, frame_state, skip=1
