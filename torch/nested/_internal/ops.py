@@ -1590,28 +1590,24 @@ def to_padded_tensor_default(func, *args, **kwargs):
     else:
         max_seq_len = inp._max_seqlen
 
-    if inp.is_cuda:
-        # > 2D values is not supported by the underlying FBGEMM kernel so do shape gymnastics
-        values = inp.values()
-        values_shape = values.shape
-        if values.dim() > 2:
-            values = values.flatten(start_dim=1)
+    # > 2D values is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    values = inp.values()
+    values_shape = values.shape
+    if values.dim() > 2:
+        values = values.flatten(start_dim=1)
 
-        padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
-            values,
-            [inp._offsets],
-            [max_seq_len],
-            new_kwargs["padding"],
-        )
+    padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
+        values,
+        [inp._offsets],
+        [max_seq_len],
+        new_kwargs["padding"],
+    )
 
-        # shape gymnastics part 2
-        if len(values_shape) > 2:
-            padded_out = padded_out.unflatten(-1, values_shape[1:])
+    # shape gymnastics part 2
+    if len(values_shape) > 2:
+        padded_out = padded_out.unflatten(-1, values_shape[1:])
 
-        return padded_out
-    else:
-        # TODO: backup non-FBGEMM impl
-        return None
+    return padded_out
 
 
 @register_jagged_func(
@@ -1637,21 +1633,17 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     elif padded.dim() < 3:
         padded = padded.unsqueeze(-1)
 
-    if padded.is_cuda:
-        values = torch.ops.aten._padded_dense_to_jagged_forward(
-            padded, [offsets], new_kwargs["sum_S"]
-        )
+    values = torch.ops.aten._padded_dense_to_jagged_forward(
+        padded, [offsets], new_kwargs["sum_S"]
+    )
 
-        # shape gymnastics part 2
-        if len(padded_shape) > 3:
-            values = values.unflatten(-1, padded_shape[2:])
-        elif len(padded_shape) < 3:
-            values = values.squeeze(-1)
+    # shape gymnastics part 2
+    if len(padded_shape) > 3:
+        values = values.unflatten(-1, padded_shape[2:])
+    elif len(padded_shape) < 3:
+        values = values.squeeze(-1)
 
-        return NestedTensor(values, offsets)
-    else:
-        # TODO: backup non-FBGEMM impl
-        return None
+    return NestedTensor(values, offsets)
 
 
 @register_jagged_func(

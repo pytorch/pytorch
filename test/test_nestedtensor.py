@@ -7094,17 +7094,17 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         def f(x):
             return x.sin() + 1
 
-        PADDING_VAL = 4.2
+        from torch.nested._internal.nested_tensor import nested_from_padded
 
         @torch.compile(fullgraph=True)
         def g(nt):
+            PADDING_VAL = 4.2
             padded = nt.to_padded_tensor(PADDING_VAL)
             padded = f(padded)
+
             # NB: sum_S must be specified to use the lowering for dense -> jagged
             # and get full fusion
-            return torch.nested.nested_tensor_from_padded(
-                padded, nt.offsets(), sum_S=nt.values().shape[0]
-            )
+            return nested_from_padded(padded, nt.offsets(), sum_S=nt.values().shape[0])
 
         expected_output = f(nt)
         if requires_grad:
