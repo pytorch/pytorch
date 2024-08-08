@@ -1914,6 +1914,34 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 mask_mod=noop_mask,
             )
 
+    @supported_platform
+    def test_causal_block_non_divisible(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S - 1, S - 1)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
+
+    @supported_platform
+    def test_causal_block_non_divisible_with_captured_buffer(self):
+        Q_S = S - 9
+        KV_S = S - 9
+        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+
+        def score_mod(score, b, h, q, kv):
+            return score + offset_q[q] + offset_kv[kv]
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)

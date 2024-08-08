@@ -246,7 +246,7 @@ compute_flex_attention = r"""
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     acc, l_i, m_i = forward_inner(
-        q, K_block_ptr, V_block_ptr,
+        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         acc, l_i, m_i,
         off_z, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
@@ -284,7 +284,7 @@ compute_flex_attention = r"""
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
-            q, K_block_ptr, V_block_ptr,
+            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             acc, l_i, m_i,
             off_z, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
@@ -319,7 +319,7 @@ compute_flex_attention = r"""
 compute_forward_block = r"""
 @triton.jit
 def forward_inner(
-    q, K_block_ptr, V_block_ptr,
+    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
@@ -345,67 +345,25 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+    if not IS_DIVISIBLE and block_n_end * BLOCK_N > KV_LEN:
+        run_last = True
+        block_n_end = block_n_end - 1
+    else:
+        run_last = False
+        block_n_end = block_n_end
+
     # loop over k, v and update accumulator
     for start_n in range(block_n_start, block_n_end):
-        # -- load k --
-        k = tl.load(K_block_ptr, boundary_check=(1,))
-        # -- compute qk ---
-        qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
-        if not PRESCALE_QK:
-            qk *= SM_SCALE
-        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-        # TODO: Add load mask in modification when M/N Boundary is not safe
-        {{ modification(
-            subgraph_number=0,
-            output_name="post_mod_scores",
-            score="qk",
-            b="off_z",
-            h="off_h",
-            m="offs_m",
-            n="offs_n",
-            out="qk"
-        ) | indent_except_first(2) }}
-
-        if not IS_FULL_BLOCKS:
-            {{ modification(
-                subgraph_number=1,
-                output_name="mask_mod_output",
-                score="qk",
-                b="off_z",
-                h="off_h",
-                m="offs_m",
-                n="offs_n",
-            ) | indent_except_first(3) }}
-            # apply mask for partially unmasked blocks
-            post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
-
-        # TODO: In the case that score_mod is linear, this can be LICMed
-        if not PRESCALE_QK:
-            post_mod_scores *= RCP_LN2
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        # -- compute scaling constant ---
-        m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
-        if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_ij == float("-inf"))
-            m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
-        else:
-            m_ij_masked = m_ij
-
-        alpha = tl.math.exp2(m_i - m_ij_masked)
-        p = tl.math.exp2(post_mod_scores - m_ij_masked[:, None])
-
-        # NB: l_i update is pulled up here since it's a bit faster
-        # NB: For headdim=256, it's faster to move it back down to after m_i =
-        # m_ij
-        l_i = l_i * alpha + tl.sum(p, 1)
-        # # -- scale and update acc --
-        acc = acc * alpha[:, None]
-        v = tl.load(V_block_ptr, boundary_check=(0,))
-        acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
-
-        # -- update m_i
-        m_i = m_ij
+        acc, l_i, m_i = forward_loop_inner(
+            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            # accumulated values
+            acc, l_i, m_i,
+            # Offsets
+            off_z, off_h, offs_m, offs_n,
+            MATMUL_PRECISION, RCP_LN2,
+            {{gen_argdefs()}},
+            IS_FULL_BLOCKS,
+        )
 
         # update pointers
         offset = get_offset_for_next_block(start_n, kv_indices, kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N)
@@ -415,6 +373,187 @@ def forward_inner(
 
         offs_n = offs_n + offset
 
+    if run_last:
+        # We need to do one more iteration for the last block
+        acc, l_i, m_i = forward_loop_inner_last(
+            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            # accumulated values
+            acc, l_i, m_i,
+            # Offsets
+            off_z, off_h, offs_m, offs_n,
+            MATMUL_PRECISION, RCP_LN2,
+            {{gen_argdefs()}},
+            IS_FULL_BLOCKS,
+        )
+
+    return acc, l_i, m_i
+
+"""
+
+
+foward_loop_inner_block = r"""
+@triton.jit
+def forward_loop_inner(
+    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    # accumulated values
+    acc, l_i, m_i,
+    # Offsets
+    off_z, off_h, offs_m, offs_n,
+    MATMUL_PRECISION, RCP_LN2,
+    {{gen_argdefs()}},
+    IS_FULL_BLOCKS,
+):
+    # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
+    {{gen_defines() | indent_except_first(1)}}
+
+    # -- load k --
+    k = tl.load(K_block_ptr, boundary_check=(1,))
+    # -- compute qk ---
+    qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+    if not PRESCALE_QK:
+        qk *= SM_SCALE
+    # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+    m = offs_m[:, None]
+    n = offs_n[None, :]
+    # TODO: Add load mask in modification when M/N Boundary is not safe
+    {{ modification(
+        subgraph_number=0,
+        output_name="post_mod_scores",
+        score="qk",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        out="qk"
+    ) | indent_except_first(1) }}
+
+    if not IS_FULL_BLOCKS:
+        {{ modification(
+            subgraph_number=1,
+            output_name="mask_mod_output",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+        ) | indent_except_first(2) }}
+        # apply mask for partially unmasked blocks
+        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+
+    # TODO: In the case that score_mod is linear, this can be LICMed
+    if not PRESCALE_QK:
+        post_mod_scores *= RCP_LN2
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # -- compute scaling constant ---
+    m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
+    if not ROWS_GUARANTEED_SAFE:
+        masked_out_rows = (m_ij == float("-inf"))
+        m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
+    else:
+        m_ij_masked = m_ij
+
+    alpha = tl.math.exp2(m_i - m_ij_masked)
+    p = tl.math.exp2(post_mod_scores - m_ij_masked[:, None])
+
+    # NB: l_i update is pulled up here since it's a bit faster
+    # NB: For headdim=256, it's faster to move it back down to after m_i =
+    # m_ij
+    l_i = l_i * alpha + tl.sum(p, 1)
+    # # -- scale and update acc --
+    acc = acc * alpha[:, None]
+    v = tl.load(V_block_ptr, boundary_check=(0,))
+    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+    # -- update m_i
+    m_i = m_ij
+
+    return acc, l_i, m_i
+
+"""
+
+
+foward_loop_inner_last_block = r"""
+@triton.jit
+def forward_loop_inner_last(
+    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    # accumulated values
+    acc, l_i, m_i,
+    # Offsets
+    off_z, off_h, offs_m, offs_n,
+    MATMUL_PRECISION, RCP_LN2,
+    {{gen_argdefs()}},
+    IS_FULL_BLOCKS,
+):
+    # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
+    {{gen_defines() | indent_except_first(1)}}
+
+    # -- load k --
+    k = tl.load(K_block_ptr, boundary_check=(1,))
+    # -- compute qk ---
+    qk = tl.dot(q, k) # TODO: use cuda matmul when q_len <= 2.
+    if not PRESCALE_QK:
+        qk *= SM_SCALE
+    # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+    m = offs_m[:, None] % Q_LEN
+    n = offs_n[None, :] % KV_LEN
+    # TODO: Add load mask in modification when M/N Boundary is not safe
+    {{ modification(
+        subgraph_number=0,
+        output_name="post_mod_scores",
+        score="qk",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        out="qk"
+    ) | indent_except_first(1) }}
+
+    if not IS_DIVISIBLE:
+        post_mod_scores = tl.where(offs_n[None, :] < KV_LEN, post_mod_scores, float("-inf"))
+
+    if not IS_FULL_BLOCKS:
+        {{ modification(
+            subgraph_number=1,
+            output_name="mask_mod_output",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+        ) | indent_except_first(2) }}
+        mask_mod_output = tl.where(offs_n[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+        # apply mask for partially unmasked blocks
+        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+
+    # TODO: In the case that score_mod is linear, this can be LICMed
+    if not PRESCALE_QK:
+        post_mod_scores *= RCP_LN2
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # -- compute scaling constant ---
+    m_ij = tl.maximum(m_i, tl.max(post_mod_scores, 1))
+    if not ROWS_GUARANTEED_SAFE:
+        masked_out_rows = (m_ij == float("-inf"))
+        m_ij_masked = tl.where(masked_out_rows, 0, m_ij)
+    else:
+        m_ij_masked = m_ij
+
+    alpha = tl.math.exp2(m_i - m_ij_masked)
+    p = tl.math.exp2(post_mod_scores - m_ij_masked[:, None])
+
+    # NB: l_i update is pulled up here since it's a bit faster
+    # NB: For headdim=256, it's faster to move it back down to after m_i =
+    # m_ij
+    l_i = l_i * alpha + tl.sum(p, 1)
+    # # -- scale and update acc --
+    acc = acc * alpha[:, None]
+    v = tl.load(V_block_ptr, boundary_check=(0,))
+    acc = tl.dot(p.to(MATMUL_PRECISION), v, acc)
+
+    # -- update m_i
+    m_i = m_ij
+
     return acc, l_i, m_i
 
 """
@@ -423,7 +562,11 @@ def forward_inner(
 flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
-    source=compute_flex_attention + compute_forward_block + compute_next_offset_func,
+    source=compute_flex_attention
+    + compute_forward_block
+    + compute_next_offset_func
+    + foward_loop_inner_block
+    + foward_loop_inner_last_block,
 )
 
 
@@ -480,6 +623,7 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
         else:
             default_config = (64, 32, 4, 3)
 
+    print("--->>> ", default_config)
     return default_config
 
 
