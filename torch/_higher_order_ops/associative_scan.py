@@ -46,10 +46,6 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
 def _interleave(a, b, dim):
     # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
     if b_trunc := (a.shape[dim] == b.shape[dim] + 1):
-        # pad = [0, 0] * b.ndim
-        # pad[
-        #     (b.ndim - dim - 1) * 2 + 1
-        # ] = 1  # +1=always end of dim, pad-order is reversed so start is at end
         pad = [0] * ((b.ndim - dim - 1) * 2 + 1) + [1] + [0] * (b.ndim * 2 - ((b.ndim - dim - 1) * 2 + 2))
         b = torch.nn.functional.pad(b, pad)
 
@@ -153,9 +149,9 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
     )
     out_leaves, tree_out = pytree.tree_flatten(out)
-    # assert spec.num_nodes != tree_out.num_nodes or any(
-    #     o.shape != i.shape or o.dtype != i.dtype or o.device != i.device
-    #     for o, i in zip(out_leaves, leaves)), "The pytree of the output of the operator needs to match the input pytree"
+    assert len(leaves) == len(out_leaves), "The pytree of the output of the operator needs to match the input pytree"
+    for x in out_leaves:
+        assert x.shape == shape, "The pytree of the output of the operator needs to match the input pytree"
     
 
     combine_fn = functools.partial(
@@ -259,12 +255,6 @@ def trace_associative_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
