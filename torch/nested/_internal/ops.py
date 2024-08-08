@@ -661,8 +661,8 @@ def _softmax_default(func, *args, **kwargs):
     if reduce_on_ragged:
         padded_softmax_values = torch.nn.functional.softmax(
             torch.ops.aten._jagged_to_padded_dense_forward(
-                inp._values.flatten(
-                    start_dim=inp._ragged_idx
+                inp._values.reshape(
+                    inp._values.shape[0], -1
                 ),  # values are required to be 2D tensors for j2pd
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],  # max length of ragged dimension
