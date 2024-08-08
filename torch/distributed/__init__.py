@@ -117,7 +117,7 @@ if is_available():
             del guard
 
     if sys.platform != "win32":
-        from torch._C._distributed_c10d import _round_robin_process_groups, HashStore
+        from torch._C._distributed_c10d import HashStore
 
     from .device_mesh import DeviceMesh, init_device_mesh
 
