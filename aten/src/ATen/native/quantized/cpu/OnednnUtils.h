@@ -5,7 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#ifdef USE_FBGEMM
 #include <cpuinfo.h>
+#endif
 
 #include <c10/util/CallOnce.h>
 
@@ -418,6 +420,7 @@ inline bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
+#ifdef USE_FBGEMM
 // When qengine is x86, use this util func to check if onednn kernel
 // is preferred than fbgemm's to get better performance.
 inline bool should_use_onednn_quant(
@@ -440,6 +443,7 @@ inline bool should_use_onednn_quant(
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
 #endif
 }
+#endif
 
 } // onednn_utils
 
