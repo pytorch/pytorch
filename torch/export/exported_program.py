@@ -327,6 +327,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
     from torch._guards import detect_fake_mode
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
         _export_to_aten_ir,
         _fakify_params_buffers,
@@ -335,16 +336,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
-        fake_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                fake_args.append(node.meta["val"])
-
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-        fake_mode = detect_fake_mode(fake_args)
+        fake_args = [
+            node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
@@ -389,18 +390,42 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
-        aten_export_artifact = _export_to_aten_ir(
-            mod,
-            # this requires empty kwargs, but not in pytree.flattened format
-            (
-                *fake_args_unwrapped[0],
-                *fake_args_unwrapped[1].values(),
-            ),
-            {},
-            fake_params_buffers,
-            constant_attrs,
-            _check_autograd_state=False,
-        )
+
+        params_buffers_to_node_meta = {}
+        for node in mod.graph.nodes:
+            target = node.target
+            meta = node.meta
+            if node.op == "get_attr":
+                params_buffers_to_node_meta[target] = meta
+
+            # If the call_function uses param as input, we also need to update params' meta
+            # with this call_function node's meta.
+            # This is basically the same flow as torch.fx.traceback.preserve_meta()
+            if node.op == "call_function" and not isinstance(
+                node.target, torch._ops.HigherOrderOperator
+            ):
+                for arg in node._input_nodes:
+                    if arg.op == "get_attr":
+                        for entry in torch.fx.proxy._COPY_META_FIELDS:
+                            if entry in meta:
+                                params_buffers_to_node_meta[arg.target][entry] = meta[
+                                    entry
+                                ]
+
+        with fake_mode:
+            fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+            aten_export_artifact = _export_to_aten_ir(
+                mod,
+                # this requires empty kwargs, but not in pytree.flattened format
+                (
+                    *fake_args_unwrapped[0],
+                    *fake_args_unwrapped[1].values(),
+                ),
+                {},
+                fake_params_buffers,
+                constant_attrs,
+                _check_autograd_state=False,
+            )
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -414,6 +439,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
                             fqn,
                             mod_cls.__module__ + "." + mod_cls.__qualname__,
                         )
+
+        # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
+        for metadata in params_buffers_to_node_meta.values():
+            metadata.pop("nn_module_stack", None)
+            metadata.pop("stack_trace", None)
+
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                if node.target in new_graph_signature.inputs_to_parameters:
+                    param_name = new_graph_signature.inputs_to_parameters[node.target]
+                    if param_name in params_buffers_to_node_meta:
+                        for k, v in params_buffers_to_node_meta[param_name].items():
+                            node.meta[k] = v
+                if node.target in new_graph_signature.inputs_to_buffers:
+                    buffer_name = new_graph_signature.inputs_to_buffers[node.target]
+                    if buffer_name in params_buffers_to_node_meta:
+                        for k, v in params_buffers_to_node_meta[buffer_name].items():
+                            node.meta[k] = v
 
         # overwrite signature for non-persistent buffers
         for spec in new_graph_signature.input_specs:
@@ -433,8 +476,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
     for name in buffers_to_remove:
         delattr(ep.graph_module, name)
-
-    from torch._guards import detect_fake_mode
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode = detect_fake_mode(fake_args)
@@ -676,7 +717,7 @@ class ExportedProgram:
         assert all(issubclass(v, Verifier) for v in verifiers)
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
-        self._validate()
+        self.validate()
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1091,6 +1132,11 @@ class ExportedProgram:
             input_placeholders, flat_args_with_path, self.range_constraints
         )
 
+    @compatibility(is_backward_compatible=False)
+    def validate(self):
+        self._validate()
+
+    # TODO: remove this
     @final
     def _validate(self):
         assert (
