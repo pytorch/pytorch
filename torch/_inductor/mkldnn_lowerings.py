@@ -27,11 +27,12 @@ from .select_algorithm import (
 )
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
 from .virtualized import ops, V
-if torch._C._has_mkldnn:
-    from . import mkldnn_ir
+
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
+        from . import mkldnn_ir
+
         aten_mkldnn_linear_unary = ExternKernelChoice(
             torch.ops.mkldnn._linear_pointwise,
             "mkldnn::_linear_pointwise",
