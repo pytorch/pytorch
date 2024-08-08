@@ -367,7 +367,7 @@ def should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
     do_bench = functools.partial(
-        torch._inductor.runtime.runtime_utils.do_bench_gpu,
+        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
         warmup=5,
     )
     m_padded_length = 0

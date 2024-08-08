@@ -577,6 +577,24 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
         self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
 
+    @with_comms
+    def test_flatten_mesh(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp", "cp", "tp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Test flatten contiguous dims
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        flattened_dp_cp_mesh = dp_cp_mesh._flatten()
+        self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+
+        # Test flatten non-contiguous dims
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        flattned_dp_tp_mesh = dp_tp_mesh._flatten()
+        self.assertEqual(dp_tp_mesh.mesh.flatten(), flattned_dp_tp_mesh.mesh)
+
 
 class TestMeshEnv(DTensorTestBase):
     @property
