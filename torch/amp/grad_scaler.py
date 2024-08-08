@@ -284,7 +284,8 @@ class GradScaler:
                     )
                     if isinstance(grads[0], torch.distributed._tensor.DTensor):
                         torch.distributed.all_reduce(
-                            per_device_found_inf.get(device), op=torch.distributed.ReduceOp.MAX
+                            per_device_found_inf.get(device),
+                            op=torch.distributed.ReduceOp.MAX,
                         )
 
         return per_device_found_inf._per_device_tensors
