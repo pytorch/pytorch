@@ -28,9 +28,8 @@ class TestBenchmarker(TestCase):
         return (fn, args, kwargs), _callable
 
     def get_counter_value(self, name):
-        print(f"benchmarking.{type(self.ThisBenchmarker).__name__}.{name}")
         return counters["inductor"][
-            f"benchmarking.{type(self.ThisBenchmarker).__name__}.{name}"
+            f"benchmarking.{self.ThisBenchmarker.__name__}.{name}"
         ]
 
     @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
