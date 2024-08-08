@@ -218,7 +218,10 @@ def map_autograd(f, xs, pos_args):
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
 def map_proxy_torch_dispatch_mode(mode, f, xs, args):
-    return trace_map(mode, map_impl, f, xs, args)
+    if mode.enable_tracing:
+        return trace_map(mode, map_impl, f, xs, args)
+    else:
+        return map_impl(f, xs, args)
 
 
 @map_impl.py_impl(FakeTensorMode)
