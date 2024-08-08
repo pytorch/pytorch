@@ -37,8 +37,9 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
+from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
-from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
+from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -2472,12 +2473,14 @@ class TritonKernel(SIMDKernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline("from triton.testing import do_bench")
+            result.writeline(
+                "from torch._inductor.runtime.benchmarking import benchmarker"
+            )
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -3023,73 +3026,79 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    @preserve_rng_state()
     def benchmark_fused_nodes(self, nodes):
-        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
-        mod = PyCodeCache.load(src_code)
-
-        def cache_file_path():
-            assert mod.__file__ is not None
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
-
-        def load_cache():
-            path = cache_file_path()
-            if os.path.exists(path):
-                with open(path) as fd:
-                    return float(fd.read())
-            return None
-
-        def store_cache():
-            path = cache_file_path()
-            with open(path, "w") as fd:
-                fd.write(str(ms))
-
-        log.debug(
-            "kernel src code for %s written to: %s",
-            {n.get_name() for n in nodes},
-            mod.__file__,
-        )
-        ms = load_cache()
-        if ms is not None:
-            return ms, mod.__file__
-
-        args = mod.get_args()
-        call = mod.call
-        wrapped_jit_function = mod.triton_
-
-        # call once to trigger the compilation
-        try:
-            call(wrapped_jit_function.clone_args(*args)[0])
-        except Exception as e:
-            log.debug(
-                "Exception (%s) in compiling fused nodes %s",
-                e,
-                {n.get_name() for n in nodes},
+        with preserve_rng_state():
+            src_code = self.generate_kernel_code_from_nodes(
+                nodes, benchmark_kernel=True
             )
-            ms = float("inf")
+            mod = PyCodeCache.load(src_code)
+
+            def cache_file_path():
+                assert mod.__file__ is not None
+                return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+
+            def load_cache():
+                path = cache_file_path()
+                if os.path.exists(path):
+                    with open(path) as fd:
+                        return float(fd.read())
+                return None
+
+            def store_cache():
+                path = cache_file_path()
+                with open(path, "w") as fd:
+                    fd.write(str(ms))
+
+            log.debug(
+                "kernel src code for %s written to: %s",
+                {n.get_name() for n in nodes},
+                mod.__file__,
+            )
+            ms = load_cache()
+            if ms is not None:
+                return ms, mod.__file__
+
+            args = mod.get_args()
+            call = mod.call
+            wrapped_jit_function = mod.triton_
+
+            # call once to trigger the compilation
+            try:
+                call(wrapped_jit_function.clone_args(*args)[0])
+            except Exception as e:
+                log.debug(
+                    "Exception (%s) in compiling fused nodes %s",
+                    e,
+                    {n.get_name() for n in nodes},
+                )
+                ms = float("inf")
+                store_cache()
+                return ms, mod.__file__
+
+            launchers = wrapped_jit_function.launchers
+            assert len(launchers) == 1
+            if launchers[0].n_spills > 0:
+                # skip benchmarking the kernel if there are register spills
+                ms = float("inf")
+            else:
+                # We have to clone the inplace updated arguments to avoid earlier calls
+                # generating out of range indices for later calls.
+                ms = benchmarker.benchmark_gpu(
+                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
+                )
+
+                # overhead of cloning args gives bias for fusing the kernel
+                # in the case of mutating/in-placeable second fusion
+                # TODO - would be better as a hook in triton do_bench that reset
+                # the input values between benchmarking
+                ms = ms - benchmarker.benchmark_gpu(
+                    lambda: wrapped_jit_function.clone_args(*args)
+                )
+
+            log.debug(
+                "The fused kernel for %s took %.3f ms to run",
+                {n.get_name() for n in nodes},
+                ms,
+            )
             store_cache()
             return ms, mod.__file__
-
-        launchers = wrapped_jit_function.launchers
-        assert len(launchers) == 1
-        if launchers[0].n_spills > 0:
-            # skip benchmarking the kernel if there are register spills
-            ms = float("inf")
-        else:
-            # We have to clone the inplace updated arguments to avoid earlier calls
-            # generating out of range indices for later calls.
-            ms = do_bench_gpu(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
-
-            # overhead of cloning args gives bias for fusing the kernel
-            # in the case of mutating/in-placeable second fusion
-            # TODO - would be better as a hook in triton do_bench that reset
-            # the input values between benchmarking
-            ms = ms - do_bench_gpu(lambda: wrapped_jit_function.clone_args(*args))
-
-        log.debug(
-            "The fused kernel for %s took %.3f ms to run",
-            {n.get_name() for n in nodes},
-            ms,
-        )
-        store_cache()
-        return ms, mod.__file__
