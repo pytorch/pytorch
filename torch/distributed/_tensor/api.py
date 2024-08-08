@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
@@ -673,6 +674,7 @@ def distribute_tensor(
 
     local_tensor = tensor.detach()
 
+    # TODO(xilun): address sharding order
     # distribute the tensor according to the placements.
     placements = list(placements)
     for idx, placement in enumerate(placements):

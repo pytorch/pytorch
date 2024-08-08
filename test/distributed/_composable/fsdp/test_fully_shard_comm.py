@@ -38,6 +38,7 @@ from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    check_sharded_parity,
     DoubleLinear,
     FSDPTest,
     FSDPTestMultiThread,
@@ -260,6 +261,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
+            reduce_scatter_reduce_op=None,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
             all_reduce_grads=True,
@@ -377,6 +379,44 @@ class TestFullyShardCommunication(FSDPTest):
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_fsdp_modules
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_divide_factor(self):
+        self.run_subtests(
+            {"divide_factor": [self.world_size * 2, self.world_size]},
+            self._test_set_reduce_scatter_divide_factor,
+        )
+
+    def _test_set_reduce_scatter_divide_factor(self, divide_factor: float):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, reshard_after_forward=False)
+        model = fully_shard(model, reshard_after_forward=False)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+        model.set_reduce_scatter_divide_factor(divide_factor)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
+        for iter_idx in range(10):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                param.grad.mul_(1.0 / divide_factor)
+                dist.all_reduce(param.grad)
+            loss = model(inp).sum()
+            loss.backward()
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+            self.assertEqual(ref_loss, loss)
+            check_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShardPrefetch(FSDPTest):
@@ -852,7 +892,7 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_multi_module_unused_module(self):
         class ModuleWithUnusedLinear(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unused_lin = nn.Linear(1, 1)
                 self.lin = nn.Linear(16, 16)

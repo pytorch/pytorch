@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     _NUM_THREADS_PER_WARP,
@@ -33,7 +34,6 @@ from .runtime_utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -664,7 +664,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return do_bench_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -690,29 +690,29 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        timings = {
-            launcher: self.bench(launcher, *args, **kwargs)
-            for launcher in self.launchers
-        }
+        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
+            timings = {
+                launcher: self.bench(launcher, *args, **kwargs)
+                for launcher in self.launchers
+            }
 
-        for k, v in timings.items():
-            self.coordesc_tuner.cache_benchmark_result(k.config, v)
-
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
-                log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
-                    k.config,
-                    v,
-                    k.n_regs,
-                    k.n_spills,
-                    k.shared,
-                )
+                self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
-        return timings
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
+                for k, v in timings.items():
+                    log.debug(
+                        "%s: %f, nreg %d, nspill %d, #shared-mem %s",
+                        k.config,
+                        v,
+                        k.n_regs,
+                        k.n_spills,
+                        k.shared,
+                    )
+
+            return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
@@ -1022,18 +1022,33 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache(inductor_meta):
-    if inductor_meta.get("autotune_remote_cache"):
-        return True
+    if inductor_meta.get("autotune_remote_cache") is not None:
+        return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
         return False
     if inductor_meta.get("is_hip"):
         return False
 
-    from triton.fb.fb_memcache import MEMCACHE_VERSION
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
 
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
     )
+
+
+class LocalAutotuneCache:
+    def get(self, filename):
+        if os.path.exists(filename):
+            with open(filename) as fd:
+                return json.loads(fd.read())
+        return None
+
+    def put(self, filename, data):
+        with open(filename, "w") as fd:
+            fd.write(json.dumps(data))
 
 
 def cached_autotune(
@@ -1060,46 +1075,52 @@ def cached_autotune(
     ):
         configs_hash = hash_configs(configs)
 
+        local_cache = None
         cache_filename = None
         remote_cache = None
         remote_cache_key = None
-        if inductor_meta.get("autotune_local_cache", True):
-            cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        if should_use_remote_autotune_cache(inductor_meta):
-            backend_hash = inductor_meta.get("backend_hash", None)
-            if backend_hash is not None:
-                key = backend_hash + configs_hash + "autotune-best-config-v2"
-                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
-
-                try:
-                    if inductor_meta.get("is_fbcode"):
-                        import triton.fb.fb_memcache
-
-                        remote_cache = (
-                            triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
-                                key
-                            )
-                        )
-                    else:
-                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
-
-                        remote_cache = RedisRemoteCacheBackend(key)
-                except Exception:
-                    remote_cache = None
-                    log.warning("Unable to create a remote cache", exc_info=True)
-                # we already sha256 hash the source contents
-                remote_cache_key = os.path.basename(filename)
-            else:
-                log.debug(
-                    "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
-                )
-
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
-            if cache_filename is not None and os.path.exists(cache_filename):
-                with open(cache_filename) as fd:
-                    best_config = json.loads(fd.read())
-            elif remote_cache is not None and remote_cache_key is not None:
+            if inductor_meta.get("autotune_local_cache", True):
+                local_cache = LocalAutotuneCache()
+                cache_filename = os.path.splitext(filename)[0] + ".best_config"
+            if should_use_remote_autotune_cache(inductor_meta):
+                backend_hash = inductor_meta.get("backend_hash", None)
+                if backend_hash is not None:
+                    key = backend_hash + configs_hash + "autotune-best-config-v2"
+                    key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                    try:
+                        if inductor_meta.get("is_fbcode"):
+                            from torch._inductor.fb.remote_cache import (
+                                FbRemoteAutotuneCacheBackend,
+                            )
+
+                            remote_cache = FbRemoteAutotuneCacheBackend(key)
+                        else:
+                            from torch._inductor.remote_cache import (
+                                RedisRemoteCacheBackend,
+                            )
+
+                            remote_cache = RedisRemoteCacheBackend(key)
+                    except Exception:
+                        remote_cache = None
+                        log.warning("Unable to create a remote cache", exc_info=True)
+                    # we already sha256 hash the source contents
+                    remote_cache_key = os.path.basename(filename)
+                else:
+                    log.debug(
+                        "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
+                    )
+
+            best_config = None
+            if local_cache is not None and cache_filename is not None:
+                best_config = local_cache.get(cache_filename)
+            if (
+                remote_cache is not None
+                and remote_cache_key is not None
+                and best_config is None
+            ):
                 best_config = remote_cache.get(remote_cache_key)
 
             best_config = load_cached_autotuning(
@@ -1107,6 +1128,9 @@ def cached_autotune(
             )
             if best_config:
                 configs = [best_config]
+
+        else:
+            log.debug("autotune caching is disabled by config.force_disable_caches")
 
         def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
             data = {
@@ -1117,9 +1141,8 @@ def cached_autotune(
                 "found_by_coordesc": found_by_coordesc,
                 "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             }
-            if cache_filename is not None:
-                with open(cache_filename, "w") as fd:
-                    fd.write(json.dumps(data))
+            if local_cache is not None and cache_filename is not None:
+                local_cache.put(cache_filename, data)
             if remote_cache is not None and remote_cache_key is not None:
                 remote_cache.put(remote_cache_key, data)
 
@@ -1322,7 +1345,6 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     while r < size_hints[1] and conditional_product(x, r) < target:
         r *= 2
 
-    cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
@@ -1330,8 +1352,29 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     default_num_warps = 4 if torch.version.hip else 8
     min_num_warps = 1 if torch.version.hip else 2
     num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
+
+    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
+    max_grid_x = 2147483647
+    warp_size = (
+        64 if torch.version.hip else 32
+    )  # TODO: query warp size once #129663 is merged
+    num_blocks = (size_hints[0] + x - 1) // x
+
+    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
+        x *= 2  # Scale up XBLOCK if grid exceeds limits
+        num_blocks = num_blocks // 2
+    while conditional_product(x, r) > target:
+        if r == 1:
+            break
+        r = r // 2
+
+    cfg = {"XBLOCK": x, "RBLOCK": r}
     check_config(cfg, xnumel=size_hints[0])
+    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
+    assert (
+        num_blocks * num_warps * warp_size
+    ) <= max_grid_x, "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1770,3 +1813,42 @@ def split_scan_grid(xnumel, rnumel):
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
 
     return grid_fn
+
+
+def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+    """min_blocks is the minimal size of the grid x dimension"""
+    if not is_sequential:
+        # round robin dispatch
+        kernel_grid_fn = grid(*numels)
+    else:
+        # sequential dispatch
+        seq_numels = list(numels)
+        # x numels are not used here, just a place holder
+        seq_numels[-1] = 1024
+        kernel_grid_fn = grid(*seq_numels)
+
+    def get_grid_dim(numel, block):
+        if numel is None:
+            return 1
+        if block is None:
+            return numel
+        return ceildiv(numel, block)
+
+    def grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
+        return tuple(cuda_grid)
+
+    def seq_grid_fn(meta):
+        cuda_grid = list(kernel_grid_fn(meta))
+        # x <= 0 means this kernel's x grid is not tunable (x_no_dim is true)
+        x_grid = sum(
+            [
+                -x if x <= 0 else get_grid_dim(x, meta.get("XBLOCK", 1))
+                for x in numels[-1]
+            ]
+        )
+        cuda_grid[0] = x_grid
+        return tuple(cuda_grid)
+
+    return grid_fn if not is_sequential else seq_grid_fn

@@ -61,7 +61,7 @@ class StorageWeakRef:
 class SharedCache(dict):
     """Dictionary from multiprocessing handles to StorageWeakRef."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
