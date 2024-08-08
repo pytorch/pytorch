@@ -1569,7 +1569,7 @@ class Scheduler:
         )
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-
+        self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:
@@ -2197,12 +2197,14 @@ class Scheduler:
 
             triton_choices = 0
 
-            for choice, unfused_time in choice_timings.items():
+            for choice, unfused_time in sorted(
+                choice_timings.items(), key=lambda x: x[1]
+            ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
-                    continue
+                    break
 
                 triton_choices += 1
                 if triton_choices > config.max_epilogue_benchmarked_choices:
@@ -3059,6 +3061,19 @@ class Scheduler:
         buf = self.name_to_buf[buf_name]
         assert buf.node is not None
         return buf.node.get_layout()
+
+    def update_zero_dim_cpu_tensor(self) -> None:
+        for node in self.nodes:
+            if node.get_device().type == "cuda":
+                for read in node.read_writes.reads:
+                    buffer = V.graph.name_to_buffer.get(read.name)
+                    if (
+                        buffer
+                        and buffer.get_device().type == "cpu"
+                        and not isinstance(buffer.layout, MultiOutputLayout)
+                        and buffer.get_size() == []
+                    ):
+                        V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
 class BaseScheduling:
