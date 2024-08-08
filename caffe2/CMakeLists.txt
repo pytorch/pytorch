@@ -1372,14 +1372,6 @@ if(USE_DISTRIBUTED)
   endif()
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
-  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
-    target_link_libraries(torch_cpu INTERFACE protobuf::libprotobuf)
-  else()
-    target_link_libraries(torch_cpu PUBLIC protobuf::libprotobuf)
-  endif()
-endif()
-
 if($ENV{TH_BINARY_BUILD})
   if(NOT MSVC AND USE_CUDA AND NOT APPLE)
     # Note [Extra MKL symbols for MAGMA in torch_cpu]

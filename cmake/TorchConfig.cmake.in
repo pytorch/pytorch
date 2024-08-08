@@ -93,7 +93,6 @@ else()
     append_torchlib_if_found(XNNPACK)
   endif()
 
-  append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
   append_torchlib_if_found(onnx onnx_proto)
 
   append_torchlib_if_found(foxi_loader fmt)
