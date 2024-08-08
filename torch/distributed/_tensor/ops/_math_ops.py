@@ -317,7 +317,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.max.default: "max",
     aten.max.dim: "max",
     aten.max.out: "max",
-    aten.isinf.default: "max",
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
