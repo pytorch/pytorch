@@ -177,19 +177,10 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
                 "2.out_proj": RowwiseParallel(),
             },
         )
-        # TODO: remove ``assertRaisesRegex`` once uneven sharding is supported
-        if mlp_dim % dp_mesh.size() != 0:
-            with self.assertRaisesRegex(
-                NotImplementedError, "does not support uneven sharding"
-            ):
-                for mlp in model:
-                    fully_shard(mlp, mesh=dp_mesh)
-                fully_shard(model, mesh=dp_mesh)
-        else:
-            for mlp in model:
-                fully_shard(mlp, mesh=dp_mesh)
-            fully_shard(model, mesh=dp_mesh)
-            self._test_state_dict_save_load(model)
+        for mlp in model:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model, mesh=dp_mesh)
+        self._test_state_dict_save_load(model)
 
     def _test_state_dict_save_load(self, model: nn.Module):
         for param_name, param in model.named_parameters():

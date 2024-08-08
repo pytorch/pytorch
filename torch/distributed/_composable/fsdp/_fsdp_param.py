@@ -302,16 +302,19 @@ class FSDPParam:
             )
             # NOTE: FSDP+TP does not support uneven sharding for now
             # TODO: enable uneven sharding for FSDP+TP
-            num_shards_map = self._sharding_spec.num_shards_map
-            tensor_shape = list(self._sharding_spec.shape)
-            assert len(num_shards_map) == len(tensor_shape)
-            for i, (size, num_shards) in enumerate(zip(tensor_shape, num_shards_map)):
-                if size % num_shards != 0:
-                    raise NotImplementedError(
-                        "FSDP+TP sharding does not support uneven sharding for now: "
-                        f"tensor dim {i} has size {size} which cannot be evenly sharded "
-                        f"into {num_shards} shards."
-                    )
+            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
+                num_shards_map = self._sharding_spec.num_shards_map
+                tensor_shape = list(self._sharding_spec.shape)
+                assert len(num_shards_map) == len(tensor_shape)
+                for i, (size, num_shards) in enumerate(
+                    zip(tensor_shape, num_shards_map)
+                ):
+                    if size % num_shards != 0:
+                        raise NotImplementedError(
+                            "FSDP+TP sharding does not support uneven sharding for now: "
+                            f"tensor dim {i} has size {size} which cannot be evenly "
+                            f"sharded into {num_shards} shards."
+                        )
 
             param_data = cast(DTensor, param)._local_tensor
         else:
