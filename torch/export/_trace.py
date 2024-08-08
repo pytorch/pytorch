@@ -14,6 +14,7 @@ import torch
 import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.db.logging import (
@@ -37,7 +38,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import placeholder_naming_pass, placeholder_prefixes, _get_shape_env
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
@@ -372,7 +373,11 @@ def _preserve_requires_grad_pass(
             assert spec.target is not None
             constant = constants[spec.target]
             if isinstance(constant, torch.Tensor):
-                node.meta["val"].requires_grad = constant.requires_grad
+                # If the tensor is not leaf, it should already have a correct requires grad field
+                if node.meta["val"].is_leaf:
+                    node.meta["val"].requires_grad = constant.requires_grad
+                else:
+                    assert node.meta["val"].requires_grad == constant.requires_grad
         elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
             continue
         else:
@@ -592,6 +597,7 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    decomp_table=None,
     _check_autograd_state=True,
     _is_torch_jit_trace=False,
 ) -> ATenExportArtifact:
@@ -631,6 +637,7 @@ def _export_to_aten_ir(
             fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            decompositions=decomp_table,
             kwargs=fake_kwargs,
         )
 
@@ -667,9 +674,6 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
-    assert fake_mode is not None, "Cannot detect fake mode from graph"
-
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -678,10 +682,11 @@ def _export_to_aten_ir(
         with _set_node_metadata_hook(
             gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
-            if fake_mode:
+            shape_env = _get_shape_env(gm)
+            if shape_env:
                 insert_deferred_runtime_asserts(
                     gm,
-                    fake_mode.shape_env,
+                    shape_env,
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
