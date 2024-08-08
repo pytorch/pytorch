@@ -869,7 +869,10 @@ class ChromiumEventLogger:
             "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
         }
         torch._logging.trace_structured(
-            "chromium_event", payload_fn=lambda: event, suppress_context=True
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
 
     @staticmethod
@@ -894,7 +897,10 @@ class ChromiumEventLogger:
             "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
         }
         torch._logging.trace_structured(
-            "chromium_event", payload_fn=lambda: event, suppress_context=True
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=True,
         )
 
 
