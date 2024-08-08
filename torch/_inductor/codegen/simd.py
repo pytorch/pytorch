@@ -1763,7 +1763,7 @@ class SIMDScheduling(BaseScheduling):
 
             # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
             # Since this is a stable sort, ties are broken by schedule order.
-            ranked_new_tilings = sorted(new_tilings, key=len)
+            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
             ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
