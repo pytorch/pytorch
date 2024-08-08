@@ -8798,6 +8798,18 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
 
+    def test_remove_set(self):
+        def fn(x):
+            set_a = set((4, 5))
+            set_a.remove(4)
+            return x * len(set_a)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_iter_set(self):
         def foo(x, y):
             setty = set()
