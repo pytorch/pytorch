@@ -4296,6 +4296,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
         reduce_dim = 1  # ragged
 
@@ -4515,6 +4516,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
 
         for tensor_list in tensor_lists:
@@ -7122,6 +7124,17 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
+    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
+    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
+    "clone",
+}
+
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
 }
 
 
@@ -7183,7 +7196,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
