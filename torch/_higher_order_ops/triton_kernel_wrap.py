@@ -590,16 +590,24 @@ def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
 def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs
 ):
-    trace_triton_kernel_wrapper(
-        mode,
-        triton_kernel_wrapper_mutation,
-        {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "kwargs": kwargs,
-        },
-    )
+    if mode.enable_tracing:
+        trace_triton_kernel_wrapper(
+            mode,
+            triton_kernel_wrapper_mutation,
+            {
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": grid,
+                "kwargs": kwargs,
+            },
+        )
+    else:
+        triton_kernel_wrapper_mutation(
+            kernel_idx=kernel_idx,
+            constant_args_idx=constant_args_idx,
+            grid=grid,
+            kwargs=kwargs,
+        )
 
     return None
 
@@ -683,17 +691,25 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     mode, *, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone
 ):
-    return trace_triton_kernel_wrapper(
-        mode,
-        triton_kernel_wrapper_functional,
-        {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "kwargs": kwargs,
-            "tensors_to_clone": tensors_to_clone,
-        },
-    )
+    if mode.enable_tracing:
+        return trace_triton_kernel_wrapper(
+            mode,
+            triton_kernel_wrapper_functional,
+            {
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": grid,
+                "kwargs": kwargs,
+                "tensors_to_clone": tensors_to_clone,
+            },
+        )
+    else:
+        return triton_kernel_wrapper_functional(
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kwargs=kwargs,
+            tensors_to_clone=tensors_to_clone,
+        )
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
