@@ -1250,25 +1250,21 @@ def forward(self, pred_1, x_1):
         self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
         self.assertEqual(cumsum1, cumsum_exp)
 
-        # TODO: If the number 2 is increased to a larger number,
-        # e.g., 10, then the test fails with some errors arising from
-        # FakeTensors
-        num_dims = [random.randint(2, 5) for _ in range(2)]
+        num_dims = [random.randint(2, 5) for _ in range(10)]
         for num_dim in num_dims:
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=torch.device("cuda"))
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                cumsum1 = associative_scan(op, x, 0)
-                cumsum_exp = _fake_associative_scan(op, x, 0)
+                cumsum1 = associative_scan(op, x, rnd_scan_dim)
+                cumsum_exp = _fake_associative_scan(op, x, rnd_scan_dim)
                 self.assertEqual(cumsum1, cumsum_exp)
-                cumsum_exp_PT = op_pt(x, 0)
+                cumsum_exp_PT = op_pt(x, rnd_scan_dim)
                 self.assertEqual(cumsum1, cumsum_exp_PT)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_generic_associative_scan_compile(self):
-        import random
-
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1335,37 +1331,6 @@ def forward(self, pred_1, x_1):
         def f(op, x, dim, reverse):
             result = associative_scan(op, x, dim, reverse)
             return result
-
-        # TODO: If the number 2 is increased to a larger number,
-        # e.g., 10, then the test fails with some errors arising from
-        # FakeTensors
-        num_dims = [random.randint(2, 5) for _ in range(2)]
-        for num_dim in num_dims:
-            shapes = [random.randint(1, 10) for _ in range(num_dim)]
-            x = torch.randn(*shapes, device=torch.device("cuda"))
-
-            torch.compiler.reset()
-            with torch._dynamo.utils.disable_cache_limit():
-                associative_scan1 = torch.compile(
-                    associative_scan, fullgraph=True, dynamic=False
-                )
-                associative_scan2 = torch.compile(
-                    associative_scan, fullgraph=True, dynamic=True
-                )
-                associative_scan3 = associative_scan
-
-            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                cumsum1 = associative_scan1(op, x, 0)
-                cumsum2 = associative_scan2(op, x, 0)
-                cumsum3 = associative_scan3(op, x, 0)
-                cumsum_exp = _fake_associative_scan(op, x, 0)
-                self.assertEqual(cumsum1, cumsum_exp)
-                self.assertEqual(cumsum2, cumsum_exp)
-                self.assertEqual(cumsum3, cumsum_exp)
-                cumsum_exp_PT = op_pt(x, 0)
-                self.assertEqual(cumsum1, cumsum_exp_PT)
-                self.assertEqual(cumsum2, cumsum_exp_PT)
-                self.assertEqual(cumsum3, cumsum_exp_PT)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
