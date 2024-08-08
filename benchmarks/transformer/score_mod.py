@@ -1,4 +1,5 @@
 import argparse
+import csv
 import itertools
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -23,14 +24,14 @@ torch._dynamo.config.automatic_dynamic_shapes = False
 torch._dynamo.config.cache_size_limit = 1000
 
 
-from triton.testing import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs)) * 1e3
+    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -141,8 +142,12 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
     )
 
+    kwargs = {}
+    if get_func_name(config.mask_mod) == "causal":
+        kwargs["is_causal"] = True
+
     def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value)
+        return F.scaled_dot_product_attention(query, key, value, **kwargs)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -175,7 +180,7 @@ def run_single_experiment(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
+        out_compile = compiled_sdpa(query, key, value, score_mod, block_mask)
         dOut = torch.randn_like(out_eager)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
@@ -243,7 +248,17 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 
 
 def get_func_name(func):
-    return func.__name__.split("<locals>.")[-1].split(" at ")[0]
+    if func is None:
+        return "None"
+    if "gqa" in func.__name__:
+        return func.__name__
+    func_str = str(func)
+    if "<locals>" in func_str:
+        # For locally defined functions
+        return func_str.split("<locals>.")[-1].split(" at ")[0]
+    else:
+        # For regular functions
+        return func.__name__
 
 
 def set_func_name(func, name):
@@ -263,12 +278,10 @@ def get_average_speedups(results: List[Experiment], type: str):
     min_config_dict = results[min_speedup_index].config.asdict()
 
     # Extract function names from score_mod strings
-    max_config_dict["score_mod"] = (
-        max_config_dict["score_mod"].__name__.split("<locals>.")[-1].split(" at ")[0]
-    )
-    min_config_dict["score_mod"] = (
-        min_config_dict["score_mod"].__name__.split("<locals>.")[-1].split(" at ")[0]
-    )
+    max_config_dict["score_mod"] = get_func_name(max_config_dict["score_mod"])
+    max_config_dict["mask_mod"] = get_func_name(max_config_dict["mask_mod"])
+    min_config_dict["score_mod"] = get_func_name(min_config_dict["score_mod"])
+    min_config_dict["mask_mod"] = get_func_name(min_config_dict["mask_mod"])
 
     # Create table data
     table_data = [
@@ -284,7 +297,7 @@ def get_average_speedups(results: List[Experiment], type: str):
     return table_data
 
 
-def print_results(results: List[Experiment]):
+def print_results(results: List[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
         for key, value in experiment.asdict().items():
@@ -316,8 +329,9 @@ def print_results(results: List[Experiment]):
         table_data["bwd_speedup"] = bwd_speedups
 
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
-    print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
+    table_data["mask_mod"] = [get_func_name(func) for func in table_data["mask_mod"]]
 
+    print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
     print("\n")
     print("FWD Speedups".center(125, "="))
     print("\n")
@@ -330,6 +344,15 @@ def print_results(results: List[Experiment]):
         print("\n")
         average_data = get_average_speedups(results, type="bwd")
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
+
+    if save_path is not None:
+        with open(save_path, "w", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=table_data.keys())
+            writer.writeheader()
+            for i in range(len(next(iter(table_data.values())))):
+                row = {k: v[i] for k, v in table_data.items()}
+                writer.writerow(row)
+        print(f"\nResults saved to {save_path}")
 
 
 def generate_score_mods(score_mods: List[str]) -> List[Callable | None]:
@@ -398,6 +421,77 @@ def get_gqa_mask_mod(mask_mod, G, q_seq_len):
     mask_mod_name = get_func_name(mask_mod)
     set_func_name(mask_mod_gqa, mask_mod_name + "_gqa")
     return mask_mod_gqa
+
+
+def generate_flash_configs(
+    calculate_bwd: bool,
+    dtype: torch.dtype,
+    batch_sizes: List[int],
+    num_heads: List[Tuple[int, int]],
+    seq_lens: List[int],
+    head_dims: List[int],
+    score_mods_str: List[str],
+    decoding: bool,
+    kv_cache_size: List[int],
+    cal_bandwidth: bool,
+) -> List[ExperimentConfig]:
+    assert not (calculate_bwd and decoding), "Decoding does not support backward"
+
+    bs_seqlen_vals = [
+        (32, 512),
+        (16, 1024),
+        (8, 2048),
+        (4, 4096),
+        (2, 8192),
+        (1, 16384),
+    ]
+    causal_vals = [False, True]
+    headdim_vals = [64, 128]
+    dim = 2048
+
+    score_mods = generate_score_mods(score_mods_str)
+    mask_mods = generate_mask_mods(score_mods_str)
+    all_configs = []
+
+    for (
+        (batch_size, seq_len),
+        causal,
+        head_dim,
+        score_mod,
+        mask_mod,
+    ) in itertools.product(
+        bs_seqlen_vals,
+        causal_vals,
+        headdim_vals,
+        score_mods,
+        mask_mods,
+    ):
+        num_heads = dim // head_dim
+
+        if decoding:
+            q_seq_len, kv_seq_len = 1, seq_len
+        else:
+            q_seq_len = kv_seq_len = seq_len
+
+        all_configs.append(
+            ExperimentConfig(
+                shape=(
+                    batch_size,
+                    num_heads,
+                    q_seq_len,
+                    num_heads,
+                    kv_seq_len,
+                    head_dim,
+                ),
+                score_mod=score_mod,
+                mask_mod=mask_mod,
+                dtype=dtype,
+                calculate_bwd_time=calculate_bwd,
+                cal_bandwidth=cal_bandwidth,
+            )
+        )
+
+    return all_configs
 
 
 def generate_experiment_configs(
@@ -497,7 +591,7 @@ def main(args):
             )
         )
 
-    print_results(results)
+    print_results(results, args.save_path)
 
 
 def heads_input_type(s):
@@ -568,7 +662,12 @@ Ignores -b batch size and calculate batch size from kv_cache size instead when s
         action="store_true",
         help="Calculate kernel memory bandwidth & computational throughput. ",
     )
-
+    parser.add_argument(
+        "--save-path",
+        type=str,
+        help="Path to save the results JSON file (optional)",
+        default=None,
+    )
     # Parse arguments
     args = parser.parse_args()
     args.dtype = getattr(torch, args.dtype)

@@ -523,6 +523,25 @@ def get_kernel_metadata(node_schedule, wrapper):
 
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
+
+    # Attempt to sort `inductor_nodes` topologically. Note that the case
+    # where `inductor_nodes` contains nodes from multiple graph instances
+    # is not supported. An example of this is conditional statements.
+    single_graph = None
+    if len(inductor_nodes):
+        unique_graphs = {n.graph for n in inductor_nodes}
+        if len(unique_graphs) == 1:
+            single_graph = inductor_nodes[0].graph
+            # create a map of idx -> node and cache it
+            if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
+                node_to_idx_map = {}
+                for idx, n in enumerate(single_graph.nodes):
+                    node_to_idx_map[n] = idx
+                single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map
+            inductor_nodes.sort(
+                key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]
+            )
+
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
@@ -530,16 +549,27 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
+    sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
-        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+        f"{wrapper.comment} {sort_str} Source Nodes: [{', '.join(from_node_dict.keys())}], "
+        f"Original ATen: [{', '.join(original_aten_dict.keys())}]"
     )
+
     # trace back to original node here
-    detailed_metadata = []
+    detailed_metadata = [f"{wrapper.comment} Source node to ATen node mapping:"]
     for original_node, nodes in sorted(from_node_dict.items()):
         detailed_metadata.append(
-            f"{wrapper.comment} {original_node} => {', '.join(sorted(nodes))}"
+            f"{wrapper.comment}   {original_node} => {', '.join(sorted(nodes))}"
         )
+
+    # print the aot_autograd graph fragment
+    if single_graph is not None:
+        detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+        for n in inductor_nodes:
+            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
+            # generate python code for graph fragments
+            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+
     return metadata, "\n".join(detailed_metadata)
 
 
@@ -940,7 +970,7 @@ class IndentedBuffer:
 
 
 class FakeIndentedBuffer(IndentedBuffer):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def __getattribute__(self, name):
@@ -1131,7 +1161,8 @@ def use_ck_template(layout, m, n, k):
         native_arch.split(":")[0]: native_arch
     }
     requested_supported_archs = [
-        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+        requested_archs[k]
+        for k in requested_archs.keys() & config.rocm.ck_supported_arch
     ]
     if not requested_supported_archs:
         return False
@@ -1219,7 +1250,7 @@ class DebugDirManager:
     counter = itertools.count(0)
     prev_debug_name: str
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.id = next(DebugDirManager.counter)
 
     def __enter__(self):
@@ -1268,7 +1299,7 @@ def get_code(fn, *args, **kwargs):
         class DummyModule:
             """This is empty to replace the generated triton module"""
 
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
             def call(self, *args, **kwargs):
