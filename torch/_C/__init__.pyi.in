@@ -65,7 +65,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from . import (
     _aoti,
     _cpu,
-    _dynamo,
     _functorch,
     _lazy,
     _lazy_ts_backend,
@@ -1948,6 +1947,7 @@ class _CudaDeviceProperties:
     gcnArchName: str
     warp_size: _int
     uuid: str
+    L2_cache_size: _int
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -1957,6 +1957,7 @@ class _SDPAParams:
     attn_mask: Optional[Tensor]
     dropout: _float
     is_causal: _bool
+    enable_gqa: _bool
     def __init__(
         self,
         query: Tensor,
@@ -1964,7 +1965,8 @@ class _SDPAParams:
         value: Tensor,
         attn_mask: Optional[Tensor],
         dropout: _float,
-        is_causal: _bool) -> None: ...
+        is_causal: _bool,
+        enable_gqa: _bool) -> None: ...
 
 class _SDPBackend(Enum):
     ERROR = -1
