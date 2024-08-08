@@ -21,7 +21,7 @@ from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
-from ..ir import FlexibleLayout
+from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -40,6 +40,7 @@ from ..utils import (
 )
 from .mm_common import (
     addmm_epilogue,
+    extra_mm_configs,
     int8_mm_configs,
     mixed_mm_configs,
     mm_args,
@@ -152,6 +153,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    name = "mm"
 
     aten_layout = layout
     if not use_max_autotune():
@@ -185,14 +187,30 @@ def tuned_mm(mat1, mat2, *, layout=None):
             [mat1, mat2],
         )
 
-    name = "mm"
     input_nodes = [mat1, mat2]
-    if torch._inductor.config.run_autoheuristic(name):
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and torch._inductor.config.run_autoheuristic(name)
+        and is_triton(mat1)
+    ):
+        num_choices_before_extra_configs = len(choices)
+        for config in extra_mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
+            )
         choice = mm_autoheuristic(
             mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
         )
-        if choice is not None:
-            choices.insert(0, choice)
+        if not torch._inductor.config.collect_autoheuristic(name):
+            # if we are collecting data, we do not want to modify choices
+            if choice is not None:
+                choices.insert(0, choice)
+            else:
+                choices = choices[:num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
@@ -203,7 +221,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     try:
-        return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
         if not inductor_config.autotune_fallback_to_aten:
             raise
