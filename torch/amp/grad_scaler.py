@@ -273,10 +273,9 @@ class GradScaler:
                     per_device_and_dtype_grads[to_unscale.device][
                         to_unscale.dtype
                     ].append(to_unscale)
+
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    # if device == torch.device(type='cuda', index=0):
-                    #    grads[0]._local_tensor[0,0].fill_(float("inf"))
                     torch._amp_foreach_non_finite_check_and_unscale_(
                         grads,
                         per_device_found_inf.get(device),
@@ -284,8 +283,7 @@ class GradScaler:
                     )
                     if isinstance(grads[0], torch.distributed._tensor.DTensor):
                         torch.distributed.all_reduce(
-                            per_device_found_inf.get(device),
-                            op=torch.distributed.ReduceOp.MAX,
+                            per_device_found_inf.get(device), op=torch.distributed.ReduceOp.MAX
                         )
 
         return per_device_found_inf._per_device_tensors
@@ -340,6 +338,7 @@ class GradScaler:
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
+
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(
             optimizer, inv_scale, found_inf, False
         )
@@ -390,6 +389,7 @@ class GradScaler:
             )
 
         self._check_scale_growth_tracker("step")
+
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
         if optimizer_state["stage"] is OptState.STEPPED:
@@ -398,6 +398,7 @@ class GradScaler:
             )
 
         retval: Optional[float] = None
+
         if getattr(optimizer, "_step_supports_amp_scaling", False):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
             # The contract with custom optimizers is that their step() should accept an additional,
