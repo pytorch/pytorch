@@ -6790,6 +6790,7 @@ class CommonTemplate:
             ),
         )
 
+    @skipIfWindows
     def test_roi_align(self):
         if not has_torchvision_roi_align():
             raise unittest.SkipTest("requires torchvision")
