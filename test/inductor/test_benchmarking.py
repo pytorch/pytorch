@@ -26,9 +26,12 @@ class TestBenchmarker(TestCase):
         fn, args, kwargs = torch.sum, (torch.randn(size, device=device),), {}
         _callable = lambda: fn(*args, **kwargs)  # noqa: E731
         return (fn, args, kwargs), _callable
-    
+
     def get_counter_value(self, name):
-        return counters["inductor"][f"benchmarking.{type(self.ThisBenchmarker).__name__}.{name}"]
+        print(f"benchmarking.{type(self.ThisBenchmarker).__name__}.{name}")
+        return counters["inductor"][
+            f"benchmarking.{type(self.ThisBenchmarker).__name__}.{name}"
+        ]
 
     @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @parametrize("device", (GPU_TYPE, "cpu"))
