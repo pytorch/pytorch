@@ -346,6 +346,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                                 "ceil_mode: bool = False",
                                 "count_include_pad: bool = True",
                                 "divisor_override: Optional[int] = None",
+                                "*",
+                                "out: Optional[Tensor] = None"
                             ]
                         )
                     )
@@ -414,17 +416,17 @@ def gen_nn_functional(fm: FileManager) -> None:
             "leaky_relu_": [
                 f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
             ],
-            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
-            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
+            "log_sigmoid": ["def log_sigmoid(input: Tensor, *, out=None) -> Tensor: ..."],
+            "gelu": ["def gelu(input: Tensor, approximate: str = ..., *, out: Optional[Tensor] = None) -> Tensor: ..."],
             "softplus": [
                 "def softplus({}) -> Tensor: ...".format(
                     ", ".join(
-                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
+                        ["input: Tensor", "beta: float = ...", "threshold: float = ...", "*", "out: Optional[Tensor] = None"]
                     )
                 )
             ],
             "softshrink": [
-                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
+                "def softshrink(input: Tensor, lambd: float = ..., *, out: Optional[Tensor] = None) -> Tensor: ..."
             ],
             "hardsigmoid": [
                 f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
@@ -436,6 +438,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "input: Tensor",
                             "weight: Tensor",
                             "bias: Optional[Tensor] = None",
+                            "*",
+                            "out: Optional[Tensor] = None"
                         ]
                     )
                 )

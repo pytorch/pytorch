@@ -37,7 +37,6 @@ try:
 except ModuleNotFoundError:
     np = None
 
-
 conv1d = _add_docstr(
     torch.conv1d,
     r"""
@@ -379,7 +378,7 @@ Examples::
 avg_pool2d = _add_docstr(
     torch._C._nn.avg_pool2d,
     r"""
-avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None, *, out=None) -> Tensor
 
 Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
 :math:`sH \times sW` steps. The number of output features is equal to the number of
@@ -401,13 +400,17 @@ Args:
         averaging calculation. Default: ``True``
     divisor_override: if specified, it will be used as divisor, otherwise
          size of the pooling region will be used. Default: None
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 """,
 )
 
 avg_pool3d = _add_docstr(
     torch._C._nn.avg_pool3d,
     r"""
-avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None, out=None) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
@@ -429,6 +432,11 @@ Args:
         averaging calculation
     divisor_override: if specified, it will be used as divisor, otherwise
         size of the pooling region will be used. Default: None
+
+Keyword args:
+    out: the output tuple of (`Tensor`, `LongTensor`) that can be optionally given to be used as
+        as output buffers. If :attr:`out` is used, this operation won't be differentiable. Default: None
+
 """,
 )
 
@@ -1014,10 +1022,16 @@ def max_unpool2d(
     stride: Optional[BroadcastingList2[int]] = None,
     padding: BroadcastingList2[int] = 0,
     output_size: Optional[BroadcastingList2[int]] = None,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool2d`.
 
-    See :class:`~torch.nn.MaxUnpool2d` for details.
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
+    See :class:`~torch.nn.MaxUnpool2d` for more details.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -1029,6 +1043,7 @@ def max_unpool2d(
             stride=stride,
             padding=padding,
             output_size=output_size,
+            out=out
         )
     kernel_size = _pair(kernel_size)
     if stride is not None:
@@ -1037,8 +1052,7 @@ def max_unpool2d(
         _stride = kernel_size
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    return torch._C._nn.max_unpool2d(input, indices, output_size)
-
+    return torch._C._nn.max_unpool2d(input, indices, output_size, out=out)
 
 def max_unpool3d(
     input: Tensor,
@@ -1047,8 +1061,13 @@ def max_unpool3d(
     stride: Optional[BroadcastingList3[int]] = None,
     padding: BroadcastingList3[int] = 0,
     output_size: Optional[BroadcastingList3[int]] = None,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool3d`.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
@@ -1062,6 +1081,7 @@ def max_unpool3d(
             stride=stride,
             padding=padding,
             output_size=output_size,
+            out=out
         )
     kernel_size = _triple(kernel_size)
     if stride is not None:
@@ -1070,7 +1090,7 @@ def max_unpool3d(
         _stride = kernel_size
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
-    return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
+    return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding, out=out)
 
 
 def lp_pool3d(
@@ -1367,7 +1387,7 @@ Args:
 )
 
 
-def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
+def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int], *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
@@ -1375,14 +1395,19 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     Args:
         output_size: the target output size (single integer or
             double-integer tuple)
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
+        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size, out=out)
     _output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
+    return torch._C._nn.adaptive_avg_pool2d(input, _output_size, out=out)
 
 
-def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
+def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int], *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
@@ -1390,11 +1415,15 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
     Args:
         output_size: the target output size (single integer or
             triple-integer tuple)
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
+        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size, out=out)
     _output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
+    return torch._C._nn.adaptive_avg_pool3d(input, _output_size, out=out)
 
 
 # Activation functions
@@ -1653,14 +1682,19 @@ def feature_alpha_dropout(
         else _VF.feature_alpha_dropout(input, p, training)
     )
 
-
 def _threshold(
     input: Tensor,
     threshold: float,
     value: float,
     inplace: bool = False,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Apply a threshold to each element of the input Tensor.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.Threshold` for more details.
     """
@@ -1668,10 +1702,16 @@ def _threshold(
         return handle_torch_function(
             _threshold, (input,), input, threshold, value, inplace=inplace
         )
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         result = _VF.threshold_(input, threshold, value)
     else:
-        result = _VF.threshold(input, threshold, value)
+        result = _VF.threshold(input, threshold, value, out=out)
     return result
 
 
@@ -1715,9 +1755,9 @@ In-place version of :func:`~relu`.
 )
 
 
-def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+def glu(input: Tensor, dim: int = -1, *, out: Optional[Tensor] = None) -> Tensor:  # noqa: D400,D402
     r"""
-    glu(input, dim=-1) -> Tensor
+    glu(input, dim=-1, *, out=None) -> Tensor
 
     The gated linear unit. Computes:
 
@@ -1732,14 +1772,19 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     Args:
         input (Tensor): input tensor
         dim (int): dimension on which to split the input. Default: -1
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(glu, (input,), input, dim=dim)
+        return handle_torch_function(glu, (input,), input, dim=dim, out=out)
     if input.dim() == 0:
         raise RuntimeError(
             "glu does not support scalars because halving size must be even"
         )
-    return torch._C._nn.glu(input, dim)
+    return torch._C._nn.glu(input, dim, out=out)
 
 
 def hardtanh(
@@ -1747,23 +1792,35 @@ def hardtanh(
     min_val: float = -1.0,
     max_val: float = 1.0,
     inplace: bool = False,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
     r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
+    hardtanh(input, min_val=-1., max_val=1., inplace=False, *, out=None) -> Tensor
 
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace
+            hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace, out=out
         )
     if min_val > max_val:
         raise ValueError("min_val cannot be greater than max_val")
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
-        result = torch._C._nn.hardtanh(input, min_val, max_val)
+        result = torch._C._nn.hardtanh(input, min_val, max_val, out=out)
     return result
 
 
@@ -1793,17 +1850,28 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     return result
 
 
-def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
+
+def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply the Exponential Linear Unit (ELU) function element-wise.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.ELU` for more details.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
+        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace, out=out)
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
-        result = torch._C._nn.elu(input, alpha)
+        result = torch._C._nn.elu(input, alpha, out=out)
     return result
 
 
@@ -1878,28 +1946,39 @@ In-place version of :func:`~celu`.
 """,
 )
 
-
 def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
     inplace: bool = False,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
     r"""
-    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
+    leaky_relu(input, negative_slope=0.01, inplace=False, *, out=None) -> Tensor
 
     Applies element-wise,
     :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace
+            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace, out=out
         )
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         result = torch._C._nn.leaky_relu_(input, negative_slope)
     else:
-        result = torch._C._nn.leaky_relu(input, negative_slope)
+        result = torch._C._nn.leaky_relu(input, negative_slope, out=out)
     return result
 
 
@@ -1976,9 +2055,13 @@ In-place version of :func:`~rrelu`.
 logsigmoid = _add_docstr(
     torch._C._nn.log_sigmoid,
     r"""
-logsigmoid(input) -> Tensor
+logsigmoid(input, *, out=None) -> Tensor
 
 Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 
 See :class:`~torch.nn.LogSigmoid` for more details.
 """,
@@ -1987,7 +2070,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 gelu = _add_docstr(
     torch._C._nn.gelu,
     r"""
-gelu(input, approximate = 'none') -> Tensor
+gelu(input, approximate = 'none', *, out=None) -> Tensor
 
 When the approximate argument is 'none', it applies element-wise the function
 :math:`\text{GELU}(x) = x * \Phi(x)`
@@ -2000,15 +2083,23 @@ When the approximate argument is 'tanh', Gelu is estimated with
     \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 """,
 )
 
 hardshrink = _add_docstr(
     torch.hardshrink,
     r"""
-hardshrink(input, lambd=0.5) -> Tensor
+hardshrink(input, lambd=0.5, *, out=None) -> Tensor
 
 Applies the hard shrinkage function element-wise
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 
 See :class:`~torch.nn.Hardshrink` for more details.
 """,
@@ -2042,12 +2133,16 @@ def softsign(input):  # noqa: D400,D402
 softplus = _add_docstr(
     torch._C._nn.softplus,
     r"""
-softplus(input, beta=1, threshold=20) -> Tensor
+softplus(input, beta=1, threshold=20, *, out=None) -> Tensor
 
 Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
 
 For numerical stability the implementation reverts to the linear function
 when :math:`input \times \beta > threshold`.
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 
 See :class:`~torch.nn.Softplus` for more details.
 """,
@@ -2254,9 +2349,13 @@ def log_softmax(
 softshrink = _add_docstr(
     torch._C._nn.softshrink,
     r"""
-softshrink(input, lambd=0.5) -> Tensor
+softshrink(input, lambd=0.5, *, out=None) -> Tensor
 
 Applies the soft shrinkage function elementwise
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 
 See :class:`~torch.nn.Softshrink` for more details.
 """,
@@ -2284,7 +2383,7 @@ def sigmoid(input):  # noqa: D400,D402
     return input.sigmoid()
 
 
-def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
+def hardsigmoid(input: Tensor, inplace: bool = False, *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply the Hardsigmoid function element-wise.
 
     .. math::
@@ -2297,19 +2396,28 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     Args:
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
 
+    Keyword args:
+        out: the output tensor. This will only be used if :attr:`inplace` is ``False``.
+            If :attr:`out` is used, this operation won't be differentiable. Default: None
+
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
+        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace, out=out)
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         return torch._C._nn.hardsigmoid_(input)
-    return torch._C._nn.hardsigmoid(input)
-
+    return torch._C._nn.hardsigmoid(input, out=out)
 
 linear = _add_docstr(
     torch._C._nn.linear,
     r"""
-linear(input, weight, bias=None) -> Tensor
+linear(input, weight, bias=None, *, out=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
@@ -2320,17 +2428,19 @@ This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>
 This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 Shape:
-
     - Input: :math:`(*, in\_features)` where `*` means any number of
       additional dimensions, including none
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
+
+Keyword args:
+    out: the output tensor. If :attr:`out` is used, this operation won't
+        be differentiable. Default: None
 """.format(
         **sparse_support_notes
     ),
 )
-
 
 bilinear = _add_docstr(
     torch.bilinear,
@@ -2355,7 +2465,7 @@ Shape:
 )
 
 
-def silu(input: Tensor, inplace: bool = False) -> Tensor:
+def silu(input: Tensor, inplace: bool = False, *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
 
     The SiLU function is also known as the swish function.
@@ -2371,16 +2481,26 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
         a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     See :class:`~torch.nn.SiLU` for more details.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(silu, (input,), input, inplace=inplace)
+        return handle_torch_function(silu, (input,), input, inplace=inplace, out=out)
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         return torch._C._nn.silu_(input)
-    return torch._C._nn.silu(input)
+    return torch._C._nn.silu(input, out=out)
 
 
-def mish(input: Tensor, inplace: bool = False) -> Tensor:
+def mish(input: Tensor, inplace: bool = False, *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply the Mish function, element-wise.
 
     Mish: A Self Regularized Non-Monotonic Neural Activation Function.
@@ -2391,16 +2511,26 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
     .. note::
         See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
 
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     See :class:`~torch.nn.Mish` for more details.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(mish, (input,), input, inplace=inplace)
+        return handle_torch_function(mish, (input,), input, inplace=inplace, out=out)
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         return torch._C._nn.mish_(input)
-    return torch._C._nn.mish(input)
+    return torch._C._nn.mish(input, out=out)
 
 
-def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
+def hardswish(input: Tensor, inplace: bool = False, *, out: Optional[Tensor] = None) -> Tensor:
     r"""Apply hardswish function, element-wise.
 
     Follows implementation as described in the paper:
@@ -2413,16 +2543,26 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
             x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     See :class:`~torch.nn.Hardswish` for more details.
 
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
+        return handle_torch_function(hardswish, (input,), input, inplace=inplace, out=out)
+
+    if inplace and out is not None:
+        raise ValueError(
+            "The parameters `inplace` and `out` are mutually exclusive."
+            f" You provided {inplace=}, {out=}")
+
     if inplace:
         return torch._C._nn.hardswish_(input)
-    return torch._C._nn.hardswish(input)
+    return torch._C._nn.hardswish(input, out=out)
 
 
 def _no_grad_embedding_renorm_(
@@ -3683,6 +3823,8 @@ def huber_loss(
     target: Tensor,
     reduction: str = "mean",
     delta: float = 1.0,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Compute the Huber loss.
 
@@ -3691,6 +3833,10 @@ def huber_loss(
 
     When delta equals 1, this loss is equivalent to SmoothL1Loss.
     In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.HuberLoss` for details.
     """
@@ -3702,6 +3848,7 @@ def huber_loss(
             target,
             reduction=reduction,
             delta=delta,
+            out=out
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3713,7 +3860,7 @@ def huber_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.huber_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
+        expanded_input, expanded_target, _Reduction.get_enum(reduction), delta, out=out
     )
 
 
@@ -3762,10 +3909,17 @@ def mse_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', *, out=None) -> Tensor
 
     Measures the element-wise mean squared error.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
+
     See :class:`~torch.nn.MSELoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3777,6 +3931,7 @@ def mse_loss(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            out=None
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3790,7 +3945,7 @@ def mse_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.mse_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction)
+        expanded_input, expanded_target, _Reduction.get_enum(reduction), out=out
     )
 
 
@@ -3867,8 +4022,14 @@ def multilabel_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
-    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean', *, out=None) -> Tensor
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
@@ -3881,12 +4042,13 @@ def multilabel_margin_loss(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            out=out
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
+    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum, out=out)
 
 
 def soft_margin_loss(
@@ -3895,9 +4057,15 @@ def soft_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
     r"""
-    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean', *, out=None) -> Tensor
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -3910,12 +4078,13 @@ def soft_margin_loss(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            out=out
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
+    return torch._C._nn.soft_margin_loss(input, target, reduction_enum, out=out)
 
 
 def multilabel_soft_margin_loss(
@@ -4006,8 +4175,14 @@ def multi_margin_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:  # noqa: D400,D402
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean', *, out=None) -> Tensor
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -4023,6 +4198,7 @@ def multi_margin_loss(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            out=out
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -4035,7 +4211,7 @@ def multi_margin_loss(
             raise ValueError("weight must be one-dimensional")
 
     return torch._C._nn.multi_margin_loss(
-        input, target, p, margin, weight, reduction_enum
+        input, target, p, margin, weight, reduction_enum, out=out
     )
 
 
@@ -5387,6 +5563,8 @@ def unfold(
     dilation: BroadcastingList2[int] = 1,
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Extract sliding local blocks from a batched input tensor.
 
@@ -5401,6 +5579,9 @@ def unfold(
         are vectorized) may result in incorrect behavior. If you need to write
         to the tensor, please clone it first.
 
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`torch.nn.Unfold` for details
     """
@@ -5413,9 +5594,10 @@ def unfold(
             dilation=dilation,
             padding=padding,
             stride=stride,
+            out=out
         )
     return torch._C._nn.im2col(
-        input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
+        input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride), out=out
     )
 
 
@@ -5426,11 +5608,17 @@ def fold(
     dilation: BroadcastingList2[int] = 1,
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1,
+    *,
+    out: Optional[Tensor] = None
 ) -> Tensor:
     r"""Combine an array of sliding local blocks into a large containing tensor.
 
     .. warning::
         Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
+
+    Keyword args:
+        out: the output tensor. If :attr:`out` is used, this operation won't
+            be differentiable. Default: None
 
     See :class:`torch.nn.Fold` for details
     """
@@ -5444,6 +5632,7 @@ def fold(
             dilation=dilation,
             padding=padding,
             stride=stride,
+            out=out
         )
     return torch._C._nn.col2im(
         input,
@@ -5452,6 +5641,7 @@ def fold(
         _pair(dilation),
         _pair(padding),
         _pair(stride),
+        out=out
     )
 
 

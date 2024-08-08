@@ -14875,7 +14875,6 @@ op_db: List[OpInfo] = [
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
-           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -14899,7 +14898,6 @@ op_db: List[OpInfo] = [
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
-           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -15463,7 +15461,6 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
@@ -15474,7 +15471,6 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
            skips=(
                # NOTE: this failure may not reproduce consistently on different systems
                # false INTERNAL ASSERT FAILED at "...torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185
@@ -15638,7 +15634,6 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.soft_margin_loss",
         dtypes=floating_types_and(torch.half, torch.bfloat16),
-        supports_out=False,
         supports_forward_ad=True,
         # doesn't support grad on target
         sample_inputs_func=partial(sample_inputs_loss, rhs_requires_grad=False),
@@ -15671,7 +15666,6 @@ op_db: List[OpInfo] = [
         "nn.functional.multi_margin_loss",
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
         reference_inputs_func=reference_inputs_multi_margin_loss,
@@ -15688,7 +15682,6 @@ op_db: List[OpInfo] = [
         "nn.functional.multilabel_margin_loss",
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
         reference_inputs_func=reference_inputs_multilabel_margin_loss,
@@ -15705,7 +15698,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            supports_gradgrad=True,
-           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
@@ -15919,7 +15911,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
@@ -15946,7 +15937,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_grad=False,
-           supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
@@ -15957,7 +15947,6 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
@@ -15981,7 +15970,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
@@ -16035,8 +16023,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_glu,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_fwgrad_bwgrad=True,),
     UnaryUfuncInfo(
         'nn.functional.elu',
         aten_backward_name='elu_backward',
@@ -16048,7 +16035,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
-        supports_out=False,
         sample_kwargs=lambda device, dtype, input:
             ({'alpha': 0.8}, {'alpha': 0.8}),
         inplace_variant=lambda x, alpha=1.0:
@@ -16372,7 +16358,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
-        supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
             DecorateInfo(
@@ -16407,7 +16392,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         assert_autodiffed=False,
-        supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
             DecorateInfo(
@@ -16441,7 +16425,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=False,
         supports_forward_ad=True,
-        supports_out=False,
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
         decorators=[
             DecorateInfo(
@@ -16493,7 +16476,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
-        supports_out=False,
         inplace_variant=partial(torch.nn.functional.mish, inplace=True),
         decorators=[
             DecorateInfo(
@@ -16562,7 +16544,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
-        supports_out=False,
         sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
                                                     {'threshold': float.fromhex('0x1.3ap-3'),
@@ -16847,7 +16828,6 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
                    error_inputs_func=error_inputs_hardtanh,
-                   supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    autodiff_nonfusible_nodes=["aten::hardtanh"]),
@@ -20786,7 +20766,6 @@ op_db: List[OpInfo] = [
         aten_backward_name='mse_loss_backward',
         ref=loss_reference_reduction_wrapper(lambda input, target: (input - target) ** 2),
         sample_inputs_func=sample_inputs_loss,
-        supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.float16),
@@ -21284,7 +21263,6 @@ op_db: List[OpInfo] = [
         "nn.functional.huber_loss",
         aten_backward_name='huber_loss_backward',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
         error_inputs_func=error_inputs_huber_loss,
@@ -22961,8 +22939,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.huber_loss",
         torch_opinfo_name="nn.functional.huber_loss",
-        # The corresponding PyTorch op doesn't support out.  But the ref is
-        # registered as a decomp and ATen has an out variant.
         supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(

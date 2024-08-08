@@ -2778,7 +2778,9 @@ def meta_avg_pool3d_backward(
     return input.new_empty(input.shape)
 
 
+@register_meta(aten.adaptive_avg_pool2d.out)
 @register_meta(aten._adaptive_avg_pool2d.default)
+@out_wrapper()
 def meta_adaptive_avg_pool2d(self, output_size):
     torch._check(
         self.ndim == 3 or self.ndim == 4,
@@ -2796,7 +2798,9 @@ def meta_adaptive_avg_pool2d(self, output_size):
     )
 
 
+@register_meta(aten.adaptive_avg_pool3d.out)
 @register_meta(aten._adaptive_avg_pool3d.default)
+@out_wrapper()
 def meta_adaptive_avg_pool3d(self, output_size):
     torch._check(
         self.ndim == 4 or self.ndim == 5,
