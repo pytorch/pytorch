@@ -86,6 +86,7 @@ partition_map_lookup(std::bitset<32>& patternID);
 std::unordered_map<std::bitset<32>, dnnl::graph::partition>::iterator
 partition_map_end();
 
+// compiled partition (fused kernel) cache
 std::unordered_map<std::vector<int64_t>, list_iterator_t>::iterator cache_lookup(
     std::vector<int64_t>& map_key);
 

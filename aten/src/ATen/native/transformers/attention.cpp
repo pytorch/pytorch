@@ -845,36 +845,27 @@ void reshape_attn_mask_to_4d(
 }
 
 #if AT_ONEDNN_GRAPH_ENABLED()
-static void cpu_sdpa_forward_onednn_graph(
+static void cpu_sdpa_inference_onednn_graph(
     const Tensor& output,
     const at::Tensor& q,
     const at::Tensor& k,
     const at::Tensor& v,
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
-  // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
-  //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
-  // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
-  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
-  // Value (Batch x Num_heads  x KV_seq_len x Dim_per_head)
-  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
-  at::Tensor query = q.transpose(1, 2);
-  at::Tensor key = k.transpose(1, 2);
-  at::Tensor value = v.transpose(1, 2);
   float scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(q.transpose(1, 2), scale).as_float_unchecked();
   // Sizes
   TORCH_CHECK(
-      (query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
-      "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+      (q.size(3) == v.size(3)) && (k.size(3) == v.size(3)),
+      "cpu_sdpa_inference_onednn_graph: Q/K/V should have the same head size");
 
   using namespace onednn_graph;
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
   if (has_attn_mask) {
-    int64_t batchSize = query.size(0);
-    int64_t qSize = query.size(1);
-    int64_t kvSize = value.size(1);
-    int64_t num_head = query.size(2);
+    int64_t batchSize = q.size(0);
+    int64_t qSize = q.size(2);
+    int64_t kvSize = v.size(2);
+    int64_t num_head = q.size(1);
     reshape_attn_mask_to_4d(
         attn_mask.value(), batchSize, num_head, qSize, kvSize);
   }
@@ -906,14 +897,12 @@ static void cpu_sdpa_forward_onednn_graph(
   map_key.reserve(1024);
   // We use this because different thread-pools may be used
   map_key.push_back(omp_get_max_threads());
-  // Algo ID
   std::vector<Tensor> input_tensors;
   input_tensors.push_back(q);
   input_tensors.push_back(k);
   input_tensors.push_back(v);
 
   map_key.push_back(static_cast<int64_t>(patternID.to_ullong()));
-  map_key.push_back(*(reinterpret_cast<int32_t*>(&scaling_factor)));
 
   map_key.insert(map_key.end(), q.sizes().begin(), q.sizes().end());
   map_key.insert(map_key.end(), q.strides().begin(), q.strides().end());
@@ -922,8 +911,6 @@ static void cpu_sdpa_forward_onednn_graph(
   map_key.insert(map_key.end(), v.sizes().begin(), v.sizes().end());
   map_key.insert(map_key.end(), v.strides().begin(), v.strides().end());
   input_tensors.push_back(scale_tensor);
-  map_key.insert(
-      map_key.end(), scale_tensor.sizes().begin(), scale_tensor.sizes().end());
   if (has_attn_mask) {
     auto attn_mask_val = attn_mask.value();
     input_tensors.push_back(attn_mask_val);
@@ -999,7 +986,8 @@ _scaled_dot_product_flash_attention_cpu(
 
   // oneDNN Graph SDPA is currently only supported with BF16 dtype on CPUs that support the AMX ISA.
   // It's used only if B * N > 2 * num_threads
-  // Only forward pass is supported, and logsumexp wouldn't be filled.
+  // Only forward pass is supported, but logsumexp wouldn't be updated.
+  // The environment variable ENABLE_ONEDNN_GRAPH_SDPA=1 should thus only be used for inference.
   const char* use_onednn_graph_sdpa = std::getenv("ENABLE_ONEDNN_GRAPH_SDPA");
   if ((use_onednn_graph_sdpa != nullptr && std::strcmp(use_onednn_graph_sdpa, "1") == 0) &&
       Context::hasOneDNNGraph() && at::cpu::is_amx_tile_supported() &&
@@ -1010,7 +998,7 @@ _scaled_dot_product_flash_attention_cpu(
     output = at::empty({batchSize, num_head, qSize, headSize}, query.options());
 #if AT_ONEDNN_GRAPH_ENABLED()
     // The output is contiguous
-    cpu_sdpa_forward_onednn_graph(output, query, key, value, attn_mask, scale);
+    cpu_sdpa_inference_onednn_graph(output, query, key, value, attn_mask, scale);
 #endif // AT_ONEDNN_GRAPH_ENABLED()
   } else {
     output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
@@ -1027,9 +1015,10 @@ _scaled_dot_product_flash_attention_cpu(
         scale);
     output = output.transpose(1, 2);
     // After the transpose above, the output would have discontiguous strides.
-    // Any trailing transpose & contiguous ops after the transpose above would not cause data movement.
+    // transpose is a view op, though, so only stride & size metadata gets updated.
+    // Any trailing transpose(1, 2) & contiguous ops after the transpose above would not cause data movement.
     // That's because such a transpose would simply result in nullifying the effect of the transpose op
-    // above by changing strides metadata. The contiguous would thus be a no-op.
+    // above by changing strides & sizes metadata. The contiguous following it would thus be a no-op.
   }
 
   logsumexp = logsumexp.transpose(1, 2);
