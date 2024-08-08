@@ -115,12 +115,7 @@ def trace_associative_scan(
 ):
     with disable_proxy_modes_tracing():
         sample_inputs = [
-            torch.empty_like(
-                x,
-                dtype=x.dtype,
-                device=x.device,
-                requires_grad=x.requires_grad,
-            )
+            torch.full((), False, dtype=x.dtype, device=x.device)
             for x in itertools.chain(input, input)
         ]
         combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
@@ -143,6 +138,12 @@ def trace_associative_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
+        assert (
+            o_meta.shape == ()
+        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
+        assert (
+            o_meta.shape == ()
+        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
