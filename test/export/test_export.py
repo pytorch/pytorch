@@ -356,6 +356,37 @@ graph():
     return (x_0,)""",
         )
 
+    def test_not_registered_parameter(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = {"foo": torch.nn.Parameter(torch.ones(3, 3))}
+
+            def forward(self, x):
+                return x + self.params["foo"]
+
+        f = Basic()
+        args = (torch.randn(1, 3),)
+        # strict-mode will error out because foo is registered as parameter
+        # in dynamo (a behavior that's different from eager). We decided to
+        # follow eager behavior.
+        ep = export(f, args, strict=False)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        # check foo is not a parameter in the final graph
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %lifted_tensor_0 : [num_users=1] = get_attr[target=lifted_tensor_0]
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
+    return (add,)""",
+        )
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -1373,11 +1404,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
-    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
+    permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1628,9 +1659,9 @@ def forward(self, x):
             """\
 def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
-    t = torch.ops.aten.t.default(p_linear_weight);  p_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, t);  p_linear_bias = x = t = None
-    sum_1 = torch.ops.aten.sum.default(add)
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, permute);  p_linear_bias = x = permute = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(add, [])
     add_1 = torch.ops.aten.add.Tensor(addmm, sum_1);  addmm = sum_1 = None
     return (add, add_1)""",
         )
@@ -3386,6 +3417,7 @@ def forward(self, x):
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -4133,7 +4165,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -4167,9 +4198,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability  # T183144788
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -5827,9 +5855,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -6681,11 +6706,13 @@ def forward(self, q, k, v):
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
-                return y * x
+                with torch.no_grad():
+                    return y * x, "moo"
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
         res = ep.module()(torch.tensor(4), 5)
-        self.assertEqual(res, torch.tensor(20))
+        self.assertEqual(res[0], torch.tensor(20))
+        self.assertEqual(res[1], "moo")
 
         class B(torch.nn.Module):
             def forward(self, x, y):
