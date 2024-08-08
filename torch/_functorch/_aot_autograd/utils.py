@@ -240,6 +240,7 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
+    num_backward_discovered_tokens = fw_metadata.num_backward_discovered_tokens
 
     def rewrite_first_with_effects(module, node):
         with module.graph.inserting_before(node):
@@ -299,6 +300,8 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
     def do_backward(module):
         input_nodes = []
         input_token_nodes = []
+        num_bw_tokens = num_tokens + num_backward_discovered_tokens
+        assert num_bw_tokens > 0
 
         for i, node in enumerate(module.graph.nodes):
             if node.op == "placeholder":
@@ -309,20 +312,22 @@ def unlift_tokens(fw_module, fw_metadata, bw_module=None):
                     rewrite_first_with_effects(module, node)
             elif node.op == "output":
                 # backward output tokens are at the end
-                output_token_nodes = node.args[0][-num_tokens:]
-                other_output_args = node.args[0][:-num_tokens]
+                output_token_nodes = node.args[0][-num_bw_tokens:]
+                other_output_args = node.args[0][:-num_bw_tokens]
 
                 rewrite_output(module, node, output_token_nodes, other_output_args)
 
-        assert len(input_token_nodes) == num_tokens
+        assert len(input_token_nodes) == num_bw_tokens
+
         for input_token_node in input_token_nodes:
             module.graph.erase_node(input_token_node)
 
         module.recompile()
 
-    do_forward(fw_module)
+    if num_tokens > 0:
+        do_forward(fw_module)
 
-    if bw_module is not None:
+    if bw_module is not None and num_tokens + num_backward_discovered_tokens > 0:
         do_backward(bw_module)
 
     # No need to update fw_metadata.num_forward_returns and fw_metadata.num_forward as num_tokens are not part of it.

@@ -685,7 +685,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg1_1, arg2_1, arg3_1, arg4_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")
@@ -696,7 +696,7 @@ class CompileTest(TestCase):
             .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
             # Expect no extra copy on return
-            .check("return (buf1, buf2, buf3, buf4, )")
+            .check("return (buf16, buf18, buf20, buf22, )")
             .run(code)
         )
 
