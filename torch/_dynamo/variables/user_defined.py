@@ -490,7 +490,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options = {"mutable_local": MutableLocal()}
             return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
-            return RandomVariable(self.value, kwargs)
+            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
+                seed = args[0].value
+            else:
+                seed = None
+            random_object = random.Random(seed)
+            return RandomVariable(random_object)
 
         return super().call_function(tx, args, kwargs)
 
