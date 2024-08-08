@@ -294,14 +294,22 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        # need to use offsets to broadcast across ragged dim properly
-        # NB: inefficient fallback here; Triton codegen can help this
-        # TODO: Make this work with autograd
-        outputs = []
-        for a_comp, b_comp in zip(a.unbind(), b.unbind()):
-            outputs.append(func(a_comp, b_comp, *args[2:], **kwargs))
-        new_values = torch.cat(outputs, dim=0)
-        return NestedTensor(new_values, **extracted_kwargs)
+        # handle broadcasting via jagged -> padded dense conversion
+        padded = nt.to_padded_tensor(0.0)
+
+        # broadcasting function call
+        lhs, rhs = (padded, t) if a_is_nt else (t, padded)
+        output_padded = func(lhs, rhs, *args[2:], **kwargs)
+
+        # padded dense -> jagged
+        total_L = nt._values.shape[0]
+
+        from .nested_tensor import nested_from_padded
+
+        # TODO: propagate cached min / max sequence length
+        return nested_from_padded(
+            output_padded, offsets=nt._offsets, ragged_idx=nt._ragged_idx, sum_S=total_L
+        )
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
