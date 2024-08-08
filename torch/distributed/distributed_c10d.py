@@ -126,11 +126,12 @@ __all__ = [
     "split_group",
 ]
 
-_communication_cache_enabled_backend =  [
-    'hccl',
+_communication_cache_enabled_backend = [
+    "hccl",
 ]
 
-_comm_ranks_bucket_cache = {}
+DictType = Dict[str, Dict[Tuple[int, ...], ProcessGroup]]
+_comm_ranks_bucket_cache: DictType = {}
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -1390,24 +1391,24 @@ def init_process_group(
                     store,
                     group_name,
                     pg_options,
-                    device_id
+                    device_id,
                 )
-            actual_world_size = get_world_size()
-            ranks_tuple = tuple(list(range(0, actual_world_size)))
-            if ranks_tuple not in _comm_ranks_bucket_cache[backend]:
-                _comm_ranks_bucket_cache[backend][ranks_tuple] = _get_default_group()
+                actual_world_size = get_world_size()
+                ranks_tuple = tuple(list(range(0, actual_world_size)))
+                if ranks_tuple not in _comm_ranks_bucket_cache[backend]:
+                    _comm_ranks_bucket_cache[backend][ranks_tuple] = _get_default_group()
     else:
         return _init_process_group_utils(
-                backend,
-                init_method,
-                timeout,
-                world_size,
-                rank,
-                store,
-                group_name,
-                pg_options,
-                device_id
-            )
+            backend,
+            init_method,
+            timeout,
+            world_size,
+            rank,
+            store,
+            group_name,
+            pg_options,
+            device_id,
+        )
 
 
 def _init_process_group_utils(
@@ -4609,18 +4610,32 @@ def new_group(
 
     if backend in _communication_cache_enabled_backend:
         _comm_ranks_bucket_cache[backend] = {}
-        if ranks == None:
+        if ranks is None:
             actual_world_size = get_world_size()
-            ranks_tuple = tuple(list(range(0, actual_world_size)))
+            ranks_tuple = tuple(range(0, actual_world_size))
         else:
-            ranks_tuple = tuple(sorted(tuple(ranks)))
+            ranks_tuple = tuple(sorted(ranks))
         if ranks_tuple in _comm_ranks_bucket_cache[backend]:
             return _comm_ranks_bucket_cache[backend][ranks_tuple]
         else:
-            _comm_ranks_bucket_cache[backend][ranks_tuple] = _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+            _comm_ranks_bucket_cache[backend][ranks_tuple] = _new_group_with_tag(
+                ranks,
+                timeout,
+                backend,
+                pg_options,
+                None,
+                use_local_synchronization=use_local_synchronization,
+            )
             return _comm_ranks_bucket_cache[backend][ranks_tuple]
     else:
-        return _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+        return _new_group_with_tag(
+            ranks,
+            timeout,
+            backend,
+            pg_options,
+            None,
+            use_local_synchronization=use_local_synchronization,
+        )
 
 
 
