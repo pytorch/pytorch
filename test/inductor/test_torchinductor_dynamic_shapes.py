@@ -570,6 +570,56 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True, do_not_emit_runtime_asserts=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_dynamic_storage_offset_comptime_not_aligned(self):
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            storage_offset = y[0].item()
+            z = x.clone()
+            return z.as_strided(size=(1,), stride=(1,), storage_offset=storage_offset)
+
+        @foo.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            storage_offset = y[0].item()
+            torch._check_is_size(storage_offset)
+            torch._check(storage_offset < x.size(0) - 1)
+            z = x.clone()
+            return z.as_strided(size=(1,), stride=(1,), storage_offset=storage_offset)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, y):
+            return torch.ops.test.foo(x, y)
+
+        def setup_context(ctx, inputs, output) -> None:
+            ctx.out = output[0]
+            ctx.inp = inputs[0]
+
+        def backward(ctx, grad):
+            return ctx.out.repeat(ctx.inp.size(0)), None
+
+        torch.library.register_autograd(
+            "test::foo",
+            backward,
+            setup_context=setup_context,
+        )
+
+        inp = (
+            torch.full(
+                (64,),
+                fill_value=1,
+                dtype=torch.float32,
+                device=GPU_TYPE,
+                requires_grad=True,
+            ),
+            torch.ones((64,), dtype=torch.int64, device=GPU_TYPE),
+        )
+
+        out = fn(*inp)
+        out.sum().backward()
+
     @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
         # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
