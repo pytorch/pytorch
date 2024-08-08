@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from typing import Mapping, Tuple
+from typing import Mapping, Tuple, TYPE_CHECKING
 
 import onnx
 import onnx.inliner
@@ -16,9 +16,12 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.diagnostics import infra
 
 
 def assert_has_diagnostics(
@@ -620,7 +623,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_exported_program_input_with_custom_fx_tracer(self):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import dynamo_graph_extractor
 
         class Model(torch.nn.Module):
@@ -631,7 +634,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         exported_program = torch.export.export(Model(), args=(x,))
 
         export_options = torch.onnx.ExportOptions()
-        export_options = exporter.ResolvedExportOptions(
+        export_options = _exporter_legacy.ResolvedExportOptions(
             export_options, model=exported_program
         )
         export_options.fx_tracer = (
