@@ -408,8 +408,8 @@ class TritonBlockPointerTest(InductorTestCase):
     )
     def test_nd_tiling_odd_shapes_pointwise(
         self,
-        full_size: tuple[int],
-        view_size: tuple[int],
+        full_size: Tuple[int],
+        view_size: Tuple[int],
         num_block_pointers: int,
         num_tiles: int,
     ):
