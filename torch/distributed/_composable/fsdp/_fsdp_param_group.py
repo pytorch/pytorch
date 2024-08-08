@@ -191,6 +191,12 @@ class FSDPParamGroup:
 
     def lazy_init(self):
         # Lazy init should be idempotent
+        # User may initialize params again after meta init.
+        # For example, we initialize DoRA magnitudes base on
+        # other parameters loaded from the state dict.
+        with torch.no_grad():
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.reset_sharded_param()
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
