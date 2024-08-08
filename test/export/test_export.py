@@ -6626,6 +6626,44 @@ def forward(self, x, y):
         gm, shape_env = _dynamo_export(M2(), inputs, {}, shapes)
         breakpoint()
 
+    def test_process_dyn_auto(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, a, b, c):
+                return 2.0
+        inputs = (
+            torch.randn(3, 8, 9),
+            torch.randn(4, 5, 6, 3),
+            3,
+            (4, 5),
+            {
+                "x": torch.randn(4, 4),
+                "y": torch.randn(6, 6),
+            },
+        )
+        shapes = {
+            # "x": (Dim("x0"), Dim("x1"), Dim("x2")),
+            # "y": (Dim("dy"), Dim("y1"), Dim("y2"), Dim("y3")),
+            "x": True,
+            "y": True,
+            "a": None,
+            "b": (None, None),
+            "c": {
+                # "x": (True, True),
+                # "y": True,
+                "x": (None, None),
+                "y": None,
+            }
+        }
+        # shapes = None
+        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(Foo(), inputs, {}, shapes)
+
+        with torch._dynamo.config.patch(
+            assume_static_by_default=False,
+            automatic_dynamic_shapes=True,
+        ):
+            ep = torch.export.export(Foo(), inputs, dynamic_shapes=shapes, strict=False)
+        breakpoint()
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

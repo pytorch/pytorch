@@ -726,9 +726,6 @@ def _process_dynamic_shapes(
 ) -> Optional[List[Constraint]]:
     from torch._dynamo.exc import UserError, UserErrorType
 
-    if dynamic_shapes is None or len(dynamic_shapes) == 0:
-        return None
-
     # map of Dim names representing input shape dimensions to constraints on them
     symbols: Dict[str, List[Constraint]] = defaultdict(list)
     # track roots that do not directly represent input shape dimensions
@@ -841,39 +838,51 @@ def _process_dynamic_shapes(
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, (int, _Dim)):
-                    if isinstance(dim, int):
+                if dim == True:
+                    continue
+                if isinstance(dim, (int, _Dim)) or dim is None:
+                    if dim is None:
+                        dim = _create_static_dim(tensor, i, tensor.shape[i])
+                    elif isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                        "try None or True instead",
+                    )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, (int, _Dim)):
-                    if isinstance(dim, int):
+                if dim == True:
+                    continue
+                if isinstance(dim, (int, _Dim)) or dim is None:
+                    if dim is None:
+                        dim = _create_static_dim(tensor, i, tensor.shape[i])
+                    elif isinstance(dim, int):
                         dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                        "try None or True instead",
+                    )
+        elif shape is None:
+            for i, val in enumerate(tensor.shape):
+                dim = _create_static_dim(tensor, i, val)
+                check_same_bounds(dim)
+                constraint = to_constraint(dim, tensor, i)
+                symbols[dim.__name__].append(constraint)
         else:
-            if shape is not None:
+            if shape != True:
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Unexpected dynamic_shape {shape} of Tensor, " "try None instead",
+                    f"Unexpected dynamic_shape {shape} of Tensor, " "try None or True instead",
                 )
 
     def assoc_shapes(combined_args, dynamic_shapes):
@@ -893,7 +902,9 @@ def _process_dynamic_shapes(
     combined_args = _combine_args(
         f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    if not isinstance(dynamic_shapes, dict):
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
+        dynamic_shapes = _tree_map(lambda t: None, combined_args)
+    elif not isinstance(dynamic_shapes, dict):
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
     assoc_shapes(combined_args, dynamic_shapes)
@@ -924,7 +935,6 @@ def _process_dynamic_shapes(
             else:
                 constraints.append(primary)
 
-    breakpoint()
     return constraints  # type: ignore[return-value]
 
 

@@ -80,7 +80,7 @@ def fakify(
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=[DimDynamic.STATIC] * n_dims,
+        dynamic_sizes=[DimDynamic.DYNAMIC] * n_dims,
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
@@ -88,7 +88,6 @@ def fakify(
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
@@ -134,11 +133,7 @@ def make_fake_inputs(
     if context is not None:
         # This occurs when we are exporting within dynamo. There already exists
         # a toplevel TracingContext with a fake mode, so we do not want to
-        # create another fake mode. In this scenario, we also shouldn't have any
-        # constraints since the toplevel tracing context should handle it.
-        assert (
-            len(constraints) == 0
-        ), "Found constraints when tracing with a toplevel tracing context."
+        # create another fake mode.
         fake_mode = context.fake_mode
     elif not _is_torch_jit_trace:
         code = nn_module.forward.__code__
@@ -204,6 +199,7 @@ def make_fake_inputs(
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
+        breakpoint()
         return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
 
 
@@ -308,7 +304,7 @@ def make_constraints(
     inline_constraints = gm.meta.get("inline_constraints", [])
     range_constraints = {
         symbol: inline_constraints[symbol] for symbol in inline_constraints
-    }
+    }  # we should probably clean up range constraints for symbols that don't appear in the graph
     if not dynamic_shapes:
         return range_constraints
 
@@ -339,7 +335,7 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                dim = shape_spec[i] if shape_spec else None
+                dim = None if (shape_spec is None or shape_spec == True) else shape_spec[i]
                 if dim:
                     range_constraints[d.node.expr] = ValueRanges(
                         lower=dim.min, upper=dim.max
