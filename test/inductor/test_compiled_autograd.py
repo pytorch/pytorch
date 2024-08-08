@@ -457,7 +457,7 @@ main()
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
-        proxies, _ = compiler.begin_capture(inputs=inputs, sizes=[])
+        proxies, _, _ = compiler.begin_capture(inputs=inputs, sizes=[], scalars=[])
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
@@ -499,7 +499,11 @@ main()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
             runtime_wrapper(
-                compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=()
+                compiled_fn=compiled_fn,
+                inputs=[param, activ],
+                sizes=(),
+                scalars=(),
+                hooks=(),
             )
         finally:
             handle.remove()
@@ -1777,9 +1781,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     assert(saved_variables.size() == 2);
     torch::Tensor x = saved_variables[0];
     torch::Tensor y = saved_variables[1];
-    assert(ctx->saved_data["bool"].isBool());
-    assert(ctx->saved_data["int"].isInt());
-    int i = ctx->saved_data["int"].toInt();
+    c10::SymInt i = ctx->saved_data["int"].toSymInt();
 
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = x + y + i;
