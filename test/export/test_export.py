@@ -356,6 +356,37 @@ graph():
     return (x_0,)""",
         )
 
+    def test_not_registered_parameter(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = {"foo": torch.nn.Parameter(torch.ones(3, 3))}
+
+            def forward(self, x):
+                return x + self.params["foo"]
+
+        f = Basic()
+        args = (torch.randn(1, 3),)
+        # strict-mode will error out because foo is registered as parameter
+        # in dynamo (a behavior that's different from eager). We decided to
+        # follow eager behavior.
+        ep = export(f, args, strict=False)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        # check foo is not a parameter in the final graph
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %lifted_tensor_0 : [num_users=1] = get_attr[target=lifted_tensor_0]
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
+    return (add,)""",
+        )
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -1183,7 +1214,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         except torch._dynamo.exc.UserError as exc:
             expected_error_msg = (
                 "Specializations unexpectedly required \(dy\)!(.*\n)*.*"
-                ".*dy - 6.*must be specialized to 6 because the guards generated for it are too complex(.*\n)*.*"
+                ".*solving the guards generated for dy - 6.*resulted in a specialized value of 6(.*\n)*.*"
                 "Suggested fixes(.*\n)*.*"
                 ".*dy = 12(.*\n)*.*"
             )
@@ -2455,8 +2486,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
-    @testing.expectedFailureTrainingIRToRunDecomp  # source_fn_stack failure
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -3387,6 +3417,7 @@ def forward(self, x):
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -4134,7 +4165,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -4168,9 +4198,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability  # T183144788
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -5828,9 +5855,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -6682,11 +6706,13 @@ def forward(self, q, k, v):
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
-                return y * x
+                with torch.no_grad():
+                    return y * x, "moo"
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
         res = ep.module()(torch.tensor(4), 5)
-        self.assertEqual(res, torch.tensor(20))
+        self.assertEqual(res[0], torch.tensor(20))
+        self.assertEqual(res[1], "moo")
 
         class B(torch.nn.Module):
             def forward(self, x, y):

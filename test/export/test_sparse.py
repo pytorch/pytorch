@@ -7,6 +7,7 @@ import sys
 import unittest
 
 import torch
+from torch._dynamo.config import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -79,6 +80,7 @@ class SparseActivationCSR(torch.nn.Module):
 #
 
 
+@unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
 class TestSparseProp(TestCase):
     def setUp(self):
         TestCase.setUp(self)
@@ -145,9 +147,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_sumnet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity!")
-
         net = SumNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
@@ -175,9 +174,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_eltwisenet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity!")
-
         net = EltwiseNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
