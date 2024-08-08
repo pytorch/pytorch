@@ -2,7 +2,6 @@
 import copyreg
 import enum
 import functools
-import os
 import warnings
 from collections import OrderedDict
 from copy import deepcopy
@@ -1515,8 +1514,15 @@ class Tensor(torch._C.TensorBase):
                     event = torch.cuda.Event()
                     event.record(sync_stream)
                     stream.wait_event(event)
-        if self.device.type == 'xla' and os.environ.get('PJRT_DEVICE', '').lower() == 'cuda':
+        if self.device.type == "xla":
+            import torch_xla
             import torch_xla.utils.dlpack as xla_dlpack
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                RuntimeError("Can't export XLA tensors not on CUDA.")
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
@@ -1539,7 +1545,14 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
-        elif torch_device_type == 'xla' and os.environ.get('PJRT_DEVICE', '').lower() == 'cuda':
+        elif torch_device_type == "xla":
+            import torch_xla
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
             device_type = DLDeviceType.kDLGPU
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
