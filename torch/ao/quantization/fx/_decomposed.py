@@ -595,7 +595,9 @@ def quantize_per_channel(
     scales = scales.view(new_shape)
     zero_points = zero_points.view(new_shape)
 
-    res = torch.clamp(torch.round(input * (1.0 / scales)) + zero_points, quant_min, quant_max)
+    res = torch.clamp(
+        torch.round(input * (1.0 / scales)) + zero_points, quant_min, quant_max
+    )
     out = res.permute(tuple(permute_axis_list))
     return out.to(dtype)
 
