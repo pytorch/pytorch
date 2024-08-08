@@ -460,6 +460,16 @@ def convolution(
     if not isinstance(groups, int):
         groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
+
+    # Need use hint for triton template since the template does not
+    # work with a dynamic shape.
+    #
+    # No need to evaluate_static_shape for dilation and output_padding
+    # since the template is only used when dilation is 1 and output_padding
+    # is 0.
+    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
+    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+
     kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
