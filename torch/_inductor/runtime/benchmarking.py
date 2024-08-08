@@ -18,11 +18,13 @@ T = TypeVar("T")
 
 
 def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
+    """Wrapper that logs function durations, in seconds, along with the function's args
+    and kwargs if logging is enabled, otherwise a no-op."""
     if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
         return fn
 
     @wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         start_s = time.perf_counter()
         result = fn(*args, **kwargs)
         log.debug(
