@@ -596,7 +596,7 @@ class DisableContext(_TorchDynamoContext):
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
         # moved it here to have better code organization. For disable, we just
-        # want the callback to be None. We don't have to check trace_rules or
+        # want to disable the eval frame callback mechanism. We don't have to check trace_rules or
         # create any wrapper.
         fn = innermost_fn(fn)
 
@@ -622,15 +622,15 @@ class DisableContext(_TorchDynamoContext):
 
         assert callable(fn)
 
-        callback = self.callback
-
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(callback)
+            from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
+
+            prior = set_eval_frame_callback_enabled(False)
             try:
                 return fn(*args, **kwargs)
             finally:
-                _maybe_set_eval_frame(prior)
+                set_eval_frame_callback_enabled(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
