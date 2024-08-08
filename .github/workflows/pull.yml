@@ -598,7 +598,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.test-matrix }}
       timeout-minutes: 600
 
-linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -610,7 +610,7 @@ linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
 
-linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
+  linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
