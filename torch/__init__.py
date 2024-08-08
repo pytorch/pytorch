@@ -1171,18 +1171,18 @@ def set_default_dtype(d: "torch.dtype", /) -> None:
 
         >>> torch.set_default_dtype(torch.float64)
         >>> # Python floats are now interpreted as float64
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float64
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex128
 
         >>> torch.set_default_dtype(torch.float16)
         >>> # Python floats are now interpreted as float16
-        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        >>> torch.tensor([1.2, 3]).dtype  # a new floating point tensor
         torch.float16
         >>> # Complex Python numbers are now interpreted as complex128
-        >>> torch.tensor([1.2, 3j]).dtype   # a new complex tensor
+        >>> torch.tensor([1.2, 3j]).dtype  # a new complex tensor
         torch.complex32
 
     """
@@ -2290,8 +2290,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[_InputT, _RetT]:
-    ...
+) -> _Callable[_InputT, _RetT]: ...
 
 
 @_overload
@@ -2304,8 +2303,7 @@ def compile(
     mode: _Union[str, None] = None,
     options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
-) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]:
-    ...
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
@@ -2443,9 +2441,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(
-        model
-    )  # type: ignore[return-value]
+    )(model)  # type: ignore[return-value]
 
 
 def _register_device_module(device_type, module):

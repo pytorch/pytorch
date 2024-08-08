@@ -63,7 +63,9 @@ from torch._inductor.codegen.rocm.compile_command import (
 
 T = TypeVar("T")
 
-from _collections_abc import dict_keys  # noqa: TCH003
+
+if TYPE_CHECKING:
+    from collections.abc import KeysView
 
 
 """
@@ -1086,6 +1088,7 @@ class FxGraphCache:
         from .graph import GraphLowering
 
         GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
         trace_structured(
@@ -1394,9 +1397,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        self.device_types = graph.device_types
-        self.device_idxs = graph.device_idxs
-        self.mutated_inputs = graph.mutated_inputs
+        # TODO - ordered set
+        self.device_types = set(graph.device_types)
+        self.device_idxs = set(graph.device_idxs)
+        self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.torchbind_constants = graph.torchbind_constants
@@ -1534,6 +1538,7 @@ def get_include_and_linking_paths(
         or vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or config.profiler_mark_wrapper_call
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
@@ -1800,7 +1805,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
     @classmethod
-    def get_keys(cls) -> dict_keys[str, Dict[str, str]]:
+    def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
 
 
@@ -1870,11 +1875,16 @@ class AotCodeCompiler:
             payload_fn=lambda: source_code,
         )
 
+        # We use a file lock below to protect FS operations. The lock file
+        # is scoped to the 'key', so make sure the consts_path is protected
+        # by the same lock:
+        consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
+
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
                 consts,
                 "bin",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
 
             consts_o = os.path.splitext(consts_path)[0] + ".o"
@@ -1943,7 +1953,7 @@ class AotCodeCompiler:
                 _, _binary_constants_path = write(
                     consts,
                     "bin",
-                    specified_dir=os.path.split(input_path)[0],
+                    specified_dir=consts_specified_dir,
                 )
                 log.debug("binary constants path: %s", _binary_constants_path)
 
@@ -1966,7 +1976,7 @@ class AotCodeCompiler:
             _, consts_path = write(
                 consts_asm,
                 "S",
-                specified_dir=os.path.split(input_path)[0],
+                specified_dir=consts_specified_dir,
             )
             consts_o = os.path.splitext(consts_path)[0] + ".o"
             cmd = f"{get_cpp_compiler()} -c -o {consts_o} {consts_path}"
@@ -2042,8 +2052,29 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_file(compile_flags)
 
             else:
+                (
+                    object_output_name,
+                    object_output_dir,
+                ) = get_name_and_dir_from_output_file_path(input_path)
+                object_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    compile_only=True,
+                    use_absolute_path=use_absolute_path,
+                    use_mmap_weights=use_mmap_weights,
+                )
+                object_builder = CppBuilder(
+                    name=object_output_name,
+                    sources=input_path,
+                    output_dir=object_output_dir,
+                    BuildOption=object_build_options,
+                )
+                compile_cmd = object_builder.get_command_line()
+                output_o = object_builder.get_target_file_path()
+
                 # TODO: replace this with using the CppBuilder above
-                compile_cmd = cpp_compile_command(
+                compile_cmd_old = cpp_compile_command(
                     input=input_path,
                     output=output_o,
                     vec_isa=picked_vec_isa,
@@ -2054,8 +2085,15 @@ class AotCodeCompiler:
                     use_mmap_weights=use_mmap_weights,
                 )
 
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        compile_cmd.split(" "), compile_cmd_old.split(" ")
+                    )
+
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
+                    output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
@@ -2149,37 +2187,62 @@ class AotCodeCompiler:
 
                 archive_path = package_aoti(os.path.split(input_path)[0])
                 return archive_path
-
-            # TODO: replace this with using the CppBuilder above
-            link_cmd = cpp_compile_command(
-                input=[output_o, consts_o],
-                output=output_so,
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
-            )
-
-            log.debug("aot linkage command: %s", link_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, link_cmd.split())
-                os.chmod(output_so, 0o755)
             else:
-                run_command_and_check(link_cmd)
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
+                so_builder = CppBuilder(
+                    name=output_name,
+                    sources=[output_o, consts_o],
+                    output_dir=output_dir,
+                    BuildOption=so_build_options,
+                )
+                link_cmd = so_builder.get_command_line()
+                output_so = so_builder.get_target_file_path()
 
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
+                # TODO: replace this with using the CppBuilder above
+                link_cmd_old = cpp_compile_command(
+                    input=[output_o, consts_o],
+                    output=output_so,
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
 
-            # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
-                f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                f.write(f"// Link cmd\n// {link_cmd}\n")
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        link_cmd.split(" "), link_cmd_old.split(" ")
+                    )
+
+                log.debug("aot linkage command: %s", link_cmd)
+                if fbcode_aot_cpu_re:
+                    output_so = os.path.splitext(input_path)[0] + ".so"
+                    compile_file([output_o, consts_o], output_so, link_cmd.split())
+                    os.chmod(output_so, 0o755)
+                else:
+                    run_command_and_check(link_cmd)
+
+                if use_mmap_weights:
+                    with open(output_so, "a+b") as f_so:
+                        so_size = f_so.tell()
+                        # Page align the weights
+                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(serialized_weights)
+                        f_so.write(struct.pack("q", magic_number))
+
+                # Append cmds to the end of codegen-ed wrapper file
+                with open(input_path, "a") as f:
+                    f.write("\n")
+                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                    f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 
@@ -2217,8 +2280,14 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
-@dynamo_timed
 def compile_file(
+    input_path: Union[str, List[str]], output_path: str, cmd: List[str]
+) -> None:
+    with dynamo_timed("compile_file"):
+        return _compile_file(input_path, output_path, cmd)
+
+
+def _compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
     input_paths = [input_path] if isinstance(input_path, str) else input_path
@@ -2492,14 +2561,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }
         template <> inline long parse_arg<long>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(result == -1 && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
+            if(unlikely(result == -1 && PyErr_Occurred()))
+                throw std::runtime_error("expected int arg");
             return result;
         }
         template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
-            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
+            if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
+                throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }
 
@@ -2507,10 +2576,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         static PyObject* %s_py(PyObject* self, PyObject* args) {
             try {
-                if(!PyTuple_CheckExact(args))
-                    [[unlikely]] throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != %s)
-                    [[unlikely]] throw std::runtime_error("requires %s args");
+                if(unlikely(!PyTuple_CheckExact(args)))
+                    throw std::runtime_error("tuple args required");
+                if(unlikely(PyTuple_GET_SIZE(args) != %s))
+                    throw std::runtime_error("requires %s args");
                 %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -3416,7 +3485,7 @@ class DLLWrapper:
     def __init__(
         self,
         lib_path: str,
-    ):
+    ) -> None:
         self.lib_path = lib_path
         self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
@@ -3663,11 +3732,10 @@ class TritonFuture(CodeCacheFuture):
         self,
         kernel: Any,
         future: Optional[Future[Any]],
-    ):
+    ) -> None:
         self.kernel = kernel
         self.future = future
 
-    # @dynamo_utils.dynamo_timed
     def result(self) -> ModuleType:  # type: ignore[override]
         if self.future is not None:
             # If the worker failed this will throw an exception.

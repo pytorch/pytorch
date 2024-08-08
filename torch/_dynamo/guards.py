@@ -87,7 +87,9 @@ from .source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -863,6 +865,7 @@ class GuardBuilder(GuardBuilderBase):
                 OptimizerSource,
                 NNModuleSource,
                 UnspecializedNNModuleSource,
+                UnspecializedBuiltinNNModuleSource,
                 FSDPNNModuleSource,
             ),
         ):
@@ -875,7 +878,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AttrSource):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
@@ -1416,6 +1419,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
+
         ok_types = tuple(
             common_constant_types
             | {
@@ -1430,6 +1434,21 @@ class GuardBuilder(GuardBuilderBase):
                 *np_types,
             }
         )
+        if torch.distributed.is_available():
+            from torch.distributed._tensor.placement_types import (
+                Partial,
+                Replicate,
+                Shard,
+            )
+            from torch.distributed.device_mesh import DeviceMesh
+
+            ok_types = ok_types + (
+                Shard,
+                Replicate,
+                Partial,
+                DeviceMesh,
+            )
+
         if istype(val, dict):
             assert all(
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
@@ -1804,7 +1823,7 @@ class GuardBuilder(GuardBuilderBase):
         # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
         # to a new tensor everytime and therefore id differs.
         if (
-            guard.is_nn_module()
+            guard.is_specialized_nn_module()
             and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
@@ -1914,7 +1933,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+                value, is_tensor=True, tensor_source=guard.originating_source
             )
 
             if not static:
@@ -2166,7 +2185,7 @@ class CheckFunctionManager:
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
-                and guard.is_nn_module()
+                and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
