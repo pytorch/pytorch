@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
-#include <memory>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -205,6 +204,7 @@ AOTITorchError aoti_torch_get_sizes(
     int64_t** ret_sizes) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_sizes = const_cast<int64_t*>(t->sizes().data());
   });
 }
@@ -224,6 +224,7 @@ AOTITorchError aoti_torch_get_strides(
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_strides = const_cast<int64_t*>(t->strides().data());
   });
 }
@@ -261,7 +262,7 @@ AOTITorchError aoti_torch_get_device_index(
     int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret_device_index = t->device().index();
+    *ret_device_index = static_cast<int16_t>(t->device().index());
   });
 }
 
@@ -917,11 +918,38 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+
+  auto device = t->device();
+  auto min = t->min().item<float>();
+  auto max = t->max().item<float>();
+
+  // Display message
   std::cout << "[";
   if (msg) {
-    std::cout << msg;
+    std::cout << "  " << msg;
   }
-  std::cout << "]:" << *t << "\n";
+  std::cout << "  "
+            << "]:" << std::endl;
+
+  // Print exact tensor values for small size tensors
+  const int threshold = 10;
+  if (t->numel() <= threshold) {
+    std::cout << *t << "\n";
+  }
+
+  // Print summary stats of the tensor
+  std::cout << "Min value: " << min << std::endl;
+  std::cout << "Max value: " << max << std::endl;
+  std::cout << "Device: " << device << std::endl;
+  std::cout << "Size: " << t->sizes() << std::endl;
+  std::cout << "Stride: " << t->strides() << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
+  std::cout << "Layout: " << t->layout() << std::endl;
+  std::cout << "Number of elements: " << t->numel() << std::endl;
+  std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
+  std::cout << "Requires grad: " << t->requires_grad() << std::endl;
+
+  std::cout << std::endl;
 }
 
 // ProxyExecutor
