@@ -599,7 +599,7 @@ jobs:
       timeout-minutes: 600
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm86
+    name: cuda12.1-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm75
@@ -611,7 +611,7 @@ jobs:
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
-    name: cuda12.1-py3.10-gcc9-sm86
+    name: cuda12.1-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
     with:
