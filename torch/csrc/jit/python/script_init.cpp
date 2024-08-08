@@ -940,19 +940,19 @@ void initJitScriptBindings(PyObject* module) {
   special_magic_methods.emplace(
       "__str__",
       [](const Object& self,
-         py::args args,
+         const py::args& args,
          const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__str__");
         if (!method) {
           return py::str("ScriptObject <" + self.type()->str() + ">");
         }
-        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
+        return invokeScriptMethodFromPython(*method, args, kwargs);
       });
 
   special_magic_methods.emplace(
       "__repr__",
       [](const Object& self,
-         py::args args,
+         const py::args& args,
          const py::kwargs& kwargs) -> py::object {
         auto method = self.find_method("__repr__");
         if (!method) {
@@ -960,7 +960,7 @@ void initJitScriptBindings(PyObject* module) {
           ss << std::hex << static_cast<const void*>(&self);
           return py::str("<torch.ScriptObject object at " + ss.str() + ">");
         }
-        return invokeScriptMethodFromPython(*method, std::move(args), kwargs);
+        return invokeScriptMethodFromPython(*method, args, kwargs);
       });
 
   for (const char* mm_name : magic_method_names) {
@@ -980,7 +980,7 @@ void initJitScriptBindings(PyObject* module) {
               throw c10::NotImplementedError(msg);
             }
             return invokeScriptMethodFromPython(
-                *method, std::move(args), kwargs);
+                *method, args, kwargs);
           });
     }
   }
@@ -1267,11 +1267,12 @@ void initJitScriptBindings(PyObject* module) {
             pp.printNamedType(self.type());
             std::map<std::string, at::IValue> consts;
             int i = 0;
+            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
-            return std::make_tuple(pp.str(), consts);
+            return std::make_tuple(pp.str(), std::move(consts));
           })
       .def("apply", &Module::apply)
       .def("__copy__", &Module::copy)
@@ -1580,11 +1581,12 @@ void initJitScriptBindings(PyObject* module) {
             pp.printMethod(self.function());
             std::map<std::string, at::IValue> consts;
             int i = 0;
+            consts.reserve(constants.size());
             for (auto const& constant : constants) {
               consts["c" + std::to_string(i)] = constant;
               i += 1;
             }
-            return std::make_tuple(pp.str(), consts);
+            return std::make_tuple(pp.str(), std::move(consts));
           })
       .def_property_readonly("owner", &Method::owner)
       .def_property_readonly("raw_owner", [](const Method& self) {

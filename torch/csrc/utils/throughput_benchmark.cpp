@@ -75,12 +75,12 @@ void ScriptModuleBenchmark::runOnce(ScriptModuleInput&& input) const {
 
 template <>
 ScriptModuleOutput ScriptModuleBenchmark::runOnce(
-    py::args&& args,
+    const py::args& args,
     const py::kwargs& kwargs) const {
   CHECK(initialized_);
   auto& function = model_.get_method("forward").function();
   ScriptModuleInput stack = jit::createStackForSchema(
-      function.getSchema(), std::move(args), kwargs, model_._ivalue());
+      function.getSchema(), args, kwargs, model_._ivalue());
   return function(std::move(stack));
 }
 
@@ -103,7 +103,7 @@ template <>
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),
-      std::move(args),
+      args,
       kwargs,
       model_._ivalue());
   inputs_.emplace_back(std::move(stack));

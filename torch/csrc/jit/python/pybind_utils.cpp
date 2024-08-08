@@ -748,14 +748,14 @@ py::object toPyObject(IValue ivalue) {
 
 std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
     std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, std::nullopt);
+        op->schema(), args, kwargs, std::nullopt);
 
     return std::make_pair(std::move(op), std::move(stack));
   } else {

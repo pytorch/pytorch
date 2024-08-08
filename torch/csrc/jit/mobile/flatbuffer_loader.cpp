@@ -55,8 +55,7 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Our own alignment requirement does not need to be exactly the same as what
 // flatbuffers supports, but what flatbuffers supports needs to satisfy our
@@ -93,7 +92,7 @@ class FlatbufferLoader final {
 
   typedef TypePtr (*TypeResolver)(
       const std::string& type_str,
-      std::shared_ptr<CompilationUnit> cu);
+      const std::shared_ptr<CompilationUnit>& cu);
 
   void internal_registerTypeResolver(TypeResolver type_resolver);
 
@@ -187,7 +186,7 @@ IValue parseEnum(
 
 TypePtr resolveType(
     const std::string& type_string,
-    std::shared_ptr<CompilationUnit> cu) {
+    const std::shared_ptr<CompilationUnit>& cu) {
   TypePtr type;
   c10::string_view type_str(type_string);
   if (type_str.starts_with(kCustomClassPrefix)) {
@@ -939,5 +938,4 @@ bool register_flatbuffer_loader() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
