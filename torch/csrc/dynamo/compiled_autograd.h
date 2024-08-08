@@ -298,7 +298,8 @@ class CompiledNodeArgs {
       }
     } else if (iv.isTensor()) {
       collect(iv.toTensor());
-    } else if (iv.isInt() || iv.isSymInt()) {
+    } else if (
+        iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
       _compiler.lifted_ivalue_args.args.emplace_back(&iv);
     } else {
       try {
@@ -607,7 +608,7 @@ class SwapSavedVariables {
       before(iv.toTensor());
     } else {
       stashed_ivalues.save(&iv, at::IValue(iv));
-      if (iv.isInt() || iv.isSymInt()) {
+      if (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
         iv = compiler.lifted_ivalue_args.next_proxy(&iv);
       }
     }
