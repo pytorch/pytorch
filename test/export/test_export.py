@@ -6706,11 +6706,13 @@ def forward(self, q, k, v):
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
-                return y * x
+                with torch.no_grad():
+                    return y * x, "moo"
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
         res = ep.module()(torch.tensor(4), 5)
-        self.assertEqual(res, torch.tensor(20))
+        self.assertEqual(res[0], torch.tensor(20))
+        self.assertEqual(res[1], "moo")
 
         class B(torch.nn.Module):
             def forward(self, x, y):
