@@ -386,6 +386,16 @@ def create_functionalized_fn(
             f_outs = fn(*f_args)
 
         if trace_joint:
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            assert functional_tensor_mode is not None
+            if len(meta.tokens) != len(functional_tensor_mode._tokens):
+                # New effect tokens were discovered in backward
+                meta.num_backward_discovered_tokens = len(
+                    functional_tensor_mode._tokens
+                ) - len(meta.tokens)
+
             # We support a limited amount of mutation of graph inputs during the backward pass.
             # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
             # Here, we perform extra checks for primals that were mutated in the **backward**
@@ -668,17 +678,21 @@ def handle_effect_tokens_fn(
             assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
             fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
 
-            assert len(functional_tensor_mode._tokens) == num_tokens
-            bwd_out_tokens = functional_tensor_mode._tokens.values()
+            # meta is collected from tracing forward only, so len(meta.tokens) is the number of tokens used in forward.
+            # Tokens can be discovered in backward only, in that case len(functional_tensor_mode._tokens) != num_tokens
 
+            bwd_out_tokens = functional_tensor_mode._tokens.values()
+            # Not adding tokens, that were not updated in backward
+            fwd_out_tokens_set = set(fwd_out_tokens)
             bwd_out_tokens_used_in_bw = [
-                bt for ft, bt in zip(fwd_out_tokens, bwd_out_tokens) if ft is not bt
+                t for t in bwd_out_tokens if t not in fwd_out_tokens_set
             ]
-            fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
-            bwd_out_tokens_used_in_bw = [from_fun(t) for t in bwd_out_tokens_used_in_bw]
+
+            f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
+            f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens_used_in_bw]
 
             meta.num_bw_out_tokens = len(bwd_out_tokens_used_in_bw)
-            return ((*fwd_out_tokens, *outs[0]), (*outs[1], *bwd_out_tokens_used_in_bw))
+            return ((*f_fwd_out_tokens, *outs[0]), (*outs[1], *f_bwd_out_tokens))
 
         out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
         return (*out_tokens, *outs)
