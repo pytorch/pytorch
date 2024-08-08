@@ -2053,7 +2053,7 @@ def optimize_onnx_ctx(
     test_data_dumped = False
 
     def run_n_iterations_onnx(model, inputs, n=2):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import diagnostics
 
         # NOTE(bowbao): Capture all export & ort errors and diagnostics.
@@ -2087,7 +2087,7 @@ def optimize_onnx_ctx(
                 else:
                     outputs = onnx_model.run(inputs)
             return outputs
-        except exporter.OnnxExporterError as e:
+        except _exporter_legacy.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
             diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
@@ -4430,7 +4430,15 @@ def run(runner, args, original_dir=None):
                 fullgraph=args.nopython,
                 mode=args.inductor_compile_mode,
             )
-            runner.model_iter_fn = baseline_ctx(runner.model_iter_fn)
+            model_iter_fn = baseline_ctx(runner.model_iter_fn)
+
+            # needed to avoid error that causes inconsistent timing due to:
+            # Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards
+            def model_iter_fn_and_mark_step(*args, **kwargs):
+                torch.compiler.cudagraph_mark_step_begin()
+                model_iter_fn(*args, **kwargs)
+
+            runner.model_iter_fn = model_iter_fn_and_mark_step
             optimize_ctx = torchao_optimize_ctx(args.quantization)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
