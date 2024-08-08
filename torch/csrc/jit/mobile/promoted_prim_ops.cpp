@@ -1,4 +1,5 @@
 #include <ATen/ScalarOps.h>
+#include <fmt/format.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 
 namespace torch::jit {
@@ -95,7 +96,7 @@ void device(Stack& stack) {
 void device_with_index(Stack& stack) {
   std::string type = pop(stack).toStringRef();
   auto index = pop(stack).toInt();
-  std::string device_str = type + ":" + std::to_string(index);
+  std::string device_str = fmt::format("{}:{}", type, index);
   auto device = c10::Device(device_str);
   push(stack, device);
 }
@@ -220,8 +221,7 @@ void isCuda(Stack& stack) {
 }
 
 void numToTensorBool(Stack& stack) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool b;
+  bool b = false;
   pop(stack, b);
   push(stack, c10::scalar_to_tensor(b));
 }

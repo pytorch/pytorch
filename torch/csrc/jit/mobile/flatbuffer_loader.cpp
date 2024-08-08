@@ -90,7 +90,7 @@ class FlatbufferLoader final {
       ExtraFilesMap* jit_sources,
       std::vector<IValue>* constants);
 
-  typedef TypePtr (*TypeResolver)(
+  using TypeResolver = TypePtr (*)(
       const std::string& type_str,
       const std::shared_ptr<CompilationUnit>& cu);
 
@@ -530,7 +530,7 @@ IValue parseList(
     const mobile::serialization::IValue& ivalue) {
   const mobile::serialization::List* list = ivalue.val_as_List();
   auto res = c10::impl::GenericList(AnyType::get());
-  for (int i : *list->items()) {
+  for (auto i : *list->items()) {
     res.emplace_back(loader.getIValue(i));
   }
   auto type = loader.getOrCreateTypeAnnotations(list->annotation_str());
@@ -575,7 +575,7 @@ IValue parseTuple(
     const mobile::serialization::IValue& ivalue) {
   const auto& tuple = ivalue.val_as_Tuple();
   std::vector<IValue> res;
-  for (int i : *tuple->items()) {
+  for (auto i : *tuple->items()) {
     res.emplace_back(loader.getIValue(i));
   }
   return c10::ivalue::Tuple::create(res);
