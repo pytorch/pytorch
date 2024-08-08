@@ -126,7 +126,7 @@ PYTHON_TO_CPP = {
 
 CONTAINER_PYTHON_TO_CPP = {
     "List": "std::vector",
-    "Optional": "c10::optional",
+    "Optional": "std::optional",
 }
 
 DTYPE_LOWP_FP = [
