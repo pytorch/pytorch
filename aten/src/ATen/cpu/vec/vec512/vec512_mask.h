@@ -61,6 +61,30 @@ struct VecMaskLoad<
     data_t,
     1,
     mask_t,
+    2,
+    typename std::enable_if<
+        std::is_same_v<data_t, BFloat16> ||
+        std::is_same_v<data_t, Half>>::type> {
+  static inline VectorizedN<data_t, 1> apply(
+      const data_t* ptr,
+      const VecMask<mask_t, 2>& vec_mask) {
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto int_mask = vec_mask.template cast<int, 2>();
+    auto mmask0 = _mm512_cmp_epi32_mask(int_mask[0], all_ones, _MM_CMPINT_EQ);
+    auto mmask1 = _mm512_cmp_epi32_mask(int_mask[1], all_ones, _MM_CMPINT_EQ);
+    auto zero = _mm256_set1_epi16(0);
+    auto temp0 = _mm256_mask_loadu_epi16(zero, mmask0, ptr);
+    auto temp1 = _mm256_mask_loadu_epi16(zero, mmask1, ptr + Vectorized<mask_t>::size());
+    return Vectorized<data_t>(
+        _mm512_inserti32x8(_mm512_castsi256_si512(temp0), temp1, 1));
+  }
+};
+
+template <typename data_t, typename mask_t>
+struct VecMaskLoad<
+    data_t,
+    1,
+    mask_t,
     1,
     typename std::enable_if<
         std::is_same_v<data_t, int8_t> ||
@@ -105,6 +129,20 @@ template <>
 struct VecMaskCast<int, 1, float, 1> {
   static inline VecMask<int, 1> apply(const VecMask<float, 1>& vec_mask) {
     return Vectorized<int>(_mm512_castps_si512(vec_mask[0]));
+  }
+};
+
+template <>
+struct VecMaskCast<float, 2, int, 2> {
+  static inline VecMask<float, 2> apply(const VecMask<int, 2>& vec_mask) {
+    return VectorizedN<float, 2>(_mm512_castsi512_ps(vec_mask[0]), _mm512_castsi512_ps(vec_mask[1]));
+  }
+};
+
+template <>
+struct VecMaskCast<int, 2, float, 2> {
+  static inline VecMask<int, 2> apply(const VecMask<float, 2>& vec_mask) {
+    return VectorizedN<int, 2>(_mm512_castps_si512(vec_mask[0]), _mm512_castps_si512(vec_mask[1]));
   }
 };
 
