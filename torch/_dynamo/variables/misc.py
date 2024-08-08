@@ -208,7 +208,9 @@ class SuperVariable(VariableTracker):
             return tx.output.side_effects.track_object_new(
                 self.objvar.source,
                 self.objvar.value,
-                UserDefinedObjectVariable,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.objvar.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
                 {},
             )
 
