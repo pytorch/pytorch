@@ -253,48 +253,100 @@ class BlockMask:
         self,
         kv_num_blocks: Tensor,
         kv_indices: Tensor,
-        full_kv_num_blocks: Optional[Tensor] = None,
-        full_kv_indices: Optional[Tensor] = None,
-        q_num_blocks: Optional[Tensor] = None,
-        q_indices: Optional[Tensor] = None,
-        full_q_num_blocks: Optional[Tensor] = None,
-        full_q_indices: Optional[Tensor] = None,
-        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
-        mask_mod: Optional[_mask_mod_signature] = None,
+        full_kv_num_blocks: Optional[Tensor],
+        full_kv_indices: Optional[Tensor],
+        q_num_blocks: Tensor,
+        q_indices: Tensor,
+        full_q_num_blocks: Optional[Tensor],
+        full_q_indices: Optional[Tensor],
+        BLOCK_SIZE: Tuple[int, int],
+        mask_mod: _mask_mod_signature,
     ):
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
+        assert kv_num_blocks is not None, "kv_num_blocks must be provided"
+        assert kv_indices is not None, "kv_indices must be provided"
+        assert q_num_blocks is not None, "q_num_blocks must be provided"
+        assert q_indices is not None, "q_indices must be provided"
+        assert (full_kv_num_blocks is None) == (
+            full_kv_indices is None
+        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        assert (full_q_num_blocks is None) == (
+            full_q_indices is None
+        ), "full_q_num_blocks and full_q_indices must be both provided or omitted"
 
         self.kv_num_blocks = kv_num_blocks
         self.kv_indices = kv_indices
         self.full_kv_num_blocks = full_kv_num_blocks
         self.full_kv_indices = full_kv_indices
+        self.q_num_blocks = q_num_blocks
+        self.q_indices = q_indices
+        self.full_q_num_blocks = full_q_num_blocks
+        self.full_q_indices = full_q_indices
+        self.BLOCK_SIZE = BLOCK_SIZE
+        self.mask_mod = mask_mod
 
-        # Set q_num_blocks and q_indices if provided, otherwise generate them
-        if q_num_blocks is not None and q_indices is not None:
-            self.q_num_blocks = q_num_blocks
-            self.q_indices = q_indices
-        else:
-            self.q_num_blocks, self.q_indices = _transpose_ordered(
-                kv_num_blocks, kv_indices
-            )
+    @classmethod
+    def from_kv_blocks(
+        cls,
+        kv_num_blocks: Tensor,
+        kv_indices: Tensor,
+        full_kv_num_blocks: Optional[Tensor] = None,
+        full_kv_indices: Optional[Tensor] = None,
+        BLOCK_SIZE: Union[int, Tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+        mask_mod: Optional[_mask_mod_signature] = None,
+    ):
+        """
+        Creates a BlockMask instance from key-value block information.
 
-        # Set full_q_num_blocks and full_q_indices if provided, otherwise generate them if full_kv tensors are available
-        if full_q_num_blocks is not None and full_q_indices is not None:
-            self.full_q_num_blocks = full_q_num_blocks
-            self.full_q_indices = full_q_indices
-        elif full_kv_num_blocks is not None and full_kv_indices is not None:
-            self.full_q_num_blocks, self.full_q_indices = _transpose_ordered(
+        Args:
+            kv_num_blocks (Tensor): Number of kv_blocks in each Q_BLOCK_SIZE row tile.
+            kv_indices (Tensor): Indices of key-value blocks in each Q_BLOCK_SIZE row tile.
+            full_kv_num_blocks (Optional[Tensor]): Number of full kv_blocks in each Q_BLOCK_SIZE row tile.
+            full_kv_indices (Optional[Tensor]): Indices of full key-value blocks in each Q_BLOCK_SIZE row tile.
+            BLOCK_SIZE (Union[int, Tuple[int, int]]): Size of KV_BLOCK_SIZE x Q_BLOCK_SIZE tiles.
+            mask_mod (Optional[Callable]): Function to modify the mask.
+
+        Returns:
+            BlockMask: Instance with full Q information generated via _transposed_ordered
+
+        Raises:
+            RuntimeError: If kv_indices has < 2 dimensions.
+            AssertionError: If only one of full_kv_* args is provided.
+        """
+        if kv_indices.dim() < 2:
+            raise RuntimeError("BlockMask must have at least 2 dimensions")
+
+        assert (full_kv_num_blocks is None) == (
+            full_kv_indices is None
+        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+
+        # Generate q_num_blocks and q_indices
+        q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+        if full_kv_num_blocks is not None:
+            full_q_num_blocks, full_q_indices = _transpose_ordered(
                 full_kv_num_blocks, full_kv_indices
             )
         else:
-            self.full_q_num_blocks, self.full_q_indices = None, None
+            full_q_num_blocks, full_q_indices = None, None
 
         if isinstance(BLOCK_SIZE, int):
             BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
-        self.BLOCK_SIZE = BLOCK_SIZE
 
-        self.mask_mod = mask_mod if mask_mod is not None else noop_mask
+        mask_mod = mask_mod if mask_mod is not None else noop_mask
+
+        return cls(
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            q_num_blocks=q_num_blocks,
+            q_indices=q_indices,
+            full_q_num_blocks=full_q_num_blocks,
+            full_q_indices=full_q_indices,
+            BLOCK_SIZE=BLOCK_SIZE,
+            mask_mod=mask_mod,
+        )
 
     def as_tuple(self, flatten: bool = True):
         """
@@ -328,24 +380,12 @@ class BlockMask:
         return s
 
     def __getitem__(self, index) -> "BlockMask":
-        new_kv_num_blocks = self.kv_num_blocks[index]
-        new_kv_indices = self.kv_indices[index]
-        new_kv_num_blocks_full = (
-            self.full_kv_num_blocks[index]
-            if self.full_kv_num_blocks is not None
-            else None
+        mapped_attributes = tree_map_only(
+            torch.Tensor,
+            lambda x: x[index],
+            self.as_tuple(flatten=False),
         )
-        new_kv_indices_full = (
-            self.full_kv_indices[index] if self.full_kv_indices is not None else None
-        )
-        return BlockMask(
-            new_kv_num_blocks,
-            new_kv_indices,
-            full_kv_num_blocks=new_kv_num_blocks_full,
-            full_kv_indices=new_kv_indices_full,
-            BLOCK_SIZE=self.BLOCK_SIZE,
-            mask_mod=self.mask_mod,
-        )
+        return BlockMask(*mapped_attributes)
 
     def __repr__(self):
         return (
@@ -592,7 +632,7 @@ def _create_sparse_block_from_block_mask(
     else:
         full_bm = (None, None)
 
-    return BlockMask(  # type: ignore[call-arg]
+    return BlockMask.from_kv_blocks(
         partial_bm[0],
         partial_bm[1],
         full_bm[0],
@@ -759,11 +799,9 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     device = query.device
     kv_len = _round_up_to_multiple(key.size()[-2], 128)
     q_len = _round_up_to_multiple(query.size()[-2], 128)
-    return BlockMask(
+    return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        full_kv_num_blocks=None,
-        full_kv_indices=None,
         BLOCK_SIZE=(kv_len, q_len),
     )
 
