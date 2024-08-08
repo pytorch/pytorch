@@ -1430,6 +1430,16 @@ PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_privateuseone(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_privateuseone");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_privateuseone());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1692,6 +1702,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
     {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
+    {"is_privateuseone",
+     (getter)THPVariable_is_privateuseone,
+     nullptr,
+     nullptr,
+     nullptr},
     {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
     {"is_sparse_csr",
      (getter)THPVariable_is_sparse_csr,
