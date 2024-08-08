@@ -15,12 +15,13 @@
 
 namespace at::native {
 
-void _amp_foreach_non_finite_check_and_unscale_cpu_(
+at::Tensor _amp_foreach_non_finite_check_and_unscale_cpu_(
     TensorList scaled_grads,
-    at::Tensor& found_inf,
     const at::Tensor& inv_scale) {
+    at::Tensor found_inf = at::Tensor({0});
     _amp_foreach_non_finite_check_and_unscale_cpu_stub(
         found_inf.device().type(), scaled_grads, found_inf, inv_scale);
+    return found_inf;
 }
 
 at::Tensor& _amp_update_scale_cpu_ (
