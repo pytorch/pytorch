@@ -1181,7 +1181,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             num_blocks = num_blocks[None, None, :]
             indices = indices[None, None, :]
-            return BlockMask(
+            return BlockMask.from_kv_blocks(
                 num_blocks, indices, BLOCK_SIZE=BLOCK_SIZE, mask_mod=mask_mod
             )
 
