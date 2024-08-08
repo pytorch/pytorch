@@ -61,7 +61,6 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       # [pytorch repo ref]
@@ -71,7 +70,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build_environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Parse ref
         id: parse-ref
