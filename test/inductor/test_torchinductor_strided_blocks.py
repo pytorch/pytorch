@@ -376,25 +376,42 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
     @parametrize(
-        "full_size,view_size,num_tiles",
+        "full_size,view_size,num_block_pointers,num_tiles",
         [
-            ((32, 32), (16, 32), 1),  # Contiguous 2D tensor. Does not require tiling.
-            ((5, 9), (3, 7), 2),  # 2D tensor with 1 discontiguous dim.
-            ((11, 13, 7), (9, 13, 5), 2),  # 3D tensor with 1 discontiguous dim (2).
+            (
+                (32, 32),
+                (16, 32),
+                3,
+                1,
+            ),  # Contiguous 2D tensor. Does not require tiling.
+            ((5, 9), (3, 7), 3, 2),  # 2D tensor with 1 discontiguous dim.
+            ((11, 13, 7), (9, 13, 5), 3, 2),  # 3D tensor with 1 discontiguous dim (2).
             (
                 (3, 11, 13, 7),
                 (2, 9, 13, 7),
+                3,
                 2,
             ),  # 4D tensor with 1 discontiguous dim (1).
             (
                 (3, 11, 13, 7),
                 (2, 11, 9, 7),
+                3,
                 2,
             ),  # 4D tensor with 1 discontiguous dim (2).
+            (
+                (5, 5, 5, 5, 5),
+                (3, 3, 5, 3, 5),
+                1,
+                2,
+            ),  # 5D tensor with 2 discontiguous dims (3, 1). Block pointers unexpected.
         ],
     )
     def test_nd_tiling_odd_shapes_pointwise(
-        self, full_size: tuple[int], view_size: tuple[int], num_tiles: int
+        self,
+        full_size: tuple[int],
+        view_size: tuple[int],
+        num_block_pointers: int,
+        num_tiles: int,
     ):
         """
         Test odd shapes with ND tiling enabled.
@@ -408,20 +425,25 @@ class TritonBlockPointerTest(InductorTestCase):
 
         args = [get_input() for arg_idx in range(2)]
 
-        # Expect 3 block pointers: 2 inputs 1 output
+        # Expect up to 3 block pointers: 2 inputs 1 output.
         result, code = self.run_and_compare(
             torch.add,
             *args,
-            expected_num_block_pointers=3,
+            expected_num_block_pointers=num_block_pointers,
             config_patches={
                 "triton.prefer_nd_tiling": True,
             },
         )
 
-        # Check the code for ND tiling
-        for tile_name in ("XBLOCK", "YBLOCK", "ZBLOCK")[:num_tiles]:
+        # Check the code for the expected tiling.
+        all_tiles = ("XBLOCK", "YBLOCK", "ZBLOCK")
+        expected_tiles = set(all_tiles[:num_tiles])
+        for tile_name in all_tiles:
             for program in code:
-                self.assertIn(tile_name, program)
+                if tile_name in expected_tiles:
+                    self.assertIn(tile_name, program)
+                else:
+                    self.assertNotIn(tile_name, program)
 
 
 if __name__ == "__main__":
