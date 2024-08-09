@@ -1115,6 +1115,9 @@ def define_buck_targets(
             "--replace",
             "@AT_BLAS_USE_CBLAS_DOT@",
             "AT_BLAS_USE_CBLAS_DOT_FBXPLAT",
+            "--replace",
+            "@AT_BUILD_WITH_APL@",
+            "APL_FOUND",
         ]),
         outs = {
             "Config.h": ["Config.h"],
