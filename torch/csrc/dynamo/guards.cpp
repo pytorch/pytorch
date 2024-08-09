@@ -1,3 +1,6 @@
+#include <ATen/PythonTorchFunctionTLS.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/core/impl/PyInterpreter.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
@@ -2477,6 +2480,41 @@ std::unique_ptr<GuardManager> make_guard_manager(
   return std::make_unique<GuardManager>(root, std::move(source));
 }
 
+class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
+ public:
+  TORCH_FUNCTION_MODE_STACK(
+      const py::list& initial_stack,
+      py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)), _ref_stack() {
+    Py_ssize_t len = PyList_Size(initial_stack.ptr());
+    for (Py_ssize_t idx = 0; idx < len; idx++) {
+      PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
+      this->_ref_stack.push_back(Py_TYPE(mode));
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, only used to satisfy the interface
+    int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    if (static_cast<size_t>(len) != this->_ref_stack.size()) {
+      return false;
+    }
+    for (int64_t idx = 0; idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+      if (Py_TYPE(mode->ptr(getPyInterpreter())) !=
+          this->_ref_stack[len - 1 - idx]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  std::vector<PyTypeObject*> _ref_stack;
+};
+
 class TENSOR_MATCH : public LeafGuard {
  public:
   TENSOR_MATCH(
@@ -3571,6 +3609,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<py::list>())
       .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
+  py::class_<
+      TORCH_FUNCTION_MODE_STACK,
+      LeafGuard,
+      std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
+      py_m, "TORCH_FUNCTION_MODE_STACK")
+      .def(py::init<py::list, py::list>())
+      .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
@@ -3795,6 +3840,14 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<GLOBAL_STATE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_torch_function_mode_stack_guard",
+          [](GuardManager& self,
+             const py::list& initial_stack,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
+                initial_stack, std::move(verbose_code_parts)));
           })
       .def(
           "add_data_ptr_guard",

@@ -2,6 +2,7 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -33,6 +34,56 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
+
+
+class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+    def _run_torch_function_mode_guard_test(self):
+        class TestMode1(BaseTorchFunctionMode):
+            pass
+
+        class TestMode2(BaseTorchFunctionMode):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt.__call__)
+        def fn(x):
+            return x + 1
+
+        inp = torch.ones(2, 2)
+        fn(inp)
+        self.assertEqual(cnt.frame_count, 1)
+
+        with TestMode1():
+            fn(inp)
+        self.assertEqual(cnt.frame_count, 2)
+
+        with TestMode1(), TestMode2():
+            fn(inp)
+        self.assertEqual(cnt.frame_count, 3)
+
+        with TestMode2(), TestMode1():
+            fn(inp)
+        self.assertEqual(cnt.frame_count, 4)
+
+        with TestMode1():
+            fn(inp)
+        self.assertEqual(cnt.frame_count, 4)
+
+    @torch._dynamo.config.patch("enable_cpp_guard_manager", False)
+    def test_torch_function_mode_guards_py(self):
+        self._run_torch_function_mode_guard_test()
+
+    def test_torch_function_mode_guards_cpp(self):
+        self._run_torch_function_mode_guard_test()
 
 
 if __name__ == "__main__":
