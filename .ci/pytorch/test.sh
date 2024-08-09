@@ -412,9 +412,9 @@ pr_time_benchmarks() {
   fi
   export SHA_TO_COMPARE
 
-  python -m venv venv
-  # shellcheck disable=SC1091
-  . venv/bin/activate
+  # python -m venv venv
+  # # shellcheck disable=SC1091
+  # . venv/bin/activate
 
   git reset --hard "${SHA_TO_COMPARE}"
   git submodule sync && git submodule update --init --recursive
@@ -422,7 +422,8 @@ pr_time_benchmarks() {
   pip install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  TORCH_CUDA_ARCH_LIST="7.5" python setup.py develop &> "$TEST_REPORTS_DIR/base_build_logs"
+  python setup.py clean
+  python setup.py develop &> "$TEST_REPORTS_DIR/base_build_logs"
   echo "::endgroup::"
 
   pip show torch
@@ -434,7 +435,6 @@ pr_time_benchmarks() {
   # resetting the original code
   git reset --hard "${SHA1}"
   git submodule sync && git submodule update --init --recursive
-  deactivate
   pip show torch
 }
 
