@@ -318,7 +318,7 @@ JIT_TO_CPP_DEFAULT = {
     "None": "::std::nullopt",  # UGH this one is type directed
     "Mean": "at::Reduction::Mean",
     "[]": "{}",
-    "contiguous_format": "MemoryFormat::Contiguous",
+    "contiguous_format": "c10::MemoryFormat::Contiguous",
     "long": "at::kLong",
 }
 
