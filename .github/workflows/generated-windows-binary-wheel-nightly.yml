@@ -106,7 +106,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -223,7 +223,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -350,7 +350,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -468,7 +468,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -596,7 +596,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -714,7 +714,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -842,7 +842,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -960,7 +960,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1087,7 +1087,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1204,7 +1204,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1331,7 +1331,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1449,7 +1449,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1577,7 +1577,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1695,7 +1695,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1823,7 +1823,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1941,7 +1941,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2068,7 +2068,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2185,7 +2185,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2312,7 +2312,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2430,7 +2430,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2558,7 +2558,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2676,7 +2676,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2804,7 +2804,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2922,7 +2922,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3049,7 +3049,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3166,7 +3166,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3293,7 +3293,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3411,7 +3411,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3539,7 +3539,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3657,7 +3657,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3785,7 +3785,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3903,7 +3903,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: atalman-patch-numpy-conda
           submodules: recursive
           repository: pytorch/builder
           path: builder
