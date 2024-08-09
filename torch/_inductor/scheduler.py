@@ -2993,9 +2993,7 @@ class Scheduler:
                 ):
                     break
                 key = (frame.filename, frame.lineno)
-                assert (
-                    key not in seen
-                ), (
+                assert key not in seen, (
                     f"Duplicate stack frame {frame.filename}:{frame.lineno}; "
                     "did you add a decorator to one of the functions in this stack "
                     "trace?  If so, try using a context manager instead."
