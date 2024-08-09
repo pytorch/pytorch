@@ -285,7 +285,7 @@ test_python_shard() {
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --continue-through_error --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -346,13 +346,15 @@ test_inductor_shard() {
   python test/run_test.py --inductor \
     --include test_modules test_ops test_ops_gradients test_torch \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --continue-through error
 
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --continue-through-error
 }
 
 test_inductor_aoti() {
