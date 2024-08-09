@@ -12,6 +12,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
@@ -613,6 +614,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+        @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
         def test_cache_hit_forward_miss_backward(self):
@@ -630,6 +632,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch._dynamo.reset()
                 counters.clear()
                 FxGraphCache.clear()
+                AOTAutogradCache.clear()
 
                 with mock.patch(
                     "torch._inductor.compile_fx.complex_memory_overlap",
@@ -656,9 +659,22 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 out.backward(back_inp)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
 
+            # Run it one more time, this time AOTAutogradCache will hit
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            torch._dynamo.reset()
+            inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+            out = foo(inp)
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+            out.backward(back_inp)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
             # we should not have cudagraph'd anything
             assert self.get_manager() is None
 
+        @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
         def test_backward_gets_cached_cudagraphs(self):
@@ -673,6 +689,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._dynamo.reset()
             counters.clear()
             FxGraphCache.clear()
+            AOTAutogradCache.clear()
 
             # Use cpu device to disable cudagraphs during compilation
             inp = torch.rand([20, 20], device="cpu", requires_grad=True)
@@ -689,14 +706,61 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # Forward and backward should also disable cudagraphs without compilation
             inp = torch.rand([20, 20], device="cpu", requires_grad=True)
             out = foo(inp)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            # AOTAutogradCache will load the forward and the backward from cache immediately, so fx_graph_cache_hit will equal 2
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            torch._dynamo.reset()
 
             back_inp = torch.empty_strided([20, 20], [0, 1], device="cpu")
             out.backward(back_inp)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
             # we should not have cudagraph'd anything
             assert self.get_manager() is None
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        def test_cached_forward_backward(self):
+            counters.clear()
+            AOTAutogradCache.clear()
+            FxGraphCache.clear()
+
+            @torch.compile
+            def foo(x):
+                torch.manual_seed(0)
+                y = x * 2
+                return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
+
+            inp = torch.rand([4, 4], requires_grad=True, device="cuda")
+            inp2 = inp.detach().clone().requires_grad_(True)
+            out = foo(inp)
+
+            out.sum().backward()
+
+            self.assertEqual(self.get_root_children(), [1])
+
+            # the three saved tensors should die in the backward
+            # we kept alive the output
+            self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
+            self.assertEqual(
+                self.curr_node().expected_dead_indices_after_graph,
+                [(0, 1), (0, 2)],
+            )
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+            # Reset dynamo and rerun. We should see a cache hit now
+            torch._dynamo.reset()
+
+            out2 = foo(inp2)
+            out2.sum().backward()
+            self.assertEqual(out, out2)
+            self.assertEqual(inp.grad, inp2.grad)
+
+            self.assertEqual(self.get_root_children(), [1])
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         def test_forward_backward_not_called(self, backend):

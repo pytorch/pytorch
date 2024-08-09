@@ -6416,6 +6416,9 @@ class MockFXGraphCache:
             gm = make_boxed_func(gm)
         return gm
 
+    def post_compile(self, gm, inputs, cudagraphs):
+        pass
+
 
 # The following tests fail in strict caching mode (i.e. they bypass or
 # cache miss instead of cache hitting). They will be fixed in the PRs above this.
@@ -6487,6 +6490,9 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         with patch(
             "torch._inductor.codecache.FxGraphCache._lookup_graph",
             new=self.inductor_cache._lookup_graph,
+        ), patch(
+            "torch._inductor.codecache.FxGraphCache.post_compile",
+            new=self.inductor_cache.post_compile,
         ):
             return super().verify_aot_autograd(
                 f,
