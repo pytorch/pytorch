@@ -348,9 +348,17 @@ class AutogradCompilerInstance:
         track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
         return bw_state
 
-    def set_node_origin(self, node_name, node_index):
+    def set_node_origin(
+        self, node_name: str, node_index: int, pyobj: Optional[torch.autograd.Function]
+    ):
+        maybe_aot_id = ""
+        if pyobj is not None:
+            maybe_aot_id = getattr(
+                pyobj._forward_cls, "_aot_id", ""  # type: ignore[attr-defined]
+            )  # iff it is from AOTAutograd's CompiledFunction
+        new_code = f"{node_name}{maybe_aot_id} (NodeCall {node_index})"
+
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
-        new_code = f"{node_name} (NodeCall {node_index})"
         new_stack_trace = raw_stack_trace.replace(
             "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
         )

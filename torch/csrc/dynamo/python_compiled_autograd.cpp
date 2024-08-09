@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -552,8 +553,14 @@ CacheNode* _compiled_autograd_impl(
         TORCH_INTERNAL_ASSERT(node_name != nullptr);
         THPObjectPtr set_node_origin(
             PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+
+        PyObject* pyobj = Py_None;
+        if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+          pyobj = pynode->obj;
+        }
+
         check(PyObject_CallFunction(
-            set_node_origin, "OI", node_name.get(), i, nullptr));
+            set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
