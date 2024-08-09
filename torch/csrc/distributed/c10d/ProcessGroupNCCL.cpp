@@ -349,7 +349,7 @@ getNCCLCommDumpMap() {
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
-  // dump_nccl_trace is only called from the default PG (local_uid_=0), but we
+  // dump_nccl_trace is only called from the default PG (local_id_=0), but we
   // want to dump from all comms so we need to iterate over ncclCommDevIdxMap,
   // which is static
   std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
@@ -775,7 +775,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
       collectiveDebugInfoMode_(false),
-      local_uid_(process_group_id++),
+      local_id_(process_group_id++),
       intraNodeComm_(initIntraNodeComm()) {
   TORCH_CHECK_WITH(
       ValueError,
@@ -1247,13 +1247,13 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
-  bool checkDumpSignal = (dumpOnException_ && local_uid_ == 0);
+  bool checkDumpSignal = (dumpOnException_ && local_id_ == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::optional<DumpPipe> dumpPipe = std::nullopt;
-  if (local_uid_ == 0) {
+  if (local_id_ == 0) {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
@@ -1275,7 +1275,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     auto currentTime = std::chrono::steady_clock::now();
 
     // We put extra functionality in the thread for the default PG (aka,
-    // local_uid_=0) because the signal is same across different PGs. We only
+    // local_id_=0) because the signal is same across different PGs. We only
     // need to run once per process to avoid duplicate things performed in too
     // many separate threads. For example, we check a global flag on the
     // TCPStore periodically to see if any PG on any rank observed a timeout and
@@ -1593,7 +1593,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
     return c10::str(
         "[PG ID ",
-        local_uid_,
+        local_id_,
         "PG GUID ",
         pg_uid_,
         "(",
@@ -1603,7 +1603,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
         "] ");
   }
   return c10::str(
-      "[PG ID ", local_uid_, "PG GUID ", pg_uid_, " Rank ", rank_, "] ");
+      "[PG ID ", local_id_, "PG GUID ", pg_uid_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -1616,7 +1616,7 @@ const int& ProcessGroupNCCL::globalRank() const {
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && local_uid_ == 0) {
+  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
     static std::vector<uint64_t> globalRanks(size_);
     std::iota(globalRanks.begin(), globalRanks.end(), 0);
     return globalRanks;
@@ -1679,7 +1679,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             kWorkStatusUpdatePeriodMs) {
       ::c10d::C10dLoggingData data;
       // logging integers
-      data.integers["pg_id"] = local_uid_;
+      data.integers["pg_id"] = local_id_;
       data.integers["rank"] = rank_;
       data.integers["global_rank"] = globalRank();
       data.integers["last_enqueued_work"] = pgStatus_->lastEnqueuedSeq;
@@ -2415,7 +2415,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
     r->trace_id_ = NCCLTraceBuffer::get()->record(
-        local_uid_,
+        local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
         seqP2P_,
@@ -3041,7 +3041,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
-        local_uid_,
+        local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
         seqP2P_,
@@ -3076,7 +3076,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
-        local_uid_,
+        local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
         seqP2P_,
