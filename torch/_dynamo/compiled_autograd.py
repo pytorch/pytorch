@@ -320,11 +320,10 @@ class AutogradCompilerInstance:
         if self.aot_autograd_backward_cls_name is None:
             return
 
+        next_primal_id = {}
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=operator.getitem
         ):
-            next_primal_id = 1
-
             getitem_inputs = len(node.args) == 2 and node.args[0].name == "inputs"
 
             if not getitem_inputs or not node.users:
@@ -338,8 +337,10 @@ class AutogradCompilerInstance:
                 continue
 
             aot_id: str = match.group(1)
-            node.name = f"aot{aot_id}_primals_{next_primal_id}"
-            next_primal_id += 1
+            if aot_id not in next_primal_id:
+                next_primal_id[aot_id] = 1
+            node.name = f"aot{aot_id}_primals_{next_primal_id[aot_id]}"
+            next_primal_id[aot_id] += 1
 
     def reorder_accumulate_grad_nodes(self):
         """
