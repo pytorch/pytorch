@@ -320,7 +320,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
                 self.conv = torch.nn.Conv2d(
-                    out_features, out_features, kernel_size=7, padding=3, groups=out_features
+                    out_features,
+                    out_features,
+                    kernel_size=7,
+                    padding=3,
+                    groups=out_features,
                 )
                 self.linear2 = torch.nn.Linear(out_features, out_features, bias)
                 self._frozen_param400 = torch.randn(batch_size, out_features, 1, 1)
