@@ -7,6 +7,7 @@ import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 torch._lazy.ts_backend.init()
 
 NODE_TYPE_PATTERN = re.compile(r", NodeType=[^\n]+")
@@ -21,7 +22,7 @@ class LazyFuncionalizationTest(TestCase):
                 metrics.reset()
 
             class Model(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fc1 = torch.nn.Linear(4, 2, bias=False)
 

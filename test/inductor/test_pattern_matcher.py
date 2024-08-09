@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
-
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -29,16 +28,9 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_BIG_GPU
 from torch.utils import _pytree as pytree
-
-# NVIDIA A100-SXM4-40GB
-is_a100_linux = LazyVal(
-    lambda: IS_LINUX
-    and torch.cuda.is_available()
-    and "A100" in torch.cuda.get_device_name(0)
-)
 
 
 class TestPatternMatcher(TestCase):
@@ -284,13 +276,20 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        # examples that should not be selected by heuristic
+        # examples that should not be selected by handwritten heuristic
         mat1_dtype = torch.float16
         dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
         torch._dynamo.mark_dynamic(dyn_tensor, 0)
@@ -337,14 +336,21 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not is_a100_linux, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
         mat1_dtype = torch.float16
-        # examples that should be selected by heuristic
+        # examples that should be selected by handwritten heuristic
         args_list = [
             (
                 torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
@@ -646,7 +652,7 @@ class TestPatternMatcher(TestCase):
 
     def test_addmm_broadcasting_bias(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.functional.linear
                 self.linear_weight = torch.randn(4, 4).cuda()
@@ -939,7 +945,7 @@ class TestPatternMatcher(TestCase):
         saved_graph = None
 
         class _CustomPass(PatternMatcherPass):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def __call__(self, g: torch.fx.graph.Graph):
@@ -999,6 +1005,7 @@ class TestPatternMatcher(TestCase):
                 "target=torch.ops.aten.sym_size"
             ).run(str(saved_graph))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_with_mutation(self):
         counter = 0
         test_pass = PatternMatcherPass(pass_name="test")
@@ -1156,6 +1163,7 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1212,6 +1220,7 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
         counter = 0
         test_pass = PatternMatcherPass()
@@ -1257,6 +1266,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0
         test_pass = PatternMatcherPass()

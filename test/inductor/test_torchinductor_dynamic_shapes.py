@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
-
 import math
 import operator
 import os
@@ -37,6 +36,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
@@ -55,6 +55,7 @@ from inductor.test_torchinductor import (
     copy_tests,
     TestFailure,
 )
+
 
 importlib.import_module("filelock")
 
@@ -910,6 +911,18 @@ class TestInductorDynamic(TestCase):
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_sum_list(self, device):
+        @torch.compile()
+        def f(xt):
+            xs = xt.tolist()
+            for x in xs:
+                torch._check_is_size(x)
+            y = sum(xs)
+            return torch.zeros(y, device=device)
+
+        f(torch.tensor([5] * 320))
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

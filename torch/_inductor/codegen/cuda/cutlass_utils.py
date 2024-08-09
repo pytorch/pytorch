@@ -3,7 +3,6 @@ import functools
 import logging
 import os
 import sys
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
@@ -11,11 +10,12 @@ from typing import Any, List, Optional
 import sympy
 
 import torch
+
 from ... import config
 from ...ir import Layout
-
 from ...runtime.runtime_utils import cache_dir
 from .cuda_env import get_cuda_arch, get_cuda_version
+
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +125,7 @@ class CUTLASSArgs:
     generator_target = ""
     kernels = "all"
     ignore_kernels = ""
+    exclude_kernels = ""
     # TODO: these three look dead?
     kernel_filter_file: None = None
     selected_kernel_list: None = None
