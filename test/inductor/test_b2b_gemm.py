@@ -3,7 +3,7 @@ import os
 import unittest
 
 import torch
-from torch._inductor.runtime.runtime_utils import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -174,7 +174,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(torch.mm(m1, m2), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         @torch._inductor.config.patch(b2b_gemm_pass=True)
         def run_with_b2b_gemm_on(
@@ -184,7 +184,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(torch.mm(m1, m2), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         Ms = [128, 256, 300, 400, 512]
         Ns = [16, 20, 32, 40, 50, 64]
@@ -230,7 +230,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(g(torch.mm(m1, m2)), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         @torch._inductor.config.patch(b2b_gemm_pass=True)
         def run_with_b2b_gemm_on(
@@ -241,7 +241,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(g(torch.mm(m1, m2)), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         Ms = [128, 256, 300, 400, 512]
         Ns = [16, 20, 32, 40, 50, 64]
@@ -287,7 +287,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(g(torch.mm(m1, m2)), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         @torch._inductor.config.patch(b2b_gemm_pass=True)
         def run_with_b2b_gemm_on(
@@ -298,7 +298,7 @@ class B2BGEMMTest(TestCase):
                 return torch.mm(g(torch.mm(m1, m2)), m3)
 
             f_opt = torch.compile(f, dynamic=False)
-            return do_bench(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
+            return benchmarker.benchmark(f_opt, (m1, m2, m3), {}, warmup=100, rep=500)
 
         Ms = [128, 256, 300, 400, 512]
         Ns = [16, 20, 32, 40, 50, 64]
