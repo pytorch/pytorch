@@ -12,7 +12,6 @@ from torch.distributed._tensor.experimental.attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _is_causal_behavior,
-    _RotateMethod,
     context_parallel,
     context_parallel_unshard,
 )
@@ -66,16 +65,13 @@ class RingAttentionTest(DTensorTestBase):
     @parametrize("compiled", [True, False])
     @parametrize("backend", backends)
     @parametrize("load_balance", [True, False])
-    @parametrize("rotater", [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER])
     def test_ring_attention_sdpa(
         self,
         is_causal: bool,
         compiled: bool,
         backend: SDPBackend,
         load_balance: bool,
-        rotater: _RotateMethod,
     ) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = rotater
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
@@ -151,7 +147,7 @@ class RingAttentionTest(DTensorTestBase):
                     cp_out = fn(cp_q, cp_k, cp_v, is_causal=is_causal)
                     cp_out.sum().backward()
 
-                    if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
+                    if not compiled:
                         # Compiler and CommDebugMode do not work well together.
                         self.assertDictEqual(
                             comm_mode.get_comm_counts(),
@@ -229,9 +225,6 @@ class RingAttentionTest(DTensorTestBase):
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     @parametrize("is_causal", [True, False])
     def test_ring_attention_native_transformer(self, is_causal: bool) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = (
-            _RotateMethod.ALL_TO_ALL
-        )
         torch.distributed._tensor.experimental.attention._enable_load_balance = (
             is_causal
         )
@@ -297,9 +290,6 @@ class RingAttentionTest(DTensorTestBase):
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     def test_ring_attention_custom_transformer(self) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = (
-            _RotateMethod.ALL_TO_ALL
-        )
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),

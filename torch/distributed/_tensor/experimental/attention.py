@@ -6,7 +6,7 @@ import logging
 import types
 import weakref
 from abc import ABC, abstractmethod
-from enum import auto, Enum
+from enum import Enum
 from typing import (
     Any,
     Callable,
@@ -30,18 +30,6 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
-class _CausalBehavior(Enum):
-    SKIP = None
-    NOT_IS_CAUSAL = False
-    IS_CAUSAL = True
-
-
-class _RotateMethod(Enum):
-    ALL_TO_ALL = auto()
-    ALL_GATHER = auto()
-    SEND_RECV = auto()
-
-
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 # Whether to upcast parameters and gradients to float32 to avoid accumulation
@@ -49,7 +37,12 @@ logger = logging.getLogger(__name__)
 # for the experimental purpose.
 _convert_to_f32 = True
 _enable_load_balance = True
-_rotate_method = _RotateMethod.ALL_GATHER
+
+
+class _CausalBehavior(Enum):
+    SKIP = None
+    NOT_IS_CAUSAL = False
+    IS_CAUSAL = True
 
 
 def _is_causal_behavior(
@@ -222,81 +215,6 @@ class AttentionOp(Protocol):
         ...
 
 
-class RingRotater(ABC):
-    @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        ...
-
-    @abstractmethod
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
-        ...
-
-    @abstractmethod
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
-        ...
-
-
-class AllToAllRotater(RingRotater):
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        self._pg = pg
-        self._seq_dim = seq_dim
-
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
-        buffer = buffer.contiguous()
-        size = dist.get_world_size(self._pg)
-        dsts = list(range(1, size)) + [0]
-        return ft_c.permute_tensor(buffer, dsts, self._pg)
-
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
-        if isinstance(tensor, ft_c.AsyncCollectiveTensor):
-            return tensor.wait()
-        return tensor
-
-
-class AllGatherRotater(RingRotater):
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        self._pg = pg
-        self._seq_dim = seq_dim
-        self._buffer = None
-        self._idx = 0
-
-    def rotate(self, buffer: torch.Tensor, curr_idx: int) -> torch.Tensor:
-        self._idx = curr_idx
-        if self._buffer is None:
-            return ft_c.all_gather_tensor(
-                buffer.contiguous(), gather_dim=0, group=self._pg
-            )
-
-        return self._buffer
-
-    def maybe_wait(self, tensor: torch.Tensor) -> torch.Tensor:
-        size = dist.get_world_size(self._pg)
-        rank = dist.get_rank(self._pg)
-        idx = rank - self._idx
-
-        if self._buffer is None:
-            if isinstance(tensor, ft_c.AsyncCollectiveTensor):
-                tensor = tensor.wait()
-            self._buffer = tensor
-        else:
-            assert tensor is self._buffer
-
-        return self._buffer.chunk(dist.get_world_size(self._pg))[idx]
-
-
-def _create_rotater(
-    pg: dist.ProcessGroup, seq_dim: int, method: Optional[RingRotater] = None
-):
-    if method is None:
-        method = _rotate_method
-    if method == _RotateMethod.ALL_TO_ALL:
-        return AllToAllRotater(pg, seq_dim)
-    elif method == _RotateMethod.ALL_GATHER:
-        return AllGatherRotater(pg, seq_dim)
-    else:
-        raise NotImplementedError
-
-
 def _ring_rotate(
     block: torch.Tensor, pg: dist.ProcessGroup, send_to_next: bool
 ) -> torch.Tensor:
@@ -365,18 +283,16 @@ def _templated_ring_attention(
     out: torch.Tensor
     logsumexp: torch.Tensor
 
-    rotater = _create_rotater(pg, 2)
-
     for i in range(size):
         # overlap communication with compute
         if next_kv is not None:
-            next_kv = rotater.maybe_wait(next_kv)
+            next_kv = _maybe_wait(next_kv)
             key = next_kv[: key.numel()].reshape(key.shape)
             value = next_kv[key.numel() :].reshape(value.shape)
 
         if i < (size - 1):
             next_kv = torch.cat([key.flatten(), value.flatten()])
-            next_kv = rotater.rotate(next_kv, i + 1)
+            next_kv = _ring_rotate(next_kv, pg, send_to_next=True)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -510,11 +426,9 @@ def _templated_ring_attention_backward(
 
     key = key.contiguous()
     value = value.contiguous()
-    kv_rotater = _create_rotater(pg, 2)
-    dkv_rotater = _create_rotater(pg, 2, method=_RotateMethod.ALL_TO_ALL)
     for i in range(size):
         if next_kv is not None:
-            buffer = kv_rotater.maybe_wait(next_kv)
+            buffer = _maybe_wait(next_kv)
             pointer = 0
             key = buffer[pointer : pointer + key.numel()].reshape(key.shape)
             pointer += key.numel()
@@ -523,7 +437,7 @@ def _templated_ring_attention_backward(
 
         if i != size - 1:
             next_kv = torch.cat([key.flatten(), value.flatten()])
-            next_kv = kv_rotater.rotate(next_kv, i + 1)
+            next_kv = _ring_rotate(next_kv, pg, send_to_next=True)
 
         is_causal_behavior = _is_causal_behavior(
             rank=rank, world_size=size, i=i, is_causal=is_causal
@@ -573,7 +487,7 @@ def _templated_ring_attention_backward(
         else:
             pointer = 0
             assert next_grad_kv is not None
-            next_grad_kv = dkv_rotater.maybe_wait(next_grad_kv)
+            next_grad_kv = _maybe_wait(next_grad_kv)
             grad_key = next_grad_kv[pointer : pointer + grad_key.numel()].reshape(
                 grad_key.shape
             )
@@ -591,7 +505,7 @@ def _templated_ring_attention_backward(
 
         # Send the key, value, grad key, and grad value to the next rank.
         next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
-        next_grad_kv = dkv_rotater.rotate(next_grad_kv, i + 1)
+        next_grad_kv = _ring_rotate(next_grad_kv, pg, send_to_next=True)
 
         if i <= rank or not _enable_load_balance:
             grad_query += grad_query_
@@ -602,7 +516,7 @@ def _templated_ring_attention_backward(
     assert grad_key_ is not None
     assert grad_value_ is not None
     grad_query = grad_query.to(query.dtype)
-    next_grad_kv = dkv_rotater.maybe_wait(next_grad_kv).to(key.dtype)
+    next_grad_kv = _maybe_wait(next_grad_kv).to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
     grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
     return (
@@ -978,7 +892,7 @@ class StripeLoadBalancer(_LoadBalancer):
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_local_rank()
+        cp_rank = mesh.get_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
         chunks = buffer.chunk(cp_world_size * 2, dim=seq_dim)
         return torch.cat(
@@ -992,7 +906,7 @@ class StripeLoadBalancer(_LoadBalancer):
     ) -> torch.Tensor:
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_local_rank()
+        cp_rank = mesh.get_rank()
 
         all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
         ft_c.all_gather_inplace(all_buffers, buffer, mesh)
