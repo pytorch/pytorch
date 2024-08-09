@@ -161,7 +161,6 @@ class FunctionalTensor(torch.Tensor):
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        print("hi")
         unrecognized_types = [
             t
             for t in types
@@ -350,7 +349,6 @@ class FunctionalTensorMode(TorchDispatchMode):
                 self.storage_to_aliases[arg.untyped_storage()._cdata].add(arg._cdata)
                 self.tensors_look_up[arg._cdata] = arg
 
-        print(self.storage_to_aliases)
         unrecognized_types = [
             t
             for t in types

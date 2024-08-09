@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._prims_common import clone_preserve_strides
+from torch._prims_common import clone_preserve_strides, clone_preserve_strides_non_gen
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -125,7 +125,7 @@ def auto_functionalized_dense(
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    kwargs.pop("_all_aliased", [])
+    _all_aliased = kwargs.pop("_all_aliased", [])
     kwargs.pop("_arg_to_aliased", {})
     new_kwargs = dict(**kwargs)
     result = []
@@ -148,9 +148,26 @@ def auto_functionalized_dense(
                     else None
                 )
             )
-        result.append(new_kwargs[name])
-        print(new_kwargs)
+        result.append(new_kwargs[name])   
+
     out = _mutable_op(**new_kwargs)
+    latest_value_for = {}
+    for alias in _all_aliased:
+        # Do i need to wrap this like what happen in clone_preserve_strides in some dispatch things idk what they are?
+        # item should see the effects of all of the mutated args that it is an alias for
+        alias_with_effects = alias
+        for name in _mutable_args_names:
+            if (
+                _only_clone_these_tensors is not None
+                and name not in _only_clone_these_tensors
+            ):
+                # if the argument is mutated in place, item would have already observed the effect. 
+                pass
+            else:
+                # observe the effect on `name`
+                mutation_source = new_kwargs[name]
+                alias_with_effects = alias_with_effects.as_strided_scatter(mutation_source, mutation_source.size(), mutation_source.stride(), mutation_source.storage_offset())
+    result.append(alias_with_effects)
 
     if isinstance(out, tuple):
         return (*out, *result)  # type: ignore[return-value]
@@ -269,18 +286,22 @@ def do_auto_functionalize(
     # take the union of all the aliased items.
     for arg in mutable_args_names:
         all_aliased_addresses.discard(normalized_kwargs[arg]._cdata)
-
-    all_aliased =  ctx.unwrap_tensors([tensors_look_up[item] for item in  all_aliased_addresses])
-
+    
+    all_aliased_original = [tensors_look_up[item] for item in  all_aliased_addresses]
+    all_aliased_unwrapped =  ctx.unwrap_tensors(all_aliased_original)
+  
     with ctx.redispatch_to_next():
+        # output of auto_functionalized is going to be as the following:
+        # op_output, mutated_arg1, ..., all_aliased[0], ...
         unwrapped_outs = auto_functionalized(
-            op, **dict(unwrapped_kwargs, _all_aliased=all_aliased, _arg_to_aliased=arg_to_aliased)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped, _arg_to_aliased=arg_to_aliased)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
-    unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
+
+    unwrapped_mutable_out = unwrapped_outs[-(len(mutable_args_names)+len(all_aliased_original)):]
 
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
@@ -291,7 +312,9 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
+    original_args =   [normalized_kwargs[name] for name in mutable_args_names] + all_aliased_original
+    
+    for orig_arg, unwrapped_out in zip(original_args, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
@@ -301,8 +324,6 @@ def do_auto_functionalize(
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
-
-        orig_arg = normalized_kwargs[name]
 
         if isinstance(unwrapped_out, torch.Tensor):
             sync_update(unwrapped_out, orig_arg)
