@@ -327,7 +327,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         make_kernel_render: Callable[
             [
                 ir.CppTemplateBuffer,
-                dict[str, SchedulerBuffer],
+                Dict[str, SchedulerBuffer],
                 Optional[List[ir.IRNode]],
             ],
             str,
