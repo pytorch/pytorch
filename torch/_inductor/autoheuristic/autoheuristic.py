@@ -136,6 +136,20 @@ class AutoHeuristic:
                 return decision
         return self.fallback()
 
+    def get_top_k_choices(self, top_k: int) -> Optional[List[Choice]]:
+        if not self.satisfies_precondition():
+            return None
+        if torch._inductor.config.use_autoheuristic(self.name):
+            if self.augment_context is not None:
+                self.context.apply_operations(self.augment_context)
+            controller = LearnedHeuristicController(
+                self.metadata,
+                self.context,
+            )
+            choices = controller.get_decisions_ranked(top_k)
+            return choices
+        return None
+
     def get_collected_feedback(self, choice: Choice) -> Any:
         return self.collected_feedback.get(choice, None)
 
@@ -285,3 +299,9 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
     def get_choice_caller(self) -> Optional[ChoiceCaller]:
         choice = self.get_choice()
         return self.choicestr2choice.get(choice, None)
+
+    def get_top_k_choices_caller(self, top_k: int) -> Optional[List[ChoiceCaller]]:
+        choices = self.get_top_k_choices(top_k)
+        if choices is None:
+            return None
+        return [self.choicestr2choice[choice] for choice in choices]

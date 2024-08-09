@@ -202,13 +202,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-        choice = mm_autoheuristic(
-            mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
+        ah_choices = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mm_operations(),
+            None,
+            top_k=10,
         )
         if not torch._inductor.config.collect_autoheuristic(name):
             # if we are collecting data, we do not want to modify choices
-            if choice is not None:
-                choices.insert(0, choice)
+            if ah_choices is not None and len(ah_choices) > 0:
+                choices = ah_choices
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
@@ -505,7 +515,7 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mm_autoheuristic(
-    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition
+    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition, top_k=-1
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
@@ -544,6 +554,8 @@ def mm_autoheuristic(
         augment_context=ops,
         precondition=precondition,
     )
+    if top_k != -1:
+        return autoheuristic.get_top_k_choices_caller(top_k)
     return autoheuristic.get_choice_caller()
 
 
