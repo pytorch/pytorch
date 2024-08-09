@@ -536,6 +536,41 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_reset_sharded_param_in_lazy_init(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.Linear(3, 3, bias=False)
+                self.layer2 = nn.Linear(3, 3, bias=False)
+                self.weight_norm = nn.Parameter(torch.empty(3))
+
+            def init_weight_norm(self):
+                with torch.no_grad():
+                    weight_norm = torch.linalg.norm(
+                        self.layer1.weight, dim=1
+                    ) + torch.linalg.norm(self.layer2.weight, dim=1)
+                model.weight_norm = nn.Parameter(weight_norm)
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                out = self.layer1(inp)
+                out = self.layer2(out)
+                return out.sum() + self.weight_norm.sum()
+
+        with torch.device("meta"):
+            model = MyModel()
+        fully_shard(model.layer1)
+        fully_shard(model.layer2)
+        fully_shard(model)
+
+        model.layer1.to_empty(device="cuda")
+        model.layer2.to_empty(device="cuda")
+        model.init_weight_norm()
+
+        inp = torch.randn(3, 3, device="cuda")
+        loss = model(inp).sum()
+        loss.backward()
+
 
 class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
     @property
