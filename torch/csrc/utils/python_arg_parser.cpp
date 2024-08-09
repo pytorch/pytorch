@@ -263,13 +263,15 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
 static py::object maybe_get_registered_torch_dispatch_rule(
     PyObject* torch_api_function,
     const py::object& torch_dispatch_object) {
-  // This is a static object, so we must leak the Python object
-  // "release()" is used here to preserve 1 refcount on the
-  // object, preventing it from ever being de-allocated by CPython.
-  static const py::handle find_torch_dispatch_rule =
-      py::object(py::module_::import("torch._library.simple_registry")
-                     .attr("find_torch_dispatch_rule"))
-          .release();
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  py::object find_torch_dispatch_rule =
+      storage
+          .call_once_and_store_result([]() -> py::object {
+            return py::module_::import("torch._library.simple_registry")
+                .attr("find_torch_dispatch_rule");
+          })
+          .get_stored();
   auto result = find_torch_dispatch_rule(
       py::reinterpret_borrow<py::object>(torch_api_function),
       torch_dispatch_object.get_type());
