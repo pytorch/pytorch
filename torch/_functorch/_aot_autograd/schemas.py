@@ -202,19 +202,26 @@ class SubclassCreationMeta:
         is_runtime: bool,
         is_subclass: bool,
     ):
-        symint_placeholders = [type(i) is not int for i in self.outer_size]
-        has_symbolic = any(symint_placeholders)
-        num_symbolic = sum(symint_placeholders)
+        outer_size_symint_placeholders = [type(i) is not int for i in self.outer_size]
+        outer_stride_symint_placeholders = [
+            type(i) is not int for i in self.outer_stride
+        ]
+        has_symbolic = any(outer_size_symint_placeholders)
 
         if is_runtime and has_symbolic and not is_subclass:
             start = curr_start_idx
-            end = start + num_symbolic
+            end = start + sum(outer_size_symint_placeholders)
             it = iter(all_args[start:end])
             outer_size = pytree.tree_map_only(
                 torch.SymInt, lambda _: next(it), self.outer_size
             )
 
-            outer_stride = self.outer_stride
+            start = end
+            end = start + sum(outer_stride_symint_placeholders)
+            it = iter(all_args[start:end])
+            outer_stride = pytree.tree_map_only(
+                torch.SymInt, lambda _: next(it), self.outer_stride
+            )
             return outer_size, outer_stride
 
         return self.outer_size, self.outer_stride
@@ -642,7 +649,7 @@ class SubclassMeta:
     # Optional field because we don't compute for inference graphs
     grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
 

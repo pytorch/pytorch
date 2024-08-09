@@ -99,7 +99,7 @@ class CachedMetricsHelper:
     apply on a cache hit.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cached_metrics = {}
         for metric in get_metric_fields():
             self.cached_metrics[metric] = globals()[metric]

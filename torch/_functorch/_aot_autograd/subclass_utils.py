@@ -6,10 +6,10 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
 import typing
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
-from torch import Size, SymInt, Tensor
+from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -93,8 +93,10 @@ def create_subclass_meta(
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
-            cnt = subclass_meta.arg_count + count_symints * len(
-                filter_symints(a.size())
+            cnt = (
+                subclass_meta.arg_count
+                + count_symints * len(filter_symints(a.size()))
+                + count_symints * len(filter_symints(a.stride()))
             )
         else:
             infos.append(idx)
@@ -116,7 +118,7 @@ def create_subclass_meta(
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
 
 
-def filter_symints(size: Union[Size, List[Union[int, SymInt]]]) -> List[SymInt]:
+def filter_symints(size: Iterable[Union[int, SymInt]]) -> List[SymInt]:
     return [s for s in size if isinstance(s, SymInt)]
 
 
@@ -141,12 +143,15 @@ def unwrap_tensor_subclasses(
     for idx, x in enumerate(wrapped_args):
         if is_traceable_wrapper_subclass(x):
             size = x.size()
+            stride = x.stride()
             xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
             if append_symints:
                 if is_runtime:
                     assert subclass_metas is not None
                     meta = subclass_metas[idx]
                     assert isinstance(meta, SubclassCreationMeta)
+
+                    # outer_size
                     symint_placeholders = [type(i) is not int for i in meta.outer_size]
                     assert len(size) == len(symint_placeholders)
                     xs_inner.extend(
@@ -156,8 +161,22 @@ def unwrap_tensor_subclasses(
                             if is_symint
                         ]
                     )
+
+                    # outer_stride
+                    symint_placeholders = [
+                        type(i) is not int for i in meta.outer_stride
+                    ]
+                    assert len(stride) == len(symint_placeholders)
+                    xs_inner.extend(
+                        [
+                            r
+                            for (r, is_symint) in zip(stride, symint_placeholders)
+                            if is_symint
+                        ]
+                    )
                 else:
                     xs_inner.extend(filter_symints(size))
+                    xs_inner.extend(filter_symints(stride))
         else:
             xs_inner.append(x)
     return xs_inner
@@ -256,8 +275,10 @@ def wrap_tensor_subclasses(
             )
             assert subclass_meta.outer_size is not None
             num_args_tallied += subclass_meta.arg_count
-            num_args_tallied += count_extra * len(
-                filter_symints(subclass_meta.outer_size)
+            num_args_tallied = (
+                num_args_tallied
+                + count_extra * len(filter_symints(subclass_meta.outer_size))
+                + count_extra * len(filter_symints(subclass_meta.outer_stride))
             )
 
     # Note: [Partitioner handling for Subclasses, Part 2]
@@ -419,7 +440,9 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
             inner_idx += 1
         else:
             assert inp_meta.original_subclass is not None
-            num_extra_symints = len(filter_symints(inp_meta.original_subclass.size()))
+            num_extra_symints = len(
+                filter_symints(inp_meta.original_subclass.size())
+            ) + len(filter_symints(inp_meta.original_subclass.stride()))
             for _ in range(inp_meta.arg_count + num_extra_symints):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
