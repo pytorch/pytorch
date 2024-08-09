@@ -311,7 +311,11 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._allow_token_discovery = _allow_token_discovery
 
         # we use this to track what tensors are aliases of each other
-        self.storage_to_tensors = defaultdict(set)
+        self.storage_to_aliases = defaultdict(set)
+
+        # maps tensor cdata every tensor address to the tensor.
+        self.tensors_look_up = {}
+
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -343,9 +347,10 @@ class FunctionalTensorMode(TorchDispatchMode):
      
         for arg in args:
             if isinstance(arg, torch.Tensor):
-                self.storage_to_tensors[arg.untyped_storage()._cdata].add(arg)
-        print(func)
-        print(self.storage_to_tensors)
+                self.storage_to_aliases[arg.untyped_storage()._cdata].add(arg._cdata)
+                self.tensors_look_up[arg._cdata] = arg
+
+        print(self.storage_to_aliases)
         unrecognized_types = [
             t
             for t in types
@@ -431,7 +436,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, self.storage_to_tensors, args, kwargs)
+            return do_auto_functionalize(func, self.storage_to_aliases, self.tensors_look_up, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
