@@ -485,13 +485,14 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             try:
                 x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
-            except exc.ObservedException:
+            except exc.ObservedAttributeError:
+                exc.handle_observed_exception(self)
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                try:
                     x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
+                except exc.ObservedAttributeError:
+                    exc.handle_observed_exception(self)
+                    x = None
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
@@ -2135,7 +2136,7 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(k) for k in tos]))  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -2721,10 +2722,18 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
+
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
-            # if it reaches here, it means Dynamo failed to inline a functorch function
             name = ci.key().name.lower()
-            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            msg = (
+                "If you are reaching here, it means dynamo failed for one of the following reasons:\n"
+                # Calling a torch.compiled function
+                f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
+                f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
+                "For more information, see PyTorch issue #128711."
+                # if it reaches here, it means Dynamo failed to inline a functorch function
+                f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            )
             unimplemented(msg)
 
     def _init_torch_function_mode_stack(self):
