@@ -2,12 +2,16 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <cusolverDn.h>
+#include <cusolverSp.h>
 
 
 torch::Tensor noop_cusolver_function(torch::Tensor x) {
   cusolverDnHandle_t handle;
   TORCH_CUSOLVER_CHECK(cusolverDnCreate(&handle));
   TORCH_CUSOLVER_CHECK(cusolverDnDestroy(handle));
+  cusolverSpHandle_t sphandle;
+  TORCH_CUSOLVER_CHECK(cusolverSpCreate(&sphandle));
+  TORCH_CUSOLVER_CHECK(cusolverSpDestroy(sphandle));
   return x;
 }
 

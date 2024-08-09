@@ -11,6 +11,8 @@
 #include <ATen/native/SparseTensorUtils.h>
 #include <algorithm>
 #include <ATen/AccumulateType.h>
+#include <ATen/native/cuda/linalg/CUDASolver.h>
+#include <ATen/cuda/CUDASparseDescriptors.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -705,6 +707,43 @@ struct ReductionMulOp {
   __forceinline__ scalar_t identity_cpu() const { return 1; }
 };
 
+template <typename scalar_t>
+void _apply_sparse_csr_linear_solve(
+  const Tensor& input,
+  const Tensor& other,
+  const Tensor& result,
+  int &_singularity) {
+#ifdef USE_ROCM
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.solve with sparse tensors requires compiling ",
+      "PyTorch with CUDA and not supported in ROCm build.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto values = input.values();
+  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
+  auto crow_indices = input.crow_indices().to(kInt);
+  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
+  auto col_indices = input.col_indices().to(kInt);
+  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDASolverSpHandle();
+  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
+
+  const scalar_t *b = other.data_ptr<scalar_t>();
+  int n = (int)input.size(-1);
+  int nnzA = input._nnz();
+  value_t tol = 0.0;
+  // default reordering of symrcm
+  // Should reorder be an argument provided for users to choose between the following?
+  // symrcm, symamd, csrmetisnd (1, 2, 3)
+  int reorder = 0;
+  scalar_t *x = result.data_ptr<scalar_t>();
+
+  at::cuda::solver::lsvchol<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
+    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
+#endif
+}
+
 } // namespace
 
 Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
@@ -733,6 +772,16 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
       result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
     });
   return result;
+}
+
+void linalg_solve_sparse_csr_kernel(
+  const Tensor& input,
+  const Tensor& other,
+  const Tensor& result,
+  int& singularity) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
+    _apply_sparse_csr_linear_solve<scalar_t>(input, other, result, singularity);
+  });
 }
 
 } // namespace at::native
