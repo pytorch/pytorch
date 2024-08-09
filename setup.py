@@ -38,6 +38,12 @@
 #   USE_CUSPARSELT=0
 #     disables the cuSPARSELt build
 #
+#   USE_CUDSS=0
+#     disables the cuDSS build
+#
+#   USE_CUFILE=0
+#     disables the cuFile build
+#
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
