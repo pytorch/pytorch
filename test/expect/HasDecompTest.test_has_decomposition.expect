@@ -56,6 +56,8 @@ aten::_convert_indices_from_coo_to_csr
 aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
+aten::_convert_scales_and_zeros_mps
+aten::_convert_scales_and_zeros_mps.out
 aten::_convert_weight_to_int4pack
 aten::_convolution
 aten::_convolution.out

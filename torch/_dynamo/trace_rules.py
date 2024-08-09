@@ -1335,6 +1335,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._conj",
         "torch._convert_indices_from_coo_to_csr",
         "torch._convert_indices_from_csr_to_coo",
+        "torch._convert_scales_and_zeros_mps",
         "torch._convert_weight_to_int4pack",
         "torch._convolution_mode",
         "torch._convolution",
