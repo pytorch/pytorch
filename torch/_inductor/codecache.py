@@ -2525,7 +2525,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
-        "include_pytorch": False,
+        "include_pytorch": True,
         "shared": True,
     }
     entry_function = "kernel"
@@ -2538,6 +2538,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <Python.h>
         #include <sstream>
         #include <cstdlib>
+        #include <torch/csrc/Exceptions.h>
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
@@ -2698,6 +2699,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+        #include <torch/csrc/Exceptions.h>
 
         static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {
             std::vector<AtenTensorHandle> result;
