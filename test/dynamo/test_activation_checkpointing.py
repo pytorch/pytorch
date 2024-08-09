@@ -671,11 +671,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 context_fn=selective_checkpointing_context_fn,
             )
 
-        rand_tensor = torch.randn(4, 4, requires_grad=True, device="cuda")
+        rand_tensor = torch.randn(4, 4, device="cuda")
 
         # tensor subclasses as inputs
-        x = TwoTensor(rand_tensor, rand_tensor.clone())
-        y = TwoTensor(rand_tensor.clone(), rand_tensor.clone())
+        x = TwoTensor(rand_tensor, rand_tensor.clone(), requires_grad=True)
+        y = TwoTensor(rand_tensor.clone(), rand_tensor.clone(), requires_grad=True)
 
         fw_compiler = functools.partial(
             count_ops,

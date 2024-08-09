@@ -8,7 +8,7 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b):
+    def __new__(cls, a, b, *, requires_grad=False):
         assert (
             a.device == b.device
             and a.layout == b.layout
@@ -22,8 +22,8 @@ class TwoTensor(torch.Tensor):
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
-        kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
+        kwargs["requires_grad"] = requires_grad
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
         assert a.shape == b.shape
@@ -31,7 +31,7 @@ class TwoTensor(torch.Tensor):
         assert a.storage_offset() == b.storage_offset()
         return out
 
-    def __init__(self, a, b):
+    def __init__(self, a, b, *, requires_grad=False):
         self.a = a
         self.b = b
 
