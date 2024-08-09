@@ -72,7 +72,6 @@ class FlexAttentionHOP(HigherOrderOperator):
 
 
 flex_attention = FlexAttentionHOP()
-flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
@@ -118,7 +117,6 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
 
 
 flex_attention_backward = FlexAttentionBackwardHOP()
-flex_attention_backward.__module__ = "torch.ops.higher_order"
 
 
 def _math_attention_inner(
