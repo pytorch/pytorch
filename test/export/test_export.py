@@ -6655,13 +6655,27 @@ def forward(self, x, y):
             }
         }
         # shapes = None
-        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(Foo(), inputs, {}, shapes)
+        # constraints = torch.export.dynamic_shapes._process_dynamic_shapes(Foo(), inputs, {}, shapes)
 
+        # with torch._dynamo.config.patch(
+        #     assume_static_by_default=False,
+        #     automatic_dynamic_shapes=True,
+        # ):
+        #     ep = torch.export.export(Foo(), inputs, dynamic_shapes=shapes, strict=False)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        inputs = (torch.randn(6, 4), torch.randn(7, 4))
+        shapes = {"x": (Dim("dx", min=3, max=16), True), "y": (True, 4)}
+        # shapes = {"x": True, "y": (True, 4)}
+        constraints = torch.export.dynamic_shapes._process_dynamic_shapes(Foo(), inputs, {}, shapes)
         with torch._dynamo.config.patch(
             assume_static_by_default=False,
             automatic_dynamic_shapes=True,
         ):
-            ep = torch.export.export(Foo(), inputs, dynamic_shapes=shapes, strict=False)
+            ep = export(Foo(), inputs, dynamic_shapes=shapes)
         breakpoint()
 
 
