@@ -663,7 +663,7 @@ def _compile(
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()
         j = 0
-        for i in range(1000):
+        for i in range(3000):
             j = j * i
 
         # print(j)
