@@ -68,50 +68,55 @@ def call_torchbind_impl(obj, method, *args, **kwargs):
 
 @call_torchbind.py_impl(ProxyTorchDispatchMode)
 def inner(mode, *args, **kwargs):
-    if mode.enable_tracing:
-        proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
-        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+    proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-        out_proxy = mode.tracer.create_proxy(
-            "call_function",
-            call_torchbind,
-            proxy_args,
-            proxy_kwargs,
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        call_torchbind,
+        proxy_args,
+        proxy_kwargs,
+    )
+    out = call_torchbind(*args, **kwargs)
+
+    obj, method, *rest_args = args
+    if isinstance(obj, torch.ScriptObject):
+        ns, class_name = _ns_and_class_name(
+            obj._type().qualified_name()  # type: ignore[attr-defined]
         )
-        out = call_torchbind(*args, **kwargs)
+        log.warning(
+            "Tracing torchbind method %s.%s with real ScriptObject. This may"
+            " cause the original object being mutated. If this is not intended,"
+            ' You can register a fake class with torch._library.register_fake_class("%s::%s").',
+            class_name,
+            method,
+            ns,
+            class_name,
+        )
 
-        obj, method, *rest_args = args
-        if isinstance(obj, torch.ScriptObject):
-            ns, class_name = _ns_and_class_name(
-                obj._type().qualified_name()  # type: ignore[attr-defined]
-            )
-            log.warning(
-                "Tracing torchbind method %s.%s with real ScriptObject. This may"
-                " cause the original object being mutated. If this is not intended,"
-                ' You can register a fake class with torch._library.register_fake_class("%s::%s").',
-                class_name,
-                method,
-                ns,
-                class_name,
-            )
-
-        ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
-        if "val" not in out_proxy.node.meta:
-            assert out is None or isinstance(
-                out, (int, float, bool)
-            ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
-            out_proxy.node.meta["val"] = out
-        return ret
-    else:
-        return call_torchbind(*args, **kwargs)
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+    if "val" not in out_proxy.node.meta:
+        assert out is None or isinstance(
+            out, (int, float, bool)
+        ), "Currently, only these constant dtypes are supported to be returned from torchbind methods."
+        out_proxy.node.meta["val"] = out
+    return ret
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
+# When tracing with fake script object, the call_torchbind op will return a fake tensor
+# When tracing with real script object, the call_torchbind op may return a real tensor,
+# we need to convert it to fake tensor mannually. Dynamic shape is surpported.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
-        return call_torchbind_impl(*args, **kwargs)
+        out = call_torchbind_impl(*args, **kwargs)
+        return pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: mode.from_tensor(x, static_shapes=True)
+            if not isinstance(x, torch._subclasses.fake_tensor.FakeTensor)
+            else x,
+            out,
+        )
 
 
 call_torchbind.py_impl(DispatchKey.Autograd)(

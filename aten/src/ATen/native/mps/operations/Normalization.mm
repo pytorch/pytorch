@@ -67,10 +67,10 @@ static void get_shapes(MPSShape* input_shape_readonly,
 
 // Inverse standard deviation now becomes variance (without epsilon)
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
-                                                         const c10::optional<Tensor>& weight_opt,
-                                                         const c10::optional<Tensor>& bias_opt,
-                                                         const c10::optional<Tensor>& running_mean_opt,
-                                                         const c10::optional<Tensor>& running_var_opt,
+                                                         const std::optional<Tensor>& weight_opt,
+                                                         const std::optional<Tensor>& bias_opt,
+                                                         const std::optional<Tensor>& running_mean_opt,
+                                                         const std::optional<Tensor>& running_var_opt,
                                                          bool train,
                                                          double momentum,
                                                          double epsilon,
@@ -364,16 +364,16 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
-                                                  const c10::optional<Tensor>& weight_opt,
-                                                  const c10::optional<Tensor>& bias_opt,
-                                                  const c10::optional<Tensor>& running_mean_opt,
-                                                  const c10::optional<Tensor>& running_var_opt,
+                                                  const std::optional<Tensor>& weight_opt,
+                                                  const std::optional<Tensor>& bias_opt,
+                                                  const std::optional<Tensor>& running_mean_opt,
+                                                  const std::optional<Tensor>& running_var_opt,
                                                   bool train,
                                                   double momentum,
                                                   double epsilon) {
   const auto memory_format = self.suggest_memory_format();
 
-  auto output = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+  auto output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
 
   int64_t n_input = self.size(1);
 
@@ -381,18 +381,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                              self.scalar_type(),
                              // TODO: Accumulate type?
                              // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
-                             c10::nullopt,
+                             std::nullopt,
                              kMPS,
-                             c10::nullopt,
-                             c10::nullopt);
+                             std::nullopt,
+                             std::nullopt);
   auto save_var = at::empty({n_input},
                             self.scalar_type(),
                             // TODO: Accumulate type?
                             // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
-                            c10::nullopt,
+                            std::nullopt,
                             kMPS,
-                            c10::nullopt,
-                            c10::nullopt);
+                            std::nullopt,
+                            std::nullopt);
 
   at::native::batch_norm_mps_out(self,
                                  weight_opt,
@@ -409,22 +409,21 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mps(const Tensor& input,
-                                                                       const c10::optional<Tensor>& weight_opt,
-                                                                       const c10::optional<Tensor>& bias_opt,
+                                                                       const std::optional<Tensor>& weight_opt,
+                                                                       const std::optional<Tensor>& bias_opt,
                                                                        Tensor& running_mean,
                                                                        Tensor& running_var,
                                                                        double momentum,
                                                                        double eps) {
-  Tensor output, save_mean, save_var;
-  std::tie(output, save_mean, save_var) =
+  auto [output, save_mean, save_var] =
       batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, /*train*/ true, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_mps_out(const Tensor& input,
-                                                                               const c10::optional<Tensor>& weight_opt,
-                                                                               const c10::optional<Tensor>& bias_opt,
+                                                                               const std::optional<Tensor>& weight_opt,
+                                                                               const std::optional<Tensor>& bias_opt,
                                                                                Tensor& running_mean,
                                                                                Tensor& running_var,
                                                                                double momentum,
@@ -439,8 +438,8 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_mps_out(c
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_mps(const Tensor& self,
-                                                         const c10::optional<Tensor>& weight_opt,
-                                                         const c10::optional<Tensor>& bias_opt,
+                                                         const std::optional<Tensor>& weight_opt,
+                                                         const std::optional<Tensor>& bias_opt,
                                                          Tensor& running_mean,
                                                          Tensor& running_var,
                                                          bool train,
@@ -450,8 +449,8 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_mps(const Tensor& self,
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_mps(const Tensor& self,
-                                                                  const c10::optional<Tensor>& weight_opt,
-                                                                  const c10::optional<Tensor>& bias_opt,
+                                                                  const std::optional<Tensor>& weight_opt,
+                                                                  const std::optional<Tensor>& bias_opt,
                                                                   bool train,
                                                                   double momentum,
                                                                   double epsilon) {
@@ -459,8 +458,8 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_mps(const Tensor& 
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_mps_out(const Tensor& self,
-                                                                const c10::optional<Tensor>& weight_opt,
-                                                                const c10::optional<Tensor>& bias_opt,
+                                                                const std::optional<Tensor>& weight_opt,
+                                                                const std::optional<Tensor>& bias_opt,
                                                                 Tensor& running_mean,
                                                                 Tensor& running_var,
                                                                 bool train,
@@ -474,8 +473,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_mps_out(const Tensor& se
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out(const Tensor& self,
-                                                                         const c10::optional<Tensor>& weight_opt,
-                                                                         const c10::optional<Tensor>& bias_opt,
+                                                                         const std::optional<Tensor>& weight_opt,
+                                                                         const std::optional<Tensor>& bias_opt,
                                                                          bool train,
                                                                          double momentum,
                                                                          double epsilon,
@@ -506,10 +505,10 @@ static string get_mem_string(c10::MemoryFormat memory_format) {
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& grad_output,
                                                                 const Tensor& input,
                                                                 const Tensor& weight,
-                                                                const c10::optional<Tensor>& running_mean_opt,
-                                                                const c10::optional<Tensor>& running_var_opt,
-                                                                const c10::optional<Tensor>& save_mean_opt,
-                                                                const c10::optional<Tensor>& save_var_opt,
+                                                                const std::optional<Tensor>& running_mean_opt,
+                                                                const std::optional<Tensor>& running_var_opt,
+                                                                const std::optional<Tensor>& save_mean_opt,
+                                                                const std::optional<Tensor>& save_var_opt,
                                                                 bool update,
                                                                 double eps,
                                                                 std::array<bool, 3> grad_input_mask,
@@ -528,11 +527,11 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& gr
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_out,
                                                            const Tensor& input,
-                                                           const c10::optional<Tensor>& weight_opt,
-                                                           const c10::optional<Tensor>& running_mean_opt,
-                                                           const c10::optional<Tensor>& running_var_opt,
-                                                           const c10::optional<Tensor>& save_mean_opt,
-                                                           const c10::optional<Tensor>& save_var_opt,
+                                                           const std::optional<Tensor>& weight_opt,
+                                                           const std::optional<Tensor>& running_mean_opt,
+                                                           const std::optional<Tensor>& running_var_opt,
+                                                           const std::optional<Tensor>& save_mean_opt,
+                                                           const std::optional<Tensor>& save_var_opt,
                                                            bool train,
                                                            double epsilon,
                                                            std::array<bool, 3> grad_input_mask) {
@@ -543,23 +542,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   const auto memory_format = input.suggest_memory_format();
 
   if (grad_input_mask[0]) {
-    grad_input = at::empty(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+    grad_input = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
   }
   // Assuming that if grad_input_mask of weight is 1, then the weight is available
   if (grad_input_mask[1]) {
     grad_weight = at::empty(weight_opt.value().sizes(),
                             weight_opt.value().scalar_type(),
-                            c10::nullopt,
+                            std::nullopt,
                             kMPS,
-                            c10::nullopt,
+                            std::nullopt,
                             at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
     grad_bias = at::empty(weight_opt.value().sizes(),
                           weight_opt.value().scalar_type(),
-                          c10::nullopt,
+                          std::nullopt,
                           kMPS,
-                          c10::nullopt,
+                          std::nullopt,
                           at::MemoryFormat::Contiguous);
   }
 
@@ -861,8 +860,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 // Layer norm forward for MPS
 std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
                                                   IntArrayRef normalized_shape,
-                                                  const c10::optional<Tensor>& weight_opt,
-                                                  const c10::optional<Tensor>& bias_opt,
+                                                  const std::optional<Tensor>& weight_opt,
+                                                  const std::optional<Tensor>& bias_opt,
                                                   double eps) {
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -922,8 +921,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
                                                            IntArrayRef normalized_shape,
                                                            const Tensor& mean,
                                                            const Tensor& rstd,
-                                                           const c10::optional<Tensor>& weight_opt /* optional */,
-                                                           const c10::optional<Tensor>& bias_opt /* optional */,
+                                                           const std::optional<Tensor>& weight_opt /* optional */,
+                                                           const std::optional<Tensor>& bias_opt /* optional */,
                                                            std::array<bool, 3> grad_input_mask) {
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -943,38 +942,38 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   Tensor grad_bias;
   if (grad_input_mask[0]) {
     grad_input = at::empty_like(*X,
-                                c10::nullopt /* dtype */,
-                                c10::nullopt /* layout */,
+                                std::nullopt /* dtype */,
+                                std::nullopt /* layout */,
                                 kMPS /* device */,
-                                c10::nullopt /* pin_memory */,
+                                std::nullopt /* pin_memory */,
                                 at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
     grad_weight = M > 0 ? at::empty_like(*gamma,
-                                         c10::nullopt /* dtype */,
-                                         c10::nullopt /* layout */,
+                                         std::nullopt /* dtype */,
+                                         std::nullopt /* layout */,
                                          kMPS /* device */,
-                                         c10::nullopt /* pin_memory */,
+                                         std::nullopt /* pin_memory */,
                                          at::MemoryFormat::Contiguous)
                         : at::zeros_like(*gamma,
-                                         c10::nullopt /* dtype */,
-                                         c10::nullopt /* layout */,
+                                         std::nullopt /* dtype */,
+                                         std::nullopt /* layout */,
                                          kMPS /* device */,
-                                         c10::nullopt /* pin_memory */,
+                                         std::nullopt /* pin_memory */,
                                          at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
     grad_bias = M > 0 ? at::empty_like(*beta,
-                                       c10::nullopt /* dtype */,
-                                       c10::nullopt /* layout */,
+                                       std::nullopt /* dtype */,
+                                       std::nullopt /* layout */,
                                        kMPS /* device */,
-                                       c10::nullopt /* pin_memory */,
+                                       std::nullopt /* pin_memory */,
                                        at::MemoryFormat::Contiguous)
                       : at::zeros_like(*beta,
-                                       c10::nullopt /* dtype */,
-                                       c10::nullopt /* layout */,
+                                       std::nullopt /* dtype */,
+                                       std::nullopt /* layout */,
                                        kMPS /* device */,
-                                       c10::nullopt /* pin_memory */,
+                                       std::nullopt /* pin_memory */,
                                        at::MemoryFormat::Contiguous);
   }
   if (M > 0) {

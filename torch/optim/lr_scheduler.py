@@ -26,6 +26,7 @@ from torch import inf, Tensor
 
 from .optimizer import Optimizer
 
+
 __all__ = [
     "LambdaLR",
     "MultiplicativeLR",
@@ -1939,7 +1940,7 @@ class OneCycleLR(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> data_loader = torch.utils.data.DataLoader(...)
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=1e-4, momentum=0.9)
         >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
