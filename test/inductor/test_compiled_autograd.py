@@ -1576,7 +1576,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     torch::Tensor y = saved_variables[1];
     torch::Tensor fixed = ctx->saved_data["fixed_tensor"].toTensor();
     assert(ctx->saved_data["bool"].isBool());
-    int i = ctx->saved_data["int"].toInt();
+    c10::SymInt i = ctx->saved_data["int"].toSymInt();
     c10::List<c10::IValue> list = ctx->saved_data["list"].toList();
     assert(list.size() == 1);
     assert(list.get(0).toStringRef() == "string");
@@ -1725,7 +1725,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
         def fn():
             for y in [1, 2, 3, 1]:
                 x = torch.ones(10, 10, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_saved_scalar.custom_op_backed_by_autograd_fn(
+                out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
                     x, y
                 )
                 loss = out.sum()
