@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
     parametrize,
@@ -232,6 +233,10 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
     @fresh_inductor_cache()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "This test is using fp8 which is only supported on H100+ and MI300+ machines",
+    )
     def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim):
         if gather_dim >= A_dims:
             return
