@@ -21,6 +21,7 @@ from torch.optim.radam import RAdam
 from torch.optim.rmsprop import RMSprop
 from torch.optim.rprop import Rprop
 from torch.optim.sgd import SGD
+from torch.optim.signSGD import SignSGD
 from torch.optim.sparse_adam import SparseAdam
 
 
@@ -35,6 +36,7 @@ del sparse_adam  # type: ignore[name-defined] # noqa: F821
 del adamax  # type: ignore[name-defined] # noqa: F821
 del asgd  # type: ignore[name-defined] # noqa: F821
 del sgd  # type: ignore[name-defined] # noqa: F821
+del sign_sgd  # type: ignore[name-defined] # noqa: F821
 del radam  # type: ignore[name-defined] # noqa: F821
 del rprop  # type: ignore[name-defined] # noqa: F821
 del rmsprop  # type: ignore[name-defined] # noqa: F821
