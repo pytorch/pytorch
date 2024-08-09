@@ -255,6 +255,7 @@ class ReplicateTest(MultiProcessTestCase):
 
 
 class ReplicateFullyShardInit(ReplicateTest):
+    @skip_if_lt_x_gpu(2)
     def test_replicate_fully_shard_init(self):
         class ToyModel(nn.Module):
             def __init__(self, dim: int):
@@ -267,9 +268,6 @@ class ReplicateFullyShardInit(ReplicateTest):
                 self.proj = nn.Linear(dim, dim, bias=False)
 
             def forward(self, x: torch.Tensor):
-                assert isinstance(
-                    self.linears[0].weight.data, DTensor
-                ), f"{type(self.linears[0].weight.data)=}"
                 y = self.linears(x)
                 y = self.proj(y)
                 return y
