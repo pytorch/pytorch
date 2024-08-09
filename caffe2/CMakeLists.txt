@@ -918,7 +918,7 @@ elseif(USE_CUDA)
   if(USE_FLASH_ATTENTION)
     # flash_attn for cuda requires excessive memory, so restrict parallelism in ninja builds
     add_library(torch_cuda_flash_attention OBJECT)
-    set_property(GLOBAL PROPERTY JOB_POOLS flash_attention_pool=5)
+    set_property(GLOBAL PROPERTY JOB_POOLS flash_attention_pool=4)
     set_property(TARGET torch_cuda_flash_attention PROPERTY JOB_POOL_COMPILE flash_attention_pool)
     target_sources(torch_cuda_flash_attention PRIVATE ${Caffe2_GPU_CU_SRCS_FLASH_ATTENTION})
     if(CUDA_SEPARABLE_COMPILATION)
