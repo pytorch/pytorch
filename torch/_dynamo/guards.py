@@ -1418,6 +1418,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
+
         ok_types = tuple(
             common_constant_types
             | {
@@ -1432,6 +1433,21 @@ class GuardBuilder(GuardBuilderBase):
                 *np_types,
             }
         )
+        if torch.distributed.is_available():
+            from torch.distributed._tensor.placement_types import (
+                Partial,
+                Replicate,
+                Shard,
+            )
+            from torch.distributed.device_mesh import DeviceMesh
+
+            ok_types = ok_types + (
+                Shard,
+                Replicate,
+                Partial,
+                DeviceMesh,
+            )
+
         if istype(val, dict):
             assert all(
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
