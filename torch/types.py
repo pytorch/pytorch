@@ -59,6 +59,10 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 Device = Optional[Union[_device, builtins.str, builtins.int]]
 del Optional
 
+# Similar to Device, but for dtype.
+# None means default dtype (typically torch.float32)
+Dtype = _dtype | None
+
 # Storage protocol implemented by ${Type}StorageBase classes
 
 
