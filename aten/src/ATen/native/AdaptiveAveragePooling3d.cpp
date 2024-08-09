@@ -228,68 +228,32 @@ static void adaptive_avg_pool3d_backward_out_frame(
 }
 
 Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
-    Tensor& gradInput,
-    const Tensor& gradOutput_,
-    const Tensor& input) {
-  /* get contiguous gradOutput */
-  auto gradOutput = gradOutput_.contiguous();
-
-  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
-
-  /* sizes */
-  int64_t sizeD = input.size(-4);
-  int64_t isizeT = input.size(-3);
-  int64_t isizeH = input.size(-2);
-  int64_t isizeW = input.size(-1);
-  int64_t osizeT = gradOutput.size(-3);
-  int64_t osizeH = gradOutput.size(-2);
-  int64_t osizeW = gradOutput.size(-1);
-
-  /* backprop */
-  if (input.ndimension() == 4) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
-        input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
-          /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
-
-          adaptive_avg_pool3d_backward_out_frame<scalar_t>(
-              gradInput_data,
-              gradOutput_data,
-              sizeD,
-              isizeT,
-              isizeH,
-              isizeW,
-              osizeT,
-              osizeH,
-              osizeW);
-        });
-  } else {
-    int64_t n = input.size(0);
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
-        input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
-          /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
-          const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
-          at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
-            for (const auto b : c10::irange(start, end)) {
-              adaptive_avg_pool3d_backward_out_frame<scalar_t>(
-                  gradInput_data + b * sizeD * isizeT * isizeH * isizeW,
-                  gradOutput_data + b * sizeD * osizeT * osizeH * osizeW,
-                  sizeD,
-                  isizeT,
-                  isizeH,
-                  isizeW,
-                  osizeT,
-                  osizeH,
-                  osizeW);
-            }
-          });
-    });
+  Tensor& grad_input,
+  const Tensor& grad_output,
+  const Tensor& input)
+{
+  int64_t ndim = grad_output.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(grad_output.size(i) > 0,
+      "adaptive_avg_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+      "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
+      "empty");
   }
-  return gradInput;
+
+  TORCH_CHECK((ndim == 4 || ndim == 5),
+    "adaptive_avg_pool3d_backward(): Expected 4D or 5D tensor, but got ", input.sizes());
+  TORCH_CHECK(input.dtype() == grad_output.dtype(),
+    "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+  TORCH_CHECK(input.dtype() == grad_input.dtype(),
+    "expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
+
+  grad_input.resize_(input.sizes(), input.suggest_memory_format());
+  grad_input.zero_();
+
+  adaptive_avg_pool3d_backward_kernel(kCPU, grad_input, grad_output);
+  return grad_input;
 }
+
 
 } // namespace
 
@@ -339,9 +303,13 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
 
 Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
     const Tensor& input) {
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
-  return gradInput;
+  auto grad_input = at::empty({0}, input.options());
+  adaptive_avg_pool3d_backward_out_cpu_template(grad_input, gradOutput_, input);
+  return grad_input;
 }
+
+DEFINE_DISPATCH(adaptive_avg_pool3d_kernel);
+DEFINE_DISPATCH(adaptive_avg_pool3d_backward_kernel);
+
 
 } // namespace at::native
