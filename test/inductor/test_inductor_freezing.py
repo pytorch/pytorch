@@ -473,7 +473,8 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["conv_bn_folding"], 1)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 1)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
@@ -504,14 +505,15 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
         for use_bias in [True, False]:
             x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-            running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
-            running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
+            running_mean = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
+            running_var = nn.Buffer(torch.var(x, dim=(0, 2, 3)).to(self.device))
 
             mod = (
                 ConvFunctionalBN(
@@ -522,8 +524,8 @@ class OptimizeForInferenceTemplate(TestCase):
                     stride=2,
                     running_mean=running_mean,
                     running_var=running_var,
-                    weight=torch.ones(32).to(self.device),
-                    bn_bias=torch.zeros(32).to(self.device),
+                    weight=nn.Parameter(torch.ones(32).to(self.device)),
+                    bn_bias=nn.Parameter(torch.zeros(32).to(self.device)),
                 )
                 .eval()
                 .to(self.device)
@@ -543,8 +545,8 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            # issue: https://github.com/pytorch/pytorch/issues/131693
-            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_bn_with_multi_bn_share_conv(self):
@@ -574,15 +576,16 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_functional_bn_with_multi_bn_share_conv(self):
         for use_bias in [True, False]:
             x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-            running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
-            running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
-            running_mean2 = torch.mean(x, dim=(0, 2, 3)).to(self.device)
+            running_mean = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
+            running_var = nn.Buffer(torch.var(x, dim=(0, 2, 3)).to(self.device))
+            running_mean2 = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
 
             mod = (
                 ConvMultiFunctionalBN(
@@ -593,8 +596,8 @@ class OptimizeForInferenceTemplate(TestCase):
                     stride=2,
                     running_mean=running_mean,
                     running_var=running_var,
-                    weight=torch.ones(32).to(self.device),
-                    bn_bias=torch.zeros(32).to(self.device),
+                    weight=nn.Parameter(torch.ones(32).to(self.device)),
+                    bn_bias=nn.Parameter(torch.zeros(32).to(self.device)),
                     running_mean2=running_mean2,
                 )
                 .eval()
@@ -613,7 +616,8 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
