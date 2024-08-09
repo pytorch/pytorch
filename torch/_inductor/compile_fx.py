@@ -59,6 +59,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.monitor import _WaitCounter
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
@@ -544,6 +545,10 @@ def _compile_fx_inner(
         "extern_node_serializer": extern_node_serializer,
     }
 
+    wc_guard = _WaitCounter(
+        "pytorch.wait_counter.fx_codgen_and_compile",
+    ).guard()
+    wc_guard.start()
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
@@ -673,6 +678,7 @@ def _compile_fx_inner(
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+    wc_guard.stop()
 
     _step_logger()(
         logging.INFO,
