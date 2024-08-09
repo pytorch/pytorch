@@ -1940,6 +1940,7 @@ class TestSDPACpuOnly(NNTestCase):
     @parametrize("type", ["dense", "nested"])
     @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
+    @skipIfTorchDynamo()
     def test_fused_sdp_choice_cpu(self, device, type: str, dropout: float, dtype: torch.dtype):
         # Test that cpu and nestedtensor cpu return MATH backend
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
