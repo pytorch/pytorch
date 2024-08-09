@@ -1271,6 +1271,36 @@ function create_trace_view(
   plot.set_delegate(delegate);
 }
 
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    const allocator_settings = snapshot.allocator_settings;
+
+    // Print allocator_settings as a list of key-value pairs
+    Object.keys(allocator_settings).forEach(key => {
+      if (typeof allocator_settings[key] === 'object') {
+        // If the value is an object, print it as a nested list
+        settings_div.append('li').text(`${key}:`);
+        Object.keys(allocator_settings[key]).forEach(nested_key => {
+          settings_div
+            .append('li')
+            .text(`--> ${nested_key}: ${allocator_settings[key][nested_key]}`);
+        });
+      } else {
+        // If the value is not an object, print it as a simple key-value pair
+        settings_div.append('li').text(`${key}: ${allocator_settings[key]}`);
+      }
+    });
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
+}
+
 function unpickle(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
@@ -1564,6 +1594,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};
