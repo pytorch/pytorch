@@ -1071,6 +1071,7 @@ def trace_structured(
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
 ):
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1104,11 +1105,12 @@ def trace_structured(
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
             else:
-                # Record the stack of the log call to better diagnose why we
-                # don't have a frame id for it
-                record["stack"] = torch._logging.structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                )
+                if expect_trace_id:
+                    # Record the stack of the log call to better diagnose why we
+                    # don't have a frame id for it
+                    record["stack"] = torch._logging.structured.from_traceback(
+                        CapturedTraceback.extract(skip=1).summary()
+                    )
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):
