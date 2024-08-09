@@ -229,7 +229,7 @@ class ConfigModule(ModuleType):
         self,
         arg1: Optional[Union[str, Dict[str, Any]]] = None,
         arg2: Any = None,
-        **kwargs: Dict[str, Any],
+        **kwargs: Any,
     ) -> "ContextDecorator":
         """
         Decorator and/or context manager to make temporary changes to a config.
@@ -286,7 +286,7 @@ class ConfigModule(ModuleType):
 
         return ConfigPatch()
 
-    def _make_closure_patcher(self, **changes: Dict[str, Any]) -> Any:
+    def _make_closure_patcher(self, **changes: Any) -> Any:
         """
         A lower-overhead version of patch() for things on the critical path.
 

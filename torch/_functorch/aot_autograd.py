@@ -1055,7 +1055,7 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
-    def forward(*runtime_args: Tuple[Any]):
+    def forward(*runtime_args: Any):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)

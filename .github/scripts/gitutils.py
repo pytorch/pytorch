@@ -437,7 +437,7 @@ def retries_decorator(
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     def decorator(f: Callable[..., T]) -> Callable[..., T]:
         @wraps(f)
-        def wrapper(*args: List[Any], **kwargs: Dict[str, Any]) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             for idx in range(num_retries):
                 try:
                     return f(*args, **kwargs)
