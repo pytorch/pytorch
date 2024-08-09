@@ -1,4 +1,6 @@
 """Utility to lazily import modules."""
+# mypy: allow-untyped-defs
+from __future__ import annotations
 
 import importlib
 from typing import TYPE_CHECKING
@@ -25,7 +27,7 @@ class _LazyModule:
 # Import the following modules during type checking to enable code intelligence features,
 # such as auto-completion in tools like pylance, even when these modules are not explicitly
 # imported in user code.
-# NOTE: Add additional use imports here.
+# NOTE: Add additional used imports here.
 if TYPE_CHECKING:
     import onnx
     import onnxscript
