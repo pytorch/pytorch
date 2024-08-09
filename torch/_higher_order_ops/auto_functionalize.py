@@ -1,6 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -54,12 +54,11 @@ class AutoFunctionalized(HigherOrderOperator):
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("auto_functionalized")
 
     def __call__(
-        self,
-        /,
+        self_,  # noqa: B902
         _mutable_op: OpOverload,
         **kwargs: Any,
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
@@ -124,12 +123,15 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
-    **kwargs: Any,
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    _all_aliased = kwargs.pop("_all_aliased", [])
+    kwargs.pop("_arg_to_aliased", {})
     new_kwargs = dict(**kwargs)
     result = []
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
+
     for name in _mutable_args_names:
         if (
             _only_clone_these_tensors is not None
@@ -140,12 +142,32 @@ def auto_functionalized_dense(
             new_kwargs[name] = (
                 [clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else clone_preserve_strides(kwargs[name])
-                if kwargs[name] is not None
-                else None
+                else (
+                    clone_preserve_strides(kwargs[name])
+                    if kwargs[name] is not None
+                    else None
+                )
             )
-        result.append(new_kwargs[name])
+        result.append(new_kwargs[name])   
+
     out = _mutable_op(**new_kwargs)
+    latest_value_for = {}
+    for alias in _all_aliased:
+        # Do i need to wrap this like what happen in clone_preserve_strides in some dispatch things idk what they are?
+        # item should see the effects of all of the mutated args that it is an alias for
+        alias_with_effects = alias
+        for name in _mutable_args_names:
+            if (
+                _only_clone_these_tensors is not None
+                and name not in _only_clone_these_tensors
+            ):
+                # if the argument is mutated in place, item would have already observed the effect. 
+                pass
+            else:
+                # observe the effect on `name`
+                mutation_source = new_kwargs[name]
+                alias_with_effects = alias_with_effects.as_strided_scatter(mutation_source, mutation_source.size(), mutation_source.stride(), mutation_source.storage_offset())
+    result.append(alias_with_effects)
 
     if isinstance(out, tuple):
         return (*out, *result)  # type: ignore[return-value]
@@ -157,7 +179,7 @@ def auto_functionalized_dense(
 def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Any,
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(_mutable_op, **kwargs)
@@ -168,7 +190,7 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Any,
+    **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
         return auto_functionalized(_mutable_op, **kwargs)
@@ -206,6 +228,8 @@ def get_mutable_arg_names(op: OpOverload) -> List[str]:
 
 def do_auto_functionalize(
     op: OpOverload,
+    storage_to_aliases: Dict[int, List[int]],
+    tensors_look_up: Dict[int, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
@@ -242,18 +266,42 @@ def do_auto_functionalize(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
             "Please consider using a different name for this argument to avoid potential issues."
         )
-    with ctx.redispatch_to_next():
-        unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
-        )
-
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
+    
+    arg_to_aliased = {}
+    all_aliased_addresses = set()
+
+    for arg in mutable_args_names:
+        ls =  list(storage_to_aliases[normalized_kwargs[arg]._typed_storage()._cdata])
+        
+        # remove self from aliases.
+        ls.remove(normalized_kwargs[arg]._cdata)
+
+        all_aliased_addresses |= set(ls)
+
+        # get tensors from tensors addresses. 
+        arg_to_aliased[arg] =   ctx.unwrap_tensors([tensors_look_up[item] for item in  ls])
+  
+    # take the union of all the aliased items.
+    for arg in mutable_args_names:
+        all_aliased_addresses.discard(normalized_kwargs[arg]._cdata)
+    
+    all_aliased_original = [tensors_look_up[item] for item in  all_aliased_addresses]
+    all_aliased_unwrapped =  ctx.unwrap_tensors(all_aliased_original)
+  
+    with ctx.redispatch_to_next():
+        # output of auto_functionalized is going to be as the following:
+        # op_output, mutated_arg1, ..., all_aliased[0], ...
+        unwrapped_outs = auto_functionalized(
+            op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped, _arg_to_aliased=arg_to_aliased)  # type: ignore[arg-type]
+        )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
-    unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
+
+    unwrapped_mutable_out = unwrapped_outs[-(len(mutable_args_names)+len(all_aliased_original)):]
 
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
@@ -264,7 +312,9 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
+    original_args =   [normalized_kwargs[name] for name in mutable_args_names] + all_aliased_original
+    
+    for orig_arg, unwrapped_out in zip(original_args, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
@@ -274,8 +324,6 @@ def do_auto_functionalize(
             ctx.replace(orig_arg, o)
             ctx.commit_update(orig_arg)
             ctx.sync(orig_arg)
-
-        orig_arg = normalized_kwargs[name]
 
         if isinstance(unwrapped_out, torch.Tensor):
             sync_update(unwrapped_out, orig_arg)
@@ -294,8 +342,10 @@ def do_auto_functionalize(
 
 
 @auto_functionalized.py_functionalize_impl
-def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+def auto_functionalized_func(ctx, _mutable_op, _arg_to_aliased, _all_aliased, **kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
-        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+        result = auto_functionalized(
+            _mutable_op, _arg_to_aliased, _all_aliased, **unwrapped_kwargs
+        )
     return ctx.wrap_tensors(result)
