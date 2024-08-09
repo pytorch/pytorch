@@ -128,9 +128,11 @@ class RingAttentionTest(DTensorTestBase):
         cp_q = q.clone().detach()
         cp_k = k.clone().detach()
         cp_v = v.clone().detach()
-        # cp_q.requires_grad = False
-        # cp_k.requires_grad = False
-        # cp_v.requires_grad = False
+        # Theoretically, context_parallel() should not be used to shard
+        # parameters because when require_grad is True, resize_ is not
+        # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
+        # now. So we can just use context_parallel() to shard q, k, v.
+        # In reality, context_paralle() should be used to shard the input.
         with context_parallel(
             device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
         ):
