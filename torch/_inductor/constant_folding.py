@@ -52,10 +52,21 @@ def replace_node_with_constant(
 def is_const_source(
     node: torch.fx.Node, lifted_constants: Optional[Dict[str, Any]]
 ) -> bool:
-    return node.op == "get_attr" or (
-        node.op == "placeholder"
-        and lifted_constants is not None
-        and node.name in lifted_constants
+    return (
+        node.op == "get_attr"
+        or (
+            # const_arg -> permute -> convert
+            node.target == torch.ops.aten.permute.default
+            and node.args[0].op == "get_attr"  # type: ignore[union-attr]
+            and node.users.keys()
+            and next(iter(node.users.keys())).target
+            == torch.ops.prims.convert_element_type.default
+        )
+        or (
+            node.op == "placeholder"
+            and lifted_constants is not None
+            and node.name in lifted_constants
+        )
     )
 
 
@@ -92,7 +103,8 @@ class ConstantFolder(torch.fx.Interpreter):
             and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
             and node.args[1] == torch.bfloat16
         ):
-            # For int8_weight -> dq -> bf16_weight
+            # For int8_weight -> bf16_weight
+            # For int8_weight -> transpose -> bf16_weight
             return True
         if node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
