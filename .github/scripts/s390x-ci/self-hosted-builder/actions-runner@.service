@@ -8,12 +8,16 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 ExecStartPre=-/usr/bin/docker rm --force actions-runner.%i
+ExecStartPre=-/usr/local/bin/gh_token_generator.sh /etc/actions-runner/%i/appid.env /etc/actions-runner/%i/installid.env /etc/actions-runner/%i/key_private.pem /etc/actions-runner/%i/ghtoken.env
 ExecStart=/usr/bin/docker run \
+              --env-file=/etc/actions-runner/%i/env \
+              --env-file=/etc/actions-runner/%i/ghtoken.env \
               --init \
               --interactive \
               --name=actions-runner.%i \
               --rm \
-              iiilinuxibmcom/actions-runner
+              --privileged \
+              iiilinuxibmcom/actions-runner.%i
 ExecStop=/bin/sh -c "docker exec actions-runner.%i kill -INT -- -1"
 ExecStop=/bin/sh -c "docker wait actions-runner.%i"
 ExecStop=/bin/sh -c "docker rm actions-runner.%i"

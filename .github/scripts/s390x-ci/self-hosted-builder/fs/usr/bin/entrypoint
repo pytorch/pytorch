@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 #
 # Container entrypoint that waits for all spawned processes.
