@@ -1579,7 +1579,7 @@ class FunctionSchema:
             ), "invariant: all scratch operators are expected to be out= operators too"
             return SchemaKind.scratch
         elif is_out:
-            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"  # noqa: B950
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable

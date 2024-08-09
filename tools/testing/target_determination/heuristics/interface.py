@@ -52,7 +52,7 @@ class TestPrioritizations:
                 files[test.test_file] |= test
 
         for test in files.values():
-            assert test.is_full_file(), f"All includes should have been excluded elsewhere, and vice versa. Test run `{test}` violates that"
+            assert test.is_full_file(), f"All includes should have been excluded elsewhere, and vice versa. Test run `{test}` violates that"  # noqa: B950
 
         # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
         assert (
