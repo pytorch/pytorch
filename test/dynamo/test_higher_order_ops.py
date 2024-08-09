@@ -23,6 +23,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch.testing._internal.common_utils import (
     munge_exc,
     TEST_WITH_TORCHDYNAMO,
@@ -2500,6 +2501,71 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 r"Cond doesn't work unless it is captured completely with torch.compile",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
+
+    def test_hints_wrapper(self):
+        def ref_fn(x, y):
+            x = x + y
+            x = torch.relu(x)
+            x = x + y
+            return torch.abs(x)
+
+        def fn_with_hints(x, y):
+            x = x + y
+
+            def inner_body_fn(x, y, hints):
+                x = torch.relu(x)
+                x = x + y
+                return x
+
+            def outer_body_fn(x, y, hints):
+                x = hints_wrapper(inner_body_fn, x, y, hints={"inner_body": True})
+                x = torch.abs(x)
+                return x
+
+            res = hints_wrapper(outer_body_fn, x, y, hints={"outer_body": True})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+        ref_res = ref_fn(x, y)
+        self.assertEqual(compiled_res, ref_res)
+        self.assertEqual(len(cnt.graphs), 1)
+        graph = backend.graphs[0]
+        self.assertExpectedInline(normalize_gm(graph.print_readable(print_output=False)),
+"""\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 4]", L_y_: "f32[4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        x: "f32[2, 4]" = l_x_ + l_y_;  l_x_ = None
+
+        wrap_body_1 = self.wrap_body_1
+        hints_wrapper = torch.ops.higher_order.hints_wrapper(wrap_body_1, x, l_y_, hints = {'outer_body': True});  wrap_body_1 = x = l_y_ = None
+        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (res,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
+            wrap_body_0 = self.wrap_body_0
+            hints_wrapper = torch.ops.higher_order.hints_wrapper(wrap_body_0, x, l_y_, hints = {'inner_body': True});  wrap_body_0 = x = l_y_ = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+
+            abs_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
+            return (abs_1,)
+
+        class GraphModule(torch.nn.Module):
+            def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
+                relu: "f32[2, 4]" = torch.relu(x);  x = None
+
+                add: "f32[2, 4]" = relu + l_y_;  relu = l_y_ = None
+                return (add,)
+""")
 
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
