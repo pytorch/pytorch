@@ -66,7 +66,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     c10::Stream old_stream = getStream(s.device());
     return old_stream;
   }
-  void setStream(Stream s) const override {
+  void setStream(c10::Stream s) const override {
     (void)s;
     // no-op
   }
