@@ -255,7 +255,7 @@ test_failures = {
     "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unbind_dynamic_shapes": TestFailure(("cpu", "xpu")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
