@@ -560,6 +560,7 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
         else:
             use_lib = lib
         if disable_dynamo:
+
             @torch._disable_dynamo
             def func_no_dynamo(*args, **kwargs):
                 return func(*args, **kwargs)
