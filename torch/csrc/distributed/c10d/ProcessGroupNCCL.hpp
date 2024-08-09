@@ -46,6 +46,8 @@ static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
     "NCCL_BLOCKING_WAIT"};
 
+// TODO: We want to eventually remove this variable and make users to use
+// the default value (3 - SkipCleanUp).
 // Control whether or not we perform Async Error Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
