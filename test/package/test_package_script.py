@@ -6,7 +6,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfMeta
 
 
 try:
@@ -191,10 +191,7 @@ class TestPackageScript(PackageTestCase):
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod(input), scripted_mod(input))
 
-    @skipIf(
-        IS_FBCODE or IS_SANDCASTLE,
-        "Tests that use temporary files are disabled in fbcode",
-    )
+    @skipIfMeta("Tests that use temporary files are disabled in fbcode")
     def test_save_scriptmodule_file(self):
         """
         Test basic saving of ScriptModule in file.
