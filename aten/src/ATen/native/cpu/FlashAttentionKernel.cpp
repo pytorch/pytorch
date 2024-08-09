@@ -158,31 +158,6 @@ inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
   }
 }
 
-void reshape_attn_mask_to_4d(
-    Tensor& attn_mask,
-    int64_t batchSize,
-    int64_t num_head,
-    int64_t qSize,
-    int64_t kvSize) {
-  // Support mask shapes:
-  // 2d: ({Q_seq_len, 1}  x {KV_seq_len, 1})
-  // 4d: ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
-  // Guaranteed in check_attn_mask_shape
-  int64_t attn_mask_size_0 = 1;
-  int64_t attn_mask_size_1 = 1;
-  if (attn_mask.dim() == 4) {
-    if (attn_mask.size(0) == batchSize) {
-      attn_mask_size_0 = batchSize;
-    }
-    if (attn_mask.size(1) == num_head) {
-      attn_mask_size_1 = num_head;
-    }
-  }
-  attn_mask = attn_mask
-                .view({attn_mask_size_0, attn_mask_size_1, attn_mask.size(-2), attn_mask.size(-1)})
-                .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
-}
-
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention(
     const Tensor& output,
