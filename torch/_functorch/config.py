@@ -40,7 +40,7 @@ _max_aliased_inputs_with_dynamic_shapes_enabled = 5
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
-cse = True
+cse = False
 
 
 enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
