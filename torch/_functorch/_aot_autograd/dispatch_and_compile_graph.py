@@ -32,7 +32,12 @@ from .traced_function_transforms import (
     fn_prepped_for_autograd,
     handle_effect_tokens_fn,
 )
-from .utils import root_module_when_exporting_non_strict, unlift_tokens
+from .utils import (
+    add_discovered_token_in_backward_as_input,
+    copy_fwd_metadata_to_bw_nodes,
+    root_module_when_exporting_non_strict,
+    unlift_tokens,
+)
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -289,46 +294,11 @@ def aot_dispatch_autograd_graph(
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 
-    # Post process graph, if new tokens were discovered in backward
+    # See Note [Side-Effectful Tokens in AOTAutograd]
+    # If forward graph does not use effectful ops with Tokens, we have not added additional token arguments before final tracing.
+    # But if backward graph does use effectful ops with Tokens - we have to add additional token argument to the joint graph manually after tracing.
     if fw_metadata.num_backward_discovered_tokens > 0:
-        placeholders = []
-        for node in fx_g.graph.nodes:
-            if node.op == "placeholder":
-                placeholders.append(node)
-            elif node.op == "call_function" and node.target.__name__ == "with_effects":
-                import torch.utils._pytree as fx_pytree
-                from torch.fx.graph import _PyTreeInfo
-
-                assert isinstance(fx_g.graph._codegen, torch.fx.graph._PyTreeCodeGen)
-                inps = fx_pytree.tree_unflatten(
-                    placeholders, fx_g.graph._codegen.pytree_info.in_spec
-                )
-
-                with fx_g.graph.inserting_before(node):
-                    # Naming with tangents as partitioner counts all inputs without "tangents" as forward inputs
-                    bw_input_token = fx_g.graph.placeholder("tangents_bw_token")
-                    node_meta = bw_input_token.meta
-                    # fake_mode = placeholders[0].meta["val"].fake_mode
-                    # node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
-                    node_meta["val"] = torch.tensor([])
-                    node_meta["tensor_meta"] = torch.tensor([])
-
-                    old_arg = node.args[0]
-
-                    node.args = (bw_input_token, *node.args[1:])
-
-                    new_inps = (inps[0], *(*inps[1], bw_input_token))
-
-                    _, new_in_spec = fx_pytree.tree_flatten(new_inps)
-                    pytree_info = fx_g.graph._codegen.pytree_info
-                    fx_g.graph._codegen.pytree_info = _PyTreeInfo(
-                        pytree_info.orig_args, new_in_spec, pytree_info.out_spec
-                    )
-
-                    fx_g.graph.erase_node(old_arg)
-                    fx_g.graph.eliminate_dead_code()
-                    fx_g.recompile()
-                break
+        add_discovered_token_in_backward_as_input(fx_g)
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
@@ -338,7 +308,9 @@ def aot_dispatch_autograd_graph(
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
+    copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
+
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.

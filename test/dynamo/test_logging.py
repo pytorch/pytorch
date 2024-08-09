@@ -697,6 +697,7 @@ exclusions = {
     "fusion",
     "overlap",
     "aot_graphs",
+    "aot_graphs_effects",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
@@ -721,6 +722,7 @@ exclusions = {
     "export",
     "trace_shape_events",
     "cudagraph_static_inputs",
+    "benchmarking",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
