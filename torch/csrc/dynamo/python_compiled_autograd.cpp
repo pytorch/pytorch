@@ -365,18 +365,21 @@ static struct PyModuleDef _module = {
 
 PyObject* wrap_lifted_ivalue_args(
     const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
-  PyObject* pyints =
-      PyTuple_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
+  PyObject* pyivalueargs =
+      PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
   size_t idx = 0;
   for (const auto& arg : lifted_ivalue_args) {
     if (arg.actual_ptr->isInt() || arg.actual_ptr->isSymInt()) {
-      PyTuple_SET_ITEM(
-          pyints, idx++, PyLong_FromSsize_t(arg.actual_ptr->toInt()));
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyLong_FromSsize_t(arg.actual_ptr->toInt()));
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyFloat_FromDouble(arg.actual_ptr->toDouble()));
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
     }
   }
-  return pyints;
+  return pyivalueargs;
 }
 
 void set_ivalue_proxies(
@@ -393,6 +396,9 @@ void set_ivalue_proxies(
       arg.proxy = at::IValue(
           py::cast<c10::SymInt>(PyList_GET_ITEM(fake_ivalue_args, i)));
       TORCH_INTERNAL_ASSERT(arg.proxy.isSymInt());
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      arg.proxy = at::IValue(
+          py::cast<c10::SymFloat>(PyList_GET_ITEM(fake_ivalue_args, i)));
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
     }

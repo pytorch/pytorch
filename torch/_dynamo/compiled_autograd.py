@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -83,7 +83,10 @@ class AutogradCompilerInstance:
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(
-        self, inputs: List[torch.Tensor], sizes: List[int], scalars: Tuple[int]
+        self,
+        inputs: List[torch.Tensor],
+        sizes: List[int],
+        scalars: List[Union[int, float]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
@@ -112,14 +115,26 @@ class AutogradCompilerInstance:
         ]
         self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
-        scalars = [
-            self.shape_env.create_unspecified_symint_and_symbol(
-                val,
-                self.source("scalars", idx),
-                DimDynamic.DYNAMIC,
-            )
-            for idx, val in enumerate(scalars)
-        ]
+        for idx, val in enumerate(scalars):
+            source = self.source("scalars", idx)
+            if isinstance(val, int):
+                scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
+                    val,
+                    source,
+                    DimDynamic.DYNAMIC,
+                )
+            elif isinstance(val, float):
+                scalars[idx] = self.shape_env.create_symfloatnode(
+                    self.shape_env.create_unspecified_symbol(
+                        val,
+                        source=source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    ),
+                    hint=val,
+                    source=source,
+                )
+            else:
+                raise AssertionError("Unexpected scalar type: ", type(val))
         self.bind_tensors_to_proxies(scalars, scalars_proxy)
 
         # TODO(jansel): are all these modes needed?
