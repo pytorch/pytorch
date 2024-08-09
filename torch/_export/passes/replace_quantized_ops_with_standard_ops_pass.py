@@ -440,7 +440,7 @@ def _transform_prepacked_op(gm: torch.fx.GraphModule, node: torch.fx.Node):
 
     func_args = []
     func_args += [args[0]]
-    func_args += so.unpack()[:2]
+    func_args += so.unpack()[:2]  # type: ignore[attr-defined]
     if opname == "conv2d_clamp_run":
         func_args += torch.ops.prepacked.unpack_prepacked_sizes_conv2d(so)[2:]
 
