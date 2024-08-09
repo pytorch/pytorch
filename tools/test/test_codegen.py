@@ -383,9 +383,9 @@ TORCH_API bool kernel_1();
 class TestNativeFunctionGeneratrion(unittest.TestCase):
     def setUp(self) -> None:
         self.native_functions: list[NativeFunction] = []
-        self.backend_indices: dict[
-            DispatchKey, dict[OperatorName, BackendMetadata]
-        ] = defaultdict(dict)
+        self.backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         yaml_entry = """
 - func: op(Tensor self) -> Tensor
   dispatch:
@@ -442,9 +442,9 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
 # Test for static_dispatch
 class TestStaticDispatchGeneratrion(unittest.TestCase):
     def setUp(self) -> None:
-        self.backend_indices: dict[
-            DispatchKey, dict[OperatorName, BackendMetadata]
-        ] = defaultdict(dict)
+        self.backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = (
+            defaultdict(dict)
+        )
         yaml_entry = """
 - func: op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
