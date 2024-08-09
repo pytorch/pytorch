@@ -460,8 +460,14 @@ class WrapperCodeGen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        custom_empty_strided_device=None,
+        device_imports: list[str] | None = None,
+    ):
         super().__init__()
+
         self._names_iter: Iterator[int] = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
@@ -494,12 +500,20 @@ class WrapperCodeGen(CodeGen):
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
 
+        # Allow a custom device (other than cpu/cuda) to use its own
+        # empty_strided method.
+        self.custom_empty_strided_device: str = custom_empty_strided_device
+
+        # Extra device specific imports which will added to the header of the
+        # wrapper.
+        self.device_imports: list[str] | None = device_imports
+
         # this is used for tracking which GraphLowering instance---parent graph
         # or (nested) subgraph---is currently codegened; the primary use case is
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
-        self.codegened_graph_stack = []
-        self.computed_sizes_stack = []
+        self.codegened_graph_stack: List[GraphLowering] = []
+        self.computed_sizes_stack: List[Set[sympy.Symbol]] = []
 
         self.write_header()
         self.write_prefix()
@@ -539,6 +553,13 @@ class WrapperCodeGen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
+
+        import_str = ""
+        if self.device_imports is not None:
+            import_str = "\n".join(
+                f"                {line}" for line in self.device_imports
+            )
+
         self.header.splice(
             f"""
                 {aot_config_comment}
@@ -551,9 +572,9 @@ class WrapperCodeGen(CodeGen):
                 from math import inf, nan
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
-                from torch._inductor.codegen.memory_planning import _align as align
-
+{import_str}
                 from torch import device, empty_strided
+                from torch._inductor.codegen.memory_planning import _align as align
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
@@ -567,7 +588,6 @@ class WrapperCodeGen(CodeGen):
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
-
             """
         )
 
@@ -1761,7 +1781,7 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        if device.type in ("cpu", "cuda"):
+        if device.type in ("cpu", "cuda", self.custom_empty_strided_device):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             return (
                 f"{name} = empty_strided_{device.type}("
