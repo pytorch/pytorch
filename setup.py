@@ -164,9 +164,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
-#
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
 #
