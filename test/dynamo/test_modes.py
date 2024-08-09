@@ -162,6 +162,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.ones(2, 2))
 
+    def test_torch_function_mode_enabled_guard(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        inp = torch.ones(2, 2)
+
+        @torch.compile(backend=cnt.__call__)
+        def fn(x):
+            return x + 1
+
+        with BaseTorchFunctionMode(), torch._C.DisableTorchFunctionSubclass():
+            with torch._C.DisableTorchFunction():
+                fn(inp)
+
+            fn(inp)
+
+        self.assertEqual(cnt.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
