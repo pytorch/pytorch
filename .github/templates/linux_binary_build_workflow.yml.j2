@@ -52,19 +52,31 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.arm64.m7g.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.m7g.4xlarge"
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
+      {%- else %}
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -87,7 +99,7 @@ jobs:
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
-      runs_on: linux.arm64.2xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge"
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
@@ -95,9 +107,9 @@ jobs:
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
       {%- else %}
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

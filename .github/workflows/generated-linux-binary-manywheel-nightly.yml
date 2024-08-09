@@ -37,7 +37,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -50,6 +59,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -70,7 +80,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-upload:  # Uploading
@@ -97,6 +107,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cpu-cxx11-abi-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -110,6 +121,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
@@ -131,7 +143,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-upload:  # Uploading
@@ -159,6 +171,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -172,6 +185,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -194,7 +208,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-upload:  # Uploading
@@ -222,6 +236,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda11_8-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -236,6 +251,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda11_8-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -259,7 +275,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-split-upload:  # Uploading
@@ -288,6 +304,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -301,6 +318,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -323,7 +341,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-upload:  # Uploading
@@ -351,6 +369,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_1-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -365,6 +384,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda12_1-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -388,7 +408,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-split-upload:  # Uploading
@@ -417,6 +437,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -430,6 +451,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -452,7 +474,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-upload:  # Uploading
@@ -480,6 +502,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda12_4-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -494,6 +517,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-cuda12_4-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -517,7 +541,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-split-upload:  # Uploading
@@ -546,6 +570,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-rocm6_0-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -559,6 +584,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-rocm6_0
       build_environment: linux-binary-manywheel
     secrets:
@@ -649,6 +675,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-rocm6_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -662,6 +689,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -752,6 +780,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-xpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -765,6 +794,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_9-xpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -864,6 +894,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -876,6 +907,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -896,7 +928,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
@@ -923,6 +955,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-cxx11-abi-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -936,6 +969,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
@@ -957,7 +991,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-upload:  # Uploading
@@ -985,6 +1019,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -998,6 +1033,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1020,7 +1056,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-upload:  # Uploading
@@ -1048,6 +1084,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda11_8-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1062,6 +1099,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda11_8-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1085,7 +1123,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-split-upload:  # Uploading
@@ -1114,6 +1152,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1127,6 +1166,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1149,7 +1189,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-upload:  # Uploading
@@ -1177,6 +1217,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_1-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1191,6 +1232,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda12_1-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1214,7 +1256,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-split-upload:  # Uploading
@@ -1243,6 +1285,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_1-full-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1257,6 +1300,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda12_1-full
       build_environment: linux-binary-manywheel
     secrets:
@@ -1279,7 +1323,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1-full
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-full-upload:  # Uploading
@@ -1308,6 +1352,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1321,6 +1366,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda12_4
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1343,7 +1389,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-upload:  # Uploading
@@ -1371,6 +1417,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda12_4-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1385,6 +1432,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-cuda12_4-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1408,7 +1456,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-split-upload:  # Uploading
@@ -1437,6 +1485,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-rocm6_0-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1450,6 +1499,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-rocm6_0
       build_environment: linux-binary-manywheel
     secrets:
@@ -1540,6 +1590,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-rocm6_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1553,6 +1604,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -1643,6 +1695,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-xpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1656,6 +1709,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -1755,6 +1809,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1767,6 +1822,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -1787,7 +1843,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
@@ -1814,6 +1870,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-cxx11-abi-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1827,6 +1884,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
@@ -1848,7 +1906,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-upload:  # Uploading
@@ -1876,6 +1934,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1889,6 +1948,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1911,7 +1971,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-upload:  # Uploading
@@ -1939,6 +1999,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda11_8-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -1953,6 +2014,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda11_8-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -1976,7 +2038,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-split-upload:  # Uploading
@@ -2005,6 +2067,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2018,6 +2081,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2040,7 +2104,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-upload:  # Uploading
@@ -2068,6 +2132,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_1-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2082,6 +2147,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda12_1-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2105,7 +2171,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_1-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-split-upload:  # Uploading
@@ -2134,6 +2200,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2147,6 +2214,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda12_4
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2169,7 +2237,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-upload:  # Uploading
@@ -2197,6 +2265,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda12_4-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2211,6 +2280,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-cuda12_4-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2234,7 +2304,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-split-upload:  # Uploading
@@ -2263,6 +2333,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-rocm6_0-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2276,6 +2347,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-rocm6_0
       build_environment: linux-binary-manywheel
     secrets:
@@ -2366,6 +2438,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-rocm6_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2379,6 +2452,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -2469,6 +2543,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-xpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2482,6 +2557,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -2581,6 +2657,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2593,6 +2670,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -2613,7 +2691,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
@@ -2640,6 +2718,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-cxx11-abi-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2653,6 +2732,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
@@ -2674,7 +2754,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-upload:  # Uploading
@@ -2702,6 +2782,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2715,6 +2796,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda11_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2737,7 +2819,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-upload:  # Uploading
@@ -2765,6 +2847,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda11_8-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2779,6 +2862,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda11_8-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2802,7 +2886,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-split-upload:  # Uploading
@@ -2831,6 +2915,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2844,6 +2929,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda12_1
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2866,7 +2952,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_1
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-upload:  # Uploading
@@ -2894,6 +2980,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_1-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2908,6 +2995,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda12_1-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2931,7 +3019,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_1-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-split-upload:  # Uploading
@@ -2960,6 +3048,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -2973,6 +3062,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda12_4
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -2995,7 +3085,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-upload:  # Uploading
@@ -3023,6 +3113,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda12_4-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3037,6 +3128,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-cuda12_4-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3060,7 +3152,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-split-upload:  # Uploading
@@ -3089,6 +3181,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-rocm6_0-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3102,6 +3195,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-rocm6_0
       build_environment: linux-binary-manywheel
     secrets:
@@ -3192,6 +3286,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-rocm6_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3205,6 +3300,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -3295,6 +3391,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-xpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3308,6 +3405,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -3407,6 +3505,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3419,6 +3518,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
     secrets:
@@ -3439,7 +3539,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-upload:  # Uploading
@@ -3466,6 +3566,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-cxx11-abi-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3479,6 +3580,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
@@ -3500,7 +3602,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-cxx11-abi-upload:  # Uploading
@@ -3528,6 +3630,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3541,6 +3644,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda11_8
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3563,7 +3667,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda11_8-upload:  # Uploading
@@ -3591,6 +3695,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda11_8-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3605,6 +3710,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda11_8-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3628,7 +3734,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda11_8-split-upload:  # Uploading
@@ -3657,6 +3763,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3670,6 +3777,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda12_1
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3692,7 +3800,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_1
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_1-upload:  # Uploading
@@ -3720,6 +3828,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_1-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3734,6 +3843,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda12_1-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3757,7 +3867,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_1-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_1-split-upload:  # Uploading
@@ -3786,6 +3896,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3799,6 +3910,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda12_4
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3821,7 +3933,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_4-upload:  # Uploading
@@ -3849,6 +3961,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda12_4-split-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -3863,6 +3976,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.13"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: manywheel-py3_13-cuda12_4-split
       build_environment: linux-binary-manywheel
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
@@ -3886,7 +4000,7 @@ jobs:
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4-split
       build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_4-split-upload:  # Uploading

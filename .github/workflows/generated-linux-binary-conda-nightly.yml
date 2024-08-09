@@ -37,7 +37,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   conda-py3_9-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -50,6 +59,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -70,7 +80,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-upload:  # Uploading
@@ -97,6 +107,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_9-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -110,7 +121,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -132,7 +143,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-upload:  # Uploading
@@ -160,6 +171,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_9-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -173,7 +185,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -195,7 +207,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-upload:  # Uploading
@@ -223,6 +235,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_9-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -236,7 +249,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -258,7 +271,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_4-upload:  # Uploading
@@ -286,6 +299,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_10-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -298,6 +312,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -318,7 +333,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-upload:  # Uploading
@@ -345,6 +360,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_10-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -358,7 +374,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -380,7 +396,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-upload:  # Uploading
@@ -408,6 +424,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_10-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -421,7 +438,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -443,7 +460,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-upload:  # Uploading
@@ -471,6 +488,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_10-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -484,7 +502,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -506,7 +524,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_4-upload:  # Uploading
@@ -534,6 +552,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_11-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -546,6 +565,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -566,7 +586,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-upload:  # Uploading
@@ -593,6 +613,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_11-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -606,7 +627,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -628,7 +649,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-upload:  # Uploading
@@ -656,6 +677,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_11-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -669,7 +691,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -691,7 +713,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-upload:  # Uploading
@@ -719,6 +741,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_11-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -732,7 +755,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -754,7 +777,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_4-upload:  # Uploading
@@ -782,6 +805,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_12-cpu-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -794,6 +818,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.12"
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -814,7 +839,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-upload:  # Uploading
@@ -841,6 +866,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_12-cuda11_8-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -854,7 +880,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -876,7 +902,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-upload:  # Uploading
@@ -904,6 +930,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_12-cuda12_1-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -917,7 +944,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -939,7 +966,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-upload:  # Uploading
@@ -967,6 +994,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   conda-py3_12-cuda12_4-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -980,7 +1008,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.12"
-      runs_on: linux.24xlarge
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.24xlarge"
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
     secrets:
@@ -1002,7 +1030,7 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
+      runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_4-upload:  # Uploading

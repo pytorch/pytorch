@@ -37,7 +37,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cpu-s390x-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -101,6 +110,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-s390x-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -164,6 +174,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-s390x-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -227,6 +238,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-s390x-build:
+    needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
