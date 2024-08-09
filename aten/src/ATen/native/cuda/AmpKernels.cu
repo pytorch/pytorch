@@ -85,21 +85,20 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
 // found_inf:  A single-element float tensor to which 1.0 will be written if any gradient contain infs/nans.
 //             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
 // inv_scale:  The inverse of the scale factor by which scaled_grads are currently multiplied.
-at::Tensor _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
+void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
+                                                     Tensor& found_inf,
                                                      const Tensor& inv_scale)
 {
-  at::Tensor found_inf = at::Tensor({0});
-
   if (scaled_grads.size() == 0) {
-    return found_inf;
+    return;
   }
 
   TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
-  //TORCH_CHECK(found_inf.is_cuda(), "found_inf must be a CUDA tensor.");
+  TORCH_CHECK(found_inf.is_cuda(), "found_inf must be a CUDA tensor.");
   TORCH_CHECK(inv_scale.numel() == 1, "inv_scale must be a 1-element tensor.");
-  //TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
+  TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
   TORCH_CHECK(inv_scale.scalar_type() == at::ScalarType::Float, "inv_scale must be a float tensor.");
-  //TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
+  TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
   // Ensures client code (GradScaler) filtered scaled_grads by dtype.
   check_foreach_api_restrictions(scaled_grads);
@@ -144,7 +143,7 @@ at::Tensor _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_gra
       }
     }
     if (tensor_lists[0].size() == 0) {
-      return found_inf;
+      return;
     }
   }
 
