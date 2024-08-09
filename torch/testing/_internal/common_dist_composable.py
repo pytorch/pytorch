@@ -2,8 +2,6 @@
 
 # Owner(s): ["oncall: distributed"]
 
-from typing import Tuple
-
 import torch
 import torch.nn as nn
 

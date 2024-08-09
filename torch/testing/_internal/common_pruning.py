@@ -1,10 +1,12 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Dict, Any, Tuple
-from torch.ao.pruning import BaseSparsifier
+from typing import Any, Tuple
+
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.ao.pruning import BaseSparsifier
+
 
 class ImplementedSparsifier(BaseSparsifier):
     def __init__(self, **kwargs: Any) -> None:
