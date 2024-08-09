@@ -110,7 +110,7 @@ class TestTritonBenchmarker(TestBase):
 
 
 @instantiate_parametrized_tests
-class TestInductorBenchmarker(TestTritonBenchmarker):
+class TestInductorBenchmarker(TestBase):
     @property
     def benchmarker(self):
         return InductorBenchmarker()
