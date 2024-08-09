@@ -53,10 +53,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -596,7 +597,7 @@ class DisableContext(_TorchDynamoContext):
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
         # moved it here to have better code organization. For disable, we just
-        # want to disable the eval frame callback mechanism. We don't have to check trace_rules or
+        # want the callback to be None. We don't have to check trace_rules or
         # create any wrapper.
         fn = innermost_fn(fn)
 
@@ -622,15 +623,15 @@ class DisableContext(_TorchDynamoContext):
 
         assert callable(fn)
 
+        callback = self.callback
+
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
-
-            prior = set_eval_frame_callback_enabled(False)
+            prior = _maybe_set_eval_frame(callback)
             try:
                 return fn(*args, **kwargs)
             finally:
-                set_eval_frame_callback_enabled(prior)
+                _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -1534,9 +1535,7 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
-                fake_mode
-            ):
+            with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
