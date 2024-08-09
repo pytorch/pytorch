@@ -585,7 +585,7 @@ class SymIntMemoDescriptor:
             setattr(obj, self._memo_epoch(obj), None)
         elif not torch.is_inference_mode_enabled() or self._opt_vc:
             setattr(obj, self._memo(obj), value)
-            if not self._opt_vc:
+            if not obj.is_inference():
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
