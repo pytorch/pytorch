@@ -15,6 +15,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
+    _PipelineScheduleRuntime,
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
@@ -81,7 +82,8 @@ class ComposabilityTest(MultiProcContinousTest):
             ScheduleFlexibleInterleaved1F1B,
         ],
     )
-    def test_manual_with_data_parallel(self, dp_type, ScheduleClass):
+    @parametrize("use_new_runtime", [False, True])
+    def test_manual_with_data_parallel(self, dp_type, ScheduleClass, use_new_runtime):
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
         )
@@ -162,6 +164,10 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Attach to a schedule
         if issubclass(ScheduleClass, PipelineScheduleSingle):
+            if use_new_runtime:
+                # Can't test PipelineScheduleSingle classes using new runtime
+                # return should still clean up this test instance correctly
+                return
             pipeline_stage, offset = build_stage(pp_group.rank(), pp_group.size())
             partial_models = [pipeline_stage.submod]
             offsets = [offset]
@@ -185,6 +191,15 @@ class ComposabilityTest(MultiProcContinousTest):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
+            if use_new_runtime:
+                old_sch = pipeline_schedule
+                pipeline_schedule = _PipelineScheduleRuntime(
+                    stages,
+                    num_microbatches,
+                    loss_fn=loss_fn,
+                    stage_index_to_group_rank=old_sch.stage_index_to_group_rank,
+                )
+                pipeline_schedule._load_actions(old_sch.pipeline_order)
 
         # Run
         pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
