@@ -280,13 +280,13 @@ class CompiledNodeArgs {
       collect(m.at(k));
     }
   }
-  void collect(const at::IValue& iv) {
+  void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
       for (auto&& value : list) {
-        collect(value);
+        collect(value, true);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
@@ -294,11 +294,12 @@ class CompiledNodeArgs {
       // NOLINTNEXTLINE(modernize-loop-convert)
       for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
         collect(it->key());
-        collect(it->value());
+        collect(it->value(), true);
       }
     } else if (iv.isTensor()) {
       collect(iv.toTensor());
-    } else if (iv.isInt() || iv.isSymInt()) {
+    } else if (!nested && (iv.isInt() || iv.isSymInt())) {
+      // can't lift ivalues nested in collections
       _compiler.lifted_ivalue_args.args.emplace_back(&iv);
     } else {
       try {
