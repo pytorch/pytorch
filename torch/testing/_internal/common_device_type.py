@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     compose_parametrize_fns,
     dtype_name,
     get_tracked_input,
+    is_privateuse1_backend_available,
     IS_FBCODE,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
@@ -724,9 +725,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        device_type = torch._C._get_privateuse1_backend_name()
-        device_mod = getattr(torch, device_type, None)
-        if hasattr(device_mod, "is_available") and device_mod.is_available():
+        if is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -741,12 +740,17 @@ device_type_test_bases = get_device_type_test_bases()
 
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
-    intersect = set(except_for if except_for else []) & set(
-        only_for if only_for else []
-    )
+    intersect = (set(except_for if except_for else [])
+                 & set(only_for if only_for else []))
     assert (
         not intersect
     ), f"device ({intersect}) appeared in both except_for and only_for"
+
+    # Replace your privateuse1 backend name with 'privateuse1'
+    if is_privateuse1_backend_available():
+        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+        except_for = list(map(lambda x: 'privateuse1' if x == privateuse1_backend_name else x, except_for))
+        only_for = list(map(lambda x: 'privateuse1' if x == privateuse1_backend_name else x, only_for))
 
     if except_for:
         device_type_test_bases = filter(

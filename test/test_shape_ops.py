@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
-    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TestCase,
     torch_to_numpy_dtype_dict,
 )
@@ -705,7 +704,7 @@ class TestShapeOps(TestCase):
                 )
             if (
                 self.device_type == "cuda"
-                or self.device_type == TEST_PRIVATEUSE1_DEVICE_TYPE
+                or self.device_type == torch._C._get_privateuse1_backend_name()
             ):
                 self.assertRaisesRegex(
                     RuntimeError,
