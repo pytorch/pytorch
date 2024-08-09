@@ -102,7 +102,7 @@ class ExportDynamoConfig:
     # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
     # but if we want to reason more about what guards/runtime asserts to emit,
     # this makes it a bit cleaner to do from the export side. Also no real point in running this twice.
-    do_not_emit_runtime_asserts = True
+    do_not_emit_runtime_asserts: bool = True
 
 
 @dataclasses.dataclass
