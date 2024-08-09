@@ -5,6 +5,7 @@ from typing import cast, List, Optional, Tuple, Union
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
@@ -23,6 +24,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["AdamW", "adamw"]
 

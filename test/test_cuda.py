@@ -1176,7 +1176,7 @@ except RuntimeError as e:
         MultiplyInStream = self._make_multiply_in_stream()
 
         class StreamModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.event = torch.cuda.Event()
                 self.stream0 = torch.cuda.Stream()
@@ -1846,9 +1846,7 @@ torch.cuda.synchronize()
             },
         )
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
@@ -1991,9 +1989,7 @@ torch.cuda.synchronize()
                     )
                     h = (h, c)
 
-                with torch.autocast(
-                    "cuda",
-                ):
+                with torch.autocast("cuda"):
                     out, h_out = rnn(x, h)
                 out = out.data if input_layout == "packed" else out
                 self.assertEqual(out.dtype, torch.float16)
@@ -2048,9 +2044,7 @@ torch.cuda.synchronize()
         linear = torch.nn.Linear(10, 10).to("cuda")
         data = torch.randn(1, 10, device="cuda")
 
-        with torch.autocast(
-            "cuda",
-        ):
+        with torch.autocast("cuda"):
             with torch.no_grad():
                 out = linear(data)
                 first_iter_mem = torch.cuda.memory_allocated()
@@ -3475,22 +3469,10 @@ exit(2)
                     },
                 )
                 for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
-                    (
-                        torch.optim.NAdam,
-                        torch.optim.RAdam,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        0.0,
-                        0.1,
-                    ),
+                    (torch.optim.NAdam, torch.optim.RAdam),
+                    (False, True),
+                    (False, True),
+                    (0.0, 0.1),
                 )
             ]
             + [
@@ -3499,14 +3481,8 @@ exit(2)
                     {"lr": 0.1, "foreach": foreach, "maximize": maximize},
                 )
                 for foreach, maximize in product(
-                    (
-                        False,
-                        True,
-                    ),
-                    (
-                        False,
-                        True,
-                    ),
+                    (False, True),
+                    (False, True),
                 )
             ]
             + [
@@ -3901,7 +3877,7 @@ exit(2)
                 return grad_output * ctx.constant, None
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.nn.Parameter(torch.randn(()))
 
@@ -5017,28 +4993,30 @@ class TestMemPool(TestCase):
         from torch.utils.cpp_extension import load_inline
 
         dummy_allocator_source = """
+        #include <torch/extension.h>
         extern "C" {
-          void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          void dummy_free(void* ptr) { }
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
-        with tempfile.TemporaryDirectory() as tempdir:
-            dummy_allocator = load_inline(
-                name=dummy_allocator_libname,
-                cpp_sources=dummy_allocator_source,
-                is_python_module=False,
-                build_directory=tempdir,
-            )
-            allocator = torch.cuda.memory.CUDAPluggableAllocator(
-                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
-                "dummy_alloc",
-                "dummy_free",
-            )
-            pool = torch.cuda.MemPool(allocator.allocator())
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+        )
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
 
-            # pool should point to the same allocator as the one passed into it
-            self.assertEqual(allocator.allocator(), pool.allocator)
+        # pool should point to the same allocator as the one passed into it
+        self.assertEqual(allocator.allocator(), pool.allocator)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()

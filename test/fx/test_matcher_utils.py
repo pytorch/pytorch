@@ -34,7 +34,7 @@ class WrapperModule(torch.nn.Module):
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
         class LargeModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self._weight = torch.nn.Parameter(torch.ones(3, 3))
                 self._bias = torch.nn.Parameter(torch.ones(3, 3))
@@ -53,7 +53,7 @@ class TestMatcher(JitTestCase):
         large_model_graph = symbolic_trace(LargeModel()).graph
 
         class PatternModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self._weight_1 = torch.nn.Parameter(torch.ones(5, 5))
                 self._bias_1 = torch.nn.Parameter(torch.ones(5, 5))
@@ -228,7 +228,7 @@ class TestMatcher(JitTestCase):
         """Testing SubgraphMatcherWithNameNodeMap with module pattern"""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -236,7 +236,7 @@ class TestMatcher(JitTestCase):
                 return self.linear(x)
 
         class Pattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
