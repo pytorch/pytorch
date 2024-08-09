@@ -11,17 +11,15 @@ class _LazyModule:
 
     def __init__(self, module_name: str) -> None:
         self._name = module_name
+        self._module = None
 
     def __repr__(self) -> str:
         return f"<lazy module '{self._name}'>"
 
     def __getattr__(self, attr):
-        module_attr = attr.split(".", 1)
-        if len(module_attr) == 2:
-            module, attr_ = module_attr
-            return getattr(importlib.import_module(f".{module}", self._name), attr_)
-        else:
-            return getattr(importlib.import_module(".", self._name), attr)
+        if self._module is None:
+            self._module = importlib.import_module(".", self._name)
+        return getattr(self._module, attr)
 
 
 # Import the following modules during type checking to enable code intelligence features,
