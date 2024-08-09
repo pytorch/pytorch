@@ -319,6 +319,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 super().__init__()
                 self.linear = torch.nn.Linear(2048, 512, bias)
                 self._frozen_param398 = torch.randn(1, 512, 1, 1)
+                self.conv = torch.nn.Conv2d(
+                    512, 512, kernel_size=7, padding=3, groups=512
+                )
+                self.linear2 = torch.nn.Linear(512, 512, bias)
+                self._frozen_param400 = torch.randn(1, 512, 1, 1)
 
             def forward(self, mul_272, _convolution_pointwise_default_31):
                 out1 = torch.ops.prims.convert_element_type.default(
@@ -327,10 +332,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 mul_272 = None
 
                 _linear_pointwise_default_131 = self.linear(out1)
-
                 permute_188 = torch.ops.aten.permute.default(
                     _linear_pointwise_default_131, [0, 3, 1, 2]
                 )
+
                 mul_273 = torch.ops.aten.mul.Tensor(permute_188, self._frozen_param398)
                 add_187 = torch.ops.aten.add.Tensor(
                     mul_273, _convolution_pointwise_default_31
@@ -338,8 +343,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 convert_element_type_847 = torch.ops.prims.convert_element_type.default(
                     add_187, torch.bfloat16
                 )
-
-                return convert_element_type_847
+                _convolution_pointwise_default_29 = self.conv(convert_element_type_847)
+                permute_189 = torch.ops.aten.permute.default(
+                    _convolution_pointwise_default_29, [0, 2, 3, 1]
+                )
+                permute_189 = self.linear2(permute_189)
+                permute_189 = torch.ops.aten.permute.default(permute_189, [0, 3, 1, 2])
+                permute_189 = torch.ops.aten.mul.Tensor(
+                    permute_189, self._frozen_param400
+                )
+                add_191 = torch.ops.aten.add.Tensor(permute_189, add_187)
+                return add_191
 
         view_12 = torch.randn(1, 18, 18, 2048)
         _convolution_pointwise_default_31 = torch.randn(1, 512, 18, 18).to(
@@ -357,8 +371,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
     @patches

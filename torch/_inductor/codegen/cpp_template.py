@@ -4,13 +4,14 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 from unittest.mock import patch
 
 import sympy
 
 from .. import codecache, config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
+from ..scheduler import SchedulerBuffer
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
 from .common import KernelTemplate
@@ -82,6 +83,7 @@ class CppTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
+            template_buffer_outputs_by_name: Dict[str, SchedulerBuffer],
             epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
@@ -91,6 +93,7 @@ class CppTemplate(KernelTemplate):
                 kernel.render,
                 self,
                 template_buffer_node=template_node,
+                template_buffer_outputs_by_name=template_buffer_outputs_by_name,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,
             )
