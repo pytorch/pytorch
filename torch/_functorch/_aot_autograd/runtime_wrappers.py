@@ -265,17 +265,16 @@ def _create_runtime_wrapper(
     #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
     epilogue_args_idx = []
     epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
-    num_tokens = len(runtime_metadata.tokens)
     for info in runtime_metadata.output_info:
         if (
             info.output_type == OutputType.alias_of_input
             or info.output_type == OutputType.is_input
         ):
             assert isinstance(info.base_idx, int)
-            epilogue_args_idx.append(info.base_idx + num_tokens)
+            epilogue_args_idx.append(info.base_idx)
 
     if config.unlift_effect_tokens:
-        assert num_tokens == 0
+        assert len(runtime_metadata.tokens) == 0
 
     replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
@@ -285,12 +284,6 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: List[Any]):
-        if num_tokens > 0:
-            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            old_args = args
-            args = [[None] * num_tokens, *args]
-            old_args.clear()
-
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -343,11 +336,7 @@ def _create_runtime_wrapper(
             == num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
-            + num_tokens
         )
-
-        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -652,6 +641,38 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
             )
             return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
+
+
+@dataclass
+class EffectTokensWrapper(CompilerWrapper):
+    def post_compile(
+        self,
+        compiled_fn,
+        _aot_config,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ):
+        num_tokens = len(runtime_metadata.tokens)
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            if num_tokens > 0:
+                # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+                old_args = args
+                args = [[None] * num_tokens, *args]
+                old_args.clear()
+
+            outs = compiled_fn(args)
+
+            # Inductor cache DummyModule can return None
+            if outs is None:
+                return None
+            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            return outs[num_tokens:]
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
@@ -1629,12 +1650,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
-                num_tokens = len(CompiledFunction.metadata.tokens)
                 expected_grad_outs = (
                     CompiledFunction.metadata.num_outputs
                     + num_mutated_runtime_inps
                     + num_intermediate_bases
-                    + num_tokens
                 )
                 deterministic = CompiledFunction.metadata.deterministic
                 global_deterministic = torch.are_deterministic_algorithms_enabled()
@@ -1653,16 +1672,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 out_info = CompiledFunction.metadata.output_info
 
                 inp_tangents, out_tangents, intermediate_base_tangents = (
-                    flat_args[num_tokens:num_mutated_runtime_inps],
+                    flat_args[:num_mutated_runtime_inps],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps : num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps : num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs
                     ],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs :
                     ],
                 )
@@ -2020,8 +2036,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
                     )
-                    return (*[None] * num_tokens, *outs_wrapped)
-                return (*[None] * num_tokens, *out)
+                    return outs_wrapped
+                return out
 
         compiled_function = RuntimeWrapper(
             indices_of_inps_to_detach=indices_of_inps_to_detach,

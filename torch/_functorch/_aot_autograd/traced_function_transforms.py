@@ -376,21 +376,6 @@ def create_functionalized_fn(
                 torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
             )
 
-            # See Note [Side-Effectful Tokens in AOTAutograd]
-            if trace_joint:
-                assert (
-                    isinstance(args, tuple)
-                    and len(args) == 2
-                    and isinstance(args[0], (list, tuple))
-                )
-                tokens = args[0][: len(meta.tokens)]
-                actual_args = args[0][len(meta.tokens) :]
-                args = (actual_args, args[1])
-            else:
-                tokens = args[: len(meta.tokens)]
-                args = args[len(meta.tokens) :]
-            assert all(token.numel() == 0 for token in tokens)
-
             with disable_above:
                 # The functionalization code here can potentially trigger traces
                 # into the graph, but we'd prefer to NOT do this, because if we
@@ -398,25 +383,9 @@ def create_functionalized_fn(
                 # module stack annotations, which makes unflattener unhappy.
                 # Wrap inputs into functional wrappers
                 f_args = pytree.tree_map(to_fun, args)
-                f_tokens = pytree.tree_map(to_fun, tokens)
-
-                # Populate the current FunctionalTensorMode with the tokens per
-                # operator. See Note [FunctionalTensorMode is Stateful]
-                functional_tensor_mode = (
-                    torch.utils._python_dispatch._detect_infra_mode(
-                        torch._C._TorchDispatchModeKey.FUNCTIONAL
-                    )
-                )
-                assert functional_tensor_mode is not None
-                for i, k in enumerate(meta.tokens.keys()):
-                    functional_tensor_mode._tokens[k] = f_tokens[i]
 
                 # Run the joint
                 f_outs = fn(*f_args)
-
-                # Return both the tokens and the outputs
-                # See Note [Side-Effectful Tokens in AOTAutograd]
-                f_outs = (*functional_tensor_mode._tokens.values(), *f_outs)
 
             if trace_joint:
                 # We support a limited amount of mutation of graph inputs during the backward pass.
@@ -656,6 +625,56 @@ def create_functionalized_fn(
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
 
+    return helper, args
+
+
+def handle_effect_tokens_fn(
+    fn,
+    args,
+    *,
+    meta: ViewAndMutationMeta,
+    trace_joint: bool,
+) -> Any:
+    num_tokens = len(meta.tokens)
+
+    @wraps(fn)
+    def inner_fn(*args):
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+
+        with disable_above:
+            # See Note [Side-Effectful Tokens in AOTAutograd]
+            if trace_joint:
+                assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
+                tokens = args[0][:num_tokens]
+                args = (args[0][num_tokens:], *args[1:])
+            else:
+                tokens = args[:num_tokens]
+                args = args[num_tokens:]
+
+            assert all(token.numel() == 0 for token in tokens)
+
+            # Populate the current FunctionalTensorMode with the tokens per
+            # operator. See Note [FunctionalTensorMode is Stateful]
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            assert functional_tensor_mode is not None
+            f_tokens = pytree.tree_map(to_fun, tokens)
+            for i, k in enumerate(meta.tokens.keys()):
+                functional_tensor_mode._tokens[k] = f_tokens[i]
+
+            # Run the joint
+            outs = fn(*args)
+
+        # Return both the tokens and the outputs
+        # See Note [Side-Effectful Tokens in AOTAutograd]
+        f_out_tokens = functional_tensor_mode._tokens.values()
+        out_tokens = [from_fun(t) for t in f_out_tokens]
+        return (*out_tokens, *outs)
+
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
@@ -663,8 +682,7 @@ def create_functionalized_fn(
         args = ([*additional_token_inputs, *args[0]], *args[1:])
     else:
         args = [*additional_token_inputs, *args]
-
-    return helper, args
+    return inner_fn, args
 
 
 # Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor

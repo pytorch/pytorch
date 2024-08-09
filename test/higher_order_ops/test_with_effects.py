@@ -29,6 +29,8 @@ from torch.testing._internal.torchbind_impls import init_torchbind_implementatio
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
+from torch.testing._internal.two_tensor import TwoTensor
+
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
@@ -370,6 +372,80 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertEqual(len(recorded_dict), 2)
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
+
+    @skipIfNoDynamoSupport
+    def test_effectful_custom_op_with_subclass(self):
+        with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+
+            def foo_impl(a):
+                torch.ops.aten._print("fwd")
+                return a.clone()
+
+            def foo_bwd(ctx, grad):
+                torch.ops.aten._print("bwd")
+                return grad.clone()
+
+            for backend in ["CPU", "CUDA", "Meta"]:
+                lib.impl("foo", foo_impl, backend)
+
+            torch.library.register_autograd("_mylib::foo", foo_bwd)
+
+            from torch._higher_order_ops.effects import (
+                _EffectType,
+                _register_effectful_op,
+            )
+
+            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+
+            def fn(x, y):
+                return torch.ops._mylib.foo(x) + y
+
+            def ins_sc():
+                return (
+                    TwoTensor(
+                        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])
+                    ),
+                    torch.tensor([4.0, 5.0, 6.0]),
+                )
+
+            def ins_dense():
+                return torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
+
+            for ins_fn in [ins_sc, ins_dense]:
+                ref_out = fn(*ins_fn())
+                compiled_fn = torch.compile(fn, backend="aot_eager")
+
+                out = compiled_fn(*ins_fn())
+                self.assertEqual(ref_out, out)
+
+            def ins_dense_req_grad():
+                return (
+                    torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                )
+
+            def ins_sc_req_grad():
+                return (
+                    TwoTensor(
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                    ),
+                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                )
+
+            for ins_fn_req_grad in [ins_dense_req_grad, ins_sc_req_grad]:
+                ref_ins = ins_fn_req_grad()
+                ref_out = fn(*ref_ins)
+                ref_out.sum().backward()
+
+                compiled_fn = torch.compile(fn, backend="aot_eager")
+                ins = ins_fn_req_grad()
+                out = compiled_fn(*ins)
+                self.assertEqual(ref_out, out)
+                out.sum().backward()
+                self.assertEqual(ref_ins[1].grad, ins[1].grad)
+                self.assertEqual(ref_ins[0].grad, ins[0].grad)
 
 
 if __name__ == "__main__":
