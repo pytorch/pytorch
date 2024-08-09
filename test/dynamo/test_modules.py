@@ -21,8 +21,8 @@ import torch.nn.functional as F
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -1142,7 +1142,6 @@ def make_test(fn, expected_ops=None):
 
 @contextlib.contextmanager
 def temporary_tensor_subclass(torch_function=None):
-
     class TensorProxy(torch.Tensor):
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1350,7 +1349,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         def one_break(x):
             x = F.sigmoid(x)
-            print('')  # force break
+            print()  # force break
             x = x.sigmoid()
             return x
 
@@ -1362,9 +1361,11 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 cnt = torch._dynamo.testing.CompileCounter()
                 opt_one_break = torch._dynamo.optimize(cnt)(one_break)
                 x2 = opt_one_break(x)
+
                 self.assertTrue(torch._dynamo.testing.same(x1, x2))
                 self.assertEqual(cnt.frame_count, 2)
                 self.assertEqual(cnt.op_count, 2)
+
                 compile_ids = set()
                 for r in results:
                     # A mangled classname looks like __subclass_TensorProxy_94524181138240_c0
@@ -1381,6 +1382,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                     cid = compile_id[1:]
                     self.assertTrue(cid.isnumeric())
                     compile_ids.add(int(cid))
+
                 self.assertEqual(compile_ids, set(range(3)))
 
         finally:
