@@ -1466,7 +1466,8 @@ class TestSparse(TestSparseBase):
         values = torch.tensor([1.], device=device)
         a = torch.sparse_coo_tensor(indices, values, size=(2, 1, 1))
         b = torch.zeros((2, 1, 1), device=device)
-        _ = torch.bmm(a, b)
+        ab = torch.bmm(a, b)
+        self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
 
     @onlyCUDA
     @unittest.skipIf(
