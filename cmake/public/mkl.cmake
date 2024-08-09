@@ -1,4 +1,4 @@
-find_package(MKL QUIET)
+find_package(MKL QUIET MODULE)
 
 if(TARGET caffe2::mkl)
   return()
