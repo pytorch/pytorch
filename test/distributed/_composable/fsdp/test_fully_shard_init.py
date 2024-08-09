@@ -23,6 +23,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -372,6 +373,16 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             chunks = torch.chunk(orig_param, self.world_size, dim=0)
             self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_scalar_parameter(self):
+        """Tests raising an exception when the model has scalar parameters."""
+        model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
+        model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
+        with self.assertRaisesRegex(
+            ValueError, "Change scalar_p to a 1D tensor with numel equals to 1."
+        ):
+            fully_shard(model)
+
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
     @property
@@ -386,7 +397,9 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         # Use odd dim sizes to test uneven shards
-        model = MLP(9, dim_multiplier=3)
+        # TODO: change "mlp_dim" back to 9 when uneven sharding
+        # is supported for FSDP+TP
+        model = MLP(8, dim_multiplier=3)
         orig_params = [param.detach().clone() for param in model.parameters()]
         orig_param_names = [param_name for param_name, _ in model.named_parameters()]
         parallelize_module(
@@ -405,7 +418,10 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
             self.assertEqual(sharded_param.size(), orig_param.size())
             self.assertEqual(sharded_param.stride(), orig_param.stride())
             if "in_proj" in orig_param_name:
-                expected_placements = (Shard(0), Shard(0))
+                expected_placements = (
+                    _StridedShard(0, split_factor=tp_mesh.size()),
+                    Shard(0),
+                )
             elif "out_proj" in orig_param_name and "weight" in orig_param_name:
                 expected_placements = (Shard(0), Shard(1))
             else:
