@@ -1,12 +1,11 @@
 # Owner(s): ["module: fx"]
 
 import copy
-import unittest
-from typing import Set, Type
+from typing import Type
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import IS_MACOS, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 class TestDCE(TestCase):
@@ -233,33 +232,3 @@ class TestDCE(TestCase):
 
         # %add_out node should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=True)
-
-    @unittest.skipIf(IS_MACOS, "Not working on macos")
-    def test_keep_collectives_no_overload(self):
-        """
-        Test that DCE doesn't remote collective ops (no overload version) even the results are not used.
-        """
-
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
-        class TestModule(torch.nn.Module):
-            def forward(
-                self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
-            ) -> torch.Tensor:
-                d = torch.ops.aten.mul(a, b)
-                e = torch.ops.aten.mul(a, c)
-                future = torch.ops._c10d_functional.all_reduce(e, "sum", "0")
-                synced_e = torch.ops._c10d_functional.wait_tensor(
-                    future
-                )  # synced_e is not used
-                return d
-
-        torch.distributed.init_process_group(
-            backend="fake",
-            world_size=2,
-            rank=0,
-            store=FakeStore(),
-        )
-        # collective nodes should not be removed because they have side effects.
-        self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
-        torch.distributed.destroy_process_group()

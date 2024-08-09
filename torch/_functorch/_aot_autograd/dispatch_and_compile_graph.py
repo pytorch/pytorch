@@ -296,7 +296,8 @@ def aot_dispatch_autograd_graph(
 
     # See Note [Side-Effectful Tokens in AOTAutograd]
     # If forward graph does not use effectful ops with Tokens, we have not added additional token arguments before final tracing.
-    # But if backward graph does use effectful ops with Tokens - we have to add additional token argument to the joint graph manually after tracing.
+    # If backward graph does use effectful ops with Tokens,
+    # we have to add additional token argument to the joint graph manually after tracing.
     if fw_metadata.num_backward_discovered_tokens > 0:
         add_discovered_token_in_backward_as_input(fx_g)
 
