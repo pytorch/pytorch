@@ -3,7 +3,7 @@ import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Set, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 from unittest.mock import patch
 
 import torch
@@ -12,6 +12,7 @@ import torch.utils
 from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import ops, V
@@ -653,6 +654,7 @@ class CppPackedGemmTemplate(CppTemplate):
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
+        template_buffer_outputs_by_name: Optional[Dict[str, SchedulerBuffer]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
@@ -678,10 +680,14 @@ class CppPackedGemmTemplate(CppTemplate):
             inp = self.input_nodes[2] if self.has_bias else None
             Y = self.output_node
 
+        outputs_by_name = {}
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
+
+            assert template_buffer_outputs_by_name is not None
+            outputs_by_name = template_buffer_outputs_by_name
 
         template_buffer = Y
         gemm_output_buffer = template_buffer
@@ -758,11 +764,28 @@ class CppPackedGemmTemplate(CppTemplate):
             or self.padded_n != self.n
             or self.maybe_k_slicing()
         )
+
+        def can_alias(template_buffer, outputs_by_name, epilogue_nodes):
+            assert template_buffer.get_name() in outputs_by_name
+            users = outputs_by_name[template_buffer.get_name()].users
+            for user in users:
+                assert isinstance(user.node, BaseSchedulerNode)
+                computed_buffer = user.node.node
+                # If template_buffer is used by nodes other than the epilogue nodes,
+                # we can't set template_buffer and Y as alias.
+                # Both template_buffer and Y need to be kept.
+                if computed_buffer not in epilogue_nodes:
+                    return False
+            return True
+
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            Y_aliases.add(template_buffer.get_name())
+
+            if can_alias(template_buffer, outputs_by_name, epilogue_nodes):
+                Y_aliases.add(template_buffer.get_name())
+
             if (
                 Y.get_size() == template_buffer.get_size()
                 and Y.get_stride() == template_buffer.get_stride()
