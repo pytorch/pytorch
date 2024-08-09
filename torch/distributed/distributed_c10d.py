@@ -3301,7 +3301,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
-        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        [tensor([0, 0], device='cuda:1'), tensor([0, 0], device='cuda:1')] # Rank 1
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
         tensor([1, 2], device='cuda:0') # Rank 0
