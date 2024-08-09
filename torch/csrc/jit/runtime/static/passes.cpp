@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <cstdint>
 
 C10_DEFINE_bool(
     enable_clip_ranges_gather_fusions,
@@ -812,18 +813,28 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
 
-    Node* list_unpack_node = value_out->uses()[0].user;
-    if (list_unpack_node->kind() != prim::ListUnpack) {
+    const Value* value_num_splits = node->inputs().at(1);
+
+    const auto num_splits_ivalue = toIValue(value_num_splits);
+
+    if (!num_splits_ivalue.has_value() || !num_splits_ivalue.value().isInt() ||
+        num_splits_ivalue.value().toInt() != 1) {
       continue;
     }
 
-    auto list_unpack_outputs = list_unpack_node->outputs();
+    Node* user_node = value_out->uses()[0].user;
+    if (user_node->kind() != prim::ListUnpack &&
+        user_node->kind() != aten::__getitem__) {
+      continue;
+    }
+
+    auto list_unpack_outputs = user_node->outputs();
     if (list_unpack_outputs.size() != 1) {
       continue;
     }
 
-    list_unpack_node->output()->replaceAllUsesWith(node->input(0));
-    to_remove.push_back(list_unpack_node);
+    user_node->output()->replaceAllUsesWith(node->input(0));
+    to_remove.push_back(user_node);
     to_remove.push_back(node);
   }
 
@@ -866,37 +877,16 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 
 } // namespace
 
-void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
-  const c10::FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
-      OP_PAIR(
-          "torcharrow::inference_wrapper_run_flat",
-          "static_runtime::fused_inference_wrapper_run_flat"),
-      OP_PAIR(
-          "torcharrow::variadic_inference_wrapper_run_flat",
-          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
-      OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
-      OP_PAIR(
-          "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
-      OP_PAIR(
-          "static_runtime::variadic_grouped_accessor_op_v2",
-          "static_runtime::fused_variadic_grouped_accessor_op_v2"),
-      OP_PAIR(
-          "fb::sigrid_transforms_torch_bind",
-          "static_runtime::fused_sigrid_transforms_torch_bind"),
-      OP_PAIR(
-          "fb::variadic_sigrid_transforms_torch_bind",
-          "static_runtime::fused_variadic_sigrid_transforms_torch_bind"),
-      OP_PAIR(
-          "fb::gather_ranges_to_dense",
-          "static_runtime::fused_gather_ranges_to_dense"),
-      OP_PAIR(
-          "fb::gather_ranges_to_dense_v2",
-          "static_runtime::fused_gather_ranges_to_dense_v2"),
-      OP_PAIR(
-          "fb::split_and_squeeze",
-          "static_runtime::fused_split_and_squeeze_copy")};
+void FuseListUnpack(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    const c10::FastMap<c10::Symbol, c10::Symbol>& unfused_to_fused) {
+  struct NodeCreationn {
+    Node* node_to_be_fused{};
+    c10::Symbol new_sym;
+    Node* list_unpack_node{};
+  };
 
-  // replacement contains (old_node, new_node, list_unpack_node)
+  std::vector<NodeCreationn> new_node_list;
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
@@ -925,18 +915,30 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     const auto& new_sym = unfused_to_fused_it->second;
-    auto* new_node = graph->create(new_sym, 0);
 
-    for (Value* in : node->inputs()) {
+    NodeCreationn new_node_creation;
+    new_node_creation.node_to_be_fused = node;
+    new_node_creation.new_sym = new_sym;
+    new_node_creation.list_unpack_node = list_unpack_node;
+    new_node_list.emplace_back(new_node_creation);
+  }
+
+  for (const auto& new_node_creation : new_node_list) {
+    auto* new_node = graph->create(new_node_creation.new_sym, 0);
+
+    for (Value* in : new_node_creation.node_to_be_fused->inputs()) {
       new_node->addInput(in);
     }
 
-    for (Value* out : list_unpack_outputs) {
+    for (Value* out : new_node_creation.list_unpack_node->outputs()) {
       Value* new_out = new_node->addOutput();
       new_out->copyMetadata(out);
       out->replaceAllUsesWith(new_out);
     }
-    replacement.emplace_back(node, new_node, list_unpack_node);
+    replacement.emplace_back(
+        new_node_creation.node_to_be_fused,
+        new_node,
+        new_node_creation.list_unpack_node);
   }
 
   for (const auto& nodes : replacement) {
@@ -949,6 +951,142 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     old_node->destroy();
   }
 } // namespace jit
+
+// Similar to FuseListUnpack with two differences
+// Its only for fb::equally_split operator
+// the operators results are being accessed by get_item rather than ListUnpack
+void FuseEquallySplitGetItemUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  // replacement contains (old_node, new_node, list_unpack_node)
+  struct UserToRemove {
+    Node* user{};
+    ArrayRef<Value*> user_outputs;
+  };
+
+  struct Replacement {
+    Node* node_to_be_fused{};
+    c10::Symbol new_sym;
+    std::vector<UserToRemove> user_to_remove{};
+  };
+
+  std::vector<Replacement> replacement_list;
+  DepthFirstGraphNodeIterator graph_it(graph);
+  const auto equally_split = fromQualString("fb::equally_split");
+  const auto get_item = fromQualString("aten::__getitem__");
+  for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
+    if (node->kind() != equally_split) {
+      continue;
+    }
+
+    const Value* value_out = node->outputs()[0];
+    const auto new_sym = fromQualString("static_runtime::fused_equally_split");
+    const auto value_num_splits = constant_as<unsigned long>(node->inputs()[1]);
+
+    // check if equally_split num of splits is equal to the number of output
+    // uses
+    if (!value_num_splits.has_value() ||
+        value_num_splits.value() != value_out->uses().size()) {
+      continue;
+    }
+
+    bool should_fuse = true;
+    std::vector<UserToRemove> user_to_remove_list;
+    c10::FastSet<std::int64_t> getItem_indices;
+
+    for (const auto& use : value_out->uses()) {
+      Node* user = use.user;
+
+      // check if all users are get_item. Even if one is not we cannot fuse
+      if (user->kind() != get_item) {
+        should_fuse = false;
+        break;
+      }
+
+      auto getItem_index_out = constant_as<int>(user->inputs().at(1));
+
+      // check if there is duplicate get_item use which is same output node
+      // index accessed by different get item. If there is duplicate we cannot
+      // fuse
+      if (!getItem_index_out.has_value() ||
+          getItem_indices.count(getItem_index_out.value()) == 1) {
+        should_fuse = false;
+        continue;
+      }
+      auto user_outputs = user->outputs();
+
+      if (user_outputs.empty()) {
+        should_fuse = false;
+        break;
+      }
+
+      getItem_indices.insert(getItem_index_out.value());
+      UserToRemove user_to_remove;
+      user_to_remove.user = user;
+      user_to_remove.user_outputs = user->outputs();
+      user_to_remove_list.emplace_back(user_to_remove);
+    }
+
+    if (!should_fuse) {
+      continue;
+    }
+
+    Replacement replacement;
+    replacement.node_to_be_fused = node;
+    replacement.new_sym = new_sym;
+    replacement.user_to_remove = std::move(user_to_remove_list);
+    replacement_list.emplace_back(std::move(replacement));
+  }
+
+  for (const auto& replacement : replacement_list) {
+    auto* new_node = graph->create(replacement.new_sym, 0);
+    for (Value* in : replacement.node_to_be_fused->inputs()) {
+      new_node->addInput(in);
+    }
+    for (const auto& user_to_remove_node : replacement.user_to_remove) {
+      for (Value* out : user_to_remove_node.user_outputs) {
+        Value* new_out = new_node->addOutput();
+        new_out->copyMetadata(out);
+        out->replaceAllUsesWith(new_out);
+      }
+      user_to_remove_node.user->destroy();
+    }
+    new_node->insertAfter(replacement.node_to_be_fused);
+    replacement.node_to_be_fused->destroy();
+  }
+} // namespace jit
+
+void FuseUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  static const c10::FastMap<c10::Symbol, c10::Symbol>& unfused_to_fused = {
+      OP_PAIR(
+          "torcharrow::inference_wrapper_run_flat",
+          "static_runtime::fused_inference_wrapper_run_flat"),
+      OP_PAIR(
+          "torcharrow::variadic_inference_wrapper_run_flat",
+          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
+      OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
+      OP_PAIR(
+          "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
+      OP_PAIR(
+          "static_runtime::variadic_grouped_accessor_op_v2",
+          "static_runtime::fused_variadic_grouped_accessor_op_v2"),
+      OP_PAIR(
+          "fb::sigrid_transforms_torch_bind",
+          "static_runtime::fused_sigrid_transforms_torch_bind"),
+      OP_PAIR(
+          "fb::variadic_sigrid_transforms_torch_bind",
+          "static_runtime::fused_variadic_sigrid_transforms_torch_bind"),
+      OP_PAIR(
+          "fb::gather_ranges_to_dense",
+          "static_runtime::fused_gather_ranges_to_dense"),
+      OP_PAIR(
+          "fb::gather_ranges_to_dense_v2",
+          "static_runtime::fused_gather_ranges_to_dense_v2"),
+      OP_PAIR(
+          "fb::split_and_squeeze",
+          "static_runtime::fused_split_and_squeeze_copy")};
+
+  FuseListUnpack(graph, unfused_to_fused);
+  FuseEquallySplitGetItemUnpack(graph);
+}
 
 void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {

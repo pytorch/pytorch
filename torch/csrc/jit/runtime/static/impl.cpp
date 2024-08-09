@@ -203,7 +203,7 @@ void OptimizeGraph(
     if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithMaybeCopy(graph);
     }
-    FuseListUnpack(graph);
+    FuseUnpack(graph);
     RemoveUnnecessaryOutputs(graph);
     PrepackWeights(graph);
 #endif
