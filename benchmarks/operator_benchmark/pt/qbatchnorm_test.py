@@ -50,6 +50,8 @@ class QBatchNorm1dBenchmark(QBatchNormBenchmark):
             M, N, K, device=device, requires_grad=self.auto_set()
         )
 
+    # pyre-fixme[14]: `forward` overrides method defined in `QBatchNormBenchmark`
+    #  inconsistently.
     def forward(
         self,
         q_input_one,
@@ -75,6 +77,8 @@ class QBatchNorm2dBenchmark(QBatchNormBenchmark):
             M, N, K, 1, device=device, requires_grad=self.auto_set()
         )
 
+    # pyre-fixme[14]: `forward` overrides method defined in `QBatchNormBenchmark`
+    #  inconsistently.
     def forward(
         self,
         q_input_one,
