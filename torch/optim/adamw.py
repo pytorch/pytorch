@@ -132,9 +132,17 @@ class AdamW(Optimizer):
         state_steps,
     ):
         has_complex = False
+        fused_supported_devices = _get_fused_kernels_supported_devices()
         for p in group["params"]:
             if p.grad is None:
                 continue
+            if group["fused"] and not (
+                p.device.type in fused_supported_devices and torch.is_floating_point(p)
+            ):
+                raise RuntimeError(
+                    "`fused=True` requires all the params to be floating point Tensors of "
+                    f"supported devices: {fused_supported_devices}."
+                )
             has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:

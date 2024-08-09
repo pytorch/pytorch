@@ -85,16 +85,6 @@ class Adam(Optimizer):
             # Support AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
-            if not all(
-                p.device.type in fused_supported_devices and torch.is_floating_point(p)
-                for pg in self.param_groups
-                for p in pg["params"]
-            ):
-                raise RuntimeError(
-                    "`fused=True` requires all the params to be floating point Tensors of "
-                    f"supported devices: {fused_supported_devices}."
-                )
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -132,8 +122,17 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        fused_supported_devices = _get_fused_kernels_supported_devices()
         for p in group["params"]:
             if p.grad is not None:
+                if group["fused"] and not (
+                    p.device.type in fused_supported_devices
+                    and torch.is_floating_point(p)
+                ):
+                    raise RuntimeError(
+                        "`fused=True` requires all the params to be floating point Tensors of "
+                        f"supported devices: {fused_supported_devices}."
+                    )
                 has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:

@@ -89,9 +89,18 @@ class SGD(Optimizer):  # noqa: D101
 
     def _init_group(self, group, params, grads, momentum_buffer_list):
         has_sparse_grad = False
+        fused_supported_devices = _get_fused_kernels_supported_devices()
 
         for p in group["params"]:
             if p.grad is not None:
+                if group["fused"] and not (
+                    p.device.type in fused_supported_devices
+                    and torch.is_floating_point(p)
+                ):
+                    raise RuntimeError(
+                        "`fused=True` requires all the params to be floating point Tensors of "
+                        f"supported devices: {fused_supported_devices}."
+                    )
                 params.append(p)
                 grads.append(p.grad)
                 if p.grad.is_sparse:
