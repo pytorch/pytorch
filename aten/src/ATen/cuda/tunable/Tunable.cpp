@@ -65,16 +65,17 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
-    TUNABLE_LOG3("missing op_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing op_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
   if (it == km.cend()) {
-    TUNABLE_LOG3("missing params_signature, returning null ResultEntry");
+    TUNABLE_LOG3("missing params_signature, returning null ResultEntry for ", op_signature, ",", params_signature);
     return ResultEntry::Null();
   }
+  TUNABLE_LOG3("ResultEntry found for ", op_signature, ",", params_signature);
   return it->second;
 }
 
@@ -282,6 +283,7 @@ std::string TuningResultsValidator::GetPyTorchVersion() const {
 }
 
 TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& value) const {
+  TUNABLE_LOG1("PT_VERSION validation: expect ", value, " to match ", GetPyTorchVersion());
   if (value == GetPyTorchVersion()) {
     return OK;
   }
