@@ -2084,6 +2084,7 @@ from torch import (
     utils as utils,
     xpu as xpu,
 )
+import torch.optim._multi_tensor  # usort: skip
 from torch.signal import windows as windows
 
 
