@@ -10,6 +10,9 @@
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cstdint>
+#include <unordered_map>
+#include <set>
+#include <mutex>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -24,6 +27,33 @@ namespace at::native {
 // of CUDA, we can switch to using DeviceThreadHandlePool.
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
+
+#ifdef USE_ROCM
+std::mutex g_hipSparseLtSupportCacheMutex;
+static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
+const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+static bool g_hipSparseLtSupportCache(int idx) {
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        if (g_hipSparseLtSupportCache.find(idx) != g_hipSparseLtSupportCache.end()) {
+            return g_hipSparseLtSupportCache[idx];
+        }
+    }
+    try {
+        std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
+        std::string arch{prop->gcnArchName};
+        bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
+        {
+            std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+            g_hipSparseLtSupportCache[idx] = result;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return false;
+    }
+}
+#endif
+
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
@@ -50,9 +80,11 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::BFloat16:
             type = CUDA_R_16BF;
             break;
-        case at::ScalarType::Float:
+#ifndef USE_ROCM
+    case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
+#endif
         default:
             TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
             break;
@@ -125,10 +157,13 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-
+  #ifdef USE_ROCM
+    TORCH_CHECK(isHipSparseLtSupported(compressed_A.device().index()), "hipSPARSELt not supported on this platform.");
+  #endif
 
   switch(compressed_A.scalar_type())
   {
+
     case at::ScalarType::Char:
         input_type = CUDA_R_8I;
         output_type = CUDA_R_8I;
@@ -137,7 +172,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || defined(USE_ROCM))
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
@@ -152,6 +187,9 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
+        #ifdef USE_ROCM
+        TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
+        #endif
         break;
 
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
@@ -226,12 +264,17 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       (dense_B.is_contiguous()) ? n : k,
       16,
       input_type,
-      CUSPARSE_ORDER_ROW));
+      CUSPARSE_ORDER_ROW
+      ));
 
   // create result tensor
   auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
   at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
                                       : at::empty({m, n}, res_tensor_options);
+#ifdef USE_ROCM
+at::Tensor res_out = (transpose_result) ? at::empty({n, m}, res_tensor_options)
+                                      : at::empty({m, n}, res_tensor_options);
+#endif
 
   cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
@@ -301,7 +344,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
+    #ifdef USE_ROCM
+        res_out.data_ptr(),
+    #else
         res.data_ptr(),
+    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
@@ -321,7 +368,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         dense_B.data_ptr(),
         &beta,
         res.data_ptr(),
+    #ifdef USE_ROCM
+        res_out.data_ptr(),
+    #else
         res.data_ptr(),
+    #endif
         workspacePtr.get(),
         // jank because of the way we want this to be an array of streams
         &stream,
