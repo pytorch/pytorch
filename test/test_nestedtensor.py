@@ -48,17 +48,17 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     markDynamoStrictTest,
+    NestedTensorTestCase,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
-    TestCase,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -263,20 +263,6 @@ def convert_jagged_to_nested_tensor(
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
-
-
-# Base TestCase for NT tests; used to define common helpers, etc.
-class NestedTensorTestCase(TestCase):
-    def assertEqualIgnoringNestedInts(self, a, b):
-        # unbinding NJTs allows us to compare them as essentially equal without
-        # caring about exact nested int comparison
-        def _unbind_njts(x):
-            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
-                return x.unbind()
-            else:
-                return x
-
-        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
 
 
 @markDynamoStrictTest
@@ -1330,7 +1316,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         chunked = torch.chunk(nt_grad, 2, dim=-1)
         self.assertRaisesRegex(
             RuntimeError,
-            "derivative for aten::chunk is not implemented",
+            "Nested Strided Tensor doesn't support chunk backward.",
             lambda: chunked[0].backward(chunked[0].clone()),
         )
 
@@ -3933,17 +3919,44 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
     def test_chunk(self, device):
+        # none NJT case
+        t = torch.randn(10, 4, 5, requires_grad=True)
+        t_list = t.chunk(3, dim=0)
+        loss = t_list[0].sum() + t_list[2].sum()
+        loss.backward()
+
         # normal case
         D = 30
         B = 8
         nt = random_nt_from_dims(
-            [B, None, D], device=device, dtype=torch.float32, layout=torch.jagged
+            [B, None, D],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=True,
         )
         NUM_CHUNKS = 3
         chunks = nt.chunk(NUM_CHUNKS, dim=-1)
         self.assertEqual(len(chunks), NUM_CHUNKS)
         for i in range(NUM_CHUNKS):
             self.assertEqual(chunks[i].shape[-1], D // NUM_CHUNKS)
+
+        # test chunk_backward
+        values = torch.randn(
+            5, 11, dtype=torch.float64, device=device, requires_grad=True
+        )
+        offsets = torch.tensor([0, 2, 3, 5], device=device)
+
+        def grad_test_func(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            chunks = nt.chunk(3, dim=-1)
+            return chunks[0].values().sum()
+
+        assert gradcheck(
+            grad_test_func,
+            inputs=(values, offsets),
+            check_batched_grad=False,
+        )
 
         # chunk on batch dim
         chunks = nt.chunk(NUM_CHUNKS, dim=0)
@@ -3960,6 +3973,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
             self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "dim != 0 INTERNAL ASSERT FAILED .* Nested Tensor doesn't support chunk backward on dim=0 yet.",
+        ):
+            # doesn't support backward for chunk (dim=0) yet
+            loss = (
+                chunks[0].values().sum()
+                + chunks[1].values().sum()
+                + chunks[2].values().sum()
+            )
+            loss.backward()
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
@@ -4271,6 +4296,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
         reduce_dim = 1  # ragged
 
@@ -4490,6 +4516,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
 
         for tensor_list in tensor_lists:
@@ -5886,6 +5913,36 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
         self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
 
+    def test_copy_(self, device):
+        offsets = torch.tensor([0, 2, 4], device=device)
+        a = torch.nested.nested_tensor_from_jagged(
+            torch.zeros(4, 3, device=device), offsets
+        )
+        b = torch.nested.nested_tensor_from_jagged(
+            torch.ones(4, 3, device=device), offsets
+        )
+        a.copy_(b)
+        torch._dynamo.disable(self.assertEqual)(a, b)
+
+        offsets_2 = torch.tensor([0, 2, 4], device=device)
+        c = torch.nested.nested_tensor_from_jagged(
+            torch.ones(4, 3, device=device), offsets_2
+        )
+        # fail when tensors have the same size but not the exact same offset tensor.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+        ):
+            a.copy_(c)
+
+        # fail when tensors have different sizes
+        a = a.transpose(1, 2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
+        ):
+            a.copy_(b)
+
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         with torch.profiler.profile() as prof:
@@ -6472,6 +6529,85 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention",
+    )
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @skipIfTorchDynamo()
+    def test_sdpa_autocast(self, device):
+        def fn_nt(values32, values16, offsets):
+            nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
+            nt16 = convert_jagged_to_nested_tensor(values16, offsets, max_length=16)
+            nt32 = nt32.transpose(1, 2)
+            nt16 = nt16.transpose(1, 2)
+            return F.scaled_dot_product_attention(nt32, nt16, nt32)
+
+        def fn_dense(x32, x16):
+            x32 = x32.view(8, 16, 4, 16).transpose(1, 2)
+            x16 = x16.view(8, 16, 4, 16).transpose(1, 2)
+            return F.scaled_dot_product_attention(x32, x16, x32)
+
+        values32 = torch.randn((8 * 16, 4, 16), device=device, dtype=torch.float32)
+        values16 = torch.randn((8 * 16, 4, 16), device=device, dtype=torch.float16)
+        offsets = torch.arange(0, 8 * 16 + 1, 16, device=device, dtype=torch.int32)
+
+        x32 = values32.clone()
+        x16 = values16.clone()
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            out_dense_eager = fn_dense(x32, x16)
+            out_dense_compiled = torch.compile(fn_dense)(x32, x16)
+            out_nt_eager = fn_nt(values32, values16, offsets)
+            out_nt_compiled = torch.compile(fn_nt)(values32, values16, offsets)
+
+        self.assertEqual(out_dense_eager, out_dense_compiled)
+        self.assertEqual(
+            out_dense_eager.transpose(1, 2),
+            out_nt_eager.values().transpose(0, 1).view(8, 16, 4, 16),
+        )
+        self.assertEqual(
+            out_dense_eager.transpose(1, 2),
+            out_nt_compiled.values().transpose(0, 1).view(8, 16, 4, 16),
+        )
+
+        def get_values():
+            return tuple(
+                x.clone().detach().requires_grad_(True) for x in (values32, values16)
+            )
+
+        v32_dense_eager, v16_dense_eager = get_values()
+        v32_dense_compile, v16_dense_compile = get_values()
+        v32_nt_eager, v16_nt_eager = get_values()
+        v32_nt_compile, v16_nt_compile = get_values()
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            loss_dense_eager = fn_dense(v32_dense_eager, v16_dense_eager).sum()
+            loss_dense_compile = torch.compile(fn_dense)(
+                v32_dense_compile, v16_dense_compile
+            ).sum()
+            loss_nt_eager = fn_nt(v32_nt_eager, v16_nt_eager, offsets).values().sum()
+            loss_nt_compile = (
+                torch.compile(fn_nt)(v32_nt_compile, v16_nt_compile, offsets)
+                .values()
+                .sum()
+            )
+
+        loss_dense_eager.backward()
+        loss_dense_compile.backward()
+        loss_nt_eager.backward()
+        loss_nt_compile.backward()
+
+        self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
+
+        self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(
@@ -6988,6 +7124,17 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
+    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
+    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
+    "clone",
+}
+
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
 }
 
 
@@ -7049,7 +7196,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
