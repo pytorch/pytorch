@@ -90,6 +90,9 @@ struct MAIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const noexcept override {
     return Stream(Stream::DEFAULT, Device(DeviceType::MAIA, 0));
   }
+  void setStream(Stream s) const override {
+    AT_ASSERT(s.device_type() == DeviceType::MAIA);
+  }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
   }

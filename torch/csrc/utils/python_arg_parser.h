@@ -272,6 +272,7 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline std::optional<at::Device> deviceOptional(int i);
+  inline at::DeviceType accelerator(int i);
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline std::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
@@ -847,6 +848,18 @@ inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return std::nullopt;
   return device(i);
+}
+
+inline at::DeviceType PythonArgs::accelerator(int i) {
+  if (!args[i])
+    return at::getAccelerator(true).value();
+  TORCH_CHECK(
+      THPUtils_checkString(args[i]), "accelerator arg must be an string.");
+  const std::string& device_str = THPUtils_unpackString(args[i]);
+  at::DeviceType device_type = at::Device(device_str).type();
+  TORCH_CHECK(
+      at::isAccelerator(device_type), device_type, " is not an accelerator.");
+  return device_type;
 }
 
 inline at::Dimname PythonArgs::dimname(int i) {

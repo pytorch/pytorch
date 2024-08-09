@@ -66,6 +66,10 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     c10::Stream old_stream = getStream(s.device());
     return old_stream;
   }
+  void setStream(c10::Stream s) const override {
+    (void)s;
+    // no-op
+  }
   c10::DeviceIndex deviceCount() const noexcept override {
     return kMTIADeviceCount;
   }

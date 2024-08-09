@@ -82,6 +82,7 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -1094,6 +1095,221 @@ PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getAccelerator(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  auto device_type = at::getAccelerator(false);
+  if (device_type.has_value()) {
+    return THPUtils_packString(c10::DeviceTypeName(
+        device_type.value(),
+        /*lower_case=*/true));
+  } else {
+    Py_RETURN_NONE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_deviceCount(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "device_count(c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceType device_type = r.accelerator(0);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  return THPUtils_packDeviceIndex(impl.deviceCount());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_isAvailable(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "is_available(c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceType device_type = r.accelerator(0);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  if (impl.deviceCount() > 0) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_setDevice(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "set_device(int64_t device_index, c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  impl.setDevice({device_type, device_index});
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getDevice(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "current_device(c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceType device_type = r.accelerator(0);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  c10::Device current_device = impl.getDevice();
+  return THPUtils_packDeviceIndex(current_device.index());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_exchangeDevice(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "_exchange_device(int64_t device_index, c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
+  if (device_index < 0) {
+    return THPUtils_packDeviceIndex(-1);
+  }
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  auto orig_device = impl.exchangeDevice({device_type, device_index});
+  return THPUtils_packDeviceIndex(orig_device.index());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_maybeExchangeDevice(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "_maybe_exchange_device(int64_t device_index, c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceIndex device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  c10::DeviceType device_type = r.accelerator(1);
+  if (device_index < 0) {
+    return THPUtils_packDeviceIndex(-1);
+  }
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  auto orig_device = impl.getDevice();
+  impl.uncheckedSetDevice({device_type, device_index});
+  return THPUtils_packDeviceIndex(orig_device.index());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_setStream(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "set_stream(Stream stream)",
+  });
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::Stream stream = r.stream(0);
+  c10::DeviceType device_type = stream.device_type();
+  TORCH_CHECK(
+      at::isAccelerator(device_type), device_type, " is not an accelerator.");
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  impl.setStream(stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getStream(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "current_stream(int64_t? device_index=None, c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  std::optional<c10::DeviceIndex> device_index;
+
+  if (!r.isNone(0)) {
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  }
+  c10::DeviceType device_type = r.accelerator(1);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  if (!device_index.has_value()) {
+    device_index = impl.getDevice().index();
+  }
+  c10::Stream stream = impl.getStream({device_type, device_index.value()});
+  return THPStream_Wrap(stream);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_syncStreamsOnDevice(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "synchronize(int64_t? device_index=None, c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  std::optional<c10::DeviceIndex> device_index;
+
+  if (!r.isNone(0)) {
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64(0));
+  }
+  c10::DeviceType device_type = r.accelerator(1);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  if (!device_index.has_value()) {
+    device_index = impl.getDevice().index();
+  }
+  {
+    pybind11::gil_scoped_release no_gil;
+    impl.syncStreamsOnDevice(device_index.value());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1491,6 +1707,43 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
+    {"current_accelerator", THPModule_getAccelerator, METH_NOARGS, nullptr},
+    {"device_count",
+     castPyCFunctionWithKeywords(THPModule_deviceCount),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"is_available",
+     castPyCFunctionWithKeywords(THPModule_isAvailable),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"set_device",
+     castPyCFunctionWithKeywords(THPModule_setDevice),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"current_device",
+     castPyCFunctionWithKeywords(THPModule_getDevice),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_exchange_device",
+     castPyCFunctionWithKeywords(THPModule_exchangeDevice),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_maybe_exchange_device",
+     castPyCFunctionWithKeywords(THPModule_maybeExchangeDevice),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"set_stream",
+     castPyCFunctionWithKeywords(THPModule_setStream),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"current_stream",
+     castPyCFunctionWithKeywords(THPModule_getStream),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"synchronize",
+     castPyCFunctionWithKeywords(THPModule_syncStreamsOnDevice),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
     {"_get_qengine", THPModule_qEngine, METH_NOARGS, nullptr},
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},

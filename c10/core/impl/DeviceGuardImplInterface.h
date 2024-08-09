@@ -140,6 +140,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
+   * Set the current stream to Stream
+   */
+  virtual void setStream(Stream) const = 0;
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
@@ -213,6 +218,15 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the all streams has completed running on the device.
+   */
+  virtual void syncStreamsOnDevice(const DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support synchronizing all streams on device.");
+  }
+
+  /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
@@ -273,6 +287,9 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   Stream exchangeStream(Stream) const noexcept override {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+  void setStream(Stream) const override {
+    // no-op
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;

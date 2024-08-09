@@ -74,6 +74,7 @@ __all__ = [
     "ByteTensor",
     "CharStorage",
     "CharTensor",
+    "DeviceGuard",
     "DoubleStorage",
     "DoubleTensor",
     "FloatStorage",
@@ -85,6 +86,7 @@ __all__ = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
+    "StreamGuard",
     "SymBool",
     "SymFloat",
     "SymInt",
@@ -2571,6 +2573,46 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
             f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
+
+
+class DeviceGuard:
+    def __init__(self, device_index: builtins.int, device_type: _Optional[str] = None):
+        self.idx = device_index
+        self.device_type = device_type
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch._C._exchange_device(self.idx, self.device_type)
+
+    def __exit__(self, type: _Any, value: _Any, traceback: _Any):
+        self.idx = torch._C._maybe_exchange_device(self.prev_idx, self.device_type)
+        return False
+
+
+class StreamGuard:
+    def __init__(self, stream: torch.Stream):
+        self.stream = stream
+        self.src_prev_stream = None
+        self.dst_prev_stream = None
+
+    def __enter__(self):
+        self.src_prev_stream = torch.current_stream(None, self.stream.device.type)  # type: ignore[assignment]
+
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
+            with DeviceGuard(self.stream.device.index, self.stream.device.type):
+                self.dst_prev_stream = torch.current_stream(  # type: ignore[assignment]
+                    None, self.stream.device.type
+                )
+        torch.set_stream(self.stream)
+
+    def __exit__(self, type: _Any, value: _Any, traceback: _Any):
+        # Reset the stream on the original device and destination device
+        if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
+            torch.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
+        return False
 
 
 def _constrain_as_size(

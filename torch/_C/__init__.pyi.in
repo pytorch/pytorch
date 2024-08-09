@@ -1763,6 +1763,16 @@ def _accelerator_hooks_get_current_device() -> _int: ...
 def _accelerator_hooks_exchange_device(device_index: _int) -> _int: ...
 def _accelerator_hooks_maybe_exchange_device(device_index: _int) -> _int: ...
 def _get_accelerator(check: _bool = False) -> _device: ...
+def current_accelerator() -> Optional[str]:...  #THPModule_getAccelerator
+def device_count(device_type: Optional[str]) -> _int: ...  #THPModule_deviceCount
+def is_available(device_type: Optional[str]) -> _bool: ...  #THPModule_isAvailable
+def set_device(device_index: _int, device_type: Optional[str]) -> None: ...  #THPModule_setDevice
+def current_device(device_type: Optional[str]) -> _int: ...  #THPModule_getDevice
+def set_stream(stream: Stream) -> None: ...  #THPModule_setStream
+def current_stream(device_index: Optional[_int], device_type: Optional[str]) -> Stream: ...  #THPModule_getStream
+def synchronize(device_index: Optional[_int], device_type: Optional[str]) -> None: ...  #THPModule_syncStreamsOnDevice
+def _exchange_device(device_index: _int, device_type: Optional[str]) -> _int: ...  #THPModule_exchangeDevice
+def _maybe_exchange_device(device_index: _int, device_type: Optional[str]) -> _int: ...  #THPModule_maybeExchangeDevice
 
 # Defined in torch/csrc/mtia/Module.cpp
 def _mtia_init() -> None: ...
