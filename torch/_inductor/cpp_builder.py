@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -261,7 +262,7 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def run_command_line(cmd_line: str, cwd: str) -> bytes:
+def _run_command_line(cmd_line: str, cwd: str) -> bytes:
     cmd = shlex.split(cmd_line)
     try:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
@@ -281,6 +282,11 @@ def run_command_line(cmd_line: str, cwd: str) -> bytes:
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
     return status
+
+
+def run_command_line(cmd_line: str, cwd: str) -> bytes:
+    with dynamo_timed("compile_file"):
+        return _run_command_line(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
