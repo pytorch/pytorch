@@ -55,6 +55,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
+from torch.distributed.utils import _replace_by_prefix
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -126,6 +127,8 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
+_OPTIMIZED_PREFIX = "_orig_mod"
+
 
 def _debug_get_cache_entry_list(
     code: Union[types.CodeType, Callable[..., Any]]
@@ -166,6 +169,13 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+        # state_dict post hook to remove prefix to allow loading into a non-optimized wrapped module.
+        self._register_state_dict_hook(self._post_state_dict_hook)
+        # load_state_dict pre-hook to allow loading back into optimized module.
+        self._register_load_state_dict_pre_hook(
+            self._pre_load_state_dict_hook, with_module=True
+        )
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -242,6 +252,25 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
+
+    @staticmethod
+    def _post_state_dict_hook(
+        module: torch.nn.Module,
+        state_dict: Dict[str, Any],
+        prefix: str,
+        *args: Any,
+    ) -> Dict[str, Any]:
+        _replace_by_prefix(state_dict, f"{prefix}{_OPTIMIZED_PREFIX}", prefix)
+        return state_dict
+
+    @staticmethod
+    def _pre_load_state_dict_hook(
+        module: torch.nn.Module,
+        state_dict: Dict[str, Any],
+        prefix: str,
+        *args: Any,
+    ) -> None:
+        _replace_by_prefix(state_dict, prefix, prefix + f"{_OPTIMIZED_PREFIX}")
 
 
 def remove_from_cache(f):
