@@ -422,7 +422,7 @@ pr_time_benchmarks() {
   pip install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
-  python setup.py develop &> "$TEST_REPORTS_DIR/base_build_logs"
+  TORCH_CUDA_ARCH_LIST="7.5" python setup.py develop &> "$TEST_REPORTS_DIR/base_build_logs"
   echo "::endgroup::"
 
   pip show torch
