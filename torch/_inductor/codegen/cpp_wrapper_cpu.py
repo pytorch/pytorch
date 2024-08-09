@@ -82,8 +82,8 @@ class CppWrapperCpu(WrapperCodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
-        grid_extra_kwargs="",
         autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -107,6 +107,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 grid_fn,
                 triton_meta,
                 autotune_configs,
+                grid_extra_kwargs,
             )
         else:
             if config.abi_compatible:

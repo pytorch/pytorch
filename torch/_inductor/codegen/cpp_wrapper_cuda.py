@@ -344,8 +344,8 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
-        grid_extra_kwargs="",
         autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
@@ -364,6 +364,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 grid_fn,
                 triton_meta,
                 autotune_configs,
+                grid_extra_kwargs,
             )
 
         device_index, call_args = self.prepare_triton_kernel_call(
