@@ -875,6 +875,9 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
+    # Whether to upcast float16 / bfloat16 to float32 in triton codegen
+    codegen_upcast_to_fp32 = True
+
 
 class aot_inductor:
     # AOTInductor output path
