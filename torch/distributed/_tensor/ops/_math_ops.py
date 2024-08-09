@@ -1055,3 +1055,79 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
+
+
+@register_op_strategy(
+    [aten._amp_foreach_non_finite_check_and_unscale_.default],
+    schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
+)
+def distribute_tensor_scale(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
+    assert len(op_schema.args_schema) == 3
+    (
+        scaled_grad,
+        found_inf,
+        inv_scale,
+    ) = op_schema.args_schema
+    assert isinstance(scaled_grad, TupleStrategy)
+    assert isinstance(found_inf, OpStrategy)
+    assert isinstance(inv_scale, OpStrategy)
+
+    output_tuple_strategy_childs: List[OpStrategy] = []
+    for op_strategy in scaled_grad.childs:
+        assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
+
+        output_strategy = OpStrategy([])
+        scaled_grad_spec = op_strategy.strategies[0].output_spec
+        scaled_grad_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=scaled_grad_spec.placements,
+            tensor_meta=scaled_grad_spec.tensor_meta,
+        )
+        input_specs = [scaled_grad_target_spec]
+
+        out_placements: List[Placement] = []
+        for placement in scaled_grad_spec.placements:
+            assert isinstance(placement, Shard)
+            out_placements.append(placement)
+
+        redistribute_cost = [
+            generate_redistribute_costs(op_strategy, scaled_grad_target_spec)
+        ]
+
+        found_inv_output_placements: List[Placement] = []
+        found_inv_output_placements.append(Replicate())
+        found_inf_spec = found_inf.strategies[0].output_spec
+        found_inf_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple(found_inv_output_placements),
+            tensor_meta=found_inf_spec.tensor_meta,
+        )
+        input_specs.append(found_inf_target_spec)
+        redistribute_cost.append(
+            generate_redistribute_costs(found_inf, found_inf_target_spec)
+        )
+
+        inv_scale_spec = inv_scale.strategies[0].output_spec
+        inv_scale_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=inv_scale_spec.placements,
+            tensor_meta=inv_scale_spec.tensor_meta,
+        )
+        input_specs.append(inv_scale_target_spec)
+        redistribute_cost.append(
+            generate_redistribute_costs(inv_scale, inv_scale_target_spec)
+        )
+
+        output_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=mesh,
+                    placements=tuple(out_placements),
+                ),
+                input_specs=tuple(input_specs),
+                redistribute_cost=redistribute_cost,
+            )
+        )
+
+        output_tuple_strategy_childs.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_childs)
