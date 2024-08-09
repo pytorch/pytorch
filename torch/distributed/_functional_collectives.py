@@ -958,10 +958,6 @@ if not torch._running_with_deploy():
     lib_impl.impl("broadcast", _broadcast_meta, "Meta")
     lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
-    # mark these ops has side effect so that they won't be removed by DCE
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
-    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
-
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release
     legacy_lib = torch.library.Library("c10d_functional", "DEF")
