@@ -14,12 +14,13 @@ from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import ops, V
+from ..virtualized import V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
+    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
@@ -453,7 +454,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
                 assert len(input_indices) >= 3
-                # assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
+                # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
                 inp_idx = input_indices[0]
                 x_idx = input_indices[1]
                 w_idx = input_indices[2]
@@ -477,7 +478,6 @@ class CppPackedGemmTemplate(CppTemplate):
         def normalize_shapes(inputs, layout_or_out):
             if not trans_w:
                 return inputs, layout_or_out
-
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
@@ -659,7 +659,6 @@ class CppPackedGemmTemplate(CppTemplate):
         assert len(self.input_nodes) >= 2
 
         int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
-
         x_scale = None
         x_zp = None
         w_scale = None
@@ -675,8 +674,8 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = self.output_node
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
-            inp = self.input_nodes[2] if self.has_bias else None
             Y = self.output_node
+            inp = self.input_nodes[2] if self.has_bias else None
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
@@ -694,30 +693,13 @@ class CppPackedGemmTemplate(CppTemplate):
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
         if inp is not None and self.beta != 0 and not int8_gemm:
-
-            def bias_epilogue(input_buffer: ir.Buffer):
-                dtype = self.layout.dtype
-                bias_loader = inp.make_loader()
-                input_loader = input_buffer.make_loader()
-
-                def bias_add_inner(index):
-                    bias = bias_loader(index)
-                    input = input_loader(index)
-                    if self.beta != 1:
-                        result = ops.constant(self.beta, torch.float) * bias + input
-                    else:
-                        result = bias + input
-                    return result
-
-                return ir.Pointwise(
-                    device=input_buffer.get_device(),
-                    dtype=dtype,
-                    inner_fn=bias_add_inner,
-                    ranges=input_buffer.get_size(),
+            # add an epilogue for bias add
+            def _bias_add_epilogue(buf):
+                return create_epilogue_with_attr(
+                    buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
                 )
 
-            epilogue_creators.append(bias_epilogue)
-
+            epilogue_creators.append(_bias_add_epilogue)
         if self.epilogue_creator is not None:
             epilogue_creators.append(self.epilogue_creator)
 
