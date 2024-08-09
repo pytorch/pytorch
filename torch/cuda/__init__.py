@@ -54,13 +54,10 @@ _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
     try:
-        import pynvml  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
-    try:
-        import amdsmi  # type: ignore[import]
+        if not torch.version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
