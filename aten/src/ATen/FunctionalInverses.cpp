@@ -14,7 +14,7 @@ namespace at::functionalization {
 
 static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseReturnMode inverse_return_mode) {
   // invert the permutation
-  auto ndims = dims.size();
+  auto ndims = static_cast<int64_t>(dims.size());
   std::vector<int64_t> dims_(ndims);
   for(const auto i : c10::irange(ndims)) {
     dims_[at::maybe_wrap_dim(dims[i], ndims)] = i;
@@ -46,7 +46,7 @@ static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, 
 }
 
 static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
-  const auto ndim = sizes.size();
+  const auto ndim = static_cast<int64_t>(sizes.size());
   const auto mask = at::dim_list_to_bitset(dim, ndim);
   Tensor result = self;
   bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
@@ -331,6 +331,28 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   }
 }
 
+Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
+  // Mutated view is a jagged NT
+  auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return cpp_nt;
+  } else {
+    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
+  // Mutated view is a strided NT
+  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return python_nt;
+  } else {
+    return python_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
 Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::squeeze(mutated_view, dim);
@@ -391,7 +413,7 @@ Tensor FunctionalInverses::unbind_int_inverse(const Tensor& base, const Tensor& 
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      dim = at::maybe_wrap_dim(dim, base.sizes().size());
+      dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(base.sizes().size()));
       return base.select_scatter(mutated_view, dim, mutated_view_idx);
     }
 }
@@ -456,10 +478,10 @@ Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Ten
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.slice_inverse_symint(base, dim, std::move(start), start + length, 1);
+      return mutated_view.slice_inverse_symint(base, dim, start, start + length, 1);
     } else {
       return base.slice_scatter_symint(
-          mutated_view, dim, std::move(start), start + length, 1);
+          mutated_view, dim, start, start + length, 1);
     }
 }
 

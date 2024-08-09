@@ -188,18 +188,6 @@ struct VecConvert<
   }
 };
 
-template <typename src_t>
-struct VecConvert<
-    float,
-    1,
-    src_t,
-    1,
-    typename std::enable_if_t<is_8bit_integer_v<src_t>,
-        void>> {
-  static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
-    return convert_int8_to_float<src_t>(src[0]);
-  }
-};
 
 template <typename dst_t>
 struct VecConvert<
@@ -217,6 +205,22 @@ struct VecConvert<
   }
 };
 
+#endif /* defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) */
+
+
+#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || defined(CPU_CAPABILITY_NEON)
+template <typename src_t>
+struct VecConvert<
+    float,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
+        void>> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
+    return convert_int8_to_float<src_t>(src[0]);
+  }
+};
 #endif
 
 template <typename src_t>
