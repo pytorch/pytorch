@@ -343,7 +343,7 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "amz2023.linux.g5.12xlarge.nvidia.gpu" },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
