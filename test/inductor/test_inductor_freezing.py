@@ -473,7 +473,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+            self.assertEqual(counters["inductor"]["conv_bn_folding"], 1)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
@@ -504,7 +504,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+            self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
@@ -543,7 +543,8 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+            # issue: https://github.com/pytorch/pytorch/issues/131693
+            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_bn_with_multi_bn_share_conv(self):
@@ -573,7 +574,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_functional_bn_with_multi_bn_share_conv(self):
@@ -612,7 +613,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-            self.assertEqual(counters["inductor"]["binary_folding"], 0)
+            self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):

@@ -378,6 +378,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def is_fusion_enabled(self):
             return self.fusion_enabled
 
+    counters["inductor"]["conv_bn_folding"] = 0
     conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
         conv_bn_to_fuse.clear()
@@ -413,6 +414,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
+                    counters["inductor"]["conv_bn_folding"] += 1
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
@@ -504,12 +506,13 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_bias,
                 )
                 for bn_node in bn_nodes:
+                    counters["inductor"]["conv_bn_folding"] += 1
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
 
     for pattern in function_patterns:  # type: ignore[assignment]
-        bn_node_to_fuse = []
+        bn_nodes_to_fuse = []
         for node in gm.graph.nodes:
             if matches_function_pattern(pattern, node):
                 # TODO: support kwargs.
@@ -572,14 +575,15 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 if bn_running_mean is None or bn_running_var is None:
                     continue
 
-                bn_node_to_fuse.append(node)
+                bn_nodes_to_fuse.append(node)
 
         updated_weights: Dict[str, Any] = {}
-        for node in bn_node_to_fuse:
+        for node in bn_nodes_to_fuse:
+            counters["inductor"]["conv_bn_folding"] += 1
             conv_node = node.args[0]
-            if conv_node.args[1].name in updated_weights:
+            if conv_node.args[1].target in updated_weights:
                 if conv_node.args[2] is None:
-                    conv_node.update_arg(2, updated_weights[conv_node.args[1].name][1])
+                    conv_node.update_arg(2, updated_weights[conv_node.args[1].target])
                 node.replace_all_uses_with(node.args[0])
                 node.graph.erase_node(node)
             else:
@@ -605,12 +609,12 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_weight,
                     bn_bias,
                 )
-                setattr(gm, conv_node.args[1].name, new_conv_weight)
+                setattr(gm, conv_node.args[1].target, new_conv_weight)
                 if conv_node.args[2]:
-                    setattr(gm, conv_node.args[2].name, new_conv_bias)
+                    setattr(gm, conv_node.args[2].target, new_conv_bias)
                 else:
                     with gm.graph.inserting_before(conv_node):
-                        conv_bias_name = conv_node.args[1].name.replace(
+                        conv_bias_name = conv_node.args[1].target.replace(
                             "weight", "bias"
                         )
                         setattr(gm, conv_bias_name, new_conv_bias)
@@ -618,10 +622,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                             "get_attr", conv_bias_name, (), {}
                         )
                     conv_node.update_arg(2, conv_bias_node)
-                updated_weights[conv_node.args[1].name] = [
-                    conv_node.args[1],
-                    conv_node.args[2],
-                ]
+                updated_weights[conv_node.args[1].target] = conv_node.args[2]
                 node.replace_all_uses_with(node.args[0])
                 node.graph.erase_node(node)
     gm.graph.lint()
