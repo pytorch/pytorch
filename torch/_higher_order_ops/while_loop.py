@@ -135,6 +135,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    @torch._dynamo.enable
     def _while_loop_op_wrapper(*args, **kwargs):
         return while_loop_op(*args, **kwargs)
 

@@ -620,6 +620,11 @@ class CompileEnabledContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if torch._dynamo.is_compiling():
+                raise RuntimeError(
+                    "Dynamo should not be tracing into CompileEnabledContext wrapper function!"
+                )
+
             from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
 
             prior = set_eval_frame_callback_enabled(self.enabled)
@@ -628,9 +633,11 @@ class CompileEnabledContext:
             finally:
                 set_eval_frame_callback_enabled(prior)
 
-        if not self.enabled:
-            # NOTE using `disable` can still result in a graph break even if immediately
-            # cancelled by an `enable` call!
+        if self.enabled:
+            # if dynamo is already enabled, directly trace fn without going through _fn
+            _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        else:
+            # if dynamo is already enabled, use _torchdynamo_disable to skip going through _fn
             _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
         return _fn

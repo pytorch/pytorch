@@ -149,6 +149,7 @@ def cond(pred, true_fn, false_fn, operands):
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    @torch._dynamo.enable
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
