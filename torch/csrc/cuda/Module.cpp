@@ -767,6 +767,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
 
   for (const auto& traceInfo : snapshot.device_traces) {
     py::list trace;
+    bool trace_contains_only_user_defined = true;
     for (const auto& te : traceInfo) {
       py::dict trace_entry;
       if (te.context_) {
@@ -782,8 +783,18 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace_entry[stream_s] = int64_t(te.stream_);
       trace_entry[time_us_s] = te.time_.t_;
       trace.append(trace_entry);
+      // Skip device_traces with only user_defined frames
+      if (te.action_ != TraceEntry::USER_DEFINED) {
+        trace_contains_only_user_defined = false;
+      }
     }
-    traces.append(trace);
+    // Skip device_traces with only user_defined frames
+    if (trace_contains_only_user_defined) {
+      py::list trace;
+      traces.append(trace);
+    } else {
+      traces.append(trace);
+    }
   }
 
   py::list external_annotations;
