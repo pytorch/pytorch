@@ -6,10 +6,14 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import Benchmarker
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
+@instantiate_parametrized_tests
 class TestBenchmarker(TestCase):
     def setUp(self):
         super().setUp()
