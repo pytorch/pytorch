@@ -72,7 +72,6 @@ class FlexAttentionHOP(HigherOrderOperator):
 
 
 flex_attention = FlexAttentionHOP()
-flex_attention.__module__ = "torch.ops.higher_order"
 
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
@@ -118,7 +117,6 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
 
 
 flex_attention_backward = FlexAttentionBackwardHOP()
-flex_attention_backward.__module__ = "torch.ops.higher_order"
 
 
 def _math_attention_inner(
@@ -186,6 +184,11 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
+    # broadcast query & key along head dim for GQA
+    G = query.size(1) // key.size(1)
+    value = torch.repeat_interleave(value, G, dim=1)
+    key = torch.repeat_interleave(key, G, dim=1)
+
     _, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -315,31 +318,18 @@ def flex_attention_proxy_torch_dispatch_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    if mode.enable_tracing:
-        return trace_flex_attention(
-            mode,
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
-    else:
-        return flex_attention(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
+    return trace_flex_attention(
+        mode,
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
 
 
 @flex_attention.py_functionalize_impl
@@ -688,6 +678,10 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    G = query.size(1) // key.size(1)
+    key = torch.repeat_interleave(key, G, dim=1)
+    value = torch.repeat_interleave(value, G, dim=1)
+
     scores, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -746,6 +740,18 @@ def sdpa_dense_backward(
 
     grad_query = grad_scores @ key
     grad_key = grad_scores.transpose(-2, -1) @ query
+
+    # Reduce DK, DV along broadcasted heads.
+    grad_key = grad_key.view(
+        grad_key.size(0), -1, G, grad_key.size(-2), grad_key.size(-1)
+    )
+    grad_value = grad_value.view(
+        grad_value.size(0), -1, G, grad_value.size(-2), grad_value.size(-1)
+    )
+
+    grad_key = torch.sum(grad_key, 2, keepdim=False)
+    grad_value = torch.sum(grad_value, 2, keepdim=False)
+
     return grad_query.contiguous(), grad_key.contiguous(), grad_value.contiguous()
 
 
@@ -847,39 +853,22 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    if mode.enable_tracing:
-        return trace_flex_attention_backward(
-            mode,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            fw_graph,
-            joint_graph,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
-    else:
-        return flex_attention_backward(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            fw_graph,
-            joint_graph,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
+    return trace_flex_attention_backward(
+        mode,
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
 
 
 @flex_attention_backward.py_functionalize_impl
