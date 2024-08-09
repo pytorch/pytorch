@@ -6,8 +6,9 @@ import struct
 
 from typing import Any, List, Optional
 
-import torch
 import numpy as np
+
+import torch
 
 from google.protobuf import struct_pb2
 
@@ -49,7 +50,20 @@ __all__ = [
     "mesh",
 ]
 
+
+class TBUserException(Exception):
+    """Exception raised for errors in user input.
+
+    Attributes:
+        message -- explanation of the error
+    """
+
+    def __init__(self, message):
+        super(message)
+
+
 logger = logging.getLogger(__name__)
+
 
 def half_to_int(f: float) -> int:
     """Casts a half-precision float value into an integer.
@@ -64,6 +78,7 @@ def half_to_int(f: float) -> int:
     buf = struct.pack("f", f)
     return struct.unpack("i", buf)[0]
 
+
 def int_to_half(i: int) -> float:
     """Casts an integer value to a half-precision float.
 
@@ -74,14 +89,18 @@ def int_to_half(i: int) -> float:
     buf = struct.pack("i", i)
     return struct.unpack("f", buf)[0]
 
+
 def _tensor_to_half_val(t: torch.Tensor) -> List[int]:
     return [half_to_int(x) for x in t.flatten().tolist()]
+
 
 def _tensor_to_complex_val(t: torch.Tensor) -> List[float]:
     return torch.view_as_real(t).flatten().tolist()
 
+
 def _tensor_to_list(t: torch.Tensor) -> List[Any]:
     return t.flatten().tolist()
+
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
 _TENSOR_TYPE_MAP = {
@@ -369,9 +388,10 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
       ValueError: If tensor has the wrong shape or type.
     """
     tensor = make_np(tensor).squeeze()
-    assert (
-        tensor.ndim == 0
-    ), f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions."
+    if tensor.ndim != 0:
+        raise TBUserException(
+            f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions."
+        )
     # python float is double precision in numpy
     scalar = float(tensor)
     if new_style:
