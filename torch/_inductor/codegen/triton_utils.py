@@ -12,6 +12,10 @@ from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
+def should_unwrap_unspec_arg(name: str):
+    return V.graph.is_unspec_arg(name) and name not in V.graph.mutated_buffers
+
+
 def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
@@ -26,7 +30,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             tye = "*fp8e5b16"
         else:
             tye = _type_of(arg.dtype)
-        if V.graph.is_unspec_arg(arg.buffer):
+        if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
             if new_tye in ["fp16", "bf16"]:
