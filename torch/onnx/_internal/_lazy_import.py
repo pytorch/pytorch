@@ -3,8 +3,6 @@
 import importlib
 from typing import TYPE_CHECKING
 
-import onnxscript.ir.convenience
-
 
 class _LazyModule:
     """Lazily import a module."""
@@ -32,6 +30,7 @@ if TYPE_CHECKING:
     import onnx
     import onnxscript
     import onnxscript.evaluator
+    import onnxscript.ir.convenience
 
     onnxscript_ir = onnxscript.ir
     onnxscript_ir_convenience = onnxscript.ir.convenience
