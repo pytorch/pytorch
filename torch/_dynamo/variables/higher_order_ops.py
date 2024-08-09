@@ -576,6 +576,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "out_dtype":
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "hinted_context":
+            return HintedContextHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
@@ -1340,6 +1342,69 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # This flattens the kwargs into lifted args
         p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
+        )
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
+
+
+class HintedContextHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def create_wrapped_node(self, tx, args, kwargs, description):
+        # See NOTE [HigherOrderOperator tracing design] for more details
+
+        (
+            (body_r, treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[0],  # function
+            [*args[1:]],
+            kwargs,
+            description,
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        body_gmod.meta["hint"] = kwargs["hint"].value
+        body_name = add_subgraph(
+            tx,
+            "hinted_context_body",
+            body_gmod,
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
+        # all the arguments are lifted.
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
+            tx, args, kwargs, "hinted_context"
         )
 
         if len(p_kwargs) > 0:

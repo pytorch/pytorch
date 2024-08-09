@@ -178,6 +178,11 @@ class TracerBase:
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
 
+            from torch._higher_order_ops.hint_tracker import ContextHintTracker
+            node_hints = ContextHintTracker.get_hints_merged()
+            if node_hints and node_hints != "":
+                node.meta["context_hints"] = node_hints
+
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
 
