@@ -27,6 +27,7 @@ def define_targets(rules):
             exclude = [
                 "TypeCast.h",
                 "typeid.h",
+                "irange.h",
             ],
         ),
         linkstatic = True,
@@ -34,6 +35,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
+            ":irange",
             "//c10/macros",
             "@fmt",
         ] + rules.select({
@@ -83,10 +85,24 @@ def define_targets(rules):
             exclude = [
                 "bit_cast.h",
                 "ssize.h",
+                "irange.h",
             ],
         ),
         visibility = [
             "//:__pkg__",
             "//c10:__pkg__",
+        ],
+        deps=[
+            ":irange",
+        ]
+    )
+
+    rules.cc_library(
+        name = "irange",
+        hdrs = ["irange.h", "TypeSafeSignMath.h"],
+        linkstatic = True,
+        visibility = ["//visibility:public"],
+        deps = [
+            "//c10/macros",
         ],
     )
