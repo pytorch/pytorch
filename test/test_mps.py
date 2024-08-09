@@ -721,7 +721,6 @@ def mps_ops_modifier(ops):
         'linalg.svdvals': None,
         'linalg.tensorsolve': None,
         'linalg.vecdot': None,
-        'logcumsumexp': None,
         'logdet': None,
         'lu': None,
         'lu_solve': None,
@@ -1096,8 +1095,6 @@ def mps_ops_error_inputs_modifier(ops):
         # memory overlapping checks
         'index_select',
 
-        # unimplemented
-        'logcumsumexp',
     }
 
     def addDecorator(op, d) -> None:

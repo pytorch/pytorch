@@ -11,6 +11,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
@@ -62,6 +63,7 @@ namespace at::native {
 enum class MPSCumulativeOpType : uint8_t {
   CUMSUM = 0,
   CUMPROD = 1,
+  LOGCUMSUMEXP = 2,
 };
 
 namespace mps {
@@ -451,6 +453,8 @@ static void cumulative_op_impl(const Tensor& self,
       cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
     } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
       cpu_result = self.to(at::Device(kCPU)).cumprod(dim, dtype);
+    } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
+      cpu_result = self.to(at::Device(kCPU)).logcumsumexp(dim);
     }
     at::_copy_from_and_resize(cpu_result, result);
     return;
@@ -478,6 +482,20 @@ static void cumulative_op_impl(const Tensor& self,
           rc = [mpsGraph cumulativeSumWithTensor:inputTensor axis:dim name:nil];
         } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
           rc = [mpsGraph cumulativeProductWithTensor:inputTensor axis:dim name:nil];
+        } else if (cumulativeOpType == MPSCumulativeOpType::LOGCUMSUMEXP) {
+          MPSGraphTensor* cumMaxTensor = [mpsGraph cumulativeMaximumWithTensor:inputTensor
+                                           axis:dim
+                                      exclusive:false
+                                        reverse:false
+                                           name:nil];
+//          std::cout<<[[inputTensor debugDescription] UTF8String]<<std::endl;
+//          std::cout<<[[cumMaxTensor debugDescription] UTF8String]<<std::endl;
+          MPSGraphTensor* stableInputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:cumMaxTensor name:nil];
+          MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:stableInputTensor name:nil];
+          MPSGraphTensor* addTensor = [mpsGraph additionWithPrimaryTensor:expTensor secondaryTensor:[mpsGraph constantWithScalar:1.0 dataType:[expTensor dataType]] name:nil];
+          MPSGraphTensor* sumTensor = [mpsGraph cumulativeSumWithTensor:expTensor axis:dim name:nil];
+          MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:sumTensor name:nil];
+          rc = [mpsGraph additionWithPrimaryTensor:logTensor secondaryTensor:cumMaxTensor name:nil];
         }
         if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
           return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
@@ -494,6 +512,28 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
+}
+
+Tensor& _logcumsumexp_out_mps(const Tensor& self, int64_t dim, Tensor& result) {
+  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  result.resize_(self.sizes());
+  if (self.dim() == 0) {
+    result.fill_(self);
+    return result;
+  }
+  if (self.numel() == 0) {
+    result.zero_();
+    return result;
+  }
+
+  ScalarType dtype = self.scalar_type();
+  cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::LOGCUMSUMEXP, "logcumsumexp_out_mps");
+  return result;
+}
+
+Tensor _logcumsumexp_mps(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return _logcumsumexp_out_mps(self, dim, result);
 }
 
 TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
