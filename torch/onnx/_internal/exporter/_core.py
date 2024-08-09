@@ -29,7 +29,6 @@ from torch.onnx._internal.exporter import (
     _onnx_program,
     _registration,
     _reporting,
-    _tensors,
     _verification,
     errors,
 )
@@ -497,6 +496,8 @@ def _handle_placeholder_node(
     lower: str,
     opset: onnxscript.values.Opset,
 ) -> None:
+    from torch.onnx._internal.exporter import _tensors
+
     # Placeholder nodes are user inputs
     # We need to create a new tensor for each user input
     # and add it to the graph's inputs
