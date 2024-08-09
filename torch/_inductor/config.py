@@ -466,7 +466,7 @@ combo_kernels_autotune = 1
 combo_kernel_allow_mixed_sizes = 1
 
 # constant folding on the joint graph
-joint_graph_constant_folding = True
+joint_graph_constant_folding = False
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
