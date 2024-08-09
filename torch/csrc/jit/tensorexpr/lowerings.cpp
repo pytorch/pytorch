@@ -147,7 +147,8 @@ int nnc_lowerings_lazy_registration() {
 
 #define DEFINE_COMPARISON_SCALAR_OP_LOWERING(op_name, op)                 \
   RegisterNNCLoweringsFunction aten_##op_name##_scalar(                   \
-      {"aten::" #op_name ".bool(bool a, bool b) -> (bool)",               \
+      {"aten::" #op_name "(Scalar a, Scalar b) -> (bool)",                \
+       "aten::" #op_name ".bool(bool a, bool b) -> (bool)",               \
        "aten::" #op_name ".int(int a, int b) -> (bool)",                  \
        "aten::" #op_name ".int_float(int a, float b) -> (bool)",          \
        "aten::" #op_name ".float_int(float a, int b) -> (bool)",          \
