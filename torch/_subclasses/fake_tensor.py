@@ -917,13 +917,6 @@ class FakeTensor(Tensor):
             out.append(s)
         return out
 
-    # Invariant: A fake tensor post-creation is guaranteed to
-    # have any associated symbolic nested int set
-    def detach(self) -> torch.Tensor:  # type: ignore[override]
-        out = torch.ops.aten.detach.default(self)
-        out.nested_int_memo = self.nested_int_memo
-        return out
-
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
