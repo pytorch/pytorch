@@ -3,7 +3,7 @@ from functools import partial
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 
 
 __all__ = [

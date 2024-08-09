@@ -4,8 +4,8 @@ from typing import List, Optional, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo

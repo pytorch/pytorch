@@ -3,8 +3,8 @@ from typing import no_type_check, Optional, Tuple
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import DTensorSpec
 
 
 @no_type_check

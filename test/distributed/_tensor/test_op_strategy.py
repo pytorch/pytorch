@@ -4,8 +4,6 @@ from itertools import chain
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor._collective_utils import redistribute_cost
-from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
@@ -17,6 +15,8 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor._collective_utils import redistribute_cost
+from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
 

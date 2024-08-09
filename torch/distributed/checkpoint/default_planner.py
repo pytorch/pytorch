@@ -11,7 +11,6 @@ from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
@@ -45,6 +44,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.tensor import DTensor
 
 
 logger: logging.Logger = logging.getLogger(__name__)
