@@ -798,7 +798,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 #       size (324, 512), stride (512, 1)
                 #   Y_ordered (ordered by stride decreasingly, in dense format):
                 #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                stride_order = list(ir.get_stride_order(Y.get_stride()))
+                stride_order = list(
+                    ir.get_stride_order(V.graph.sizevars.size_hints(Y.get_stride()))
+                )
                 fill_order = ir.stride_order2fill_order(stride_order)
                 reversed_fill_order = list(reversed(fill_order))
                 size_with_stride_ordered_decreasingly = [
