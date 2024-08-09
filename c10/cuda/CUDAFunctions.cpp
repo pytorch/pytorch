@@ -57,7 +57,7 @@ int device_count_impl(bool fail_if_no_driver) {
       TORCH_CHECK(
           false,
           "CUDA driver initialization failed, you might not "
-          "have a CUDA gpu.");
+          "have a CUDA GPU.");
       break;
     case cudaErrorUnknown:
       TORCH_CHECK(
