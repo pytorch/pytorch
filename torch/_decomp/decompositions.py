@@ -2571,6 +2571,44 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+@register_decomposition(aten.max_unpool2d)
+def max_unpool2d(
+    input: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+):
+    torch._check(
+        input.ndim in (3, 4),
+        lambda: "Input to max_unpooling2d should be a 3d or 4d Tensor, "
+                f"but got a tensor with {input.ndim} dimensions.",
+    )
+    h, w = output_size[-2:]
+    indices_h = indices // w
+    indices_w = indices - indices_h * w
+    output = input.new_zeros(output_size)
+    return aten._unsafe_index_put(output, [indices_h, indices_w], input, accumulate=False)
+
+
+@register_decomposition(aten.max_unpool3d)
+def max_unpool2d(
+    input: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+):
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: "Input to max_unpooling2d should be a 4d or 5d Tensor, "
+                f"but got a tensor with {input.ndim} dimensions.",
+    )
+    d, h, w = output_size[-3:]
+    indices_dh = indices // w
+    indices_w = indices - indices_dh * w
+    indices_h = indices_dh // h
+    indices_d = indices_dh - indices_h * h
+    output = input.new_zeros(output_size)
+    return aten._unsafe_index_put(output, [indices_d, indices_h, indices_w], input, accumulate=False)
+
+
 @register_decomposition(aten.index_add_)
 def index_add_(
     x: TensorLike,
