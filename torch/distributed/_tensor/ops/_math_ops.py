@@ -1055,38 +1055,3 @@ def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
-
-
-@register_op_strategy(
-    [aten.isinf.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def distribute_tensor_isinf(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy = op_schema.args_schema[0]
-    input_placements: List[Placement] = []
-    input_placements.append(Partial("max"))
-    output_placements: List[Placement] = []
-    output_placements.append(Replicate())
-    assert isinstance(input_strategy, OpStrategy)
-    assert isinstance(input_strategy.strategies[0].output_specs, DTensorSpec)
-    input_strategy.strategies[0].output_specs.placements = tuple(input_placements)
-    reduction_strategy = OpStrategy([])
-    for strtg in input_strategy.strategies:
-        input_spec = DTensorSpec(
-            mesh=mesh,
-            placements=tuple(output_placements),
-            tensor_meta=strtg.output_spec.tensor_meta,
-        )
-        redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
-        reduction_strategy.strategies.append(
-            PlacementStrategy(
-                output_specs=DTensorSpec(
-                    mesh=mesh,
-                    placements=tuple(output_placements),
-                ),
-                input_specs=(input_spec,),
-                redistribute_cost=redistribute_cost,
-            )
-        )
-
-    return reduction_strategy
