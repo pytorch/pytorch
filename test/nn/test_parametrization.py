@@ -1743,14 +1743,10 @@ class TestNNParametrization(NNTestCase):
     def test_wrapper_subclass_parametrization(self):
         class Subclassify(nn.Module):
             def forward(self, X):
-                # NB: not differentiable, but fine because we don't actually
-                #     check backward here
                 return TwoTensor(X, X)
 
         class UnSubclassify(nn.Module):
             def forward(self, X):
-                # NB: not differentiable, but fine because we don't actually
-                #     check backward here
                 return X.a
 
         class IdentityWithRightInverse(nn.Module):
@@ -1774,7 +1770,7 @@ class TestNNParametrization(NNTestCase):
                 type_before_registration == TwoTensor
                 and type_after_registration == Tensor
             ):
-                model._apply(lambda t: TwoTensor(t, t, requires_grad=False))
+                model._apply(lambda t: TwoTensor(t, t))
             initial_weight = model.weight.clone().detach()
             initial_weight_id = id(model.weight)
             initial_buf = model.buf.clone().detach()
