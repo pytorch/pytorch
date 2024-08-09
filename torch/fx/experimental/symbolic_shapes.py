@@ -4618,9 +4618,20 @@ class ShapeEnv:
             #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
             #       expr = sympy.Eq(shape_0 - 1/3, 4)
             #       expr.xreplace({}) # False
-            offset = int(lower - 1)
-            new_shape_env[k] = s + offset
-            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+
+            # Compute offset such that 1 + offset == lower
+            offset = lower - 1
+            # Compute offset_integral as the greatest integer smaller than offset
+            offset_integral = int(offset)
+            # int(-1.5) == -1 but we want -2
+            if offset < 0 and offset != offset_integral:
+                offset -= 1
+            new_shape_env[k] = s + offset_integral
+            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset_integral)
+            # The lower bound must be set to 1
+            # Same dodginess that is also alluded to above
+            if 1 <= new_range_env[s].upper:
+                new_range_env[s] = ValueRanges(1, new_range_env[s].upper)
 
         try:
             new_expr = expr.xreplace(new_shape_env)
