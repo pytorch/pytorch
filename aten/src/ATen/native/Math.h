@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <limits>
 #include <type_traits>
+#include <unsupported/Eigen/CXX11/Tensor> // from @eigen_archive
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -3897,5 +3898,32 @@ inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 
     return std::sin(x) / x;
 } // T spherical_bessel_j0_forward(T x)
+
+template <typename T>
+inline C10_HOST_DEVICE T calc_betaln(T a, T b) {
+    return std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
+}
+
+template <typename T>
+inline C10_HOST_DEVICE T calc_beta(T a, T b) {
+    return std::exp(calc_betaln(a, b));
+}
+
+template <typename T>
+inline C10_HOST_DEVICE T calc_betainc(T x, T a, T b) {
+  if (std::is_same<T, float>::value) {
+     const float _x = x, _a = a, _b = b;
+     return Eigen::numext::betainc(_a, _b, _x);
+  } else if (std::is_same<T, double>:: value) {
+     const double _x = x, _a = a, _b = b;
+     return Eigen::numext::betainc(_a, _b, _x);
+  } else {
+    //promote to float
+    const float _x = static_cast<float>(x);
+    const float _a = static_cast<float>(a);
+    const float _b = static_cast<float>(b);
+    return static_cast<T>(Eigen::numext::betainc(_a,_b,_x));
+  }
+}
 
 C10_CLANG_DIAGNOSTIC_POP()
