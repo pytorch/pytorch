@@ -1425,6 +1425,13 @@ class MetaConverter:
                         )
 
                 else:
+
+                    def has_symbolic_size(t_size):
+                        for t in t_size:
+                            if isinstance(t, torch.SymInt):
+                                return True
+                        return False
+
                     is_leaf = t.is_leaf
 
                     # Graph-Break for wrapped tensors
@@ -1455,7 +1462,7 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
-                        if self.copy_data:
+                        if self.copy_data and not has_symbolic_size(t.size):
                             with torch.no_grad(), no_dispatch():
                                 assert t.size is not None
                                 assert t.stride is not None
@@ -1493,7 +1500,7 @@ class MetaConverter:
                     ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
-                        if self.copy_data:
+                        if self.copy_data and not has_symbolic_size(t.size):
                             r.untyped_storage().real_storage = (
                                 r.real_tensor.untyped_storage()
                             )
@@ -1538,7 +1545,7 @@ class MetaConverter:
                         with torch.no_grad(), maybe_suppress():
                             with maybe_fake_mgr:
                                 r.set_(r_s, storage_offset, sizes, strides)
-                            if self.copy_data:
+                            if self.copy_data and not has_symbolic_size(t.size):
                                 with torch.no_grad(), no_dispatch():
                                     r.real_tensor.set_(
                                         r_s.real_storage,
