@@ -262,7 +262,7 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_command_line(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
     cmd = shlex.split(cmd_line)
     try:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
@@ -284,9 +284,9 @@ def _run_command_line(cmd_line: str, cwd: str) -> bytes:
     return status
 
 
-def run_command_line(cmd_line: str, cwd: str) -> bytes:
+def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
     with dynamo_timed("compile_file"):
-        return _run_command_line(cmd_line, cwd)
+        return _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -1372,7 +1372,7 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+        status = run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
