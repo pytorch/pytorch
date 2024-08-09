@@ -60,13 +60,11 @@ class AutoFunctionalized(HigherOrderOperator):
     def __call__(
         self_,  # noqa: B902
         _mutable_op: torch._ops.OpOverload,
-        _arg_to_aliased: Dict[str, List[Any]],
-        _all_aliased: List[Any],
         **kwargs: Any,
     ) -> Tuple[Any, Tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
-        return super().__call__(_mutable_op,_arg_to_aliased,_all_aliased, **kwargs)
+        return super().__call__(_mutable_op, **kwargs)
 
 
 auto_functionalized = AutoFunctionalized()
@@ -123,15 +121,16 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: torch._ops.OpOverload,
-    _arg_to_aliased: Dict[str, List[Any]],
-    _all_aliased: List[Any],
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    kwargs.pop('_all_aliased', [])
+    kwargs.pop('_arg_to_aliased', {})
     new_kwargs = dict(**kwargs)
     result = []
-
+ 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
+
     for name in _mutable_args_names:
         if (
             _only_clone_these_tensors is not None
@@ -147,6 +146,7 @@ def auto_functionalized_dense(
                 else None
             )
         result.append(new_kwargs[name])
+        print(new_kwargs)
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
@@ -158,11 +158,11 @@ def auto_functionalized_dense(
 @auto_functionalized.py_impl(FakeTensorMode)
 def auto_functionalized_fake(
     mode,
-    _mutable_op: torch._ops.OpOverload,_arg_to_aliased, _all_aliased,
+    _mutable_op: torch._ops.OpOverload,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, _arg_to_aliased, _all_aliased, **kwargs)
+        result = auto_functionalized_dense(_mutable_op, **kwargs)
         return result
 
 
@@ -170,21 +170,19 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: torch._ops.OpOverload,
-    _arg_to_aliased,
-    _all_aliased,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     if not mode.enable_tracing:
-        return auto_functionalized(_mutable_op,_arg_to_aliased, _all_aliased, **kwargs)
+        return auto_functionalized(_mutable_op, **kwargs)
 
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(_mutable_op, _arg_to_aliased, _all_aliased, **kwargs)
+        out = auto_functionalized(_mutable_op, **kwargs)
 
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized,
-        (_mutable_op,_arg_to_aliased, _all_aliased),
+        (_mutable_op,),
         proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
@@ -251,25 +249,18 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
     arg_to_aliased={}
+    ls =[]
     for arg in mutable_args_names:
+        ls.append(unwrapped_kwargs[arg])
         arg_to_aliased[arg] = ctx.unwrap_tensors(list(storage_to_tensors[normalized_kwargs[arg]._typed_storage()._cdata]))
         
     # take the union of all the aliased items.
     all_aliased = list(set.union(*map(set, arg_to_aliased.values())))
     print("all aliased:")
     print(all_aliased)
-
-    # for each arg, identify the items that
     with ctx.redispatch_to_next():
-        # The output have the the following structure:
-        # - op output
-        # - mutated 0, alias 0, alias 1, alias 2, alias 3...etc
-        # - mutated kwargs
-        # We only need the first one, so we slice it.
-        print("inputs")
-        print(unwrapped_kwargs)
         unwrapped_outs = auto_functionalized(
-            op,arg_to_aliased, all_aliased, **unwrapped_kwargs  # type: ignore[arg-type]
+            op, ** dict(unwrapped_kwargs, _all_aliased=all_aliased, _arg_to_aliased=arg_to_aliased)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
