@@ -1,14 +1,21 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+import importlib
 
 
 @functools.lru_cache(None)
 def has_triton_package() -> bool:
     try:
-        from triton.compiler.compiler import triton_key
-
-        return triton_key is not None
+        import triton
+        if triton.language.dtype is not None:
+            try:
+                from triton.compiler.compiler import triton_key
+                return triton_key is not None
+            except ImportError:
+                return False
+    except AttributeError:
+        return False
     except ImportError:
         return False
     except RuntimeError:
