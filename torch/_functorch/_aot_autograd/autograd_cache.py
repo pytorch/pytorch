@@ -27,6 +27,7 @@ from torch._inductor.codecache import (
     write_atomic,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._logging import LazyString
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -238,7 +239,9 @@ def autograd_cache_key(
     key = "a" + AOTAutogradCachePickler.get_hash(details)
     debug_lines = details.debug_lines()
     log.debug(
-        "Autograd graph cache hash details for key %s:\n%s", key, "\n".join(debug_lines)
+        "Autograd graph cache hash details for key %s:\n%s",
+        key,
+        LazyString(lambda: "\n".join(debug_lines)),
     )
     return key, debug_lines
 
