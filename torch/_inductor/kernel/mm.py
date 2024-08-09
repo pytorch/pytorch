@@ -16,7 +16,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.common import BackendFeature
-from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout
@@ -172,7 +172,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
@@ -239,7 +239,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         choices = []
 
     if use_cutlass:
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
@@ -340,7 +340,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
             != 0
         ):
-            CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
                 choices,
                 layout,
                 [mat1, mat2, inp_expanded],
@@ -575,7 +575,10 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             )
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 
