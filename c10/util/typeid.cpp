@@ -26,7 +26,7 @@ std::mutex& TypeMeta::getTypeMetaDatasLock() {
   return lock;
 }
 
-uint16_t TypeMeta::nextTypeIndex(NumScalarTypes);
+uint16_t TypeMeta::nextTypeIndex(c10::NumScalarTypes);
 
 // fixed length array of TypeMetaData instances
 detail::TypeMetaData* TypeMeta::typeMetaDatas() {
@@ -41,7 +41,7 @@ detail::TypeMetaData* TypeMeta::typeMetaDatas() {
       detail::_PickCopy<T>(),            \
       detail::_PickPlacementDelete<T>(), \
       detail::_PickDelete<T>(),          \
-      TypeIdentifier::Get<T>(),          \
+      c10::TypeIdentifier::Get<T>(),     \
       c10::util::get_fully_qualified_type_name<T>()),
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_META)
 #undef SCALAR_TYPE_META
@@ -52,7 +52,8 @@ detail::TypeMetaData* TypeMeta::typeMetaDatas() {
   return instances;
 }
 
-uint16_t TypeMeta::existingMetaDataIndexForType(TypeIdentifier identifier) {
+uint16_t TypeMeta::existingMetaDataIndexForType(
+    c10::TypeIdentifier identifier) {
   auto* metaDatas = typeMetaDatas();
   const auto end = metaDatas + nextTypeIndex;
   // MaxTypeIndex is not very large; linear search should be fine.

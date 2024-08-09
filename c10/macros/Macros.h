@@ -176,13 +176,10 @@ namespace c10::cuda {}
 namespace c10::hip {}
 namespace c10::xpu {}
 
-// Since C10 is the core library for caffe2 (and aten), we will simply reroute
-// all abstractions defined in c10 to be available in caffe2 as well.
+// Since C10 is the core library for aten, we will simply reroute
+// all abstractions defined in c10 to be available in aten as well.
 // This is only for backwards compatibility. Please use the symbols from the
 // c10 namespace where possible.
-namespace caffe2 {
-using namespace c10;
-}
 namespace at {
 using namespace c10;
 }

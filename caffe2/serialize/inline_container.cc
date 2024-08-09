@@ -190,7 +190,7 @@ void PyTorchStreamReader::init() {
       "pytorch.stream.reader.metadata",
       {{"serialization_id", serialization_id_},
        {"file_name", archive_name_},
-       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
+       {"file_size", c10::str(mz_zip_get_archive_size(ar_.get()))}});
 
   // version check
   at::DataPtr version_ptr;
@@ -766,7 +766,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
       "pytorch.stream.writer.metadata",
       {{"serialization_id", serialization_id_},
        {"file_name", archive_name_},
-       {"file_size", str(mz_zip_get_archive_size(ar_.get()))}});
+       {"file_size", c10::str(mz_zip_get_archive_size(ar_.get()))}});
   if (file_stream_.is_open()) {
     file_stream_.close();
   }
