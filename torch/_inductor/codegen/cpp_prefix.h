@@ -302,8 +302,9 @@ at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
   using i_t = at::vec::VecMask<int64_t, NI>;
   i_t vmask_itype = vmask.template cast<int64_t, NI>();
   v_t equal_mask = (a.value == value);
+  i_t equal_mask_itype = equal_mask.template cast<int64_t, NI>();
   i_t imask(a.index < index);
-  return i_t::blendv(vmask_itype, imask, equal_mask);
+  return i_t::blendv(vmask_itype, imask, equal_mask_itype);
 }
 
 
