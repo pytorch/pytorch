@@ -15,6 +15,7 @@ from .memory_format import (
 from .spectral_norm import remove_spectral_norm, spectral_norm
 from .weight_norm import remove_weight_norm, weight_norm
 
+from .Functional2Layer import Functional2Layer
 
 __all__ = [
     "clip_grad_norm",
@@ -36,4 +37,5 @@ __all__ = [
     "stateless",
     "vector_to_parameters",
     "weight_norm",
+    "Functional2Layer",
 ]
