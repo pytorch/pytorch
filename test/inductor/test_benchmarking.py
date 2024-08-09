@@ -119,7 +119,7 @@ class TestInductorBenchmarker(TestTritonBenchmarker):
     def feature_name(self):
         return "inductor_benchmarker"
 
-    @config.path({"is_fbcode": lambda: False})
+    @config.patch({"is_fbcode": lambda: False})
     @parametrize(
         "config_name,config_val,expected_should_fallback",
         [
