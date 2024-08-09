@@ -254,6 +254,7 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
+    # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -264,6 +265,7 @@ class TestCommon(TestCase):
             in ("signal_windows_exponential", "signal_windows_bartlett")
             and dtype == torch.float64
             and "cuda" in device
+            or "cpu" in device
         ):  # noqa: E121
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
 
@@ -534,12 +536,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize(
-        "executor",
-        [
-            "aten",
-        ],
-    )
+    @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -564,12 +561,7 @@ class TestCommon(TestCase):
 
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(
-            contextlib.nullcontext,
-            device,
-            dtype,
-            op,
-        )
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -2370,10 +2362,7 @@ supported_dynamic_output_op_tests = (
 )
 
 # some inputs invoke dynamic output shape operators, some do not
-sometimes_dynamic_output_op_test = (
-    "__getitem__",
-    "index_select",
-)
+sometimes_dynamic_output_op_test = ("__getitem__", "index_select")
 
 data_dependent_op_tests = (
     "equal",
