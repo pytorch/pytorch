@@ -1,6 +1,5 @@
 #include <numeric>
 #include <algorithm>
-#include <type_traits>
 #include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
@@ -235,10 +234,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     bool is_causal,
     bool return_debug_mask,
     std::optional<double> scale) {
-  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
-      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
-  int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
-  std::tie(
+  auto [
       query_buffer_reshaped,
       key_buffer_reshaped,
       value_buffer_reshaped,
@@ -246,7 +242,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
       max_seqlen_batch_kv,
-      output_shape) = preprocessing::sdpa_nested_preprocessing(query, key, value);
+      output_shape] = preprocessing::sdpa_nested_preprocessing(query, key, value);
 
   auto
       [attention,
@@ -292,11 +288,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     std::optional<double> scale) {
-  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
-      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
-  int64_t max_seqlen_batch_q{0};
-  int64_t max_seqlen_batch_k{0};
-  std::tie(
+  auto [
       query_buffer_reshaped,
       key_buffer_reshaped,
       value_buffer_reshaped,
@@ -304,7 +296,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
       max_seqlen_batch_k,
-      output_shape) = preprocessing::sdpa_nested_preprocessing(query, key, value);
+      output_shape] = preprocessing::sdpa_nested_preprocessing(query, key, value);
 
   sdp::CustomMaskType custom_mask_type = is_causal
       ? sdp::CustomMaskType::CausalFromTopLeft
@@ -350,14 +342,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
-  Tensor grad_out_buffer_reshaped, query_buffer_reshaped, key_buffer_reshaped,
-      value_buffer_reshaped, output_buffer_reshaped;
-  std::tie(
+  auto [
       grad_out_buffer_reshaped,
       query_buffer_reshaped,
       key_buffer_reshaped,
       value_buffer_reshaped,
-      output_buffer_reshaped) =
+      output_buffer_reshaped] =
       preprocessing::sdpa_nested_preprocessing_backward(
           grad_out_,
           query,
@@ -369,8 +359,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
           max_seqlen_batch_q,
           max_seqlen_batch_k);
 
-  Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+  auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_buffer_reshaped,
     query_buffer_reshaped,
     key_buffer_reshaped,

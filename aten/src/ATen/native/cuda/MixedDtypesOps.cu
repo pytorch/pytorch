@@ -357,7 +357,7 @@ _mixed_dtypes_mad_op(const Tensor& mat1, const Tensor& mat2,
                      const Tensor& mat2_scale, const Tensor& input,
                      const Scalar& alpha, const Scalar& beta) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR(__func__ " : ROCm doesn't support CUTLASS");
+  AT_ERROR(__func__, " : ROCm doesn't support CUTLASS");
   return Tensor{};
 #else
 
