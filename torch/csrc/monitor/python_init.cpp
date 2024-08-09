@@ -315,6 +315,15 @@ void initMonitorBindings(PyObject* module) {
       .def(
           "__exit__",
           [](const std::shared_ptr<WaitCounterTracker>& self,
+             const pybind11::args&) { self->guard.reset(); })
+      .def(
+          "start",
+          [](const std::shared_ptr<WaitCounterTracker>& self) {
+            self->guard.emplace(self->handle.start());
+          })
+      .def(
+          "stop",
+          [](const std::shared_ptr<WaitCounterTracker>& self,
              const pybind11::args&) { self->guard.reset(); });
 
   py::class_<c10::monitor::WaitCounterHandle>(
