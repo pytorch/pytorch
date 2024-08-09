@@ -1092,6 +1092,7 @@ class TestProfiler(TestCase):
             self.assertTrue(os.path.exists(dname))
             file_num = 0
             for file_name in os.listdir(dname):
+                print(file_name)
                 parts = file_name.split(".")
                 self.assertTrue(len(parts) > 4)
                 self.assertTrue(
