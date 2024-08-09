@@ -29,6 +29,7 @@ def cutlass_mm(a, b):
 
 @triton.jit
 def triton_mm_kernel(
+    use_3xtf32,
     a_ptr,
     b_ptr,
     c_ptr,
@@ -66,7 +67,10 @@ def triton_mm_kernel(
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-        accumulator = tl.dot(a, b, accumulator, input_precision="tf32x3")
+        if use_3xtf32:
+            accumulator = tl.dot(a, b, accumulator, input_precision="tf32x3")
+        else:
+            accumulator = tl.dot(a, b, accumulator, input_precision="ieee")
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
     c = accumulator.to(tl.float32)
@@ -78,7 +82,7 @@ def triton_mm_kernel(
     tl.store(c_ptrs, c, mask=c_mask)
 
 
-def triton_mm(a, b):
+def triton_mm(a, b, use_3xtf32):
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     M, K = a.shape
@@ -89,6 +93,7 @@ def triton_mm(a, b):
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
     )
     triton_mm_kernel[grid](
+        use_3xtf32,
         a,
         b,
         c,
@@ -112,32 +117,39 @@ def triton_mm(a, b):
 
 
 dims = []
-cutlass_loss = []
-triton_loss = []
+cutlass_3xtf32_loss = []
+triton_3xtf32_loss = []
+triton_ieee_loss = []
 for m in range(256, 4096, 128):
     n = k = m
 
     a = torch.randn((m, k), dtype=dtype, device=device)
     b = torch.randn((k, n), dtype=dtype, device=device)
 
-    # d_ref = torch.mm(a.to(torch.float64), b.to(torch.float64)).to(torch.float32)
-    # allow_tf32_saved = torch.backends.cuda.matmul.allow_tf32
-    # torch.backends.cuda.matmul.allow_tf32 = False
-    # d_ref = torch.mm(a, b)
-    # torch.backends.cuda.matmul.allow_tf32 = allow_tf32_saved
+    allow_tf32_saved = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    d_ref = torch.mm(a, b)
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32_saved
 
-    d_ref = torch.from_numpy(np.matmul(a.to("cpu").numpy(), b.to("cpu").numpy())).to(
-        device
-    )
+    # d_ref = torch.from_numpy(np.matmul(a.to("cpu").numpy(), b.to("cpu").numpy())).to(
+    #    device
+    # )
 
-    d_cutlass = cutlass_mm(a, b)
-    d_triton = triton_mm(a, b)
+    d_cutlass_3xtf32 = cutlass_mm(a, b)
+    d_triton_3xtf32 = triton_mm(a, b, True)
+    d_triton_ieee = triton_mm(a, b, False)
 
     dims.append(m)
-    cutlass_loss.append(loss(d_cutlass, d_ref).item())
-    triton_loss.append(loss(d_triton, d_ref).item())
+    cutlass_3xtf32_loss.append(loss(d_cutlass_3xtf32, d_ref).item())
+    triton_3xtf32_loss.append(loss(d_triton_3xtf32, d_ref).item())
+    triton_ieee_loss.append(loss(d_triton_ieee, d_ref).item())
 
 df = pd.DataFrame(
-    {"dims": dims, "CUTLASS loss": cutlass_loss, "Triton loss": triton_loss}
+    {
+        "dims": dims,
+        "CUTLASS 3xTF32 loss": cutlass_3xtf32_loss,
+        "Triton 3xTF32 loss": triton_3xtf32_loss,
+        "Triton IEEE loss": triton_ieee_loss,
+    }
 )
 print(df)
