@@ -479,8 +479,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
+  // This function returns a local uid for ProcessGroupNCCL.
   uint64_t getUid() {
-    return static_cast<uint64_t>(uid_);
+    return static_cast<uint64_t>(local_id_);
   }
 
   c10::intrusive_ptr<Options> getOptions() {
@@ -1121,7 +1122,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-  size_t uid_;
+  // The number of ProcessGroupNCCL created on the current rank.
+  size_t local_id_;
 
   std::string logPrefix_;
 
