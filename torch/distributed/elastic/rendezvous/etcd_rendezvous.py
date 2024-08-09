@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
 
+# pyre-unsafe
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -963,6 +965,7 @@ class EtcdRendezvous:
         return EtcdStore(etcd_client=self.client, etcd_store_prefix=store_path)
 
 
+# pyre-fixme[11]: Annotation `Client` is not defined as a type.
 def _create_etcd_client(params: RendezvousParameters) -> etcd.Client:
     """Create a new ``etcd.Client`` from the specified ``RendezvousParameters``."""
     hostname, port = parse_rendezvous_endpoint(params.endpoint, 2379)

@@ -5,6 +5,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import binascii
 import logging
 import os
@@ -13,7 +15,11 @@ from base64 import b64decode, b64encode
 from datetime import timedelta
 from typing import Any, cast, Optional, Tuple
 
+# pyre-fixme[21]: Could not find name `FileStore` in `torch.distributed`.
+# pyre-fixme[21]: Could not find name `Store` in `torch.distributed`.
+# pyre-fixme[21]: Could not find name `TCPStore` in `torch.distributed`.
 from torch.distributed import FileStore, Store, TCPStore
+# pyre-fixme[21]: Could not find module `torch.distributed.elastic.events`.
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
@@ -43,6 +49,7 @@ class C10dRendezvousBackend(RendezvousBackend):
     # See the explanation in the __init__ method.
     _NULL_SENTINEL = "Y2FuaW1hZGFt"
 
+    # pyre-fixme[11]: Annotation `Store` is not defined as a type.
     _store: Store
     _key: str
 
@@ -131,6 +138,7 @@ class C10dRendezvousBackend(RendezvousBackend):
         return state, base64_state
 
 
+# pyre-fixme[11]: Annotation `TCPStore` is not defined as a type.
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
 
@@ -155,6 +163,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     # see the explanation in the except clause below.
     for is_server in [is_host, False]:
         try:
+            # pyre-fixme[16]: Module `distributed` has no attribute `TCPStore`.
             store = TCPStore(
                 host,
                 port,
@@ -166,7 +175,9 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
 
             if is_server:
                 msg = f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 construct_and_record_rdzv_event(
+                    # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                     run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
                 logger.info(msg)
@@ -187,6 +198,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     return store  # type: ignore[possibly-undefined]
 
 
+# pyre-fixme[11]: Annotation `FileStore` is not defined as a type.
 def _create_file_store(params: RendezvousParameters) -> FileStore:
     # If a user specifies an endpoint, we treat it as a path to a file.
     if params.endpoint:
@@ -202,6 +214,7 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
             ) from exc
 
     try:
+        # pyre-fixme[16]: Module `distributed` has no attribute `FileStore`.
         store = FileStore(path)
     except (ValueError, RuntimeError) as exc:
         raise RendezvousConnectionError(
@@ -263,9 +276,11 @@ def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend,
         backend = C10dRendezvousBackend(store, params.run_id)
 
     except Exception as e:
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         construct_and_record_rdzv_event(
             message=f"{type(e).__name__}: {str(e)}",
             run_id=params.run_id,
+            # pyre-fixme[16]: Module `elastic` has no attribute `events`.
             node_state=NodeState.FAILED,
         )
         raise

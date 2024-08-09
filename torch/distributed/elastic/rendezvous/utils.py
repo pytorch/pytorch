@@ -5,6 +5,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import ipaddress
 import random
 import re
@@ -86,6 +88,7 @@ def parse_rendezvous_endpoint(
 
     # An endpoint that starts and ends with brackets represents an IPv6 address.
     if endpoint[0] == "[" and endpoint[-1] == "]":
+        # pyre-fixme[23]: Unable to unpack `Tuple[str, *Tuple[_T, ...]]` into 2 values.
         host, *rest = endpoint, *[]
     else:
         host, *rest = endpoint.rsplit(":", 1)
@@ -192,6 +195,11 @@ class _PeriodicTimer:
 
     # The state of the timer is hold in a separate context object to avoid a
     # reference cycle between the timer and the background thread.
+    # pyre-fixme[13]: Attribute `args` is never initialized.
+    # pyre-fixme[13]: Attribute `function` is never initialized.
+    # pyre-fixme[13]: Attribute `interval` is never initialized.
+    # pyre-fixme[13]: Attribute `kwargs` is never initialized.
+    # pyre-fixme[13]: Attribute `stop_event` is never initialized.
     class _Context:
         interval: float
         function: Callable[..., None]
@@ -265,6 +273,7 @@ class _PeriodicTimer:
         # shutdown. At that point we do not even know whether it still exists.
         self._finalizer.atexit = False
 
+        # pyre-fixme[16]: `Optional` has no attribute `start`.
         self._thread.start()
 
     def cancel(self) -> None:

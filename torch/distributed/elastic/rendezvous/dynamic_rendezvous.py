@@ -5,6 +5,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 import inspect
 import logging
 import os
@@ -20,7 +22,9 @@ from enum import Enum
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple
 
 import torch.distributed as dist
+# pyre-fixme[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+# pyre-fixme[21]: Could not find module `torch.distributed.elastic.events`.
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
@@ -119,6 +123,10 @@ class RendezvousBackend(ABC):
         """
 
 
+# pyre-fixme[13]: Attribute `_close` is never initialized.
+# pyre-fixme[13]: Attribute `_heartbeat` is never initialized.
+# pyre-fixme[13]: Attribute `_join` is never initialized.
+# pyre-fixme[13]: Attribute `_last_call` is never initialized.
 class RendezvousTimeout:
     """Hold the timeout configuration of a rendezvous.
 
@@ -394,7 +402,10 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         self._last_sync_time = -1
         self._dead_nodes = []
 
+    # pyre-fixme[11]: Annotation `NodeState` is not defined as a type.
+    # pyre-fixme[16]: Module `elastic` has no attribute `events`.
     def _record(self, message: str, node_state: NodeState = NodeState.RUNNING):
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         construct_and_record_rdzv_event(
             name=f"{self.__class__.__name__}.{get_method_name()}",
             run_id=self._settings.run_id,
@@ -593,6 +604,7 @@ class _RendezvousOpExecutor(ABC):
         """
 
 
+# pyre-fixme[13]: Attribute `_state` is never initialized.
 class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
     """Execute rendezvous operations using a shared state.
 
@@ -622,7 +634,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._state_holder = state_holder
         self._settings = settings
 
+    # pyre-fixme[16]: Module `elastic` has no attribute `events`.
     def _record(self, message: str, node_state: NodeState = NodeState.RUNNING) -> None:
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         construct_and_record_rdzv_event(
             name=f"{self.__class__.__name__}.{get_method_name()}",
             run_id=self._settings.run_id,
@@ -818,6 +832,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             f"The node '{self._node}' marked round {self._state.round} of the rendezvous "
             f"'{self._settings.run_id}' as complete. Pending sync."
         )
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         self._record(message=msg, node_state=NodeState.SUCCEEDED)
         logger.debug(msg)
 
@@ -835,6 +850,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             f"The node '{self._node}' marked the rendezvous '{self._settings.run_id}' as closed. "
             "Pending sync."
         )
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         self._record(message=msg, node_state=NodeState.SUCCEEDED)
         logger.debug(msg)
 
@@ -996,6 +1012,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
     _this_node: _NodeDesc
     _settings: RendezvousSettings
     _backend_name: str
+    # pyre-fixme[11]: Annotation `Store` is not defined as a type.
     _store: Store
     _state_holder: _RendezvousStateHolder
     _op_executor: _RendezvousOpExecutor
@@ -1095,9 +1112,11 @@ class DynamicRendezvousHandler(RendezvousHandler):
     def _record(
         self,
         message: str,
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         node_state: NodeState = NodeState.RUNNING,
         rank: Optional[int] = None,
     ) -> None:
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         construct_and_record_rdzv_event(
             name=f"{self.__class__.__name__}.{get_method_name()}",
             run_id=self._settings.run_id,
@@ -1109,7 +1128,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
             rank=rank,
         )
 
+    # pyre-fixme[11]: Annotation `TCPStore` is not defined as a type.
     def _create_tcp_store_server(self, bootstrap_store_info) -> dist.TCPStore:
+        # pyre-fixme[16]: Module `dist` has no attribute `TCPStore`.
         return dist.TCPStore(
             bootstrap_store_info.master_addr,
             bootstrap_store_info.master_port,
@@ -1165,6 +1186,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         except Exception as e:
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 node_state=NodeState.FAILED,
             )
             raise
@@ -1188,6 +1210,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             )
 
         if self._bootstrap_store_info is None:
+            # pyre-fixme[16]: Module `dist` has no attribute `TCPStore`.
             if isinstance(self._store, dist.TCPStore):
                 addr = self._store.host
                 port = self._store.port
@@ -1227,6 +1250,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         except Exception as e:
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 node_state=NodeState.FAILED,
             )
             raise
@@ -1239,6 +1263,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         except Exception as e:
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 node_state=NodeState.FAILED,
             )
             raise
@@ -1254,6 +1279,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         except Exception as e:
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 node_state=NodeState.FAILED,
             )
             raise
@@ -1275,6 +1301,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 f"The node '{self._this_node}' has failed to shutdown the rendezvous "
                 f"'{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
+            # pyre-fixme[16]: Module `elastic` has no attribute `events`.
             self._record(message=msg, node_state=NodeState.FAILED)
             logger.warning(msg)
 
@@ -1282,6 +1309,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         except Exception as e:
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
+                # pyre-fixme[16]: Module `elastic` has no attribute `events`.
                 node_state=NodeState.FAILED,
             )
             raise
@@ -1294,6 +1322,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._op_executor.run(op, deadline)
 
         msg = f"The node '{self._this_node}' has closed the rendezvous '{self._settings.run_id}'."
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         self._record(message=msg, node_state=NodeState.SUCCEEDED)
         logger.info(msg)
 
@@ -1324,6 +1353,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 f"The node '{self._this_node}' has failed to send a keep-alive heartbeat to the "
                 f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
+            # pyre-fixme[16]: Module `elastic` has no attribute `events`.
             self._record(message=msg, node_state=NodeState.FAILED)
             logger.warning(msg)
         finally:
@@ -1338,6 +1368,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             f"RendezvousKeepAliveTimer_{self._this_node.local_id}"
         )
 
+        # pyre-fixme[16]: `Optional` has no attribute `start`.
         self._keep_alive_timer.start()
 
     def _stop_heartbeats(self) -> None:
@@ -1356,6 +1387,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             f"torch.rendezvous.{self._settings.run_id}.{self._state_holder.state.round}"
         )
 
+        # pyre-fixme[16]: Module `dist` has no attribute `PrefixStore`.
         return dist.PrefixStore(key_prefix, store)
 
     def _get_store(self) -> Store:
@@ -1418,9 +1450,11 @@ def create_handler(
             timeout,
         )
     except Exception as e:
+        # pyre-fixme[16]: Module `elastic` has no attribute `events`.
         construct_and_record_rdzv_event(
             message=f"{type(e).__name__}: {str(e)}",
             run_id=params.run_id,
+            # pyre-fixme[16]: Module `elastic` has no attribute `events`.
             node_state=NodeState.FAILED,
         )
         raise
