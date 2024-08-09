@@ -49,10 +49,17 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
     return Device(DeviceType::CUDA, device);
   }
+#if CUDA_VERSION >= 12000
+  void setDevice(Device d) const override {
+    TORCH_INTERNAL_ASSERT(d.is_cuda());
+    C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(d.index()));
+  }
+#else
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
     C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
+#endif
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
