@@ -217,6 +217,23 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     ]
     return reduceOp not in denyList
 
+'''
+    A utility function to get backend name string from a device object.
+    This API get handy in generalizing code flows.
+    eg. DDP based Multi Process Test cases, Mesh() etc.
+
+    current_device = torch.device('cuda:0')
+    tensor_ = torch.randn(5, device=current_device)
+    get_backend_from_device(tensor_.device) -> returns 'nccl'
+'''
+def get_backend_from_device(device) -> str:
+    if device.type == "cuda":
+        return "nccl"
+    elif device.type == "hpu":
+        return "hccl"
+    else :
+        return "gloo"
+
 
 class Backend(str):
     """
