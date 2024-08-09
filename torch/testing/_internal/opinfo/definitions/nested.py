@@ -205,6 +205,27 @@ def unsupported_reference(op_name):
 
 
 # === BEGIN OP-SPECIFIC SAMPLE INPUTS FUNCS ===
+def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
+    # non-contiguous NJTs
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        yield SampleInput(njt)
+
+    for memory_format in (torch.contiguous_format, torch.preserve_format):
+        # construct a "non-contiguous with holes" NJT
+        values = torch.randn(
+            10, 5, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        offsets = torch.tensor([0, 2, 4, 10], device=device, dtype=torch.int64)
+        lengths = torch.tensor([2, 1, 3], device=device, dtype=torch.int64)
+        njt = torch.nested.nested_tensor_from_jagged(
+            values, offsets=offsets, lengths=lengths
+        )
+
+        yield SampleInput(njt, kwargs={"memory_format": memory_format})
+
+
 def sample_inputs_mvl_gamma(p):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"p": p})
 
@@ -230,6 +251,7 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
+    "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
