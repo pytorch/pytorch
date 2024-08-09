@@ -182,7 +182,16 @@ def _create_c10d_store(
 
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
-        tcp_store = TCPStore(hostname, port, world_size, False, timeout)
+        tcp_store = TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=False,
+            timeout=timeout,
+            # wait_for_workers is a noop when using a shared store with no
+            # master so we can disable it or performance reasons.
+            wait_for_workers=False,
+        )
         return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
     else:
         start_daemon = rank == 0
