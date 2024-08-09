@@ -4,8 +4,8 @@ import torch
 import torch._lazy
 import torch._lazy.ts_backend
 from torch import float16, float32
-
 from torch.testing._internal.common_utils import TestCase
+
 
 torch._lazy.ts_backend.init()
 
