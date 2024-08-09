@@ -103,13 +103,13 @@ class _RNGStateTracker:
     def __init__(self, device_type: str = "cuda"):
         self._device_type = device_type
         self._device_handle = _get_device_handle(device_type)
-        if not (self._device_handle and self._device_handle.is_available()):
+        if not (self._device_handle and torch.is_available(device_type)):
             raise RuntimeError(
                 f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
             )
 
         self._states: Dict[str, Tensor] = {}
-        self._devices = [self._device_handle.current_device()]
+        self._devices = [torch.current_device(device_type)]
         self._use_distribute_region = True
 
     @property
@@ -155,6 +155,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     def __init__(self, device_type: str = "cuda"):
         super().__init__(device_type)
         # synchronize RNG state using rank 0's current one
+        # delete this comment: can't handle get_rng_state()
         rng_state = self._device_handle.get_rng_state().to(device_type)
         dist.broadcast(rng_state, 0)
         self.rng_states["parallel-rng"] = rng_state.to("cpu")
@@ -175,6 +176,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
             with torch.random.fork_rng(self._devices, device_type=self._device_type):
+                # Delete this comment: can't handle set_rng_state
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
                     yield  # execute the region code
