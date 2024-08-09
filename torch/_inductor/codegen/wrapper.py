@@ -32,6 +32,7 @@ import torch
 import torch._ops
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -530,6 +531,11 @@ class WrapperCodeGen(CodeGen):
         self._metas: Dict[str, str] = {}
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
+
+        # intermediate tensor value printing utility
+        self.debug_printer = DebugPrinterManager(
+            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+        )
 
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")

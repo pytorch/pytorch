@@ -1724,10 +1724,14 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
 
-        log.debug(
-            "Finished codegen for all nodes. The list of kernel names available: %s",
-            V.graph.all_codegen_kernel_names,
-        )
+        if "cuda" in self.device_types and not self.cpp_wrapper:
+            # do nothing - we print the list of all kernel names in the second pass for cuda/gpu case
+            pass
+        else:
+            output_code_log.debug(
+                "Finished codegen for all nodes. The list of kernel names available: %s",
+                V.graph.all_codegen_kernel_names,
+            )
 
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
