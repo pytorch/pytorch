@@ -528,7 +528,10 @@ def instantiate_parametrized_tests(generic_cls):
             def instantiated_test(self, param_kwargs=param_kwargs):
                 test(self, **param_kwargs)
 
-            assert name not in generic_cls.__dict__, f"Redefinition of test {name}"
+            if hasattr(generic_cls, name):
+                delattr(generic_cls, name)
+
+            assert not hasattr(generic_cls, name), f"Redefinition of test {name}"
             setattr(generic_cls, name, instantiated_test)
 
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
