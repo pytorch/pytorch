@@ -1,24 +1,19 @@
 from typing import Optional, Sequence
 
 import torch
-
 import torch.distributed._tensor.random as random
-
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import (
-    Placement,
-    Replicate,
-)
 from torch.distributed._tensor.ops.utils import normalize_to_torch_size
+from torch.distributed._tensor.placement_types import Placement, Replicate
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
 
-def _dtensor_init_helper(
+def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
-    device_mesh=None,
-    placements=None,
+    device_mesh: Optional[DeviceMesh] = None,
+    placements: Optional[Sequence[Placement]] = None,
     **kwargs,
 ) -> DTensor:
     from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
@@ -49,7 +44,7 @@ def _dtensor_init_helper(
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
         tensor_meta = TensorMeta(size, (0,), dtype)
-        spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
+        spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
             random._rng_tracker = random.OffsetBasedRNGTracker()
@@ -77,7 +72,7 @@ def _dtensor_init_helper(
     )
 
 
-def ones(
+def ones(  # type: ignore[no-untyped-def]
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
@@ -120,7 +115,7 @@ def ones(
     )
 
 
-def empty(
+def empty(  # type: ignore[no-untyped-def]
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
@@ -163,7 +158,7 @@ def empty(
     )
 
 
-def full(
+def full(  # type: ignore[no-untyped-def]
     size,
     fill_value,
     *,
@@ -210,7 +205,7 @@ def full(
     )
 
 
-def rand(
+def rand(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
     dtype: Optional[torch.dtype] = None,
@@ -254,7 +249,7 @@ def rand(
     )
 
 
-def randn(
+def randn(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
     dtype: Optional[torch.dtype] = None,
@@ -298,7 +293,7 @@ def randn(
     )
 
 
-def zeros(
+def zeros(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
     dtype: Optional[torch.dtype] = None,
