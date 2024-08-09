@@ -531,7 +531,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             root_state._lazy_init()
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_reset_sharded_param(self):
+    def test_reset_sharded_param_in_lazy_init(self):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
