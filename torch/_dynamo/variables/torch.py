@@ -767,6 +767,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx.symbolic_torch_function_mode_stack.appendleft(args[0])
             return ConstantVariable.create(None)
 
+        @register(torch._C._len_torch_function_stack)
+        def handle_len_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
+
         return handlers
 
     def call_function(

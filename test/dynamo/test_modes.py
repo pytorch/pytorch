@@ -136,6 +136,19 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(_len_torch_function_stack(), 0)
 
+    def test_len_torch_function_mode(self):
+        m = BaseTorchFunctionMode()
+        with m:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                z = _len_torch_function_stack()
+                return x + z
+
+            res = fn(torch.ones(2, 2))
+            self.assertEqual(res, torch.ones(2, 2) + 1)
+            self.assertEqual(_len_torch_function_stack(), 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
