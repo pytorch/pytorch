@@ -702,10 +702,14 @@ PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
+#ifndef USE_FLASH_ATTENTION
+  Py_RETURN_FALSE;
+#else
   if (at::globalContext().userEnabledFlashSDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+#endif
 }
 PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -719,10 +723,14 @@ PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
+#ifndef USE_MEM_EFF_ATTENTION
+  Py_RETURN_FALSE;
+#else
   if (at::globalContext().userEnabledMemEfficientSDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+#endif
 }
 PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
