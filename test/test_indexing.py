@@ -1538,6 +1538,31 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
+    @dtypes(torch.float)
+    def test_put_along_dim(self, device, dtype):
+        def _test_against_numpy(t, indices, values, dim):
+            actual = torch.put_along_dim(t, indices, values, dim)
+            t_np = t.cpu().numpy()
+            indices_np = indices.cpu().numpy()
+            values_np = values.cpu().numpy()
+            # performs operation in-place
+            np.put_along_axis(t_np, indices_np, values_np, dim)
+            self.assertEqual(actual, t_np, atol=0, rtol=0)
+
+        t = torch.tensor([[10, 30, 20], [60, 40, 50]], dtype=dtype)
+        indices = torch.tensor([[1], [0]])
+        values = torch.tensor([[-1], [-2]], dtype=dtype)
+        _test_against_numpy(t, indices, values, 1)
+        _test_against_numpy(t, indices, values, 0)
+
+        indices = torch.tensor([[1, 0]])
+        values = torch.tensor([[-1, -2]], dtype=dtype)
+        _test_against_numpy(t, indices, values, 1)
+
+        indices = torch.tensor([1, 0])
+        values = torch.tensor([-1, -2], dtype=dtype)
+        _test_against_numpy(t, indices, values, None)
+
     @onlyCUDA
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):

@@ -2223,6 +2223,44 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, std::optio
   return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
+namespace {
+
+inline std::tuple<Tensor, Tensor> _put_along_dim_helper(const Tensor& self, const Tensor& indices, const Tensor& values, int64_t dim) {
+  auto new_indices_sizes = DimVector(self.sizes());
+  new_indices_sizes[dim] = indices.size(dim);
+  auto new_indices = at::broadcast_to(indices, new_indices_sizes);
+  auto new_values = at::broadcast_to(values, new_indices_sizes);
+  return std::make_tuple(new_indices, new_values);
+}
+}
+
+Tensor put_along_dim(
+    const Tensor& self,
+    const Tensor& indices,
+    const Tensor& values,
+    c10::optional<int64_t> opt_dim) {
+  checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
+  if (opt_dim.has_value()) {
+    auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
+    return at::scatter(self, opt_dim.value(), new_indices, new_values);
+  } else {
+    TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
+    return self.put(indices, values);
+  }
+}
+
+Tensor& put_along_dim_out(const Tensor& self, const Tensor& indices, const Tensor& values, c10::optional<int64_t> opt_dim, Tensor& result) {
+  checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
+  if (opt_dim.has_value()) {
+    auto [new_indices, new_values] = _put_along_dim_helper(self, indices, values, opt_dim.value());
+    at::scatter_out(result, self, opt_dim.value(), new_indices, new_values);
+  } else {
+    TORCH_CHECK(indices.dim() == 1, "when axis=None, `indices` must have a single dimension");
+    at::put_out(result, self, indices, values);
+  }
+  return result;
+}
+
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
     if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(at::empty_symint({0,grad.sym_numel()}, index.options()), grad, self.sym_sizes());
