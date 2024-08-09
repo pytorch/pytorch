@@ -1841,11 +1841,16 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         "profiling out of range",
                     )
 
-    def _schedule_helper(self, warmup, active, repeat):
+    def _schedule_helper(self, warmup, active, repeat, acc_events=True):
         with profile(
             schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
-            )
+                skip_first=0,
+                wait=0,
+                warmup=warmup,
+                active=active,
+                repeat=repeat,
+            ),
+            acc_events=acc_events,
         ) as prof:
             for i in range(100):
                 torch.add(1, 2)
@@ -1863,6 +1868,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
         self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
         self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+        self.assertEqual(
+            self._schedule_helper(warmup=0, active=5, repeat=0, acc_events=False), 0
+        )
+        self.assertEqual(
+            self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
+        )
 
     def _step_helper_func(self, prof):
         time.sleep(0.1)
