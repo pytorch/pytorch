@@ -55,7 +55,33 @@ bool binary_valid(
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose);
+    const at::Tensor& weight);
+
+dnnl::memory::format_tag conv_src_fmt(
+    const int64_t ndim,
+    const bool is_channels_last = false);
+
+dnnl::memory::dims compatible_weight_dims(
+    const int64_t ndim,
+    const int64_t groups,
+    const int64_t oc,
+    const int64_t ic,
+    const IntArrayRef wsizes);
+
+// dnnl::memory::dims compatible_dilation(IntArrayRef& dilation);
+
+dnnl::memory::format_tag conv_weight_fmt(
+    const int64_t ndim,
+    const bool grouped = false,
+    const bool is_channels_last = false);
+
+template <typename Vec>
+dnnl::memory::dims compatible_dilation(Vec&& dilation){
+    dnnl::memory::dims ret = dilation.vec();
+    for(auto it = ret.begin(); it != ret.end(); it++){
+        *it -=1;
+    }
+    return ret;
+}
 
 } // namespace at::native::onednn
