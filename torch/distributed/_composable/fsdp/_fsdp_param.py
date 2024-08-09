@@ -11,7 +11,12 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+from torch.distributed._tensor.placement_types import (
+    _StridedShard,
+    DTensorSpec,
+    Placement,
+    TensorMeta,
+)
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -281,8 +286,13 @@ class FSDPParam:
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
+            split_factor = self._tp_spec.num_shards_map[0]
             self._spmd_placements: Tuple[Placement, ...] = (
-                Shard(0),
+                (
+                    _StridedShard(0, split_factor=split_factor)
+                    if split_factor > 1
+                    else Shard(0)
+                ),
                 self._tp_spec.placements[0],
             )
             self._sharding_spec = DTensorSpec(
@@ -290,6 +300,18 @@ class FSDPParam:
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
             )
+            # NOTE: FSDP+TP does not support uneven sharding for now
+            # TODO: enable uneven sharding for FSDP+TP
+            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
+                num_shards = self._sharding_spec.num_shards_map[0]
+                tensor_size_dim_0 = self._sharding_spec.shape[0]
+                if tensor_size_dim_0 % num_shards != 0:
+                    raise NotImplementedError(
+                        "FSDP+TP sharding does not support uneven sharding for now: "
+                        f"tensor dim 0 has size {tensor_size_dim_0} which cannot be "
+                        f"evenly sharded into {num_shards} shards."
+                    )
+
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
