@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
+import os
 from itertools import chain, count
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 import sympy
 
@@ -11,12 +12,12 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
 from ..codecache import CudaKernelParamCache
+from ..utils import DeferredLineBase
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
 from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .triton_utils import DeferredCudaKernelLine
 from .wrapper import SymbolicCallArg
 
 
@@ -24,12 +25,48 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
+class DeferredCudaKernelLine(DeferredLineBase):
+    """
+    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    to be tuned and stored as cubin files, so use a deferred line to backfill those information
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        line_template: str,
+        keys: Tuple[str, ...],
+    ):
+        super().__init__(line_template)
+        assert not isinstance(line_template, DeferredLineBase)
+        self.kernel_name = kernel_name
+        self.line_template = line_template
+        self.keys = keys
+
+    def __call__(self):
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        for key in self.keys:
+            assert (
+                key in params
+            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            if key == get_cpp_wrapper_cubin_path_name():
+                assert os.path.exists(params[key]), f"{params[key]} does not exist"
+
+        return self.line_template % tuple(params[key] for key in self.keys)
+
+    def _new_line(self, line):
+        return DeferredCudaKernelLine(self.kernel_name, line, self.keys)
+
+
 class CppWrapperCuda(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
@@ -153,7 +190,18 @@ class CppWrapperCuda(CppWrapperCpu):
                             var_name,
                         )
                     else:
-                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                        from torch import bfloat16, float16
+
+                        if arg_type in (float16, bfloat16):
+                            var_name_tmp = f"{var_name}_tmp"
+                            self.writeline(
+                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
+                            )
+                            self.writeline(f"float {var_name} = float({var_name_tmp});")
+                        else:
+                            self.writeline(
+                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
+                            )
                 else:
                     if config.abi_compatible:
                         self.writeline(
@@ -178,16 +226,27 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(self, name: str, grid: List[Any], cuda: bool = True):
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwargs,
+    ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics.
         """
         if not cuda:
             return grid
-        assert isinstance(grid, list), f"expected {grid=} to be a list"
+        assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
-        grid_fn = default_grid(*grid)
+        grid_callable = grid_callable or default_grid
+        if not grid_extra_kwargs:
+            grid_fn = grid_callable(*grid)
+        else:
+            grid_fn = grid_callable(*grid, **grid_extra_kwargs)
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
@@ -211,6 +270,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
