@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <thread>
+#include <chrono>
 
 #include <ATen/xpu/XPUEvent.h>
 #include <c10/util/irange.h>
@@ -101,4 +103,83 @@ TEST(XpuEventTest, testXPUEventFunction) {
   c10::xpu::set_device(1);
   auto stream1 = c10::xpu::getStreamFromPool();
   ASSERT_THROW(event.record(stream1), c10::Error);
+}
+
+TEST(XpuEventTest, testXPUElapsedTime) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  auto stream = c10::xpu::getStreamFromPool();
+  at::xpu::XPUEvent startEvent(/*enable_timing=*/true);
+  startEvent.recordOnce(stream);
+  stream.synchronize();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  at::xpu::XPUEvent endEvent(/*enable_timing=*/true);
+  endEvent.recordOnce(stream);
+  stream.synchronize();
+
+  auto elapsed_time = startEvent.elapsed_time(endEvent);
+  EXPECT_GT(elapsed_time, float(0));
+}
+
+TEST(XpuEventTest, testXPUElapsedTimeDifferentStreams) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  auto stream0 = c10::xpu::getStreamFromPool();
+  at::xpu::XPUEvent startEvent(/*enable_timing=*/true);
+  startEvent.recordOnce(stream0);
+  stream0.synchronize();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  auto stream1 = c10::xpu::getStreamFromPool();
+  at::xpu::XPUEvent endEvent(/*enable_timing=*/true);
+  endEvent.recordOnce(stream1);
+  stream1.synchronize();
+
+  auto elapsed_time = startEvent.elapsed_time(endEvent);
+  EXPECT_GT(elapsed_time, float(0));
+}
+
+TEST(XpuEventTest, testXPUElapsedTimeNotEnabled) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  auto stream = c10::xpu::getStreamFromPool();
+  at::xpu::XPUEvent startEvent(/*enable_timing=*/false);
+  startEvent.recordOnce(stream);
+  stream.synchronize();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  at::xpu::XPUEvent endEvent(/*enable_timing=*/true);
+  endEvent.recordOnce(stream);
+  stream.synchronize();
+
+  EXPECT_ANY_THROW(startEvent.elapsed_time(endEvent));
+}
+
+TEST(XpuEventTest, testXPUElapsedTimeHighPriorityNotEnabled) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  auto stream = c10::xpu::getStreamFromPool(/*high_priority=*/true);
+  at::xpu::XPUEvent startEvent(/*enable_timing=*/true);
+  startEvent.recordOnce(stream);
+  stream.synchronize();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  at::xpu::XPUEvent endEvent(/*enable_timing=*/true);
+  endEvent.recordOnce(stream);
+  stream.synchronize();
+
+  EXPECT_ANY_THROW(startEvent.elapsed_time(endEvent));
 }
