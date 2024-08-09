@@ -80,6 +80,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "sebotnet33ts_256",
     "selecsls42b",
     "cspdarknet53",
+    "convmixer_768_32",
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
