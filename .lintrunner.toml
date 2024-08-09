@@ -178,6 +178,7 @@ exclude_patterns = [
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
+    'benchmarks/**'
 ]
 command = [
     'python3',
