@@ -2413,6 +2413,62 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(out, expected)
 
     @requires_gpu
+    def test_capture_triton_disabled_in_triton_op(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        add_kernel_decorated = torch._library.capture_triton(add_kernel)
+
+        status = []
+
+        @torch._library.triton_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            import torch._higher_order_ops.triton_kernel_wrap
+
+            status.append(torch._library.triton.is_capture_triton_enabled())
+
+            # capture_triton should return the kernel directly if disabled
+            result = torch._library.capture_triton(add_kernel)
+            self.assertIs(result, add_kernel)
+
+            # Smoke test: check that with capture_triton disabled this still does something
+            output = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_decorated[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
+            add_kernel_decorated.run(
+                x, y, output2, n_elements, BLOCK_SIZE=16, grid=grid, warmup=False
+            )
+
+            return output + output2
+
+        x = torch.randn(3, device=GPU_TYPE)
+        y = torch.randn(3, device=GPU_TYPE)
+        z = add(x, y)
+        self.assertEqual(status[-1], False)
+        self.assertEqual(z, (x + y) * 2)
+
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotune", [False, True])
     def test_capture_triton_special_kwargs(self, dynamic, autotune):

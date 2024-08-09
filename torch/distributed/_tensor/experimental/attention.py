@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import collections
 import contextlib
-import importlib
 import itertools
 import logging
 import types
@@ -11,7 +9,6 @@ from enum import Enum
 from typing import (
     Any,
     Callable,
-    DefaultDict,
     Dict,
     Generator,
     List,
@@ -34,6 +31,9 @@ from torch.distributed.tensor.parallel.style import ParallelStyle
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+# Whether to upcast parameters and gradients to float32 to avoid accumulation
+# errors. It is likely this is always True but we currently keep this variable
+# for the experimental purpose.
 _convert_to_f32 = True
 
 
@@ -372,9 +372,10 @@ def _templated_ring_attention_backward(
     rest: List[Any]
     grad_query_, grad_key_, grad_value_ = None, None, None
 
-    grad_query = torch.zeros_like(query, dtype=torch.float32)
-    grad_key = torch.zeros_like(key, dtype=torch.float32)
-    grad_value = torch.zeros_like(value, dtype=torch.float32)
+    accum_dtype = torch.float32 if _convert_to_f32 else query.dtype
+    grad_query = torch.zeros_like(query, dtype=accum_dtype)
+    grad_key = torch.zeros_like(key, dtype=accum_dtype)
+    grad_value = torch.zeros_like(value, dtype=accum_dtype)
 
     key = key.contiguous()
     value = value.contiguous()
@@ -407,9 +408,9 @@ def _templated_ring_attention_backward(
                 **kwargs,
             )
         else:
-            grad_query_ = torch.zeros_like(query)
-            grad_key_ = torch.zeros_like(key)
-            grad_value_ = torch.zeros_like(value)
+            grad_query_ = torch.zeros_like(query, dtype=accum_dtype)
+            grad_key_ = torch.zeros_like(key, dtype=accum_dtype)
+            grad_value_ = torch.zeros_like(value, dtype=accum_dtype)
 
         # Get the grad key and grad value for the i round.
         if i > 0:
@@ -533,20 +534,81 @@ customized_ops = {
 }
 
 
-# Following experimental APIs allow users to enable CP.
+_replaced_functions: Dict[Callable, Tuple[str, Callable]] = {}
+
+
+def _distribute_function(
+    fn: Callable,
+    fn_module: types.ModuleType,
+    device_mesh: DeviceMesh,
+    input_fn: Optional[Callable] = None,
+    output_fn: Optional[Callable] = None,
+) -> None:
+    """
+    ``distribute_function`` is an experimental API that allows users to "distribute"
+    the inputs and outputs of a function. Similar to ``distribute_module``, this API
+    installs hooks to the ``fn`` to convert the inputs and outputs. There are two
+    major differences between ``distribute_function`` and ``distribute_module``.
+    First, a function does not have parammeters and buffers, as a result,
+    ``distribute_function`` itself won't convert any tensors but simply install the
+    input and output hooks.  The tnesor conversion will happen in the hooks.
+    Another difference is an nn.Module subclass can have several instances and each
+    instance be fed into ``distribute_module`` independently with affecting other
+    instance. On the other hand, function is a singleton object. So if a function
+    is distributed by ``distribute_function`` all subsequent calls to the function
+    will invoke the installed hooks.
+
+    Args:
+        fn (Callable): the function to be distributed.
+        fn_module (types.ModuleType): the Python module that the function is declared.
+            e.g., if ``fn`` is ``torch.nn.functional.scaled_dot_product_attention``,
+            ``fn_module`` is ``torch.nn.functional``.
+        device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
+            input and output hooks to distribute the tensors.
+        input_fn (Optioinal[Callable]): the hook to distribute or convert the input
+            arguments of ``fn``.
+        output_fn (Optioinal[Callable]): the hook to distribute or convert the output
+            arguments of ``fn``.
+    """
+
+    def wrapper(
+        target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
+    ) -> Callable:
+        def inner_fn(*args: Tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
+            if input_fn is not None:
+                args, kwargs = input_fn(device_mesh, *args, **kwargs)
+            output = target_fn(*args, **kwargs)
+            if output_fn is not None:
+                output = output_fn(device_mesh, output)
+            return output
+
+        return inner_fn
+
+    global _replaced_functions
+
+    if fn in _replaced_functions:
+        return
+
+    wrapper_fn = wrapper(fn, input_fn, output_fn)
+    setattr(fn_module, fn.__name__, wrapper_fn)
+    _replaced_functions[wrapper_fn] = (fn.__name__, fn)
+
+
+def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
+    """Restore the function that is replaced by _distribute_function."""
+    global _original_functions
+    global _wrapper_functions
+
+    if fn not in _replaced_functions:
+        return
+
+    original_name, original_fn = _replaced_functions[fn]
+    setattr(fn_module, original_name, original_fn)
 
 
 @contextlib.contextmanager
-def attention_context_parallel() -> Generator[None, None, None]:
-    """
-    This is a context manager that force enables attention context parallel
-    optimizations for all scaled_dot_product_attention ops.
-
-    This currently only supports ring attention and the
-    SDPBackend.FLASH_ATTENTION backend. See sdpa_kernel.
-
-    Non-flash attention backends will result in incorrect results.
-    """
+def _enable_cp_dispatcher() -> Generator[None, None, None]:
+    """Enables DTensor dispatcher to dispatch SDPA to CP."""
     old_handlers = DTensor._op_dispatcher._custom_op_handlers
     DTensor._op_dispatcher._custom_op_handlers = {**old_handlers, **customized_ops}
 
@@ -555,7 +617,7 @@ def attention_context_parallel() -> Generator[None, None, None]:
     DTensor._op_dispatcher._custom_op_handlers = old_handlers
 
 
-class AttentionContextParallel(ParallelStyle):
+class _AttentionContextParallel(ParallelStyle):
     """
     Applies context parallel optimizations to the attention layer.
 
@@ -622,7 +684,7 @@ class AttentionContextParallel(ParallelStyle):
 
             inp.append(input)
 
-        manager = attention_context_parallel()
+        manager = _enable_cp_dispatcher()
         manager.__enter__()
         cls._CONTEXT_MANAGERS[module] = manager
 
@@ -642,7 +704,7 @@ class AttentionContextParallel(ParallelStyle):
 
         def backward_hook(grad: torch.Tensor) -> None:
             if module not in cls._CONTEXT_MANAGERS:
-                manager = attention_context_parallel()
+                manager = _enable_cp_dispatcher()
                 manager.__enter__()
                 cls._CONTEXT_MANAGERS[module] = manager
 
@@ -662,125 +724,19 @@ class AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
-_original_functions: Dict[Callable, Callable] = {}
-_wrapper_functions: Dict[Callable, Callable] = {}
-_replaced_objs: DefaultDict[
-    Callable, Set[Tuple[types.ModuleType, str]]
-] = collections.defaultdict(set)
-
-
-def _distribute_function(
-    fn: Callable,
-    fn_module: types.ModuleType,
-    fn_callers: List[nn.Module],
-    device_mesh: DeviceMesh,
-    input_fn: Optional[Callable] = None,
-    output_fn: Optional[Callable] = None,
-) -> None:
-    """
-    ``distribute_function`` is an experimental API that allows users to "distribute"
-    the inputs and outputs of a function. Similar to ``distribute_module``, this API
-    installs hooks to the ``fn`` to convert the inputs and outputs. There are two
-    major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parammeters and buffers, as a result,
-    ``distribute_function`` itself won't convert any tensors but simply install the
-    input and output hooks.  The tnesor conversion will happen in the hooks.
-    Another difference is an nn.Module subclass can have several instances and each
-    instance be fed into ``distribute_module`` independently with affecting other
-    instance. On the other hand, function is a singleton object. So if a function
-    is distributed by ``distribute_function`` all subsequent calls to the function
-    will invoke the installed hooks.
-
-    Args:
-        fn (Callable): the function to be distributed.
-        fn_module (types.ModuleType): the Python module that the function is declared.
-            e.g., if ``fn`` is ``torch.nn.functional.scaled_dot_product_attention``,
-            ``fn_module`` is ``torch.nn.functional``.
-        fn_callers (nn.Module): the nn.Module that calls ``fn``.
-        device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
-            input and output hooks to distribute the tensors.
-        input_fn (Optioinal[Callable]): the hook to distribute or convert the input
-            arguments of ``fn``.
-        output_fn (Optioinal[Callable]): the hook to distribute or convert the output
-            arguments of ``fn``.
-    """
-
-    def wrapper(
-        target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
-    ) -> Callable:
-        def inner_fn(*args: Tuple[Any, ...], **kwargs: Dict[str, Any]) -> Any:
-            if input_fn is not None:
-                args, kwargs = input_fn(device_mesh, *args, **kwargs)
-            output = target_fn(*args, **kwargs)
-            if output_fn is not None:
-                output = output_fn(device_mesh, output)
-            return output
-
-        return inner_fn
-
-    def setattr_(
-        module: types.ModuleType, obj_name: str, obj: Any, new_obj: Any
-    ) -> None:
-        setattr(module, obj_name, new_obj)
-        global _replaced_objs
-        _replaced_objs[obj].add((module, obj_name))
-
-    global _original_functions
-    global _wrapper_functions
-    if fn in _original_functions:
-        wrapper_func = _original_functions[fn]
-        original_func = fn
-    elif fn in _wrapper_functions:
-        wrapper_func = fn
-        original_func = _wrapper_functions[fn]
-    else:
-        original_func = fn
-        wrapper_func = wrapper(fn, input_fn, output_fn)
-        setattr_(fn_module, fn.__name__, fn, wrapper_func)
-
-    for nn_module in fn_callers:
-        fn_caller_module = importlib.import_module(nn_module.__module__)
-        for obj_name in dir(fn_caller_module):
-            obj = getattr(fn_caller_module, obj_name)
-            if obj == original_func:
-                setattr_(fn_caller_module, obj_name, obj, wrapper_func)
-
-
-def enable_context_parallel(
-    seq_dim: int,
-    callers: List[nn.Module],
-    device_mesh: DeviceMesh,
-) -> None:
-    """
-    This is an experimental API to enable context parallelism for
-    ``torch.nn.functional.scaled_dot_product_attention``. This API assumes
-    that the q, k, v are already sharded on the ``seq_dim`` dimension and
-    will install hook to convert the q, k, v to the DTensors.
-
-    This API will change ``scaled_dot_product_attention`` in ``torch.nn.functional``
-    (short as ``F``) to a wrapped function. So any subsequent call to
-    ``F.scaled_dot_product_attention`` will be redirected to the wrapped function.
-
-    Note that it is important to include all the modules that call SDPA in the
-    ``callers`` list. This can avoid the incorrect wrapping if the model code uses
-    ``from ... import ..." to import SDPA.
-
-    Args:
-        seq_dim (int): the sequence dimension for q, k, v.
-        callers (List[nn.Module]): the nn.Modules that call ``scaled_dot_product_attention``.
-        device_mesh (:class:`DeviceMesh`, optional): the device mesh for context
-            parallelism.
-    """
+@contextlib.contextmanager
+def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
+    """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
-        device_mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: Dict[str, Any]
+        mesh: DeviceMesh, *args: Tuple[Any, ...], **kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         placement = [Shard(seq_dim)]
         all_args = []
 
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                arg = DTensor.from_local(arg, device_mesh, placement, run_check=False)
+                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
 
             all_args.append(arg)
 
@@ -788,7 +744,7 @@ def enable_context_parallel(
         new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
         return new_args, new_kwargs
 
-    def attention_output_fn(device_mesh: DeviceMesh, outputs: Any) -> Any:
+    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
             output = output.to_local() if isinstance(output, DTensor) else output
@@ -799,16 +755,22 @@ def enable_context_parallel(
 
         return tuple(new_outputs)
 
-    old_handlers = DTensor._op_dispatcher._custom_op_handlers
-    DTensor._op_dispatcher._custom_op_handlers = {**old_handlers, **customized_ops}
+    # TODO: provide a more robust way to replace SDPA.
+    # Currently we use monkey patch to replace scaled_dot_product_attention with the
+    # wrapped fn. This is okay if users do `import torch.nn.functional` but will not
+    # work if users do `import torch.nn.functional.scaled_dot_product_attention`.
     _distribute_function(
         F.scaled_dot_product_attention,
         F,
-        callers,
-        device_mesh,
+        mesh,
         attention_input_fn,
         attention_output_fn,
     )
+
+    with _enable_cp_dispatcher():
+        yield
+
+    _restore_function(F.scaled_dot_product_attention, F)
 
 
 def _get_sequence_shard(
@@ -817,43 +779,81 @@ def _get_sequence_shard(
     return buffer.chunk(mesh.size(), dim=seq_dim)[mesh.get_local_rank()]
 
 
+def _context_parallel_buffers(
+    mesh: DeviceMesh,
+    buffers: List[torch.Tensor],
+    buffer_seq_dims: List[int],
+) -> List[torch.Tensor]:
+    """Shard the buffers along the sequence dimensions according to CP rules."""
+    new_buffers = []
+    for buffer, seq_dim in zip(buffers, buffer_seq_dims):
+        new_buffers.append(_get_sequence_shard(buffer, mesh, seq_dim))
+
+    return new_buffers
+
+
 @contextlib.contextmanager
 @torch.no_grad()
-def context_parallel_buffers(
-    mesh: Optional[DeviceMesh],
-    buffers: List[torch.Tensor],
-    seq_dims: List[int],
-    restore_funcs: Optional[Tuple[Optional[Callable]]] = None,
-) -> Generator[List[torch.Tensor], None, None]:
-    if mesh is None:
-        yield buffers
-        return
+def context_parallel(
+    mesh: DeviceMesh,
+    *,
+    buffers: Optional[List[torch.Tensor]] = None,
+    buffer_seq_dims: Optional[List[int]] = None,
+    no_restore_buffers: Optional[Set[torch.Tensor]] = None,
+) -> Generator[None, None, None]:
+    """
 
-    restore_funcs_tuple = (
-        [None for _ in buffers] if restore_funcs is None else restore_funcs
-    )
-    original_buffers = []
+    ``context_parallel`` is an experimental API to enable context
+    parallelism (CP). This API performs two actions: 1) patch the SDPA
+    (``torch.nn.functional.scaled_dot_product_attention``) with the CP-enabled
+    one, 2) shard ``buffers`` along the sequence dimension and each rank will
+    preserve the corresponding shard according ``mesh``.
 
-    if len(buffers) != len(seq_dims):
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (Optional[List[torch.Tensor]]): buffers that the usage depend
+            on the sequence dimension. Examples are input batch, labels and
+            positional embedding buffers. These buffers must be sharded along
+            the sequence dimension to ensure the accuracy. The sharding will
+            happen in-place, the buffer's shape will change within the context.
+            The buffers will be restored after the context finishes.
+            ``no_restore_buffers`` can be used to specify which buffers don't
+            need to be restored. Note that ``buffers`` should not contain any
+            nn.Parameter.
+        buffer_seq_dims (Optional[List[int]]): the sequence dimensions of ``buffers``.
+        no_restore_buffers (Optional[Set[torch.Tensor]]): buffers in these set
+            won't be restored after the context exists. This set must be a subset
+            of ``buffers``.
+
+    .. warning::
+        `torch.distributed._tensor.experimental.attention.context_parall` is a
+        prototype feature in PyTorch. The API is subject to change.
+    """
+    buffers = [] if buffers is None else buffers
+    buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
+    no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
+
+    if len(buffers) != len(buffer_seq_dims):
         raise ValueError(
             "`seq_dims` must have the same number of elements as `buffers`."
         )
 
-    if len(restore_funcs_tuple) != len(buffers):
-        raise ValueError(
-            "`restore_funcs_tuple` must be either None or have the same "
-            "number of as `buffers`."
-        )
+    for buffer in no_restore_buffers:
+        if buffer not in buffers:
+            raise ValueError("`no_restore_buffers` must be a subset of `buffers`.")
 
-    assert mesh is not None
-    new_buffers = []
-    for buffer, seq_dim, restore_func in zip(buffers, seq_dims, restore_funcs_tuple):
-        original_buffers.append(buffer if restore_func else None)
-        new_buffers.append(_get_sequence_shard(buffer, mesh, seq_dim))
+    original_buffers = [None if b in no_restore_buffers else b.clone() for b in buffers]
 
-    yield new_buffers
+    chunks = _context_parallel_buffers(mesh, buffers, buffer_seq_dims)
+    for buffer, chunk in zip(buffers, chunks):
+        chunk = chunk.clone()
+        buffer.resize_(chunk.shape)
+        buffer.copy_(chunk)
 
-    for original_buffer, restore_func in zip(original_buffers, restore_funcs_tuple):
+    with _context_parallel(seq_dim=2, mesh=mesh):
+        yield
+
+    for buffer, original_buffer in zip(buffers, original_buffers):
         if original_buffer is not None:
-            assert restore_func is not None
-            restore_func(original_buffer)
+            buffer.resize_(original_buffer.shape)
+            buffer.copy_(original_buffer)

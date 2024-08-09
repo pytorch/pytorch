@@ -1366,7 +1366,7 @@ class ExportedProgramSerializer(metaclass=Final):
         Args:
             exported_program: Exported Program to serialize
         """
-        exported_program._validate()
+        exported_program.validate()
 
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature, exported_program.module_call_graph

@@ -9,11 +9,11 @@ from torch import nn
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental.attention import (
+    _AttentionContextParallel,
     _CausalBehavior,
+    _context_parallel_buffers,
     _is_causal_behavior,
-    AttentionContextParallel,
-    context_parallel_buffers,
-    enable_context_parallel,
+    context_parallel,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -108,15 +108,21 @@ class RingAttentionTest(DTensorTestBase):
             out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
             out.sum().backward()
 
-        with context_parallel_buffers(
-            device_mesh, (out, q.grad, k.grad, v.grad), (2, 2, 2, 2)
-        ) as local_buffers:
-            local_out, local_dq, local_dk, local_dv = local_buffers
+        local_out, local_dq, local_dk, local_dv = _context_parallel_buffers(
+            device_mesh,
+            buffers=(out, q.grad, k.grad, v.grad),
+            buffer_seq_dims=(2, 2, 2, 2),
+        )
 
-        enable_context_parallel(2, [], device_mesh)
-        with context_parallel_buffers(device_mesh, (q, k, v), (2, 2, 2)) as cp_buffers:
-            cp_q, cp_k, cp_v = cp_buffers
-
+        cp_q = q.clone().detach()
+        cp_k = k.clone().detach()
+        cp_v = v.clone().detach()
+        # cp_q.requires_grad = False
+        # cp_k.requires_grad = False
+        # cp_v.requires_grad = False
+        with context_parallel(
+            device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
+        ):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
             cp_v.requires_grad = True
@@ -161,6 +167,13 @@ class RingAttentionTest(DTensorTestBase):
             self.assertTrue(torch.allclose(local_dq, cp_q.grad, atol=atol))
             self.assertTrue(torch.allclose(local_dk, cp_k.grad, atol=atol))
             self.assertTrue(torch.allclose(local_dv, cp_v.grad, atol=atol))
+
+            cp_q.grad = None
+            cp_k.grad = None
+            cp_v.grad = None
+            cp_q.requires_grad = False
+            cp_k.requires_grad = False
+            cp_v.requires_grad = False
 
     def test_is_causal_behavior(self) -> None:
         self.assertEqual(
@@ -208,7 +221,7 @@ class RingAttentionTest(DTensorTestBase):
             module=encoder_layer,
             device_mesh=device_mesh,
             parallelize_plan={
-                "self_attn": AttentionContextParallel(),
+                "self_attn": _AttentionContextParallel(),
             },
         )
         model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
@@ -263,7 +276,7 @@ class RingAttentionTest(DTensorTestBase):
             module=model,
             device_mesh=device_mesh,
             parallelize_plan={
-                f"layers.{i}.attention": AttentionContextParallel()
+                f"layers.{i}.attention": _AttentionContextParallel()
                 for i in range(args.n_layers)
             },
         )
