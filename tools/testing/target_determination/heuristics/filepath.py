@@ -27,6 +27,7 @@ keyword_synonyms: dict[str, list[str]] = {
     "ops": ["opinfo"],
     "hop": ["higher_order_op"],
     "aot": ["flex_attention", "autograd"],
+    "inductor": ["dynamo", "export"],  # not actually synonyms but they interact a lot
 }
 
 not_keyword = [

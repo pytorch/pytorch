@@ -18,9 +18,9 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _tree_map
+from torch.export.dynamic_shapes import _tree_map_with_path
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -37,6 +37,7 @@ from torch.utils._pytree import (
     SequenceKey,
     tree_map_with_path,
 )
+
 
 if TYPE_CHECKING:
     from sympy import Symbol
@@ -94,22 +95,6 @@ def fakify(
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
-
-
-def make_fake_params_buffers(
-    fake_mode: FakeTensorMode,
-    params_buffers: Dict[str, torch.Tensor],
-) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
-    faked_params_buffers = {}
-    memo: Dict[int, FakeTensor] = {}
-    for key, value in params_buffers.items():
-        if id(value) in memo:
-            fake_tensor = memo[id(value)]
-        else:
-            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
-            memo[id(value)] = fake_tensor
-        faked_params_buffers[key] = fake_tensor
-    return faked_params_buffers  # type: ignore[return-value]
 
 
 def make_fake_inputs(
@@ -228,11 +213,11 @@ def _flatten_dynamic_shapes(
 ) -> List[Any]:
     flat_shapes = []
 
-    def _tree_map_helper(t, shape):
+    def _tree_map_helper(path, t, shape):
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
 
 
