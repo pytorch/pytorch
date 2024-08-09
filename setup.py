@@ -1268,6 +1268,7 @@ def main():
         "include/ATen/native/transformers/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
+        "include/ATen/native/xnnpack/*.h",
         "include/ATen/quantized/*.h",
         "include/ATen/xpu/*.h",
         "include/ATen/xpu/detail/*.h",

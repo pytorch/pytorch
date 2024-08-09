@@ -25,8 +25,8 @@ class PThreadPool final {
   PThreadPool(PThreadPool&&) = delete;
   PThreadPool& operator=(PThreadPool&&) = delete;
 
-  size_t get_thread_count() const;
-  void set_thread_count(size_t thread_count);
+  __attribute__((visibility("default"))) size_t get_thread_count() const;
+  __attribute__((visibility("default"))) void set_thread_count(size_t thread_count);
 
   // Run, in parallel, function fn(task_id) over task_id in range [0, range).
   // This function is blocking.  All input is processed by the time it returns.
@@ -41,13 +41,13 @@ class PThreadPool final {
 };
 
 // Return a singleton instance of PThreadPool for ATen/TH multithreading.
-PThreadPool* pthreadpool();
+__attribute__((visibility("default"))) PThreadPool* pthreadpool();
 
 // Exposes the underlying implementation of PThreadPool.
 // Only for use in external libraries so as to unify threading across
 // internal (i.e. ATen, etc.) and external (e.g. NNPACK, QNNPACK, XNNPACK)
 // use cases.
-pthreadpool_t pthreadpool_();
+__attribute__((visibility("default"))) pthreadpool_t pthreadpool_();
 
 } // namespace caffe2
 
