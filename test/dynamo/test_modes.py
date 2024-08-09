@@ -149,6 +149,19 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(res, torch.ones(2, 2) + 1)
             self.assertEqual(_len_torch_function_stack(), 1)
 
+    def test_intermedate_torch_function_mode_construction_mutation(self):
+        class TestMode(BaseTorchFunctionMode):
+            def __init__(self, x):
+                self.x = x
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            z = TestMode(2)
+            z.y = 2
+            return x + 1, z
+
+        fn(torch.ones(2, 2))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
