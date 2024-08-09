@@ -72,7 +72,7 @@ class GlobGroup:
         def component_to_re(component):
             if "**" in component:
                 if component == "**":
-                    return "(" + re.escape(separator) + "[^" + separator + "]+)*"
+                    return f"({re.escape(separator)}[^"{separator}]+)*"
                 else:
                     raise ValueError("** can only appear as an entire path segment")
             else:

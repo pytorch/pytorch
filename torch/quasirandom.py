@@ -214,4 +214,4 @@ class SobolEngine:
             fmt_string += ["scramble=True"]
         if self.seed is not None:
             fmt_string += [f"seed={self.seed}"]
-        return self.__class__.__name__ + "(" + ", ".join(fmt_string) + ")"
+        return self.__class__.__name__ + "(, ".join(fmt_string) + ")"
