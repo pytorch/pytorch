@@ -1,14 +1,12 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 struct Value;
@@ -36,5 +34,4 @@ TORCH_API void parseIR(
     std::unordered_map<std::string, Value*>& vmap,
     bool parse_tensor_constants = false);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -196,7 +196,7 @@ class TestCommModeFeatures(DTensorTestBase):
             output_tp.sum().backward()
 
         # checks to see if all sub-modules make it into the module_depth_dictionary
-        self.assertEqual(len(comm_mode.advanced_module_tracker.module_depth_dict), 5)
+        self.assertEqual(len(comm_mode.advanced_module_tracker.module_helper_dict), 5)
 
         # checks to see if all collectives were correctly traced at the module-level
 
@@ -245,9 +245,12 @@ class TestCommModeFeatures(DTensorTestBase):
         comm_mode = CommDebugMode()
         with comm_mode:
             self.assertEqual(
-                len(comm_mode.advanced_module_tracker.module_depth_dict), 1
+                len(comm_mode.advanced_module_tracker.module_helper_dict), 1
             )
-            self.assertEqual(comm_mode.comm_module_counts, {})
+            self.assertEqual(
+                comm_mode.comm_module_counts,
+                {"Global": {"forward": {}, "backward": {}}},
+            )
             output_tp = model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)

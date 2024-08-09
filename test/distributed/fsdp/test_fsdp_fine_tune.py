@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -178,7 +179,7 @@ class TestFSDPFineTune(FSDPTest):
         torch.manual_seed(42)
 
         class TestModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer_0 = nn.Linear(5, 5, device="cuda")
                 self.layer_no_grad = nn.Linear(5, 5, device="cuda")
