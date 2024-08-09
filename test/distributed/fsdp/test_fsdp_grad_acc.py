@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -274,6 +275,7 @@ class TestGradAcc(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
         self,
