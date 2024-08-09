@@ -729,7 +729,6 @@ def mps_ops_modifier(ops):
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
-        'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
         'normnuc': None,
@@ -759,7 +758,6 @@ def mps_ops_modifier(ops):
         'ormqr': None,
         'pca_lowrank': None,
         'qr': None,
-        'quantile': None,
         'rsub': None,
         'scatter_reduceamax': None,
         'scatter_reduceamin': None,
@@ -921,6 +919,12 @@ def mps_ops_modifier(ops):
             # not reproducible in later OS. Added assert to op if used in < 14.0
             'isin': [torch.int64, torch.int32, torch.int16, torch.uint8, torch.int8],
             'nn.functional.max_pool2d': [torch.uint8],
+        })
+
+    if product_version < 15.0:
+        UNIMPLEMENTED_XFAILLIST.update({
+            'quantile': None,
+            'nanquantile': None,
         })
 
     UNDEFINED_XFAILLIST = {
@@ -3543,6 +3547,116 @@ class TestMPS(TestCaseMPS):
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
 
+    def test_slice_reshape_view_api_test_1(self):
+        x = torch.randn(4, 4)
+        x_mps = x.detach().clone().to("mps")
+
+        y = x[1]
+        y_mps = x_mps[1]
+        self.assertEqual(y, y_mps)
+
+        z = y.reshape(2, 2)
+        z_mps = y_mps.reshape(2, 2)
+        self.assertEqual(z, z_mps)
+        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
+
+        r = z + 1
+        r_mps = z_mps + 1
+        self.assertEqual(r, r_mps)
+
+    def test_slice_reshape_view_api_test_2(self):
+        x = torch.randn(2, 4)
+        x_mps = x.detach().clone().to("mps")
+        ones = torch.ones(4)
+        ones_mps = torch.ones(4, device="mps")
+
+        print(x_mps)
+        y = x[1]
+        y_mps = x_mps[1]
+
+        self.assertEqual(y, y_mps)
+
+        r = y + ones
+        r_mps = y_mps + ones_mps
+        self.assertEqual(r, r_mps)
+
+    def test_slice_reshape_view_api_test_3(self):
+        x = torch.randn(4, 6)
+        x_mps = x.detach().clone().to("mps")
+
+        y = x[1]
+        y_mps = x_mps[1]
+        self.assertEqual(y, y_mps)
+        print(y.shape)
+        print(y_mps.shape)
+
+        z = y.reshape(3, 2).t()
+        z_mps = y_mps.reshape(3, 2).t()
+
+        self.assertEqual(z, z_mps)
+        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
+
+        r = z + 1
+        r_mps = z_mps + 1
+        self.assertEqual(r, r_mps)
+
+    def test_slice_reshape_view_api_test_4(self):
+        x = torch.arange(4).resize(1, 2, 2)
+        x_mps = x.detach().clone().to("mps")
+
+        z = x.permute(2, 0, 1)
+        z_mps = x_mps.permute(2, 0, 1)  # -> 3, 4, 3
+
+        self.assertEqual(z, z_mps)
+        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
+
+        r = z + 1
+        r_mps = z_mps + 1
+        self.assertEqual(r, r_mps)
+
+    def test_slice_reshape_view_api_test_5(self):
+        x = torch.randn(4, 8)
+        x_mps = x.detach().clone().to("mps")
+
+        x = x.transpose(0, 1).reshape(-1)
+        x_mps = x_mps.transpose(0, 1).reshape(-1)
+
+        y = x[:2]
+        y_mps = x_mps[:2]
+        self.assertEqual(y, y_mps)
+
+        r = y + 1
+        r_mps = y_mps + 1
+        self.assertEqual(r, r_mps)
+
+    def test_slice_reshape_view_api_test_6(self):
+        x = torch.randn(1)
+        x_mps = x.detach().clone().to("mps")
+
+        x = x.expand(2, 3)
+        x_mps = x_mps.expand(2, 3)
+
+        ones_tensor = torch.ones(2, 3)
+        ones_tensor_mps = torch.ones(2, 3, device="mps")
+        self.assertEqual(x, x_mps)
+        x = x + ones_tensor
+        x_mps = x_mps + ones_tensor_mps
+
+        self.assertEqual(x, x_mps)
+
+    def test_slice_reshape_contiguous(self):
+        x = torch.randn(4, 4)
+        x_mps = x.detach().clone().to("mps")
+
+        y = x[1]
+        y_mps = x_mps[1]
+        self.assertEqual(y, y_mps)
+
+        z = y.reshape(2, 2)
+        z_mps = y_mps.reshape(2, 2)
+        self.assertEqual(z, z_mps)
+        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
+
     def test_scalar_from_slice_unary(self):
         # https://github.com/pytorch/pytorch/issues/82543
         tensor_list = torch.tensor([1.0, 1.2], device="mps")
@@ -3952,6 +4066,11 @@ class TestMPS(TestCaseMPS):
     def test_bool_expand(self):
         x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
         y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
+        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
+
+    def test_int_expand(self):
+        x = torch.tensor([[1], [0]], dtype=torch.int8, device='mps')
+        y = torch.tensor([0, 1], dtype=torch.int8, device='mps')
         self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
 
     # Empty unary op should return tensor of the same size
@@ -10346,10 +10465,10 @@ class TestConvolutionMPS(TestCaseMPS):
                     res_cpu = conv_cpu(x_cpu)
                     res_mps = conv_mps(x_mps)
                     self.assertEqual(res_cpu, res_mps.cpu(), rtol=1e-03, atol=1e-05)
-
                     res_cpu = res_cpu.sum().backward()
                     res_mps = res_mps.sum().backward()
                     self.assertEqual(res_cpu, res_mps, rtol=2.6e-05, atol=2e-04)
+
                     self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=2.6e-05, atol=2e-04)
                     self.assertEqual(conv_cpu.bias.grad, conv_mps.bias.grad)
                     self.assertEqual(x_cpu.grad, x_mps.grad)
@@ -10779,7 +10898,7 @@ class TestAdvancedIndexing(TestCaseMPS):
 
     def test_nonzero_non_diff(self):
         device = "mps"
-        x = torch.randn(10, requires_grad=True)
+        x = torch.randn(10, requires_grad=True, device=device)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 

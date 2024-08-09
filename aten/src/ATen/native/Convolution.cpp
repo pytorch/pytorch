@@ -1664,7 +1664,7 @@ at::Tensor _convolution(
                "Input type (", input.toString(), ") and bias type (", bias.toString(),
                ") should be the same");
 
-      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+      output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
 #else
