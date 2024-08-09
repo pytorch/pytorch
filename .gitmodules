@@ -124,3 +124,7 @@
 	path = third_party/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
 	branch = v0.15.3
+[submodule "third_party/composable_kernel"]
+	path = third_party/composable_kernel
+	url = https://github.com/ROCm/composable_kernel.git
+	branch = develop
