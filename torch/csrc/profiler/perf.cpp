@@ -28,8 +28,11 @@ inline long perf_event_open(
 // TODO sync with Kineto level abstract events in profiler/events.h
 static const std::unordered_map<
     std::string,
+    std::pair<perf_type_id, /* perf event type */ uint32_t>>& getEventTable() {
+  static std::unordered_map<
+    std::string,
     std::pair<perf_type_id, /* perf event type */ uint32_t>>
-    EventTable{
+    eventTable{
         {"cycles",
          std::make_pair(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES)},
         {"instructions",
@@ -46,6 +49,9 @@ static const std::unordered_map<
          std::make_pair(
              PERF_TYPE_HARDWARE,
              PERF_COUNT_HW_STALLED_CYCLES_FRONTEND)}};
+  return eventTable;
+}
+
 
 PerfEvent::~PerfEvent() {
   if (fd_ > -1) {
@@ -57,8 +63,8 @@ PerfEvent::~PerfEvent() {
 void PerfEvent::Init() {
   TORCH_CHECK(!name_.empty(), "Invalid profiler event name");
 
-  auto const it = EventTable.find(name_);
-  if (it == EventTable.end()) {
+  auto const it = getEventTable().find(name_);
+  if (it == getEventTable().end()) {
     TORCH_CHECK(false, "Unsupported profiler event name: ", name_);
   }
 
