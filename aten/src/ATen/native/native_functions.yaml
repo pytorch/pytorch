@@ -3386,9 +3386,18 @@
   dispatch:
     CUDA: _sparse_semi_structured_addmm
 
+# DEPRECATED: Use torch._mixed_dtypes_mm/torch._mixed_dtypes_addmm instead
 - func: _mixed_dtypes_linear(Tensor input, Tensor weight, Tensor scale, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
     CUDA: _mixed_dtypes_linear
+
+- func: _mixed_dtypes_mm(Tensor mat1, Tensor mat2, Tensor mat1_scale) -> Tensor
+  dispatch:
+    CUDA: _mixed_dtypes_mm
+
+- func: _mixed_dtypes_addmm(Tensor input, Tensor mat1, Tensor mat2, Tensor mat2_scale, *, Scalar alpha=1, Scalar beta=1) -> Tensor
+  dispatch:
+    CUDA: _mixed_dtypes_addmm
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
