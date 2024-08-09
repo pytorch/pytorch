@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.utils import _get_shape_env
+from torch._export.utils import _get_shape_env, _detect_fake_mode_from_gm
 from torch._export.verifier import Verifier
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
@@ -269,10 +269,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    def _get_fake_mode(args):
-        fake_mode = detect_fake_mode(fake_args)
-        return contextlib.nullcontext() if fake_mode is None else fake_mode
-
     mod = ep.module()
     fake_args = []
     for node in mod.graph.nodes:
@@ -280,7 +276,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
             fake_args.append(node.meta["val"])
 
     fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-    fake_mode = _get_fake_mode(fake_args)
+    fake_mode = _detect_fake_mode_from_gm(mod)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = mod._out_spec

@@ -48,7 +48,7 @@ def _get_shape_env(gm):
         if node.meta.get("val", None) is not None
     ]
 
-    fake_mode = detect_fake_mode(vals)
+    fake_mode = _detect_fake_mode_from_gm(gm)
     if fake_mode is not None:
         return fake_mode.shape_env
     for v in vals:
