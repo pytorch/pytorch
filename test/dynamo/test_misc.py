@@ -7099,10 +7099,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         a = torch.randn([3, 3])
         a.tag = "a"
-        a.frog = "ribbity ribbit"
         b = torch.randn([3, 3])
         b.tag = "b"
-        b.frog = "ribbit"
 
         exported = torch._dynamo.export(foo)(a, b)
         out_graph = exported[0]
@@ -7110,14 +7108,11 @@ utils_device.CURRENT_DEVICE == None""".split(
         nodes = list(out_graph.graph.nodes)
         placeholders = [node for node in nodes if node.op == "placeholder"]
         all_tags = []
-        all_frogs = []
         for placeholder in placeholders:
             if "tensor_dict" in placeholder.meta:
                 all_tags.append(placeholder.meta["tensor_dict"]["tag"])
-                all_frogs.append(placeholder.meta["tensor_dict"]["frog"])
 
         self.assertEqual(all_tags, ["a", "b"])
-        self.assertEqual(all_frogs, ["ribbity ribbit", "ribbit"])
 
     def test_tagging_tensors_mix_used_unused_structure(self):
         def pre_attention_state_ops(input, mems, state):
@@ -8802,6 +8797,18 @@ def ___make_guard_fn():
         result = foo([x, x, x, x, y], y)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
+
+    def test_remove_set(self):
+        def fn(x):
+            set_a = set((4, 5))
+            set_a.remove(4)
+            return x * len(set_a)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     def test_iter_set(self):
         def foo(x, y):

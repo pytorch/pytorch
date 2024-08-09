@@ -2560,7 +2560,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2581,7 +2581,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
@@ -2614,7 +2614,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(code.count("empty_strided_cpu("), 3)
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
             softmax = torch.nn.functional.softmax(x, dim=-1)
@@ -2646,7 +2646,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_share_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
@@ -2672,7 +2672,7 @@ class CPUReproTests(TestCase):
                 1,  # 2 global bufs share 1 local buf
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion_case2(self):
         # exp and exp2 should be replaced by local buffer
         # since exp will be used after exp2, exp2 can't share the same
@@ -2706,6 +2706,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_with_line_reuse(self):
         # Test Global buffer which is inplace buffer and replaced by local buffer
         def fn(x, y):
@@ -3107,6 +3108,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(2, 3, 4)
         self.assertEqual(torch.compile(func)(x), func(x))
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -3527,18 +3529,23 @@ class CPUReproTests(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.group_norm = torch.nn.GroupNorm(32, 32)
+                self.group_norm = torch.nn.GroupNorm(3, 90)
 
             def forward(self, x):
                 return self.group_norm(x)
 
-        metrics.reset()
-        mod = M().eval()
-        x = torch.randn(2, 32, 32, 32)
-        with torch.no_grad():
-            self.common(mod, (x,))
-            # 2 generated kernels (one for var_mean, the other for result)
-            check_metrics_vec_kernel_count(2)
+        options = itertools.product(
+            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+        )
+        for dtype, fmt in options:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
+            with torch.no_grad():
+                self.common(mod, (x,))
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
