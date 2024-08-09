@@ -38,7 +38,7 @@ class TestBenchmarker(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_benchmark(self, device):
         benchmarker = self.benchmarker
-        fn, args, kwargs, _ = self.make_sum(device)
+        (fn, args, kwargs), _ = self.make_sum(device)
         if device == "cpu":
             _ = benchmarker.benchmark(fn, *args, **kwargs)
             self.assertEqual(self.counter_value("benchmark"), 1)
