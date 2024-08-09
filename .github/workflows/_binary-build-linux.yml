@@ -88,8 +88,18 @@ on:
         description: Github Token
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   build:
-    runs-on: ${{ inputs.runs_on }}
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ inputs.runs_on }}"
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
