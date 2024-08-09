@@ -16,6 +16,43 @@ should_preserve_node_meta = False
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def preserve_node_meta():
+    """
+    Preserves state of ``meta`` field of a graph node
+
+    This function preserves a node's meta fields (stack_trace, nn_module_stack, val, tensor_meta, ...)
+    during fx.Transformer and aot_autograd transformations.
+
+    Example:
+
+    >>> import torch
+
+    >>> class SimpleAdd(torch.nn.Module):
+    >>>     def __init__(self):
+    >>>         super().__init__()
+    >>>     def forward(self, x, y):
+    >>>         return x + y
+
+    >>> model = SimpleAdd()
+    >>> with torch.fx.traceback.preserve_node_meta():
+    >>>     fxg = torch.fx.symbolic_trace(model)
+
+    >>>     # node meta prior to transform
+    >>>     for node in fxg.graph.nodes:
+    >>>         print(node, node.meta)
+
+    >>>     def simple_transform(g: torch.fx.Graph) -> torch.fx.Graph:
+    >>>         for node in g.graph.nodes:
+    >>>             if node.op == 'call_function':
+    >>>                 if node.target.__name__ == 'add':
+    >>>                     node.meta["add_symbol_meta"] = "+"
+    >>>         return g
+
+    >>>     fxg_new = simple_transform(fxg)
+
+    >>>     # node meta after transform
+    >>>     for node in fxg_new.graph.nodes:
+    >>>         print(node, node.meta)
+    """
     global should_preserve_node_meta
     global current_meta
 
