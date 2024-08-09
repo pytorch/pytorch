@@ -86,9 +86,12 @@ class _ReplicateState(_State):
         device_mesh = kwargs.get("device_mesh", None)
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        for submodule in module.modules():
+            if _is_fully_sharded(submodule):
+                ignored_params.update(submodule.parameters())
         from torch.distributed.tensor.parallel.ddp import _localize_dtensor
 
-        _localize_dtensor(module)
+        _localize_dtensor(module, ignored_params=ignored_params)
         self._collect_params(module, ignored_modules, ignored_params)
 
         if "device_id" in kwargs:
