@@ -574,11 +574,13 @@ IValue parseTuple(
     FlatbufferLoader& loader,
     const mobile::serialization::IValue& ivalue) {
   const auto& tuple = ivalue.val_as_Tuple();
+  const auto items = tuple->items();
   std::vector<IValue> res;
-  for (auto i : *tuple->items()) {
+  res.reserve(items->size());
+  for (auto i : *items) {
     res.emplace_back(loader.getIValue(i));
   }
-  return c10::ivalue::Tuple::create(res);
+  return c10::ivalue::Tuple::create(std::move(res));
 }
 
 IValue parseDict(
