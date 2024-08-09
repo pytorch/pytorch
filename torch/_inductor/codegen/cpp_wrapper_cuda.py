@@ -1,28 +1,156 @@
 # mypy: allow-untyped-defs
 import functools
+import os
 from itertools import chain, count
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
+from ..codecache import CudaKernelParamCache
+from ..utils import DeferredLineBase
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
-from .cpp_utils import DTYPE_TO_CPP
+from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .triton_utils import (
-    DeferredCudaDefaultGrid,
-    DeferredCudaGridLine,
-    DeferredCudaKernelLine,
-)
+from .wrapper import SymbolicCallArg
 
 
 if TYPE_CHECKING:
     from ..graph import GraphLowering
+
+
+class DeferredCudaKernelLine(DeferredLineBase):
+    """
+    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    to be tuned and stored as cubin files, so use a deferred line to backfill those information
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        line_template: str,
+        keys: Tuple[str, ...],
+    ):
+        super().__init__(line_template)
+        assert not isinstance(line_template, DeferredLineBase)
+        self.kernel_name = kernel_name
+        self.line_template = line_template
+        self.keys = keys
+
+    def __call__(self):
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        for key in self.keys:
+            assert (
+                key in params
+            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            if key == get_cpp_wrapper_cubin_path_name():
+                assert os.path.exists(params[key]), f"{params[key]} does not exist"
+
+        return self.line_template % tuple(params[key] for key in self.keys)
+
+    def _new_line(self, line):
+        return DeferredCudaKernelLine(self.kernel_name, line, self.keys)
+
+
+class DeferredCudaDefaultGrid:
+    """
+    A marker to
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        grid,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwargs,
+    ):
+        self.kernel_name = kernel_name
+        self.grid = grid
+        self.grid_callable = grid_callable
+        self.grid_extra_kwargs = grid_extra_kwargs
+
+    def __call__(self):
+        grid = self.grid
+        assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
+        grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
+        grid_callable = self.grid_callable or default_grid
+        if not self.grid_extra_kwargs:
+            grid_fn = grid_callable(*grid)
+        else:
+            grid_fn = grid_callable(*grid, **self.grid_extra_kwargs)
+
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+        block_cfg = {
+            "XBLOCK": params["x_block"],
+            "YBLOCK": params["y_block"],
+            "ZBLOCK": params["z_block"],
+        }
+        return grid_fn(block_cfg)
+
+
+class DeferredCudaGridLine(DeferredLineBase):
+    """
+    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    to be tuned and stored as cubin files, so use a deferred line to backfill those information
+    """
+
+    def __init__(
+        self,
+        kernel_name: str,
+        grid_var: str,
+        grid,
+        autotune_configs,
+    ):
+        super().__init__("")
+        self.kernel_name = kernel_name
+        self.grid_var = grid_var
+        self.grid = grid
+        self.autotune_configs = autotune_configs
+
+    def __call__(self):
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+
+        if self.autotune_configs is not None:
+            # This indicates the Triton kernel is a user-defined one.
+            grid = None
+            if len(self.grid) == 1:
+                grid = self.grid[0]
+            else:
+                for i, c in enumerate(self.autotune_configs):
+                    if all(arg == params["meta"][key] for key, arg in c.kwargs.items()):
+                        grid = self.grid[i]
+                        break
+            assert grid is not None
+        elif isinstance(self.grid, DeferredCudaDefaultGrid):
+            grid = self.grid()
+        else:
+            grid = self.grid
+
+        assert len(grid) != 0, "Grid can't be empty"
+        grid_args_str = ", ".join(
+            [cexpr(V.graph.sizevars.simplify(item)) for item in grid]
+        )
+        return f"Grid {self.grid_var} = Grid({grid_args_str});"
+
+    def _new_line(self, line):
+        return DeferredCudaGridLine(
+            self.kernel_name, self.grid_var, self.grid, self.autotune_configs
+        )
 
 
 class CppWrapperCuda(CppWrapperCpu):
@@ -30,7 +158,7 @@ class CppWrapperCuda(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
@@ -148,7 +276,18 @@ class CppWrapperCuda(CppWrapperCpu):
                             var_name,
                         )
                     else:
-                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                        from torch import bfloat16, float16
+
+                        if arg_type in (float16, bfloat16):
+                            var_name_tmp = f"{var_name}_tmp"
+                            self.writeline(
+                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
+                            )
+                            self.writeline(f"float {var_name} = float({var_name_tmp});")
+                        else:
+                            self.writeline(
+                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
+                            )
                 else:
                     if config.abi_compatible:
                         self.writeline(
@@ -174,7 +313,12 @@ class CppWrapperCuda(CppWrapperCpu):
         return ", ".join(new_args)
 
     def generate_default_grid(
-        self, kernel_name: str, grid: List[Any], cuda: bool = True
+        self,
+        kernel_name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwargs,
     ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
@@ -184,7 +328,9 @@ class CppWrapperCuda(CppWrapperCpu):
         """
         if not cuda:
             return grid
-        return DeferredCudaDefaultGrid(kernel_name, grid)
+        return DeferredCudaDefaultGrid(
+            kernel_name, grid, grid_callable, **grid_extra_kwargs
+        )
 
     def generate_kernel_call(
         self,
@@ -198,6 +344,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
         autotune_configs=None,
     ):
         assert arg_types is not None and len(call_args) == len(

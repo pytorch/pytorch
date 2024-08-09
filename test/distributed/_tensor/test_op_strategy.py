@@ -6,7 +6,7 @@ import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
-from torch.distributed._tensor.ops.basic_strategy import (
+from torch.distributed._tensor.ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
@@ -169,7 +169,7 @@ class TestCostModel(DTensorOpTestBase):
 
     def test_redistribute_cost_latency(self):
         # test cost model on addmm op
-        from torch.distributed._tensor.ops.matrix_ops import addmm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import addmm_strategy
 
         mesh = self.build_device_mesh()
         shard0_placement = (Shard(0),)
@@ -246,7 +246,7 @@ class TestCostModel(DTensorOpTestBase):
         self.assertTrue(allreduce_cost > reduce_scatter_cost)
 
     def test_mm_strategies(self):
-        from torch.distributed._tensor.ops.matrix_ops import mm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import mm_strategy
 
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(6, 8)
@@ -292,7 +292,7 @@ class TestCostModel(DTensorOpTestBase):
             self.assertFalse(output_sharding.needs_redistribute)
 
     def test_bmm_strategies(self):
-        from torch.distributed._tensor.ops.matrix_ops import bmm_strategy
+        from torch.distributed._tensor.ops._matrix_ops import bmm_strategy
 
         mesh = self.build_device_mesh()
         lhs_tensor = torch.randn(8, 6, 8)
