@@ -2,7 +2,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from warnings import warn
 
 import torch
@@ -16,6 +16,7 @@ from torch.autograd import (
     _prepare_profiler,
     _ProfilerResult,
     _supported_activities,
+    _toggle_collection_dynamic,
     DeviceType,
     kineto_available,
     ProfilerActivity,
@@ -436,6 +437,14 @@ class profile:
         assert self.function_events is not None, "Expected profiling results"
         assert self.with_stack, "export_stacks() requires with_stack=True"
         return self.function_events.export_stacks(path, metric)
+
+    def toggle_collection_dynamic(
+        self, enabled: bool, activities: Iterable[ProfilerActivity]
+    ):
+        """
+        Toggles the collection of activities for the current profiler instance.
+        """
+        return _toggle_collection_dynamic(enabled, set(activities))
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()

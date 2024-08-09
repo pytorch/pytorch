@@ -117,6 +117,8 @@ void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);
+
+void toggleCollectionDynamic(const bool enable);
 void startTrace();
 ActivityTraceWrapper stopTrace();
 void pushCorrelationId(uint64_t correlation_id);

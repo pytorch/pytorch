@@ -610,6 +610,22 @@ void prepareProfiler(
   }
 }
 
+void toggleCollectionDynamic(
+    const bool enable,
+    const std::set<torch::profiler::impl::ActivityType>& activities) {
+  // TODO: CPU toggling should be done in this file to interface with collection
+  // similar to enableProfiler call GPU toggling is called in impl::kineto as is
+  for (auto act : activities) {
+    if (act != torch::autograd::profiler::ActivityType::CUDA) {
+      LOG(WARNING)
+          << "Dynamic toggle is only supported for GPU activity, skipping toggling of "
+          << actToString(act);
+      continue;
+    }
+    torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
+  }
+}
+
 void enableProfilerWithEventPostProcess(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
