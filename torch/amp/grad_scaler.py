@@ -281,6 +281,10 @@ class GradScaler:
                         per_device_found_inf.get(device),
                         per_device_inv_scale.get(device),
                     )
+                    if isinstance(grads[0], torch.distributed._tensor.DTensor):
+                        torch.distributed.all_reduce(
+                            per_device_found_inf.get(device), op=torch.distributed.ReduceOp.MAX
+                        )
 
         return per_device_found_inf._per_device_tensors
 
