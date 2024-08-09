@@ -1006,5 +1006,8 @@ def context_parallel_unshard(
     buffers: List[torch.Tensor],
     seq_dims: List[int],
 ) -> List[torch.Tensor]:
+    """
+    Unshard the tensors (e.g., output) that are sharded due to context parallelism.
+    """
     sharder = StripeLoadBalancer if _enable_load_balance else EvenSharder
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
