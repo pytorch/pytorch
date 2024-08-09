@@ -983,6 +983,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }
+      if (elem.timestamp !== null) {
+        var d = new Date(elem.time_us / 1000);
+        text = `${text}, timestamp ${d}`;
+      }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
       }
