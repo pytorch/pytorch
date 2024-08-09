@@ -2044,6 +2044,12 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (mempool_id.first == 0 && mempool_id.second == 0) {
+      auto active_mempool = MemPoolContext::getActiveMemPool();
+      if (active_mempool) {
+        mempool_id = active_mempool->id();
+      }
+    }
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
@@ -2068,6 +2074,12 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (mempool_id.first == 0 && mempool_id.second == 0) {
+      auto active_mempool = MemPoolContext::getActiveMemPool();
+      if (active_mempool) {
+        mempool_id = active_mempool->id();
+      }
+    }
     for (auto it = captures_underway.begin(); it != captures_underway.end();
          ++it) {
       if (it->first == mempool_id) {
@@ -2674,7 +2686,11 @@ class DeviceCachingAllocator {
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      }
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator_ && p.pool->owner_PrivatePool) {
+        ptr = active_pool->allocator_->raw_alloc(size);
+        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size);
       }

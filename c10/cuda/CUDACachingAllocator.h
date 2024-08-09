@@ -281,11 +281,13 @@ class CUDAAllocator : public Allocator {
   virtual SnapshotInfo snapshot() = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter) = 0;
+      MempoolId_t mempool_id = {0, 0},
+      std::function<bool(cudaStream_t)> filter = [](cudaStream_t) {
+        return true;
+      }) = 0;
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
-      MempoolId_t mempool_id) = 0;
+      MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
