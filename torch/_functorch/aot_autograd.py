@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import itertools
+from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -1117,13 +1118,12 @@ def aot_export_module(
     """
     if pre_dispatch and trace_joint:
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
-    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
-    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-
-    params_and_buffers = {
-        **dict(named_parameters),
-        **dict(named_buffers),
-    }
+    named_parameters = OrderedDict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = OrderedDict(mod.named_buffers(remove_duplicate=False))
+    # Use OrderedDict to ensure deterministic ordering (parameters first, then buffers)
+    params_and_buffers = OrderedDict()
+    params_and_buffers.update(named_parameters)
+    params_and_buffers.update(named_buffers)
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
@@ -1315,7 +1315,7 @@ def aot_export_joint_simple(
             args,
             decompositions=decompositions,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1342,7 +1342,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1350,7 +1350,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )
