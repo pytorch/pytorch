@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/mobile/module.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * Serializes the provided tensor map to the provided stream.
@@ -49,5 +48,4 @@ extern void (*_save_mobile_module_to)(
     const mobile::Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

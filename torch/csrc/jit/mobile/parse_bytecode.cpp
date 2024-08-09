@@ -73,7 +73,6 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
   for (size_t i = 0; i < code.instructions_.size(); i++) {
     Instruction& inst = code.instructions_[i];
     if (inst.op == OpCode::OP) {
-      std::string op_name = code.op_names_[inst.X].name;
       std::string operator_name = code.op_names_[inst.X].name +
           (code.op_names_[inst.X].overload_name.empty()
                ? ""

@@ -15,8 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace mobile {
 
 char const* toString(OpCode op);
@@ -150,5 +149,4 @@ void _save_parameters(
   _save_parameters(map, ifile, use_flatbuffer);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

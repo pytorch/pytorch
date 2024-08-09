@@ -7,16 +7,12 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 /// A lighter `Sampler` that returns indices sequentially and cannot be
 /// serialized.
@@ -46,6 +42,4 @@ class TORCH_API SequentialSampler : public torch::data::samplers::Sampler<> {
   size_t index_{0};
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile
