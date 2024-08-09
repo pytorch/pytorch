@@ -1,7 +1,9 @@
 import ast
 import copy
+import csv
 import functools
 import json
+import os
 import timeit
 from collections import namedtuple
 
@@ -188,7 +190,9 @@ class BenchmarkRunner:
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
+        self.output_dir = args.output_dir
         self.operator_range = benchmark_utils.get_operator_range(args.operator_range)
+        self.disable_output = args.disable_output
         # 100 is the default warmup iterations
         if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
@@ -396,8 +400,41 @@ class BenchmarkRunner:
 
         return False
 
+    def _output_csv(self, filename, headers, row):
+        if self.args.disable_output is False:
+            return
+        if os.path.exists(filename):
+            with open(filename) as fd:
+                lines = list(csv.reader(fd)) or [[]]
+                if headers and len(headers) > len(lines[0]):
+                    # if prior results failed the header might not be filled in yet
+                    lines[0] = headers
+                else:
+                    headers = lines[0]
+        else:
+            lines = [headers]
+        lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
+        with open(filename, "w") as fd:
+            writer = csv.writer(fd, lineterminator="\n")
+            for line in lines:
+                writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
+
     def run(self):
         self._print_header()
+        DEFAULT_OUTPUT_DIR = "benchmark_logs"
+        mode = "JIT" if self.use_jit else "Eager"
+        output_filename = self.args.output_dir
+        headers = [
+            "Benchmarking Framework",
+            "Benchamrking Module Name",
+            "Case Name",
+            "tag",
+            "run_backward",
+            "Execution Time",
+        ]
+
+        if self.args.disable_output:
+            disable_output = True
 
         for test_metainfo in BENCHMARK_TESTER:
             for test in _build_test(*test_metainfo):
@@ -437,5 +474,18 @@ class BenchmarkRunner:
                     )
                     for _ in range(self.num_runs)
                 ]
-
                 self._print_perf_result(reported_time, test_case)
+
+                # output results to csv
+                self._output_csv(
+                    output_filename,
+                    headers,
+                    [
+                        test_case.framework,
+                        test_case.op_bench.module_name(),
+                        test_case.test_config.test_name + "_BACKWARD" if test_case.test_config.run_backward is True else test_case.test_config.test_name,
+                        test_case.test_config.tag,
+                        test_case.test_config.run_backward,
+                        reported_time[0],
+                    ],
+                )

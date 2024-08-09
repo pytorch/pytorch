@@ -1372,6 +1372,28 @@ test_linux_aarch64(){
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
 }
 
+test_operator_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+  CORES=$(lscpu | grep Core | awk '{print $4}')
+  end_core=$(( CORES-1 ))
+
+  cd benchmarks/operator_benchmark/pt_extension
+  python setup.py install
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  taskset -c 0-"$end_core" python -m benchmark_all_test --device cpu --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  pip_install pandas
+  python check_perf_csv.py \
+  --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+  --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+
+}
+
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1398,6 +1420,8 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "${TEST_CONFIG}" == *cpu_operator_benchmark* ]]; then
+  test_operator_benchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
