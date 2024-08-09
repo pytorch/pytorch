@@ -436,6 +436,10 @@ pr_time_benchmarks() {
   git submodule sync && git submodule update --init --recursive
   deactivate
   pip show torch
+
+  echo "looking for regressions:"
+  python  benchmarks/dynamo/pr_time_benchmarks/compare_results.py "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "$TEST_REPORTS_DIR/pr_time_compare_results.txt"
+
 }
 
 
