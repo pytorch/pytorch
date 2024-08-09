@@ -10,19 +10,23 @@ import torch
 from torch.utils._pytree import (
     _get_node_type,
     BUILTIN_TYPES,
+    keystr,
+    LeafSpec,
+    MappingKey,
+    SequenceKey,
     SUPPORTED_NODES,
     tree_flatten,
-    tree_map,
+    tree_map_with_path,
 )
 
 from .exported_program import ExportedProgram
+
 
 if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._guards import Source
-
-    from ..fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
 
 __all__ = [
     "Constraint",
@@ -206,6 +210,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _min = 0 if min is None else min
     _max = int_oo if max is None else max
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
         inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
@@ -580,10 +585,11 @@ def _process_equalities(
         derived_equalities.append((source, root, fn))
 
 
-def _tree_map(
+def _tree_map_with_path(
     func: Callable[..., Any],
     tree: Any,
     *dynamic_shapes: Any,
+    tree_name: Optional[str] = None,
 ) -> Any:
     """
     Customized tree_map for mapping pytrees to dynamic_shapes.
@@ -611,25 +617,99 @@ def _tree_map(
         # as well as user-defined classes registered with pytree, which are.
         return _get_node_type(t) not in BUILTIN_TYPES
 
-    def f(t, *dynamic_shapes):
+    def f(path, t, *dynamic_shapes):
         typ = _get_node_type(t)
         # typ is not in BUILTIN_TYPES
         if typ in SUPPORTED_NODES:
             # thus typ is a user-defined class registered with pytree,
             # in which case flatten and recurse
-            return tree_map(
+            return tree_map_with_path(
                 f,
                 SUPPORTED_NODES[typ].flatten_fn(t)[0],
                 *dynamic_shapes,
                 is_leaf=is_leaf,
             )
         else:
-            return func(t, *dynamic_shapes)
+            return func(path, t, *dynamic_shapes)
 
-    return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
+    try:
+        return tree_map_with_path(f, tree, *dynamic_shapes, is_leaf=is_leaf)
+    except ValueError as e:
+        if "mismatch" in e.args[0]:
+            # When PyTree finds a structural mismatch between tree and dynamic_shapes,
+            # the error message is unfortunately quite horrible. Let's fix that.
+            assert dynamic_shapes, "Cannot be a mismatch if there is no dynamic_shapes"
+            assert tree_name, "Must provide a tree_name when there might be a mismatch"
+
+            def _key(type_, context, i):
+                # derive a PyTree key given the type, context, and child # of a TreeSpec
+                if type_ is dict:
+                    return MappingKey(context[i])
+                if type_ in (list, tuple):
+                    assert context is None
+                    return SequenceKey(i)
+                raise AssertionError(f"Did not expect type {type_}")
+
+            def raise_mismatch_error(msg):
+                from torch._dynamo.exc import UserError, UserErrorType
+
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Detected mismatch between the structure of `{tree_name}` and `dynamic_shapes`: {msg}",
+                    case_name="dynamic_shapes_validation",
+                )
+
+            def _compare(tree, dynamic_shapes, path):
+                # raise an error at the point where tree and dynamic_shapes differ,
+                # including the path to that point and the reason for the difference
+                rendered_path = keystr(path)
+                if isinstance(tree, LeafSpec):
+                    return
+                if isinstance(dynamic_shapes, LeafSpec):
+                    raise_mismatch_error(
+                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
+                        f"but `dynamic_shapes{rendered_path}` is not"
+                    )
+                if tree.type != dynamic_shapes.type:
+                    raise_mismatch_error(
+                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
+                        f"but `dynamic_shapes{rendered_path}` is a {dynamic_shapes.type}"
+                    )
+                if len(tree.children_specs) != len(dynamic_shapes.children_specs):
+                    raise_mismatch_error(
+                        f"`{tree_name}{rendered_path}` has {len(tree.children_specs)} elements, "
+                        f"but `dynamic_shapes{rendered_path}` has {len(dynamic_shapes.children_specs)} elements"
+                    )
+                if tree.type is dict:
+                    # context, children could be out of order
+                    if sorted(tree.context) != sorted(dynamic_shapes.context):
+                        raise_mismatch_error(
+                            f"`{tree_name}{rendered_path}` has keys {tree.context}, "
+                            f"but `dynamic_shapes{rendered_path}` has keys {dynamic_shapes.context}"
+                        )
+                    _remap = dict(
+                        zip(dynamic_shapes.context, dynamic_shapes.children_specs)
+                    )
+                    dynamic_shapes_children_specs = [_remap[k] for k in tree.context]
+                else:
+                    dynamic_shapes_children_specs = dynamic_shapes.children_specs
+                for i, (tree_, dynamic_shapes_) in enumerate(
+                    zip(tree.children_specs, dynamic_shapes_children_specs)
+                ):
+                    _compare(
+                        tree_,
+                        dynamic_shapes_,
+                        path + [_key(tree.type, tree.context, i)],
+                    )
+
+            _, tree_spec = tree_flatten(tree, is_leaf=is_leaf)
+            for other_tree in dynamic_shapes:
+                _, other_tree_spec = tree_flatten(other_tree, is_leaf)
+                _compare(tree_spec, other_tree_spec, [])
+        raise
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> Dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
@@ -697,7 +777,7 @@ class ShapesCollection:
 
         t_ids = set()
 
-        def find_shape(t):
+        def find_shape(path, t):
             t_id = id(t)
             if t_id in self._shapes:
                 t_ids.add(t_id)
@@ -706,7 +786,7 @@ class ShapesCollection:
                 return None
 
         combined_args = _combine_args(m, args, kwargs)
-        dynamic_shapes = _tree_map(find_shape, combined_args)
+        dynamic_shapes = _tree_map_with_path(find_shape, combined_args)
         if any(t_id not in t_ids for t_id in self._shapes):
             raise ValueError(
                 "Some tensors that were assigned shapes were not found in args. "
@@ -834,7 +914,7 @@ def _process_dynamic_shapes(
         else:
             bounds[dim.__name__] = (dim.min, dim.max)
 
-    def update_symbols(tensor, shape):
+    def update_symbols(path, tensor, shape):
         def _create_static_dim(tensor, i, value):
             return _StaticDim(str(value), (int,), {"value": value})
 
@@ -850,8 +930,10 @@ def _process_dynamic_shapes(
                     if dim is not None:
                         raise UserError(
                             UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
+                            f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
+                            f"specified at `dynamic_shapes{keystr(path)}` "
+                            f"(expected None, an int, or a Dim, but got {dim} instead)",
+                            case_name="dynamic_shapes_validation",
                         )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
@@ -865,34 +947,71 @@ def _process_dynamic_shapes(
                     if dim is not None:
                         raise UserError(
                             UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
+                            f"Unexpected dimension #{i} in input tensor shape {shape} "
+                            f"specified at `dynamic_shapes{keystr(path)}` "
+                            f"(expected None, an int, or a Dim, but got {dim} instead)",
+                            case_name="dynamic_shapes_validation",
                         )
         else:
             if shape is not None:
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
-                    f"Unexpected dynamic_shape {shape} of Tensor, " "try None instead",
+                    f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
+                    f"(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
+                    f" where each dimension is None, an int, or a Dim)",
+                    case_name="dynamic_shapes_validation",
                 )
 
     def assoc_shapes(combined_args, dynamic_shapes):
-        def assoc_shape(t, dynamic_shape):
+        def assoc_shape(path, t, dynamic_shape):
             if isinstance(t, torch.Tensor):
-                update_symbols(t, dynamic_shape)
+                update_symbols(path, t, dynamic_shape)
             else:
                 if dynamic_shape is not None:
+                    rendered_path = keystr(path)
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
-                        f"Cannot associate shape {dynamic_shape} to non-tensor type {type(t)}, "
-                        f"expected None",
+                        f"Cannot associate shape {dynamic_shape} specified at `dynamic_shapes{rendered_path}` "
+                        f"to non-tensor type {type(t)} at `inputs{rendered_path}` (expected None)",
+                        case_name="dynamic_shapes_validation",
                     )
 
-        _tree_map(assoc_shape, combined_args, dynamic_shapes)
+        _tree_map_with_path(
+            assoc_shape, combined_args, dynamic_shapes, tree_name="inputs"
+        )
 
     combined_args = _combine_args(
         f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    if not isinstance(dynamic_shapes, dict):
+    if isinstance(dynamic_shapes, dict):
+        got_keys = list(dynamic_shapes.keys())
+        expected_arg_names = list(combined_args.keys())
+        if sorted(got_keys) != sorted(expected_arg_names):
+            # This error would be caught by `assoc_shapes` below, but we can give
+            # a more helpful error message here.
+            msg = (
+                f"When `dynamic_shapes` is specified as a dict, its top-level keys "
+                f"must be the arg names {expected_arg_names} of `inputs`, but "
+                f"here they are {got_keys}. "
+            )
+            if (
+                len(combined_args) == 1
+                and expected_arg_names[0] not in got_keys
+                and isinstance(combined_args[expected_arg_names[0]], dict)
+            ):
+                msg += (
+                    "Since here `inputs` is a list/tuple enclosing a single dict, "
+                    "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
+                )
+            else:
+                msg += (
+                    "Alternatively, you could also ignore arg names entirely "
+                    "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
+                )
+            raise UserError(
+                UserErrorType.INVALID_INPUT, msg, case_name="dynamic_shapes_validation"
+            )
+    else:
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
     assoc_shapes(combined_args, dynamic_shapes)
@@ -1040,7 +1159,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
     # cache so we don't produce multiple derived dim objects
     derived_dim_cache: Dict[str, _DerivedDim] = {}
 
-    def apply_fixes(dim, dummy):
+    def apply_fixes(path, dim, dummy):
         if dim is None or isinstance(dim, int):  # not dynamic
             return dim
         elif dim.__name__ in shape_fixes:  # directly fix
@@ -1076,4 +1195,4 @@ def refine_dynamic_shapes_from_suggested_fixes(
                 return _dim
         return dim  # unchanged dim
 
-    return _tree_map(apply_fixes, dynamic_shapes, dynamic_shapes)
+    return _tree_map_with_path(apply_fixes, dynamic_shapes, dynamic_shapes)
