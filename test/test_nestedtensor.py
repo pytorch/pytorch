@@ -7057,7 +7057,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(expected_padded, padded)
 
         # convert padded dense -> NJT
-        nt2 = torch.nested.nested_tensor_from_padded(padded, nt.offsets())
+        from torch.nested._internal.nested_tensor import nested_from_padded
+
+        nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
         if requires_grad:
@@ -7121,6 +7123,48 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
 
         # TODO: Verify that computation fusion happens
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIfRocm
+    def test_compile_padded_dense_conversion_preserves_metadata_cache(
+        self, device, dtype
+    ):
+        # shape (B, *, D)
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        # expect min / max seqlen to be stored here
+        cache = dict(nt._metadata_cache)
+
+        @torch.compile
+        def g(nt):
+            padded = nt.to_padded_tensor(0.3)
+            intermediate = padded.sin() + 1
+
+            from torch.nested._internal.nested_tensor import nested_from_padded
+
+            return nested_from_padded(
+                intermediate,
+                nt.offsets(),
+                min_seqlen=nt._min_seqlen,
+                max_seqlen=nt._max_seqlen,
+                sum_S=nt.values().shape[0],
+            )
+
+        output = g(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(output._metadata_cache, cache)
 
 
 FORWARD_FAILURES = {
