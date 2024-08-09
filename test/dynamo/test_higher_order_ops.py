@@ -5386,6 +5386,45 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
 
+    def test_vmap_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.vmap\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.vmap(fn)(x)
+
+    def test_grad_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.grad\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.grad(fn)(x)
+
+    def test_jvp_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.jvp\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.jvp(fn, (x,), (x,))
+
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):
         @torch.compile(backend="eager")
