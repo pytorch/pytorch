@@ -1212,23 +1212,58 @@ def bwd_dq_inner(
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
     hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
-    for start_n in range(0, hi):
-        dq = bwd_dq_inner_loop_inner(
-            dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-            off_z, off_h, offs_m2, offs_n2,
-            stride_kn, stride_kd, stride_vn, stride_vd,
-            kv_indices, sparse_kv_num_blocks,
-            MATMUL_PRECISION, RCP_LN2,
-            {{gen_argdefs()}}, IS_FULL_BLOCKS
-        )
+    if not IS_DIVISIBLE:
+        if hi >= 1:
+            for start_n in range(0, hi - 1):
+                dq = bwd_dq_inner_loop_inner(
+                    dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+                    off_z, off_h, offs_m2, offs_n2,
+                    stride_kn, stride_kd, stride_vn, stride_vd,
+                    kv_indices, sparse_kv_num_blocks,
+                    MATMUL_PRECISION, RCP_LN2,
+                    {{gen_argdefs()}}, IS_FULL_BLOCKS
+                )
 
-        # Increment pointers.
-        offset = get_offset_for_next_block(start_n, kv_indices, sparse_kv_num_blocks, SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2)
+                # Increment pointers.
+                offset = get_offset_for_next_block(
+                    start_n, kv_indices, sparse_kv_num_blocks,
+                    SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2
+                )
 
-        kT_ptrs += offset * stride_kn
-        vT_ptrs += offset * stride_vn
+                kT_ptrs += offset * stride_kn
+                vT_ptrs += offset * stride_vn
 
-        offs_n2 += offset
+                offs_n2 += offset
+
+            dq = bwd_dq_inner_loop_inner(
+                dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+                off_z, off_h, offs_m2, offs_n2,
+                stride_kn, stride_kd, stride_vn, stride_vd,
+                kv_indices, sparse_kv_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}}, IS_FULL_BLOCKS
+            )
+    else:
+        for start_n in range(0, hi):
+            dq = bwd_dq_inner_loop_inner(
+                dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+                off_z, off_h, offs_m2, offs_n2,
+                stride_kn, stride_kd, stride_vn, stride_vd,
+                kv_indices, sparse_kv_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}}, IS_FULL_BLOCKS
+            )
+
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, sparse_kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N2
+            )
+
+            kT_ptrs += offset * stride_kn
+            vT_ptrs += offset * stride_vn
+
+            offs_n2 += offset
 
     return dq
 
@@ -1331,22 +1366,57 @@ def bwd_dkdv_inner(
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
-    for start_m in range(0, hi):
-        dk, dv = bwd_dkdv_inner_loop_inner(
-            dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-            off_z, off_h, offs_n1, offs_m1,
-            stride_qm, stride_qd, stride_dom, stride_dod,
-            q_indices, sparse_q_num_blocks,
-            MATMUL_PRECISION, RCP_LN2,
-            {{gen_argdefs()}}, IS_FULL_BLOCKS
-        )
-        # Increment pointers.
-        offset = get_offset_for_next_block(start_m, q_indices, sparse_q_num_blocks, SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1)
 
-        qT_ptrs += offset * stride_qm
-        do_ptrs += offset * stride_dom
+    if not IS_DIVISIBLE:
+        if hi >= 1:
+            for start_m in range(0, hi - 1):
+                dk, dv = bwd_dkdv_inner_loop_inner(
+                    dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+                    off_z, off_h, offs_n1, offs_m1,
+                    stride_qm, stride_qd, stride_dom, stride_dod,
+                    q_indices, sparse_q_num_blocks,
+                    MATMUL_PRECISION, RCP_LN2,
+                    {{gen_argdefs()}}, IS_FULL_BLOCKS
+                )
+                # Increment pointers.
+                offset = get_offset_for_next_block(
+                    start_m, q_indices, sparse_q_num_blocks,
+                    SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1
+                )
 
-        offs_m1 += offset
+                qT_ptrs += offset * stride_qm
+                do_ptrs += offset * stride_dom
+
+                offs_m1 += offset
+
+            dk, dv = bwd_dkdv_inner_loop_inner(
+                dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+                off_z, off_h, offs_n1, offs_m1,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}}, IS_FULL_BLOCKS
+            )
+    else:
+        for start_m in range(0, hi):
+            dk, dv = bwd_dkdv_inner_loop_inner(
+                dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+                off_z, off_h, offs_n1, offs_m1,
+                stride_qm, stride_qd, stride_dom, stride_dod,
+                q_indices, sparse_q_num_blocks,
+                MATMUL_PRECISION, RCP_LN2,
+                {{gen_argdefs()}}, IS_FULL_BLOCKS
+            )
+            # Increment pointers.
+            offset = get_offset_for_next_block(
+                start_m, q_indices, sparse_q_num_blocks,
+                SPARSE_Q_BLOCK_SIZE, SPARSE_Q_MULTIPLE, BLOCK_M1
+            )
+
+            qT_ptrs += offset * stride_qm
+            do_ptrs += offset * stride_dom
+
+            offs_m1 += offset
 
     return dk, dv
 
