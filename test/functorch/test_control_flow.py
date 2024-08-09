@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -76,6 +77,34 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+def _fake_associative_scan(combine_fn, input, dim, reverse=False):
+    inp_leaves, spec = pytree.tree_flatten(input)
+    result_flat = []
+    num_leaves = len(inp_leaves)
+    op = reversed if reverse else lambda x: x
+
+    for ind in op(range(inp_leaves[0].size(dim))):
+        r = [
+            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
+            for leave_ind in range(num_leaves)
+        ]
+        if (ind > 0 and not reverse) or (
+            ind < (inp_leaves[0].size(dim) - 1) and reverse
+        ):
+            r = combine_fn(
+                pytree.tree_unflatten(result_flat[-1], spec),
+                pytree.tree_unflatten(r, spec),
+            )
+        r_flat, _ = pytree.tree_flatten(r)
+        result_flat.append(r_flat)
+
+    results = [
+        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        for leave_ind in range(num_leaves)
+    ]
+    return pytree.tree_unflatten(results, spec)
 
 
 def _while_loop_tests():
@@ -1173,6 +1202,118 @@ def forward(self, pred_1, x_1):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_vmap(self):
+        device = torch.device("cuda")
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        x = torch.tile(
+            torch.unsqueeze(
+                torch.unsqueeze(
+                    torch.arange(
+                        0, 10, device=device, dtype=torch.float32, requires_grad=True
+                    ),
+                    0,
+                ),
+                -1,
+            ),
+            (4, 1, 4),
+        )
+        torch.compiler.reset()
+
+        def associative_scan_fct(x):
+            return associative_scan(add, x, 0)
+
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+            )
+            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+
+        result1 = associative_scan1(x)
+        # result2 = associative_scan2(x)
+        expected_result = _fake_associative_scan(add, x, 1)
+        self.assertEqual(result1, expected_result)
+        # self.assertEqual(result2, expected_result)
+
+        torch.compiler.reset()
+
+        def associative_scan_fct(x):
+            return associative_scan(add, x, 1)
+
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+            )
+            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+
+        result1 = associative_scan1(x)
+        # result2 = associative_scan2(x)
+        expected_result = _fake_associative_scan(add, x, 2)
+        self.assertEqual(result1, expected_result)
+        # self.assertEqual(result2, expected_result)
+
+        torch.compiler.reset()
+
+        def associative_scan_fct(x):
+            return associative_scan(add, x, 1)
+
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True
+            )
+            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
+
+        result1 = associative_scan1(x)
+        # result2 = associative_scan2(x)
+        expected_result = torch.transpose(_fake_associative_scan(add, x, 2), 0, 1)
+        self.assertEqual(result1, expected_result)
+        # self.assertEqual(result2, expected_result)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_generic_associative_scan_vmap_pytree(self):
+        device = torch.device("cuda")
+
+        def fct_pointwise(x, y):
+            return {
+                "i": x["i"] * y["i"],
+                "j": (x["j"][0] + y["j"][0],),
+            }
+
+        x = torch.tile(
+            torch.unsqueeze(
+                torch.unsqueeze(torch.randn(10, device=device, requires_grad=True), 0),
+                -1,
+            ),
+            (3, 1, 2),
+        )
+        y = torch.tile(
+            torch.unsqueeze(
+                torch.unsqueeze(torch.randn(10, device=device, requires_grad=True), 0),
+                -1,
+            ),
+            (3, 1, 2),
+        )
+        inp = {"i": x, "j": (y,)}
+
+        def associative_scan_fct(z):
+            return associative_scan(fct_pointwise, z, 0)
+
+        torch.compiler.reset()
+        with torch._dynamo.utils.disable_cache_limit():
+            associative_scan1 = torch.compile(
+                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+            )
+            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+
+        result1 = associative_scan1(inp)
+        # result2 = associative_scan2(inp)
+        expected_result = _fake_associative_scan(fct_pointwise, inp, 1)
+        self.assertEqual(result1, expected_result)
+        # self.assertEqual(result2, expected_result)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
