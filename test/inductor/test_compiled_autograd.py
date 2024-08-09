@@ -2102,6 +2102,30 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertTrue("CompiledFunctionBackward0" in logs.getvalue())
 
+    def test_verbose_logs_aot_primals(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        def fn():
+            @torch.compile
+            def f(x):
+                tmp1 = x.sin()
+                torch._dynamo.graph_break()
+                return tmp1.sin()
+
+            x = torch.randn(4, requires_grad=True)
+            out = f(x)
+            out.sum().backward()
+            yield x.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn)
+
+        self.assertTrue("aot0_primals_1" in logs.getvalue())
+        self.assertTrue("aot1_primals_1" in logs.getvalue())
+
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 

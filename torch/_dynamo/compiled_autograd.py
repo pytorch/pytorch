@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import operator
+import re
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
@@ -72,6 +74,7 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
+        self.aot_autograd_backward_cls_name: Optional[str] = None
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -274,6 +277,7 @@ class AutogradCompilerInstance:
             {},
         )
         self.reorder_accumulate_grad_nodes()
+        self.rename_aot_autograd_primals()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -308,6 +312,34 @@ class AutogradCompilerInstance:
                 in_compiled_autograd_region = False
 
         return runtime_wrapper, self.compiler_fn(graph)
+
+    def rename_aot_autograd_primals(self):
+        """
+        Annotates primals as they appear in the AOTAutograd backward graphs, prefixed by AOT id
+        """
+        if self.aot_autograd_backward_cls_name is None:
+            return
+
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=operator.getitem
+        ):
+            next_primal_id = 1
+
+            getitem_inputs = len(node.args) == 2 and node.args[0].name == "inputs"
+
+            if not getitem_inputs or not node.users:
+                continue
+
+            user = next(iter(node.users))
+
+            pattern = self.aot_autograd_backward_cls_name + r"(\d+)"
+            match = re.search(pattern, user.stack_trace)
+            if not match:
+                continue
+
+            aot_id: str = match.group(1)
+            node.name = f"aot{aot_id}_primals_{next_primal_id}"
+            next_primal_id += 1
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -356,6 +388,8 @@ class AutogradCompilerInstance:
             maybe_aot_id = getattr(
                 pyobj._forward_cls, "_aot_id", ""  # type: ignore[attr-defined]
             )  # iff it is from AOTAutograd's CompiledFunction
+            if maybe_aot_id is not None:
+                self.aot_autograd_backward_cls_name = node_name
         new_code = f"{node_name}{maybe_aot_id} (NodeCall {node_index})"
 
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
