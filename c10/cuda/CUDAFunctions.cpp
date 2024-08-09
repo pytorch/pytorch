@@ -40,7 +40,7 @@ int device_count_impl(bool fail_if_no_driver) {
             false,
             "Found no CUDA driver on your system. Please check that you "
             "have an NVIDIA GPU and installed a driver from "
-            "http://www.nvidia.com/Download/index.aspx");
+            "https://www.nvidia.com/Download/index.aspx");
       } else {
         TORCH_CHECK(
             false,
@@ -48,7 +48,7 @@ int device_count_impl(bool fail_if_no_driver) {
             version,
             ") for the CUDA runtime library. Please update your GPU driver "
             "by downloading and installing a new version from the URL: "
-            "http://www.nvidia.com/Download/index.aspx Alternatively, go to: "
+            "https://www.nvidia.com/Download/index.aspx Alternatively, go to: "
             "https://pytorch.org to install a PyTorch version that has been "
             "compiled with your version of the CUDA driver.");
       }
