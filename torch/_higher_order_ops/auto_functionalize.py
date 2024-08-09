@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._prims_common import clone_preserve_strides, clone_preserve_strides_non_gen
+from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
