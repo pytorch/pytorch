@@ -2,9 +2,10 @@ import time
 from functools import cached_property, wraps
 from statistics import median
 from typing import Any, Callable, Dict, List, Tuple
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.utils import is_cpu_device
 
 
@@ -18,21 +19,40 @@ T = TypeVar("T")
 
 
 def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
+    """Wrapper that logs function durations, in milliseconds, along with the
+    function's args and kwargs if logging is enabled, otherwise a no-op.
+    """
     if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
         return fn
 
     @wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
         start_s = time.perf_counter()
         result = fn(*args, **kwargs)
         log.debug(
-            "fn:%r args:[%r, %r] took %f seconds.",
+            "fn:%r args:[%r, %r] took %f milliseconds.",
             fn.__name__,
             args,
             kwargs,
-            time.perf_counter() - start_s,
+            (time.perf_counter() - start_s) * MILLISECONDS_PER_SECOND,
         )
         return result
+
+    return wrapper
+
+
+def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
+    """Wrapper that increments dynamo counters on function call for subclasses of `Benchmarker`;
+    counter scheme is `counters["inductor"]["benchmarking.Foo.bar"]` where "Foo" is the subclass
+    and "bar" is the function.
+    """
+
+    @wraps(fn)
+    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
+        counters["inductor"][
+            "benchmarking." + type(self).__name__ + "." + fn.__name__
+        ] += 1
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -42,6 +62,7 @@ class Benchmarker:
         pass
 
     @maybe_time
+    @count
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
@@ -68,6 +89,7 @@ class Benchmarker:
         return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
 
     @maybe_time
+    @count
     def benchmark_cpu(
         self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
     ) -> float:
@@ -99,6 +121,7 @@ class Benchmarker:
         run_for(warmup)
         return median(run_for(rep))
 
+    @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
 
@@ -106,6 +129,7 @@ class Benchmarker:
 class TritonBenchmarker(Benchmarker):
     @cached_property
     @maybe_time
+    @count
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's do_bench."""
         try:
@@ -115,6 +139,7 @@ class TritonBenchmarker(Benchmarker):
         return do_bench
 
     @maybe_time
+    @count
     def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
         """Benchmark a GPU callable using Triton's do_bench.
 
