@@ -106,6 +106,9 @@ def download_artifacts_and_extract_csvs(urls):
                 try:
                     df = pd.read_csv(artifact.open(name))
                     df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                    df["cpp_to_python_exceptions_raised"] = (
+                        df["cpp_to_python_exceptions_raised"].fillna(0).astype(int)
+                    )
                     prev_df = dataframes.get((suite, phase), None)
                     dataframes[(suite, phase)] = (
                         pd.concat([prev_df, df]) if prev_df is not None else df
@@ -123,7 +126,16 @@ def download_artifacts_and_extract_csvs(urls):
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
-        df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
+        df.to_csv(
+            out_fn,
+            index=False,
+            columns=[
+                "name",
+                "accuracy",
+                "graph_breaks",
+                "cpp_to_python_exceptions_raised",
+            ],
+        )
         apply_lints(out_fn)
 
 

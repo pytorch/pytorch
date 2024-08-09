@@ -166,6 +166,8 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 TORCH_API void runJITCPPTests();
 #endif
 
+static thread_local uint64_t cpp_to_python_translated_exception_count{0};
+
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
@@ -179,6 +181,7 @@ void initJITBindings(PyObject* module) {
   py::register_exception_translator([](std::exception_ptr p) {
     try {
       if (p) {
+        cpp_to_python_translated_exception_count += 1;
         std::rethrow_exception(p);
       }
     } catch (const JITException& e) {
@@ -194,6 +197,12 @@ void initJITBindings(PyObject* module) {
       // exception manually
       PyErr_SetString(exc.ptr(), e.what());
     }
+  });
+  m.def("_get_cpp_to_python_translated_exception_count", []() {
+    return cpp_to_python_translated_exception_count;
+  });
+  m.def("_clear_cpp_to_python_translated_exception_count", []() {
+    cpp_to_python_translated_exception_count = 0;
   });
 
   m.def(

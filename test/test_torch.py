@@ -10431,6 +10431,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertTrue(called)
 
+    def test_op_overload_packet_no_cpp_exceptions(self):
+        # goal: test that OpOverloadPacket.__getattr__ doesn't rely
+        # on catching/throwing C++ exceptions when the attribute does not exist.
+        self.assertTrue(isinstance(torch.ops.aten.add, torch._ops.OpOverloadPacket))
+        count_before = torch._C._get_cpp_to_python_translated_exception_count()
+        _ = hasattr(torch.ops.aten.add, "foobar")
+        count_after = torch._C._get_cpp_to_python_translated_exception_count()
+        self.assertEqual(count_before, count_after)
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_storage_fix_weakref_no_leak(self):
         import weakref
