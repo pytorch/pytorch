@@ -8421,7 +8421,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp)
 
-    @onlyCPU
+    @dtypesIfCUDA(torch.float, torch.double)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_groupnorm_nhwc(self, device, dtype):
         def helper(self, size, groups, memory_format, is_mixed):
@@ -8452,6 +8452,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
+
             self.assertEqual(out, ref_out)
             # parameters in bfloat16/Half is not recommended
             atol = 5e-4
@@ -8468,9 +8469,12 @@ class TestNNDeviceType(NNTestCase):
             helper(self, (4, 40, 40, 40), 2, torch.channels_last, is_mixed)
             helper(self, (2, 30, 50, 50), 3, torch.channels_last, is_mixed)
             helper(self, (2, 60, 50, 50), 3, torch.channels_last, is_mixed)
-            helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, is_mixed)
-            helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
-            helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
+
+            # channels_last_3d is currently not supported for cuda
+            if device == 'cpu':
+                helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, is_mixed)
+                helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
+                helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_memory_format(self, device):
