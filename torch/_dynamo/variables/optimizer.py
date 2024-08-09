@@ -133,7 +133,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             all_cuda = True
 
             for p in group.get("params", []):
-                all_cuda &= p.is_cuda
+                all_cuda &= p.is_cuda or p.is_xpu
                 all_uninitialized &= p not in self.value.state
 
             return "capturable" in group and all_uninitialized and all_cuda
