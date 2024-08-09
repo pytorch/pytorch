@@ -491,6 +491,8 @@ class CodeGen:
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
                 return f"torch.Tensor(size={size}, dtype={dtype})"
+            elif isinstance(arg, tuple):
+                return "(" + ",".join(_get_repr(a) for a in arg) + ",)"
             else:
                 return blue(repr(arg))
 
