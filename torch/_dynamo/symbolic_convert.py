@@ -19,7 +19,20 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -65,6 +78,7 @@ from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
+    get_torch_function_mode_stack,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -2680,6 +2694,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
+            self._init_torch_function_mode_stack()
+
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2710,6 +2726,27 @@ class InstructionTranslator(InstructionTranslatorBase):
             name = ci.key().name.lower()
             msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
+
+    def _init_torch_function_mode_stack(self):
+        if TYPE_CHECKING:
+            from torch.overrides import TorchFunctionMode
+
+        self.symbolic_torch_function_mode_stack: Deque[
+            TorchFunctionMode
+        ] = collections.deque()
+        py_stack = get_torch_function_mode_stack()
+        for val in py_stack:
+            global_name = variables.torch_function.TorchFunctionModeVariable.get_global_mangled_name(
+                self, val
+            )
+            source = GlobalWeakRefSource(global_name)
+            # we guard on the stack regardless, this is to be extra safe
+            install_guard(source.make_guard(GuardBuilder.WEAKREF_ALIVE))
+            val_ref = weakref.ref(val)
+            self.output.install_global_unsafe(global_name, val_ref)
+            self.symbolic_torch_function_mode_stack.append(
+                variables.LazyVariableTracker.create(val, source=source)
+            )
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):

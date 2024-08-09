@@ -2,6 +2,11 @@
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._C import (
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -84,6 +89,35 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
+
+    def test_pop_torch_function_mode(self):
+        m = BaseTorchFunctionMode()
+        with m:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                _pop_torch_function_stack()
+                return x + 1
+
+            fn(torch.ones(2, 2))
+
+            self.assertEqual(_len_torch_function_stack(), 0)
+            # reset stack so __exit__ doesn't crash
+            _push_on_torch_function_stack(m)
+
+        self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_error_empty_stack_pop_torch_function_mode(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            _pop_torch_function_stack()
+            return x + 1
+
+        self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Popping from an empty torch function mode stack",
+            lambda: fn(torch.ones(2, 2)),
+        )
 
 
 if __name__ == "__main__":

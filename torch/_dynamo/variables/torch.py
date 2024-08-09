@@ -44,7 +44,11 @@ from .ctx_manager import (
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TorchFunctionModeStackVariable,
+)
 
 
 try:
@@ -228,6 +232,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
+
+        if tx.symbolic_torch_function_mode_stack:
+            pass
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -740,6 +747,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
                     tx, [*args], kwargs
                 )
+
+        @register(torch._C._pop_torch_function_stack)
+        def handle_pop_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            if not tx.symbolic_torch_function_mode_stack:
+                raise unimplemented("Popping from an empty torch function mode stack")
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            return tx.symbolic_torch_function_mode_stack.popleft()
 
         return handlers
 
