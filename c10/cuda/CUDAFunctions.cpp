@@ -38,17 +38,17 @@ int device_count_impl(bool fail_if_no_driver) {
         }
         TORCH_CHECK(
             false,
-            "Found no NVIDIA driver on your system. Please check that you "
+            "Found no CUDA driver on your system. Please check that you "
             "have an NVIDIA GPU and installed a driver from "
-            "http://www.nvidia.com/Download/index.aspx");
+            "https://www.nvidia.com/Download/index.aspx");
       } else {
         TORCH_CHECK(
             false,
-            "The NVIDIA driver on your system is too old (found version ",
+            "The CUDA driver on your system is too old (found version ",
             version,
-            "). Please update your GPU driver by downloading and installing "
-            "a new version from the URL: "
-            "http://www.nvidia.com/Download/index.aspx Alternatively, go to: "
+            ") for the CUDA runtime library. Please update your GPU driver "
+            "by downloading and installing a new version from the URL: "
+            "https://www.nvidia.com/Download/index.aspx Alternatively, go to: "
             "https://pytorch.org to install a PyTorch version that has been "
             "compiled with your version of the CUDA driver.");
       }
@@ -57,7 +57,7 @@ int device_count_impl(bool fail_if_no_driver) {
       TORCH_CHECK(
           false,
           "CUDA driver initialization failed, you might not "
-          "have a CUDA gpu.");
+          "have a CUDA GPU.");
       break;
     case cudaErrorUnknown:
       TORCH_CHECK(
