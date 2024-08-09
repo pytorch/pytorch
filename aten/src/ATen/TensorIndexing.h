@@ -48,7 +48,7 @@ struct TORCH_API Slice final {
       step_ = std::move(step_index).value();
     }
 
-    TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
+    TORCH_CHECK_VALUE(step_.sym_ne(0).expect_true(__FILE__, __LINE__), "slice step cannot be zero");
 
     if (!start_index.has_value()) {
       start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
