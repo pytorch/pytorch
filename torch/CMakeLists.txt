@@ -60,12 +60,10 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/aten/src
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
     ${CMAKE_BINARY_DIR}/third_party
-    ${CMAKE_BINARY_DIR}/third_party/onnx
 
     ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
-    ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
     ${TORCH_ROOT}/third_party/cpp-httplib
@@ -86,6 +84,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     nlohmann
     shm
     fmt::fmt-header-only
+    onnx_proto
     ATEN_CPU_FILES_GEN_LIB)
 
 if(USE_ASAN AND TARGET Sanitizer::address)
