@@ -617,7 +617,8 @@ Tensor _safe_softmax(
   auto out = at::softmax(self, dim, dtype);
   const auto masked = self.eq(-std::numeric_limits<float>::infinity());
   const auto masked_rows = all(masked, dim, true);
-  return at::where(masked_rows, at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device())), out);
+  const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  return out.masked_fill(masked_rows,zero);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
