@@ -193,6 +193,7 @@ def async_save(
             (Default: ``None``)
 
     Returns:
+        :rtype: concurrent.futures.Future
         Future: A future holding the resultant Metadata object from `save`.
 
     Example:

@@ -59,6 +59,14 @@ def main():
         print(f"{env_var} = {value}")
 
     if args.fail:
+        restarts = os.environ["TORCHELASTIC_RESTART_COUNT"]
+        global_rank = os.environ["RANK"]
+        file = os.path.join(
+            args.touch_file_dir,
+            f"attempt_{restarts}_rank_{global_rank}",
+        )
+        Path(file).touch()
+        print(f"created failure file: {file}")
         raise RuntimeError("raising exception since --fail flag was set")
     else:
         file = os.path.join(args.touch_file_dir, os.environ["RANK"])
