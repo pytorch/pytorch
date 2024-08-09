@@ -253,6 +253,7 @@ class _KinetoProfile:
         to be used in the trace callback or after the profiling is finished
         """
         assert self.profiler
+        self.profiler._ensure_function_events()
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str):

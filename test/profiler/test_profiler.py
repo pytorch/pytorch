@@ -274,6 +274,7 @@ class TestProfiler(TestCase):
             c = b.sum()
             c.backward()
 
+        p._ensure_function_events()
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
                 self.assertTrue(any("test_profiler" in entry for entry in e.stack))
@@ -867,6 +868,7 @@ class TestProfiler(TestCase):
 
         def judge(expected_event_count, prof):
             actual_event_count = {}
+            prof._ensure_function_events()
             for e in prof.function_events:
                 if "#" in e.name:
                     key = e.name
@@ -1847,9 +1849,11 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
             )
         ) as prof:
+            prof.profiler.acc_events = True
             for i in range(100):
                 torch.add(1, 2)
                 prof.step()
+        print(prof.key_averages())
         for ev in prof.key_averages():
             if ev.key == "aten::add":
                 return ev.count
