@@ -14,19 +14,10 @@ import traceback
 import typing
 from typing import Any, Callable, Literal, Sequence
 
-import onnx
-
-import onnxscript
-import onnxscript.evaluator
-import onnxscript.function_libs
-import onnxscript.function_libs.torch_lib
-import onnxscript.function_libs.torch_lib.registration
-from onnxscript import ir
-from onnxscript.ir import convenience as ir_convenience
-
 import torch
 import torch.fx
 from torch.export import graph_signature
+from torch.onnx._internal import _lazy_import
 from torch.onnx._internal.exporter import (
     _analysis,
     _building,
@@ -49,6 +40,12 @@ if typing.TYPE_CHECKING:
 
     import numpy as np
 
+
+onnx = _lazy_import.onnx
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
+ir_convenience = _lazy_import.onnxscript_ir_convenience
+onnxscript_evaluator = _lazy_import.onnxscript_evaluator
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
@@ -446,7 +443,7 @@ def _handle_call_function_node_with_lowering(
             # Set dtype to -1 if it is None
             onnx_kwargs[key] = -1
 
-    with onnxscript.evaluator.default_as(
+    with onnxscript_evaluator.default_as(
         tracer := _building.OpRecorder(opset, constant_farm)
     ):
         try:

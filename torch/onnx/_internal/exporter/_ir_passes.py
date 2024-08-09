@@ -4,8 +4,10 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
-from onnxscript import ir
+from torch.onnx._internal import _lazy_import
 
+
+ir = _lazy_import.onnxscript.ir
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,11 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import onnxscript
-from onnxscript import ir
+from torch.onnx._internal import _lazy_import
+
+
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
 
 
 class SymbolicTensor(ir.Value):

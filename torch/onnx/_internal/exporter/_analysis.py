@@ -10,16 +10,17 @@ import traceback
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-import onnxscript
-
 import torch
 import torch._export.serde.schema
 from torch.export import graph_signature
+from torch.onnx._internal import _lazy_import
 from torch.onnx._internal.exporter import _dispatching, _registration
 
 
 if TYPE_CHECKING:
     import torch.fx
+
+onnxscript = _lazy_import.onnxscript
 
 
 @dataclasses.dataclass

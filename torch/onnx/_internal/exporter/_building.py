@@ -14,16 +14,19 @@ import inspect
 import logging
 from typing import Any, Mapping, Sequence, TYPE_CHECKING, Union
 
-import onnxscript
-from onnxscript import evaluator, ir
-from onnxscript.ir import convenience as ir_convenience
-
 import torch
+from torch.onnx._internal import _lazy_import
 from torch.onnx._internal.exporter import _schemas, _tensors, errors
 
 
 if TYPE_CHECKING:
     import onnx
+
+
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
+evaluator = _lazy_import.onnxscript_evaluator
+ir_convenience = _lazy_import.onnxscript_ir_convenience
 
 
 logger = logging.getLogger(__name__)
