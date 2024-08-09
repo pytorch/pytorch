@@ -157,7 +157,6 @@ def is_hip_clang() -> bool:
 hip_platform_files = [
     "third_party/fbgemm/fbgemm_gpu/CMakeLists.txt",
     "third_party/fbgemm/fbgemm_gpu/cmake/Hip.cmake",
-    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_dense_host.cpp",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
     "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
