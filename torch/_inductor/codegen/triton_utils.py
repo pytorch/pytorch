@@ -1,15 +1,13 @@
 # mypy: allow-untyped-defs
-import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import sympy
 
 import torch
 
 from .. import config
-from ..codecache import CudaKernelParamCache, get_cpp_wrapper_cubin_path_name
 from ..runtime.hints import instance_descriptor
-from ..utils import _type_of, DeferredLineBase
+from ..utils import _type_of
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
@@ -82,7 +80,7 @@ def is_unaligned_buffer(arg: TensorArg):
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
-        buffer = V.graph.get_buffer(buf_name)
+        buffer = V.graph.try_get_buffer(buf_name)
         # output arg
         if not buffer:
             assert buf_name == V.kernel.output_node.name
@@ -159,39 +157,3 @@ def config_of(
     return instance_descriptor(
         divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8
     )
-
-
-class DeferredCudaKernelLine(DeferredLineBase):
-    """
-    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
-    to be tuned and stored as cubin files, so use a deferred line to backfill those information
-    """
-
-    def __init__(
-        self,
-        kernel_name: str,
-        line_template: str,
-        keys: Tuple[str, ...],
-    ):
-        super().__init__(line_template)
-        assert not isinstance(line_template, DeferredLineBase)
-        self.kernel_name = kernel_name
-        self.line_template = line_template
-        self.keys = keys
-
-    def __call__(self):
-        params = CudaKernelParamCache.get(self.kernel_name)
-        assert (
-            params is not None
-        ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        for key in self.keys:
-            assert (
-                key in params
-            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
-            if key == get_cpp_wrapper_cubin_path_name():
-                assert os.path.exists(params[key]), f"{params[key]} does not exist"
-
-        return self.line_template % tuple(params[key] for key in self.keys)
-
-    def _new_line(self, line):
-        return DeferredCudaKernelLine(self.kernel_name, line, self.keys)

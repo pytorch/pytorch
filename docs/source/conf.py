@@ -850,7 +850,6 @@ coverage_ignore_functions = [
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "make_fx",
     "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
@@ -2166,6 +2165,8 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
+    # torch.cuda.memory
+    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",

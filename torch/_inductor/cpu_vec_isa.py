@@ -128,6 +128,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )

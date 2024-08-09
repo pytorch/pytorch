@@ -100,7 +100,7 @@ class TestCustomSharder(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_sharder(self):
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.ebc = CustomEmbeddingBagCollection(10, 10, 8)
 

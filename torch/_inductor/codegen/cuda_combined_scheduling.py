@@ -23,7 +23,7 @@ class CUDACombinedScheduling(BaseScheduling):
     this would also be the place to do it.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self._scheduler = scheduler
         self._triton_scheduling = TritonScheduling(scheduler)
@@ -85,8 +85,8 @@ class CUDACombinedScheduling(BaseScheduling):
     def flush(self):
         return self._triton_scheduling.flush()
 
-    def codegen_foreach(self, *args, **kwargs):
-        return self._triton_scheduling.codegen_foreach(*args, **kwargs)
+    def codegen_combo_kernel(self, *args, **kwargs):
+        return self._triton_scheduling.codegen_combo_kernel(*args, **kwargs)
 
     def benchmark_fused_nodes(self, nodes):
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
