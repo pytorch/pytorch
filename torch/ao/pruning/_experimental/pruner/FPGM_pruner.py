@@ -5,6 +5,7 @@ import torch
 
 from .base_structured_sparsifier import BaseStructuredSparsifier
 
+
 __all__ = ["FPGMPruner"]
 
 
