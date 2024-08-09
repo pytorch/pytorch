@@ -38,7 +38,10 @@ fi
   source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
   pushd /tmp
-  wget -q "${BASE_URL}/${CONDA_FILE}"
+  if [ -n $CENTOS_VERSION ] && [[ $CENTOS_VERSION == 7.* ]]; then
+    NO_CHECK_CERTIFICATE_FLAG="--no-check-certificate"
+  fi
+  wget -q "${BASE_URL}/${CONDA_FILE}" ${NO_CHECK_CERTIFICATE_FLAG}
   # NB: Manually invoke bash per https://github.com/conda/conda/issues/10431
   as_jenkins bash "${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
@@ -108,6 +111,11 @@ fi
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   if [ -n "$CUDA_VERSION" ]; then
     conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
+  fi
+
+  # Install required libstdc++.so.6 version
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.9" ] ; then
+    conda_install_through_forge libstdcxx-ng=12
   fi
 
   # Install some other packages, including those needed for Python test reporting

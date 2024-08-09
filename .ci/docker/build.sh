@@ -452,10 +452,15 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
+DOCKER_PROGRESS="--progress=plain"
+if [[ "${DOCKER_BUILDKIT}" == 0 ]]; then
+  DOCKER_PROGRESS=""
+fi
+
 # Build image
 docker build \
        --no-cache \
-       --progress=plain \
+       ${DOCKER_PROGRESS} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \

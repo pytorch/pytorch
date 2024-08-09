@@ -2,14 +2,14 @@
 astunparse
 expecttest!=0.2.0
 hypothesis
-numpy
+numpy<2
 psutil
 pyyaml
 requests
 setuptools
 types-dataclasses
 typing-extensions>=4.8.0
-sympy
+sympy<=1.12.1
 filelock
 networkx
 jinja2

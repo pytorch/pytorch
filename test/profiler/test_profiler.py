@@ -717,7 +717,7 @@ class TestProfiler(TestCase):
 
         def create_cuda_tensor_oom():
             device = torch.device("cuda:0")
-            return torch.empty(1024, 1024, 1024, 20, dtype=torch.float32, device=device)
+            return torch.empty(1024, 1024, 1024, 1024, dtype=torch.float32, device=device)
 
         def check_trace(fname):
             prof.export_chrome_trace(fname)
