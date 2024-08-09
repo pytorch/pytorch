@@ -9,6 +9,7 @@
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/core/Tensor.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -64,6 +65,7 @@ public:
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
+  void commitAdaptive(const TensorList& inputTensors, const TensorList& outputTensors, void* profilerHandle);
   void fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
   void copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
             size_t length, size_t srcOffset, size_t dstOffset,
@@ -71,8 +73,11 @@ public:
   void copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
                      size_t length, size_t srcOffset, size_t dstOffset,
                      bool non_blocking, uint64_t profileId);
-  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
-  void addCompletedHandler(MTLCommandBufferHandler block);
+  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results,
+                       SyncType syncType = SyncType::NONE, MPSGraphExecutable* executable = nullptr);
+  void addCompletedHandler(MTLCommandBufferHandler block, SyncType syncType = SyncType::NONE);
+  // see description for "_activeResources"
+  void addActiveResource(MPSGraphTensorData* tensorData, void* buffer);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const { return _stream.device_index(); }
@@ -91,16 +96,24 @@ private:
   MPSCommandBuffer* _prevCommandBuffer = nil;
   MTLComputeCommandEncoder_t _commandEncoder = nil;
   MPSGraphExecutionDescriptor *_executionDescriptor = nil;
+  MPSGraphExecutableExecutionDescriptor *_executableExecutionDescriptor = nil;
   MPSGraphCompilationDescriptor *_compilationDescriptor = nil;
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  // accumulated sizes of resources encoded on command buffer
+  size_t _commandBufferResourceSize = 0;
+  // unfortunately, there's no way to get the underlying buffer from
+  // an MPSGraphTensorData. so we need to keep a mapping of them here
+  std::unordered_map<MPSGraphTensorData*, void*> _activeResources{};
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+  bool updateCommandBufferResourceSize(NSArray<MPSGraphTensorData*> *feeds,
+                                       NSArray<MPSGraphTensorData*> *results);
 };
 
 /**

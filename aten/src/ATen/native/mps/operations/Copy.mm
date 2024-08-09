@@ -40,6 +40,7 @@ static void copy_cast_mps(at::Tensor& dst,
   using CachedGraph = MPSUnaryCachedGraph;
 
   MPSStream* stream = getCurrentMPSStream();
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSDataType dstDType = getMPSDataType(dst);
   MPSDataType srcDType = getMPSDataType(src);
@@ -67,16 +68,12 @@ static void copy_cast_mps(at::Tensor& dst,
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
-    MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:sourceBuffer
-                                                                           shape:srcShape
-                                                                        dataType:srcDType] autorelease];
-    MPSGraphTensorData* dstData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:destBuffer
-                                                                           shape:dstShape
-                                                                        dataType:dstDType] autorelease];
+    MPSGraphTensorData* srcData = allocMPSGraphTensorData(sourceBuffer, srcShape, srcDType);
+    MPSGraphTensorData* dstData = allocMPSGraphTensorData(destBuffer, dstShape, dstDType);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_ : srcData};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_ : dstData};
-    stream->executeMPSGraph(
-        cachedGraph->graph(), feeds, results, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT_ADAPTIVE);
+    runMPSGraph(stream, cachedGraph, feeds, results, /*disable_type_inference*/ true,
+                !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT_ADAPTIVE);
   }
 }
 
