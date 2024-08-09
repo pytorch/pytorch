@@ -56,7 +56,7 @@ class TestUnshardParamsBase(FSDPTest):
         self,
         writeback: bool,
         check_outer: bool,
-        **fsdp_kwargs: Dict[str, Any],
+        **fsdp_kwargs: Any,
     ):
         model = nn.Sequential(
             nn.Linear(5, 5, bias=False, device=self.device),

@@ -84,7 +84,7 @@ def file_matches_keyword(file: str, keyword: str) -> bool:
 class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
-    def __init__(self, **kwargs: dict[str, Any]) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

@@ -25,9 +25,7 @@ def with_xla(func: Callable) -> Callable:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
-    def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
-    ) -> None:
+    def wrapper(self, *args: Any, **kwargs: Any) -> None:
         # TODO(yeounoh) replace this with xr.use_spmd() when we deprecate the flag.
         os.environ["XLA_USE_SPMD"] = "1"
         try:
@@ -35,7 +33,7 @@ def with_xla(func: Callable) -> Callable:
         except ImportError as exc:
             raise unittest.SkipTest("torch_xla is not installed.") from exc
         self.device_type = "xla"
-        func(self, *args, **kwargs)  # type: ignore[misc]
+        func(self, *args, **kwargs)
         os.environ["XLA_USE_SPMD"] = "0"
 
     return wrapper

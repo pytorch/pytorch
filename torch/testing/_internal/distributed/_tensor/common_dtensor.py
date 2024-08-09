@@ -361,7 +361,7 @@ def with_comms(func: TestFunc) -> TestFunc:
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
+        self, *args: Any, **kwargs: Any
     ) -> None:
         # if enough GPU we can use GPU, otherwise we fallback to CPU
         if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
@@ -372,7 +372,7 @@ def with_comms(func: TestFunc) -> TestFunc:
         self.init_pg()
 
         try:
-            func(self, *args, **kwargs)  # type: ignore[misc]
+            func(self, *args, **kwargs)
         except Exception as e:
             dist.destroy_process_group()
             raise e

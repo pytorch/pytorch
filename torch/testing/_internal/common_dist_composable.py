@@ -70,7 +70,7 @@ class CompositeParamModel(nn.Module):
 class FakeSequential(nn.Module):
     # Define this class to achieve a desired nested wrapping using the module
     # wrap policy with `nn.Sequential`
-    def __init__(self, *modules: Tuple[nn.Module, ...]) -> None:
+    def __init__(self, *modules: nn.Module) -> None:
         super().__init__()
         self._module_sequence = list(modules)
 

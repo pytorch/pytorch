@@ -62,8 +62,8 @@ class WithEffects(HigherOrderOperator):
         self,
         token,
         op: OpType,
-        *args: Tuple[Any, ...],
-        **kwargs: Dict[str, Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> Tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
@@ -120,8 +120,8 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
 def with_effects_dense(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
     new_token = torch.tensor([])
@@ -135,8 +135,8 @@ def with_effects_fake(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
@@ -148,8 +148,8 @@ def with_effects_proxy(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
+    *args: Any,
+    **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)

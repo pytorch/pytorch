@@ -576,7 +576,7 @@ class _ConfigAutoWrap:
     wrapper_cls: Optional[Callable] = None  # The wrapper class
     kwargs: Dict[str, Any] = {}  # Wrapper's args
 
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: Any):
         self.kwargs = kwargs
 
     @staticmethod
