@@ -59,12 +59,12 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.18.0")
+        _cmake_min_version = LooseVersion("3.25.3")
         if all(
             ver is None or ver < _cmake_min_version
             for ver in [cmake_version, cmake3_version]
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
+            raise RuntimeError("no cmake or cmake3 with version >= 3.25.3 found")
 
         if cmake3_version is None:
             cmake_command = "cmake"
