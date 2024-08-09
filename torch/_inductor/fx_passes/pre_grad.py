@@ -138,12 +138,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
             )
-            pass_execution_and_save(
-                fuse_chunk_reshape_unsqueeze_concat_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
-            )
+            # pass_execution_and_save(
+            #     fuse_chunk_reshape_unsqueeze_concat_pass,
+            #     gm,
+            #     example_inputs,
+            #     "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
+            # )
             pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,
