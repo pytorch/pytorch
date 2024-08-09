@@ -14,6 +14,7 @@ from .core import (
     is_masked_tensor,
     MaskedTensor,
 )
+from .like import _apply_like_fn, LIKE_FNS
 from .passthrough import _apply_pass_through_fn, PASSTHROUGH_FNS
 from .reductions import (
     _apply_reduction,
@@ -270,6 +271,11 @@ def _general_binary(func, *args, **kwargs):
     return _apply_native_binary(func, *args, **kwargs)
 
 
+@register_dispatch_func(LIKE_FNS)
+def _general_like(func, *args, **kwargs):
+    return _apply_like_fn(func, *args, **kwargs)
+
+
 @register_dispatch_func([torch.ops.aten.stride])
 def stride(func, *args, **kwargs):
     return None
@@ -363,13 +369,6 @@ def _softmax(func, *args, **kwargs):
     mask = _maybe_get_mask(args[0])
     result_data = torch.ops.aten._masked_softmax(data, ~mask, args[1], 2)
     return MaskedTensor(result_data, mask)
-
-
-@register_dispatch_func([torch.ops.aten.ones_like])
-def ones_like(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1)
-    result_data = func(_get_data(args[0]), **kwargs)
-    return MaskedTensor(result_data, _maybe_get_mask(args[0]))
 
 
 @register_dispatch_func([torch.ops.aten._softmax_backward_data])
