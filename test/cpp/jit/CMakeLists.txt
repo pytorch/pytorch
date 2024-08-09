@@ -121,7 +121,7 @@ if(USE_MKLDNN)
   target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)
+set(JIT_TEST_DEPENDENCIES torch GTest::gmock GTest::gtest jitbackend_test backend_with_compiler)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)

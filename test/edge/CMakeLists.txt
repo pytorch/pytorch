@@ -58,7 +58,7 @@ add_executable(test_edge_op_registration
 
 target_compile_definitions(test_edge_op_registration PRIVATE USE_GTEST)
 
-set(TEST_DEPENDENCIES gtest unbox_lib)
+set(TEST_DEPENDENCIES GTest::gtest unbox_lib)
 
 target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}
