@@ -2727,7 +2727,35 @@ class InstructionTranslator(InstructionTranslatorBase):
             msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
 
+    def _init_torch_function_state(self):
+        self._init_torch_function_mode_stack()
+        # This is annoyingly complicated because of how the torch function subclass + mode C API was designed
+        # There are two exposed C knobs here as contexts: torch._C.DisableTorchFunction and torch._C.DisableTorchFunctionSubclass
+        # These are their definitions:
+        # 1) torch._C._is_torch_function_enabled indicates that neither of the above knobs have been entered
+        # (if either are entered, this will be False)
+        # 2) torch._C._is_torch_function_mode_enabled indicates that either the torch mode stack is empty OR
+        # torch._C.DisableTorchFunction has been entered
+        # To disambiguate these and keep myself sane I added a C API to check whether all torch function
+        # concepts (modes and subclasses) are enabled.
+        # This only returns true iff we have not entered torch._C.DisableTorchFunction and allows us to separate
+        # the stack length from the enablement state of torch function modes.
+        # This is important because now if a mode is pushed while dynamo is tracing, we know whether
+        # or not torch function modes are enabled and whether we should trace it.
+        self.torch_function_subclass_enabled = torch._C._is_torch_function_enabled()
+
+        # This differs from the C API of the same name
+        # this will only be false iff we have entered torch._C.DisableTorchFunction
+        # and does not take into account the mode stack length, while the C API bundles these
+        # two concepts
+        self.torch_function_mode_enabled = (
+            not torch._C._is_torch_function_all_disabled()
+        )
+        self._init_torch_function_mode_stack()
+
     def _init_torch_function_mode_stack(self):
+        self.cur_mode = None
+
         if TYPE_CHECKING:
             from torch.overrides import TorchFunctionMode
 
@@ -2747,6 +2775,26 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.symbolic_torch_function_mode_stack.append(
                 variables.LazyVariableTracker.create(val, source=source)
             )
+
+    @contextlib.contextmanager
+    def _pop_mode_for_inlining(self):
+        self.cur_mode = self.pop_torch_function_mode_stack()
+        try:
+            yield self.cur_mode
+        finally:
+            mode = self.cur_mode
+            self.cur_mode = None
+            self.push_torch_function_mode_stack(mode)
+
+    def pop_torch_function_mode_stack(self):
+        return self.symbolic_torch_function_mode_stack.popleft()
+
+    def push_torch_function_mode_stack(self, mode_var):
+        self.symbolic_torch_function_mode_stack.appendleft(mode_var)
+
+    def inline_torch_function_mode(self):
+        with self._pop_mode_for_inlining() as cur_mode:
+            pass
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):

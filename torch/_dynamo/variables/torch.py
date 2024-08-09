@@ -15,6 +15,7 @@ import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
+from torch.overrides import get_overridable_functions
 
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
@@ -232,9 +233,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
         )
-
-        if tx.symbolic_torch_function_mode_stack:
-            pass
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -756,7 +754,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not tx.symbolic_torch_function_mode_stack:
                 raise unimplemented("Popping from an empty torch function mode stack")
             TorchFunctionModeStackVariable.register_mutation(tx)
-            return tx.symbolic_torch_function_mode_stack.popleft()
+            return tx.pop_torch_function_mode_stack()
 
         @register(torch._C._push_on_torch_function_stack)
         def handle_push_torch_function(
@@ -764,7 +762,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
-            tx.symbolic_torch_function_mode_stack.appendleft(args[0])
+            tx.push_torch_function_mode_stack(args[0])
             return ConstantVariable.create(None)
 
         @register(torch._C._len_torch_function_stack)
@@ -784,6 +782,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
+
+        if self.torch_function_mode_override_enabled(tx):
+            pass
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
@@ -1067,3 +1068,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             source
         )
         return result
+
+    def torch_function_mode_override_enabled(self, tx):
+        return (
+            tx.torch_function_mode_enabled
+            and tx.symbolic_torch_function_mode_stack
+            and self.get_function() in get_overridable_functions()
+        )
