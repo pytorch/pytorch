@@ -59,10 +59,10 @@ class TestWithEffects(TestCase):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops.aten._print.default, 'moo');  arg0_1 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.aten._print.default, 'moo');  arg0_1 = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add)""",
         )
@@ -76,10 +76,10 @@ def forward(self, arg0_1, arg1_1):
                 """\
 def forward(self, arg1_1):
     _make_token_default = torch.ops.prims._make_token.default()
-    with_effects = torch._higher_order_ops.effects.with_effects(_make_token_default, torch.ops.aten._print.default, 'moo');  _make_token_default = None
+    with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.aten._print.default, 'moo');  _make_token_default = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
     return [add]""",  # noqa: B950
@@ -102,7 +102,7 @@ def forward(self, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     _torchbind_obj0 = self._torchbind_obj0
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _torchbind_obj0, arg1_1);  arg0_1 = _torchbind_obj0 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _torchbind_obj0, arg1_1);  arg0_1 = _torchbind_obj0 = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
@@ -133,12 +133,12 @@ def forward(self, arg0_1, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops.aten._print.default, 'moo');  arg0_1 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.aten._print.default, 'moo');  arg0_1 = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg2_1, arg2_1)
     add_1 = torch.ops.aten.add.Tensor(arg1_1, add);  arg1_1 = add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, arg2_1);  arg2_1 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add_1, add_2)""",
         )
@@ -481,7 +481,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                         torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
                     )
 
-                for ins_fn in [ins_dense_req_grad]:
+                def ins_sc_req_grad():
+                    return (
+                        TwoTensor(
+                            torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                            torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                        ),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    )
+
+                for ins_fn in [ins_dense_req_grad, ins_sc_req_grad]:
                     ref_ins = ins_fn()
 
                     ref_out = fn(*ref_ins)
@@ -513,6 +522,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             inp = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
             torch.compile(fn, backend="inductor", fullgraph=True)(inp)
+
+            inp_sc = TwoTensor(
+                torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+            )
+            torch.compile(fn, backend="inductor", fullgraph=True)(inp_sc)
         finally:
             _deregister_effectful_op(torch.ops.aten.cos.default)
 

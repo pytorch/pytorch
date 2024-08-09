@@ -165,10 +165,14 @@ register_artifact(
     "Logs traces for every ShapeEnv operation that we record for replay",
     off_by_default=True,
 )
-
 register_artifact(
     "cudagraph_static_inputs",
     "Logs static inputs handling in dynamo, AOT, and cudagraphs",
+    off_by_default=True,
+)
+register_artifact(
+    "benchmarking",
+    "Detailed Inductor benchmarking information.",
     off_by_default=True,
 )
 
