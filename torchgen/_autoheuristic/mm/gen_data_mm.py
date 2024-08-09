@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 import itertools
 import os
 import random
@@ -13,6 +12,7 @@ from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
     fits_in_memory,
     get_mm_tensors,
+    get_random_between_pow2,
     set_precision,
 )
 
@@ -60,14 +60,16 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
 
             with fresh_inductor_cache():
 
-                def mixed_mm(A, B):
+                def mixed_mm(A: Any, B: Any) -> Any:
                     return torch.mm(A, B)
 
                 cf = torch.compile(mixed_mm, mode="max-autotune-no-cudagraphs")
                 cf(a, b)
                 torch.compiler.reset()
 
-    def random_multiple_of_128(self, min_num=7, max_num=17):
+    def random_multiple_of_128(self, min_num: int = 7, max_num: int = 17) -> int:
+        # generates a random number ran_pow2 between min_num and max_num -1
+        # and returns a random multiple of 128 between 2^ran_pow2 and 2^(ran_pow2+1)
         ran_pow2 = random.randint(min_num, max_num - 1)
         start = (2**ran_pow2) // 128
         end = (2 ** (ran_pow2 + 1)) // 128
@@ -84,14 +86,15 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
             [0.85, 0.1, 0.04, 0.01],
         )[0]
 
-    def get_random_dim(self):
+    def get_random_dim(self) -> int:
         distr_type = self.get_distr_type()
         if distr_type == "mult_128":
             return self.random_multiple_of_128(min_num=10, max_num=17)
         if distr_type == "pow2":
-            return 2 ** random.randint(0, 17)
+            return int(2 ** random.randint(0, 17))
         elif distr_type == "uniform-between-pow2":
-            return self.get_random_between_pow2(min_power2=1, max_power2=17)
+            # TODO(AlnisM): make mypy work for torchgen/_autoheuristic/
+            return int(get_random_between_pow2(min_power2=1, max_power2=17))
         elif distr_type == "uniform":
             return random.randint(1, 131072)
         print(f"random_type {distr_type} not supported")
