@@ -68,7 +68,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                               dataType:inputType] autorelease];
     if (needsScatter) {
       auto updatesType = getMPSScalarType(src.scalar_type());
-      if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+      if (updatesType == MPSDataTypeUInt8) {
         updatesType = MPSDataTypeInt8;
       }
 
@@ -87,7 +87,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     // Workaround for MPSShaderLibrary bug in macOS Monterey
     // This is fixed in macOS Ventura
     auto outputType = getMPSScalarType(output.scalar_type());
-    if (outputType == MPSDataTypeUInt8 || (outputType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+    if (outputType == MPSDataTypeUInt8) {
       outputType = MPSDataTypeInt8;
     }
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:outputBuffer
@@ -697,7 +697,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
       // Workaround for MPSShaderLibrary bug in macOS Monterey
       // This is fixed in macOS Ventura
       auto inputType = getMPSScalarType(self.scalar_type());
-      if (inputType == MPSDataTypeUInt8 || (inputType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+      if (inputType == MPSDataTypeUInt8) {
         inputType = MPSDataTypeInt8;
       }
 
@@ -709,7 +709,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
       }
       if (needsScatter) {
         auto updatesType = getMPSScalarType(updates.scalar_type());
-        if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+        if (updatesType == MPSDataTypeUInt8) {
           updatesType = MPSDataTypeInt8;
         }
         newCachedGraph->updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, updatesType, getMPSShape(self.numel()));

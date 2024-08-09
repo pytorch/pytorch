@@ -31,7 +31,7 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
   TORCH_CHECK(major == 13, "Trying to check for unexpected MacOS major ", major);
   switch (minor) {
     case 0:
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
+      return true;
     case 1:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
     case 2:

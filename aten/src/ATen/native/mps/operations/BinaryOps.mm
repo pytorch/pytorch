@@ -68,8 +68,6 @@ static void binaryOpTensor(const Tensor& self,
                            const Tensor& output_,
                            std::string op_name,
                            BinaryOpBlock binaryBlock) {
-  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
-              "MPS support binary op with uint8 natively starting from macOS 13.0");
   TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
                 (self.scalar_type() == ScalarType::Long ||
                  (other.scalar_type() == ScalarType::Long &&
@@ -105,19 +103,6 @@ static void binaryOpTensor(const Tensor& self,
   auto inputDataType = self.scalar_type();
   auto otherDataType = other.scalar_type();
   auto outputDataType = output_.scalar_type();
-  if (!is_macos_13_or_newer()) {
-    // workaround for signed vs. unsigned comparison issue in MacOS 12
-    if (outputDataType == kBool && (inputDataType == kByte || otherDataType == kByte)) {
-      inputDataType = otherDataType = kByte;
-    } else {
-      if (inputDataType == kBool || inputDataType == kByte) {
-        inputDataType = kChar;
-      }
-      if (otherDataType == kBool || otherDataType == kByte) {
-        otherDataType = kChar;
-      }
-    }
-  }
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
