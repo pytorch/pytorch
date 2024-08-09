@@ -27,7 +27,7 @@ struct bitset final {
 #endif
  public:
   static constexpr size_t NUM_BITS() {
-    return 8 * sizeof(bitset_type);
+    return 100 * sizeof(bitset_type);
   }
 
   constexpr bitset() noexcept = default;
