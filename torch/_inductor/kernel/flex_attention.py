@@ -1235,7 +1235,7 @@ def bwd_dq_inner(
 
                 offs_n2 += offset
 
-            dq = bwd_dq_inner_loop_inner(
+            dq = bwd_dq_inner_loop_inner_non_div(
                 dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
                 off_z, off_h, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
@@ -1344,6 +1344,88 @@ def bwd_dq_inner_loop_inner(
 
 
 @triton.jit
+def bwd_dq_inner_loop_inner_non_div(
+    dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+    off_z, off_h, offs_m2, offs_n2,
+    stride_kn, stride_kd, stride_vn, stride_vd,
+    kv_indices, sparse_kv_num_blocks,
+    MATMUL_PRECISION, RCP_LN2,
+    {{gen_argdefs()}}, IS_FULL_BLOCKS
+):
+    {{gen_defines() | indent_except_first(1)}}
+
+    kT = tl.load(kT_ptrs, mask=offs_n2[None, :] < KV_LEN)
+    qk = tl.dot(q, kT)
+    if not PRESCALE_QK:
+        qk *= SM_SCALE
+    # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+    pre_mod_scores = qk
+    m = offs_m2[:, None] % Q_LEN
+    n = offs_n2[None, :] % KV_LEN
+    {{ modification(
+        subgraph_number=0,
+        output_name="post_mod_scores",
+        score="qk",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        out="qk"
+    ) | indent_except_first(1) }}
+
+    # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
+    post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
+
+    if not IS_FULL_BLOCKS:
+        {{ modification(
+            subgraph_number=2,
+            output_name="mask_mod_output",
+            score="qk",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+        ) | indent_except_first(2) }}
+
+        mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+        # apply mask for partial masked block
+        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if not PRESCALE_QK:
+        post_mod_scores *= RCP_LN2
+    p = tl.math.exp2(post_mod_scores - lse)
+    # Compute dP and dS.
+    vT = tl.load(vT_ptrs, mask=offs_n2[None, :] < KV_LEN)
+    dp = tl.dot(do, vT)
+    ds = p * (dp - Di[:, None])
+    # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+    {{ modification(
+        subgraph_number=1,
+        output_name = "grad_scores",
+        score="pre_mod_scores",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        grad_score_mod="ds"
+    ) | indent_except_first(1) }}
+    grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
+
+    ds = grad_scores
+
+    if not IS_FULL_BLOCKS:
+        mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+        # (grads) apply mask for partially unmasked block
+        ds = tl.where(mask_mod_output, ds, 0.0)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ds = ds.to(MATMUL_PRECISION)
+    # Compute dQ.
+    dq += tl.dot(ds, tl.trans(kT))
+
+    return dq
+
+
+@triton.jit
 def bwd_dkdv_inner(
     Q, DO, DELTA, LSE, # pointers
     dk, dv, k, v,
@@ -1389,7 +1471,7 @@ def bwd_dkdv_inner(
 
                 offs_m1 += offset
 
-            dk, dv = bwd_dkdv_inner_loop_inner(
+            dk, dv = bwd_dkdv_inner_loop_inner_non_div(
                 dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
                 off_z, off_h, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
@@ -1452,6 +1534,7 @@ def bwd_dkdv_inner_loop_inner(
         n="n",
         out="qkT"
     ) | indent_except_first(1) }}
+
     if not IS_FULL_BLOCKS:
         {{ modification(
             subgraph_number=2,
@@ -1491,6 +1574,92 @@ def bwd_dkdv_inner_loop_inner(
     ) | indent_except_first(1) }}
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
+        # (grads) apply mask for partially unmasked block
+        dsT = tl.where(mask_mod_output, dsT, 0.0)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
+
+    return dk, dv
+
+
+@triton.jit
+def bwd_dkdv_inner_loop_inner_non_div(
+    dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
+    off_z, off_h, offs_n1, offs_m1,
+    stride_qm, stride_qd, stride_dom, stride_dod,
+    q_indices, sparse_q_num_blocks,
+    MATMUL_PRECISION, RCP_LN2,
+    {{gen_argdefs()}}, IS_FULL_BLOCKS
+):
+    {{gen_defines() | indent_except_first(1) }}
+
+    # Load LSE before computing qk to reduce pipeline stall.
+    qT = tl.load(qT_ptrs, mask=offs_m1[None, :] < Q_LEN)
+    lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
+    qkT = tl.dot(k, qT)
+    if not PRESCALE_QK:
+        qkT *= SM_SCALE
+    # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+    m = offs_m1[None, :] % Q_LEN
+    n = offs_n1[:, None] % KV_LEN
+    pre_mod_scores = qkT
+    {{ modification(
+        subgraph_number=0,
+        output_name="post_mod_scores",
+        score="qkT",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        out="qkT"
+    ) | indent_except_first(1) }}
+
+    # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
+    post_mod_scores = tl.where(offs_n1[:, None] < KV_LEN, post_mod_scores, float("-inf"))
+
+    if not IS_FULL_BLOCKS:
+        {{ modification(
+            subgraph_number=2,
+            output_name="mask_mod_output",
+            score="qkT",
+            b="off_z",
+            h="off_h",
+            m="m",
+            n="n",
+        ) | indent_except_first(2) }}
+        mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+        # (grads) apply mask for fully masked block
+        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if not PRESCALE_QK:
+        post_mod_scores *= RCP_LN2
+    pT = tl.math.exp2(post_mod_scores - lse[None, :])
+    do = tl.load(do_ptrs, mask=offs_m1[:, None] < Q_LEN)
+    # Compute dV.
+    ppT = pT
+    dv += tl.dot(ppT.to(MATMUL_PRECISION), do)
+    Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
+    # Compute dP and dS.
+    dpT = tl.dot(v, tl.trans(do))
+    dsT = pT * (dpT - Di[None, :])
+    # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+    m = offs_m1[None, :]
+    n = offs_n1[:, None]
+    {{ modification(
+        subgraph_number=1,
+        output_name = "grad_scores",
+        score="pre_mod_scores",
+        b="off_z",
+        h="off_h",
+        m="m",
+        n="n",
+        grad_score_mod="dsT"
+    ) | indent_except_first(1) }}
+    grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
+
+    dsT = grad_scores
+    if not IS_FULL_BLOCKS:
+        mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
