@@ -7,8 +7,7 @@
 
 #include <caffe2/serialize/file_adapter.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
@@ -77,7 +76,7 @@ void _load_extra_only_for_mobile(
 // version type_resolver and obj_loader.
 at::TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
-    std::shared_ptr<CompilationUnit> compilation_unit);
+    const std::shared_ptr<CompilationUnit>& compilation_unit);
 c10::StrongTypePtr typeResolverMobile(
     const c10::QualifiedName& qn,
     const std::shared_ptr<CompilationUnit>& compilation_unit);
@@ -108,5 +107,4 @@ TORCH_API std::set<std::string> _export_operator_list(
 
 } // namespace mobile
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

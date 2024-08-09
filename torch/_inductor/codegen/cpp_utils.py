@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import sys
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from unittest.mock import patch
@@ -40,7 +41,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
-    torch.complex64: "complex64",
+    torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
 }
@@ -80,7 +81,9 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
-INDEX_TYPE = "long"
+_IS_WINDOWS = sys.platform == "win32"
+
+INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -219,7 +222,7 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
