@@ -206,8 +206,7 @@ class Attr {
   }
 
   // append bias with binary_add method (only used for QConv now)
-  template <int N>
-  Attr& append_bias(const at::Tensor& binary) {
+  Attr& append_bias(const at::Tensor& binary, const int N) {
     // In PyTorch, bias are in shape of [OC],
     // we expand its shape according to Conv dimension
     // Conv1d [OC, 1, 1], Conv2d [1, OC, 1, ,1], Conv3d [1, OC, 1, 1, 1]
@@ -248,7 +247,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst){
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst, bool is_quantized=false){
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -288,7 +287,7 @@ class Attr {
 
     // if output is quantized, then append the eltwise linear to adjust the
     // output scale/zero_point
-    if (dst.is_quantized()) {
+    if (is_quantized) {
       // [Note: Gap of u8 qtensor scale between oneDNN and PyTorch]
       // The /2 here is for output_scale collected by observer is different
       // from quantization requirements in oneDNN.
