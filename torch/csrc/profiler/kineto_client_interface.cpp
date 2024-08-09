@@ -71,6 +71,15 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 } // namespace profiler::impl
 
+extern "C" TORCH_API void global_kineto_init() {
+  if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
+    libkineto_init(
+        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+        /*logOnError=*/true);
+    libkineto::api().suppressLogMessages();
+  }
+}
+
 #if ENABLE_GLOBAL_OBSERVER
 namespace {
 
@@ -91,26 +100,6 @@ struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
     static profiler::impl::LibKinetoClient client;
     libkineto::api().registerClient(&client);
-
-    auto kineto_init = []() {
-      libkineto_init(
-          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-          /*logOnError=*/true);
-      libkineto::api().suppressLogMessages();
-    };
-
-    if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
-      int init_delay_s = get_init_delay();
-      if (init_delay_s > 0) {
-        std::thread t([init_delay_s, kineto_init]() {
-          std::this_thread::sleep_for(std::chrono::seconds(init_delay_s));
-          kineto_init();
-        });
-        t.detach();
-      } else {
-        kineto_init();
-      }
-    }
   }
 } register_libkineto_client;
 
