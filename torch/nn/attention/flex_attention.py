@@ -839,7 +839,7 @@ def flex_attention(
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
-        enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads. 
+        enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
