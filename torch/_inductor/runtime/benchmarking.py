@@ -162,9 +162,10 @@ class TritonBenchmarker(Benchmarker):
         # this may be used as a fallback if other features are disabled, in that case we
         # need to prune any additional kwargs that are not part of do_bench's signature
         do_bench_sig = inspect.signature(self.triton_do_bench)
-        for kwarg in list(kwargs.keys()):
-            if kwarg not in do_bench_sig:
-                del kwargs[kwarg]
+        if "**kwargs" not in str(do_bench_sig):
+            for kwarg in list(kwargs.keys()):
+                if kwarg not in do_bench_sig.parameters:
+                    del kwargs[kwarg]
 
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
@@ -229,7 +230,15 @@ def maybe_fallback(
 
 
 class InductorBenchmarker(TritonBenchmarker):
-    should_fallback = lambda: not is_feature_enabled("inductor_benchmarker")
+    should_fallback = lambda: not is_feature_enabled(
+        "inductor_benchmarker"
+    )  # noqa: E731
+
+    @cached_property
+    def L2_cache_size(self: Self) -> int:
+        device = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device)
+        return props.L2_cache_size
 
     def get_event_pairs(
         self: Self, num_pairs: int
@@ -307,7 +316,7 @@ class InductorBenchmarker(TritonBenchmarker):
             _callable()
             end_event.record()
         torch.cuda.synchronize()
-        estimated_timing = self.get_min_timing(event_pairs)
+        estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
         benchmark_iters = max(
@@ -326,7 +335,7 @@ class InductorBenchmarker(TritonBenchmarker):
             _callable()
             end_event.record()
         torch.cuda.synchronize()
-        benchmarked_timing = self.get_min_timing_ms(event_pairs)
+        benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
