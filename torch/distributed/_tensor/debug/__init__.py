@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.debug.comm_mode import CommDebugMode
+from torch.distributed._tensor.debug.visualize_sharding import visualize_sharding
 
 
-def get_sharding_prop_cache_info():
+__all__ = ["CommDebugMode", "visualize_sharding"]
+
+
+def _get_sharding_prop_cache_info():
     """
     Get the cache info for the sharding propagation cache, used for debugging purpose only.
     This would return a named tuple showing hits, misses, maxsize and cursize of the sharding

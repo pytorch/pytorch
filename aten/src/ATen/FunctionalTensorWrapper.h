@@ -150,7 +150,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set__impl(const FunctionalTensorWrapper* other);
 
   // Custom implementation of resize_storage_bytes_(self, new_size)
-  void storage_resize_(c10::SymInt new_size);
+  void storage_resize_(const c10::SymInt& new_size);
 
   // Returns whether the current tensor's data was ever mutated
   bool has_data_mutation();
