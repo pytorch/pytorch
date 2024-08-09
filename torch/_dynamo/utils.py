@@ -1405,6 +1405,7 @@ def same(
                 relax_numpy_equality,
                 ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -1423,6 +1424,7 @@ def same(
             relax_numpy_equality,
             ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -1442,6 +1444,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                     ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
+                    use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -1553,15 +1556,16 @@ def same(
                     passes_test = True
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f"
+                        ", use_larger_multiplier_for_smaller_tensor: %d",
                         res_error,
                         ref_error,
                         res.size(),
                         res.dtype,
                         multiplier,
                         tol,
+                        use_larger_multiplier_for_smaller_tensor,
                     )
-                    # import pdb; pdb.set_trace()
                 return passes_test
 
             if ignore_non_fp:
@@ -1597,6 +1601,7 @@ def same(
             relax_numpy_equality=relax_numpy_equality,
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -1624,6 +1629,7 @@ def same(
                 relax_numpy_equality=relax_numpy_equality,
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for key in ref.__dict__.keys()
         )
