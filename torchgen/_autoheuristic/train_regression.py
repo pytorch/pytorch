@@ -34,7 +34,15 @@ class AHTrainRegressionTree(AHTrain):
     def __init__(self):
         super().__init__()
 
-    def main(self, log_path, other_datasets, nrows, heuristic_name):
+    def main(
+        self,
+        log_path,
+        other_datasets,
+        nrows,
+        heuristic_name,
+        save_dot=False,
+        ranking=False,
+    ):
         """
         Main function that trains a decision tree and generates a heuristic.
         """
@@ -46,7 +54,7 @@ class AHTrainRegressionTree(AHTrain):
         self.add_real_datasets(datasets, other_datasets, cat_feature2cats)
 
         # We will do a grid search over the values
-        max_depths = [5, 10, 13, 15, 17, 20, 23, None]
+        max_depths = [5, 10]
         min_samples_leafs = [1, 2, 5, 10]
         choice_columns = [f"{CHOICE_COL}_{choice}" for choice in choices]
         (results_df, best_model, threshold) = self.train_and_evaluate_models(
@@ -355,6 +363,65 @@ class AHTrainRegressionTree(AHTrain):
             "wrong_max_ratio": wrong_max_ratio,
         }
 
+    def dt_to_python(
+        self,
+        dt,
+        metadata,
+        feature_names,
+        dummy_col_2_col_val,
+        heuristic_name,
+        threshold,
+        unsafe_leaves=None,
+    ):
+        tree_ = dt.tree_
+        feature_name = [
+            feature_names[i] if i != -1 else "undefined!" for i in tree_.feature
+        ]
+
+        lines = []
+        device_capa = metadata["device_capa"]
+        device_capa_str = f"({device_capa[0]}, {device_capa[1]})"
+        opt_name = metadata["name"]
+        lines.append(
+            self.codegen_boilerplate(
+                heuristic_name,
+                opt_name,
+                threshold,
+                metadata["shared_memory"],
+                device_capa_str,
+                dt,
+            )
+        )
+        fn_def = f"\n    {self.gen_predict_fn_def()}"
+        lines.append(fn_def)
+
+        def dt_to_python(node, depth):
+            indent = "    " * (depth + 1)
+            false_predicate = ""
+            if tree_.feature[node] != -2:
+                name = feature_name[node]
+                threshold = tree_.threshold[node]
+                if name in dummy_col_2_col_val:
+                    (orig_name, value) = dummy_col_2_col_val[name]
+                    predicate = f"{indent}if str(context.get_value('{orig_name}')) != '{value}':"
+                    assert (
+                        threshold == 0.5
+                    ), f"expected threshold to be 0.5 but is {threshold}"
+                else:
+                    predicate = (
+                        f"{indent}if context.get_value('{name}') <= {threshold}:"
+                    )
+                lines.append(predicate)
+                dt_to_python(tree_.children_left[node], depth + 1)
+                lines.append(f"{indent}else:")
+                dt_to_python(tree_.children_right[node], depth + 1)
+            else:
+                lines.append(self.handle_leaf(tree_, node, indent, unsafe_leaves))
+
+        dt_to_python(0, 1)
+
+        self.write_heuristic_to_file(lines, heuristic_name)
+
     def handle_leaf(self, tree_, node, indent, unsafe_leaves):
         """
         Generates the code for a leaf node. This is just the value predicted by the regression tree.
@@ -366,7 +433,7 @@ class AHTrainRegressionTree(AHTrain):
         return "def predict(self, context: AHContext) -> float:"
 
     def codegen_boilerplate(
-        self, heuristic_name, opt_name, threshold, shared_memory, device_capa, dt
+        self, heuristic_name, opt_name, threshold, shared_memory, device_capa, classes
     ):
         """
         Generates the boilerplate code for the generated heuristic. This includes things like imports, class definition,
