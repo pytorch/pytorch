@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# flake8: noqa: B950
 import unittest
 from collections import deque
 from functools import partial
@@ -9,6 +10,11 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+from functorch.compile import (
+    aot_function,
+    default_decompositions,
+    min_cut_rematerialization_partition,
+)
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
@@ -30,6 +36,27 @@ if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
 from torch.testing._internal.two_tensor import TwoTensor
+
+
+def extract_graph(fx_g, _, graph_cell):
+    graph_cell[0] = fx_g
+    return fx_g
+
+
+def get_fw_bw_graph(
+    f, inps, partitioner=min_cut_rematerialization_partition, dynamic=False
+):
+    fw_graph_cell = [None]
+    bw_graph_cell = [None]
+    aot_function(
+        f,
+        fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        partition_fn=partitioner,
+        decompositions=default_decompositions,
+        dynamic=dynamic,
+    )(*inps).sum().backward()
+    return (fw_graph_cell[0], bw_graph_cell[0])
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -374,32 +401,39 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule:mean" in recorded_dict)
 
     @skipIfNoDynamoSupport
-    def test_effectful_custom_op_with_subclass(self):
+    def test_effectful_custom_op_with_subclasses(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
-            lib.define("foo(Tensor x) -> Tensor")
+            lib.define("zoo(Tensor x) -> Tensor")
+
+            d = {"fw": 0}
+
+            def reset_counter():
+                d["fw"] = 0
+
+            def assert_counter(fw):
+                self.assertEqual(d["fw"], fw)
 
             def foo_impl(a):
-                torch.ops.aten._print("fwd")
-                return a.clone()
+                d["fw"] = d["fw"] + 1
+                return 2 * a.clone()
 
             def foo_bwd(ctx, grad):
-                torch.ops.aten._print("bwd")
                 return grad.clone()
 
             for backend in ["CPU", "CUDA", "Meta"]:
-                lib.impl("foo", foo_impl, backend)
+                lib.impl("zoo", foo_impl, backend)
 
-            torch.library.register_autograd("_mylib::foo", foo_bwd)
+            torch.library.register_autograd("_mylib::zoo", foo_bwd)
 
             from torch._higher_order_ops.effects import (
                 _EffectType,
                 _register_effectful_op,
             )
 
-            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+            _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
 
             def fn(x, y):
-                return torch.ops._mylib.foo(x) + y
+                return torch.ops._mylib.zoo(x) + y
 
             def ins_sc():
                 return (
@@ -412,11 +446,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def ins_dense():
                 return torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
 
-            for ins_fn in [ins_sc, ins_dense]:
+            for i, (ins_fn, expected_fw_count) in enumerate(
+                zip([ins_sc, ins_dense], [2, 1])
+            ):
+                reset_counter()
                 ref_out = fn(*ins_fn())
-                compiled_fn = torch.compile(fn, backend="aot_eager")
+                assert_counter(expected_fw_count)
 
+                compiled_fn = torch.compile(fn, backend="aot_eager")
                 out = compiled_fn(*ins_fn())
+                reset_counter()
+                out = compiled_fn(*ins_fn())
+                assert_counter(expected_fw_count)
+
                 self.assertEqual(ref_out, out)
 
             def ins_dense_req_grad():
@@ -429,23 +471,66 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return (
                     TwoTensor(
                         torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
-                        torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+                        torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
                     ),
-                    torch.tensor([4.0, 5.0, 6.0], requires_grad=True),
+                    TwoTensor(
+                        torch.tensor([7.0, 8.0, 9.0], requires_grad=True),
+                        torch.tensor([10.0, 11.0, 12.0], requires_grad=True),
+                    ),
                 )
 
-            for ins_fn_req_grad in [ins_dense_req_grad, ins_sc_req_grad]:
+            for i, (
+                ins_fn_req_grad,
+                (
+                    expected_fw_count,
+                    expected_fw_count_after_bw,
+                ),
+            ) in enumerate(
+                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1), (2, 2)])
+            ):
                 ref_ins = ins_fn_req_grad()
+                reset_counter()
                 ref_out = fn(*ref_ins)
+                assert_counter(expected_fw_count)
                 ref_out.sum().backward()
+                assert_counter(expected_fw_count_after_bw)
 
                 compiled_fn = torch.compile(fn, backend="aot_eager")
+
                 ins = ins_fn_req_grad()
                 out = compiled_fn(*ins)
+                reset_counter()
+                out = compiled_fn(*ins)
+                assert_counter(expected_fw_count)
                 self.assertEqual(ref_out, out)
                 out.sum().backward()
+                assert_counter(expected_fw_count_after_bw)
                 self.assertEqual(ref_ins[1].grad, ins[1].grad)
                 self.assertEqual(ref_ins[0].grad, ins[0].grad)
+
+            fw_graph, bw_graph = get_fw_bw_graph(fn, ins_sc_req_grad())
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops._mylib.zoo.default, primals_2);  primals_1 = primals_2 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._mylib.zoo.default, primals_3);  getitem = primals_3 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    add = torch.ops.aten.add.Tensor(getitem_1, primals_4);  getitem_1 = primals_4 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem_3, primals_5);  getitem_3 = primals_5 = None
+    return (getitem_2, add, add_1)""",
+            )
+            self.assertExpectedInline(
+                bw_graph.code.strip(),
+                """\
+def forward(self, tangents_1, tangents_2):
+    clone = torch.ops.aten.clone.default(tangents_1)
+    clone_1 = torch.ops.aten.clone.default(tangents_2)
+    return (clone, clone_1, tangents_1, tangents_2)""",
+            )
 
 
 if __name__ == "__main__":
