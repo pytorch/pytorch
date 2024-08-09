@@ -2158,6 +2158,15 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
         compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled(nt)
 
+    def test_inference_tensor(self):
+        with torch.inference_mode():
+            nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(n):
+            return n * 2
+
+        torch.compile(fn, backend="eager")(nt)
+
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)

@@ -531,10 +531,18 @@ class FakeTensorConfig:
 class SymIntMemoDescriptor:
     _name: str
     _is_unbacked: bool
+    # This flag makes version counting optional. We use this for NJT, where
+    # memoization of the nested int on the fake offsets is important to do even
+    # during inference mode. We're okay with no version tracking for that case
+    # because we trust that offsets will not be mutated.
+    _opt_vc: bool
 
-    def __init__(self, *, is_unbacked: Optional[bool] = None):
+    def __init__(
+        self, *, is_unbacked: Optional[bool] = None, opt_vc: bool = False
+    ) -> None:
         assert is_unbacked is not None
         self._is_unbacked = is_unbacked
+        self._opt_vc = opt_vc
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -559,7 +567,10 @@ class SymIntMemoDescriptor:
             return None
         # Version counter based tracking isn't 100% sound but it's close
         # enough
-        if getattr(obj, self._memo_vc(obj)) != obj._version or (
+        if (
+            not (self._opt_vc and obj.is_inference())
+            and getattr(obj, self._memo_vc(obj)) != obj._version
+        ) or (
             self._is_unbacked
             and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
@@ -572,9 +583,10 @@ class SymIntMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not torch.is_inference_mode_enabled():
+        elif not obj.is_inference() or self._opt_vc:
             setattr(obj, self._memo(obj), value)
-            setattr(obj, self._memo_vc(obj), obj._version)
+            if not obj.is_inference():
+                setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
@@ -602,7 +614,7 @@ class FakeTensor(Tensor):
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
     # nested int.
-    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False)
+    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False, opt_vc=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
