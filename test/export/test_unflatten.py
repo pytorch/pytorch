@@ -117,6 +117,11 @@ class TestUnflatten(TestCase):
         for name, value in orig_state_dict.items():
             self.assertTrue(torch.allclose(value, exported_state_dict[name]))
 
+        # Check composability with torch.compile
+        self.assertTrue(
+            torch.allclose(orig_eager(*inputs), torch.compile(unflattened)(*inputs))
+        )
+
     def test_unflatten_buffer_mutation(self):
         class Child(torch.nn.Module):
             def __init__(self) -> None:
@@ -413,7 +418,7 @@ class TestUnflatten(TestCase):
         unflattened = unflatten(export_module)
 
         # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
-        unflattened.foo.compile(fullgraph=True)
+        unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)
 
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)

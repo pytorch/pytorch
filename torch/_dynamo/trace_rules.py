@@ -3224,6 +3224,8 @@ MOD_INLINELIST = {
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export.unflatten",
+    "torch.export._tree_utils",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
