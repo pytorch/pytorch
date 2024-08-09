@@ -111,9 +111,9 @@ def _try_detecting_missing_ranks(
 ) -> Optional[Iterable[str]]:
     store.set(f"{key_prefix}{rank}{_TRACE}", "<val_ignored>")
 
-    missing_rank_info = set()
-    ranks_missing = 0
-    if rank == 0:
+    def _find_missing_ranks():
+        missing_rank_info = set()
+        ranks_missing = 0
         for i in range(1, world_size):
             # reduce noise, assuming in general 8 ranks per node
             # It is valuable to know that 1 or >1 nodes have timed-out.
@@ -130,15 +130,22 @@ def _try_detecting_missing_ranks(
             except DistStoreError:
                 ranks_missing += 1
                 missing_rank_info.add(rank_decoder(i))
-        store.set(f"{key_prefix}{_TRACING_GATE}", "<val_ignored>")
         return missing_rank_info
-    else:
+
+    def _checkin():
         try:
             store.wait([f"{key_prefix}{_TRACING_GATE}"])
             return [f"[<check rank 0 ({rank_decoder(0)}) for missing rank info>]"]
         except DistStoreError:
             # in case rank0 is the source of the timeout, original exception will be raised
             return None
+
+    if rank == 0:
+        missing_rank_info = _find_missing_ranks()
+        store.set(f"{key_prefix}{_TRACING_GATE}", "<val_ignored>")
+        return missing_rank_info
+    else:
+        return _checkin()
 
 
 def _barrier_nonblocking(store, world_size: int, key_prefix: str) -> str:
@@ -175,6 +182,8 @@ def barrier(
     Time complexity: O(1) per worker, O(N) globally.
 
     Optionally, passing rank will enable tracing of missing ranks on timeouts.
+    `rank_tracing_decoder` lambda arg can be used to convert rank data
+    into a more meaninful information at an app level (e.g. hostname).
 
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.

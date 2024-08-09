@@ -10,6 +10,7 @@
 import datetime
 from multiprocessing.pool import ThreadPool
 from typing import List
+from unittest import mock
 
 import torch.distributed as dist
 import torch.distributed.elastic.utils.store as store_util
@@ -18,6 +19,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MockStore:
+    _TEST_TIMEOUT = 1234
+
     def __init__(self) -> None:
         self.ops = []
 
@@ -28,7 +31,7 @@ class MockStore:
     def timeout(self) -> datetime.timedelta:
         self.ops.append(("timeout",))
 
-        return datetime.timedelta(seconds=1234)
+        return datetime.timedelta(seconds=self._TEST_TIMEOUT)
 
     def set(self, key: str, value: str) -> None:
         self.ops.append(("set", key, value))
@@ -97,7 +100,7 @@ class StoreUtilTest(TestCase):
                 ("add", "test/store/finished/num_members", 1),
                 ("set", "test/store/finished/last_member", "<val_ignored>"),
                 ("wait", ["test/store/finished/last_member"]),
-                ("set_timeout", datetime.timedelta(seconds=1234)),
+                ("set_timeout", datetime.timedelta(seconds=store._TEST_TIMEOUT)),
             ],
         )
 
@@ -129,7 +132,7 @@ class StoreUtilTest(TestCase):
                 ("add", "test/store/num_members", 1),
                 ("set", "test/store/last_member", "<val_ignored>"),
                 ("wait", ["test/store/last_member"]),
-                ("set_timeout", datetime.timedelta(seconds=1234)),
+                ("set_timeout", datetime.timedelta(seconds=store._TEST_TIMEOUT)),
             ],
         )
 
@@ -164,6 +167,75 @@ class StoreUtilTest(TestCase):
                 for msg in outputs
             )
         )
+
+    def test_barrier_timeout_operations(self):
+        import torch
+
+        DistStoreError = torch._C._DistStoreError
+
+        N = 3
+        store = MockStore()
+
+        # rank 0
+        with mock.patch.object(store, "wait") as wait_mock:
+            wait_mock.side_effect = [DistStoreError("test"), None, None]
+
+            with self.assertRaises(DistStoreError):
+                store_util.barrier(
+                    store,
+                    N,
+                    key_prefix="test/store",
+                    barrier_timeout=1,
+                    rank=0,
+                    rank_tracing_decoder=lambda x: f"Rank {x} host",
+                    trace_timeout=0.1,
+                )
+
+            self.assertListEqual(
+                store.ops,
+                [
+                    ("timeout",),
+                    ("set_timeout", datetime.timedelta(seconds=1)),
+                    ("add", "test/store/num_members", 1),
+                    ("set", "test/store/last_member", "<val_ignored>"),
+                    # wait for last member is mocked
+                    ("set", "test/store0/TRACE", "<val_ignored>"),
+                    # wait for each rank is mocked
+                    ("set", "test/store/TRACING_GATE", "<val_ignored>"),
+                ],
+            )
+
+        # rank 1
+        with mock.patch.object(store, "wait") as wait_mock:
+            store.ops = []
+
+            wait_mock.side_effect = [
+                DistStoreError("test"),
+                None,
+            ]
+
+            with self.assertRaises(DistStoreError):
+                store_util.barrier(
+                    store,
+                    N,
+                    key_prefix="test/store",
+                    barrier_timeout=1,
+                    rank=1,
+                    rank_tracing_decoder=lambda x: f"Rank {x} host",
+                    trace_timeout=0.1,
+                )
+
+            self.assertListEqual(
+                store.ops,
+                [
+                    ("timeout",),
+                    ("set_timeout", datetime.timedelta(seconds=1)),
+                    ("add", "test/store/num_members", 1),
+                    ("set", "test/store/last_member", "<val_ignored>"),
+                    ("set", "test/store1/TRACE", "<val_ignored>"),
+                    # wait for gate is mocked
+                ],
+            )
 
     def test_barrier_hash_store(self) -> None:
         N = 4
