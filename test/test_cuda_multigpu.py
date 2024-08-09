@@ -499,6 +499,29 @@ class TestCudaMultiGPU(TestCase):
         self.assertEqual(x.cuda().get_device(), 0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_set_device_by_accelerator_hooks(self):
+        x = torch.randn(5, 5)
+        with torch.cuda.device(1):
+            self.assertEqual(x.cuda().get_device(), 1)
+            torch._C._accelerator_hooks_set_current_device(0)
+            self.assertEqual(x.cuda().get_device(), 0)
+            with torch.cuda.device(1):
+                self.assertEqual(x.cuda().get_device(), 1)
+            self.assertEqual(x.cuda().get_device(), 0)
+            torch._C._accelerator_hooks_set_current_device(1)
+        self.assertEqual(x.cuda().get_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_get_device_by_accelerator_hooks(self):
+        self.assertEqual(torch._C._accelerator_hooks_get_current_device(), 0)
+        with torch.cuda.device(1):
+            self.assertEqual(torch._C._accelerator_hooks_get_current_device(), 1)
+            torch._C._accelerator_hooks_set_current_device(0)
+            self.assertEqual(torch._C._accelerator_hooks_get_current_device(), 0)
+            torch._C._accelerator_hooks_set_current_device(1)
+        self.assertEqual(torch._C._accelerator_hooks_get_current_device(), 0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")
