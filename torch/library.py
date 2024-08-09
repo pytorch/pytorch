@@ -553,21 +553,21 @@ def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
 
     def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
-        if disable_dynamo:
-
-            @torch._disable_dynamo
-            def func_no_dynamo(*args, **kwargs):
-                return func(*args, **kwargs)
 
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        for key in keys:
-            if disable_dynamo:
+        if disable_dynamo:
+            @torch._disable_dynamo
+            def func_no_dynamo(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            for key in keys:
                 use_lib.impl(qualname, func_no_dynamo, key)
-            else:
+        else:
+            for key in keys:
                 use_lib.impl(qualname, func, key)
 
     if func is None:
