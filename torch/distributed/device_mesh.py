@@ -116,6 +116,42 @@ else:
 
             return res_submesh
 
+        def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            flatten_dims_in_root = [
+                not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
+                for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+            ]
+            flatten_mesh_dim_names = "_".join(
+                [
+                    not_none(root_mesh.mesh_dim_names)[dim]
+                    for dim in flatten_dims_in_root
+                ]
+            )
+            flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
+
+            remained_dims_in_root = list(range(root_mesh.mesh.ndim))
+            for flatten_dim_in_root in flatten_dims_in_root:
+                remained_dims_in_root.remove(flatten_dim_in_root)
+
+            pg_ranks_by_dim = root_mesh.mesh.permute(
+                *remained_dims_in_root, *flatten_dims_in_root
+            ).reshape(-1, flattened_mesh_dim_size)
+
+            cur_rank = root_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                # need to init backend here since the flattened pg doesn't exist in root mesh.
+                flattened_mesh = DeviceMesh(
+                    root_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=(flatten_mesh_dim_names,),
+                )
+                if cur_rank in mesh_nd:
+                    res_flattened_mesh = flattened_mesh
+            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
+
+            return res_flattened_mesh
+
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
             # A root mesh is not created through slicing.
@@ -310,14 +346,21 @@ else:
             dim_group_infos: List[Tuple[str, List[int], str]] = []
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
-                # if the mesh is the same as world_pg, we just append the default
-                # pg to the first dim groups, as new_group cannot have the exact
-                # same ranks as world
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
+                # Otherwise, create new pg.
+                default_group = _get_default_group()
+                ranks = list(range(get_world_size()))
+                dim_group = (
+                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
+                    if torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
                 dim_group_infos.append(
                     (
-                        _get_group_tag(_get_default_group()),
-                        list(range(get_world_size())),
-                        _get_default_group().group_name,
+                        _get_group_tag(dim_group),
+                        ranks,
+                        dim_group.group_name,
                     )
                 )
             else:
@@ -654,6 +697,17 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        def _flatten(self) -> "DeviceMesh":
+            """
+            Returns a 1D DeviceMesh by flattening the current DeviceMesh.
+            """
+            if not self.mesh_dim_names:
+                raise RuntimeError(
+                    "Cannot flatten a DeviceMesh without mesh_dim_names!"
+                )
+
+            return _mesh_resources.create_flatten_mesh(self)
 
     def init_device_mesh(
         device_type: str,
