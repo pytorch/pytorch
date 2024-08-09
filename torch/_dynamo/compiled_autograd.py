@@ -83,7 +83,7 @@ class AutogradCompilerInstance:
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(
-        self, inputs: List[torch.Tensor], sizes: List[int], int_scalars: Tuple[int]
+        self, inputs: List[torch.Tensor], sizes: List[int], scalars: Tuple[int]
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
@@ -112,15 +112,15 @@ class AutogradCompilerInstance:
         ]
         self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
-        int_scalars = [
+        scalars = [
             self.shape_env.create_unspecified_symint_and_symbol(
                 val,
                 self.source("scalars", idx),
                 DimDynamic.DYNAMIC,
             )
-            for idx, val in enumerate(int_scalars)
+            for idx, val in enumerate(scalars)
         ]
-        self.bind_tensors_to_proxies(int_scalars, scalars_proxy)
+        self.bind_tensors_to_proxies(scalars, scalars_proxy)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -129,7 +129,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
-        return inputs, sizes, int_scalars
+        return inputs, sizes, scalars
 
     def proxy_call_backward(
         self,
