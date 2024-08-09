@@ -402,6 +402,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
     _verify_placeholder_names(gm, new_graph_signature)
+    
+    with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
+        for node in gm.graph.nodes:
+            if node.op == "output":
+                args, _ = pytree.tree_flatten(node.args)
+                for out in args:
+                    if out.name in new_graph_signature.buffers_to_mutate:
+                        if out.op == "call_function" and out.target == torch.ops.aten.copy.default:
+                            out.replace_all_uses_with(out.args[1])
+                            gm.graph.erase_node(out)
+        gm.recompile()
+
     return gm, new_graph_signature
 
 
