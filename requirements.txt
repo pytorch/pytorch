@@ -21,3 +21,6 @@ ninja
 setuptools ; python_version >= "3.12"
 packaging
 optree>=0.12.0 ; python_version <= "3.12"
+pyarrow
+aiohttp
+yarl
