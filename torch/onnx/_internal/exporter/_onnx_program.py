@@ -12,13 +12,13 @@ import tempfile
 import textwrap
 from typing import Callable, IO, Sequence, TYPE_CHECKING
 
-import onnx
-
-from onnxscript import ir
-
 import torch
+from torch.onnx._internal import _lazy_import
 from torch.utils import _pytree as pytree
 
+
+onnx = _lazy_import.onnx
+ir = _lazy_import.onnxscript_ir
 
 if TYPE_CHECKING:
     import onnxruntime as ort

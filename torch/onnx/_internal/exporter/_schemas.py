@@ -9,10 +9,12 @@ import types
 import typing
 from typing import Any, Iterator, Mapping, Optional, Sequence, TypeVar, Union
 
-import onnx
+from torch.onnx._internal import _lazy_import
 
-import onnxscript
-from onnxscript import ir
+
+onnx = _lazy_import.onnx
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
 
 
 logger = logging.getLogger(__name__)
@@ -26,36 +28,46 @@ class _Empty:
 
 _EMPTY_DEFAULT = _Empty()
 
+
 # Map from python type to corresponding ONNX AttributeProto type
-_PY_TYPE_TO_ATTR_TYPE = {
-    float: ir.AttributeType.FLOAT,
-    int: ir.AttributeType.INT,
-    str: ir.AttributeType.STRING,
-    bool: ir.AttributeType.INT,
-    ir.Tensor: ir.AttributeType.TENSOR,
-    ir.TensorProtocol: ir.AttributeType.TENSOR,
-    ir.Graph: ir.AttributeType.GRAPH,
-    ir.GraphProtocol: ir.AttributeType.GRAPH,
-}
+def _py_type_to_attr_type(py_type: type) -> ir.AttributeType:
+    _PY_TYPE_TO_ATTR_TYPE = {
+        float: ir.AttributeType.FLOAT,
+        int: ir.AttributeType.INT,
+        str: ir.AttributeType.STRING,
+        bool: ir.AttributeType.INT,
+        ir.Tensor: ir.AttributeType.TENSOR,
+        ir.TensorProtocol: ir.AttributeType.TENSOR,
+        ir.Graph: ir.AttributeType.GRAPH,
+        ir.GraphProtocol: ir.AttributeType.GRAPH,
+    }
+    return _PY_TYPE_TO_ATTR_TYPE.get(py_type)
+
 
 # Map from python type to corresponding ONNX AttributeProto type,
 # for repeated (i.e., list of) values
-_LIST_TYPE_TO_ATTR_TYPE = {
-    float: ir.AttributeType.FLOATS,
-    int: ir.AttributeType.INTS,
-    str: ir.AttributeType.STRINGS,
-    bool: ir.AttributeType.INTS,
-    ir.Tensor: ir.AttributeType.TENSORS,
-    ir.TensorProtocol: ir.AttributeType.TENSORS,
-    ir.Graph: ir.AttributeType.GRAPHS,
-    ir.GraphProtocol: ir.AttributeType.GRAPHS,
-}
+def _list_type_to_attr_type(py_type: type) -> ir.AttributeType:
+    _LIST_TYPE_TO_ATTR_TYPE = {
+        float: ir.AttributeType.FLOATS,
+        int: ir.AttributeType.INTS,
+        str: ir.AttributeType.STRINGS,
+        bool: ir.AttributeType.INTS,
+        ir.Tensor: ir.AttributeType.TENSORS,
+        ir.TensorProtocol: ir.AttributeType.TENSORS,
+        ir.Graph: ir.AttributeType.GRAPHS,
+        ir.GraphProtocol: ir.AttributeType.GRAPHS,
+    }
+    return _LIST_TYPE_TO_ATTR_TYPE.get(py_type)
 
-_ALL_VALUE_TYPES = (
-    {ir.TensorType(dtype) for dtype in ir.DataType}
-    | {ir.SequenceType(ir.TensorType(dtype)) for dtype in ir.DataType}
-    | {ir.OptionalType(ir.TensorType(dtype)) for dtype in ir.DataType}
-)
+
+def _all_value_types() -> set[ir.TypeProtocol]:
+    """Returns all possible value types."""
+    return (
+        {ir.TensorType(dtype) for dtype in ir.DataType}
+        | {ir.SequenceType(ir.TensorType(dtype)) for dtype in ir.DataType}
+        | {ir.OptionalType(ir.TensorType(dtype)) for dtype in ir.DataType}
+    )
+
 
 # TypeAnnotationValue represents the (value of) valid type-annotations recognized
 # by ONNX Script. Currently, it supports
@@ -95,7 +107,7 @@ class TypeConstraintParam:
 
     @classmethod
     def any_value(cls, name: str, description: str = "") -> TypeConstraintParam:
-        return cls(name, _ALL_VALUE_TYPES, description)
+        return cls(name, _all_value_types(), description)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,8 +226,8 @@ def _is_optional(type_: type) -> bool:
 def _get_attr_type(type_: type) -> ir.AttributeType:
     """Obtain the type of the attribute from a Python class."""
     try:
-        if type_ in _PY_TYPE_TO_ATTR_TYPE:
-            return _PY_TYPE_TO_ATTR_TYPE[type_]
+        if (attr_type := _py_type_to_attr_type(type_)) is not None:
+            return attr_type
         origin_type = typing.get_origin(type_)
         if origin_type is None:
             return ir.AttributeType.UNDEFINED
@@ -228,8 +240,8 @@ def _get_attr_type(type_: type) -> ir.AttributeType:
             tuple,
         ):
             inner_type = typing.get_args(type_)[0]
-            if inner_type in _LIST_TYPE_TO_ATTR_TYPE:
-                return _LIST_TYPE_TO_ATTR_TYPE[inner_type]
+            if attr_type := _list_type_to_attr_type(inner_type):
+                return attr_type
     except TypeError:
         logger.warning("TypeError when checking %s.", type_, exc_info=True)
     return ir.AttributeType.UNDEFINED
@@ -280,7 +292,7 @@ def _get_allowed_types_from_type_annotation(
         else:
             bound = type_.__bound__
             if bound is None:
-                allowed_types = _ALL_VALUE_TYPES
+                allowed_types = _all_value_types()
             else:
                 allowed_types.update(_get_allowed_types_from_type_annotation(bound))
         return allowed_types
@@ -316,7 +328,7 @@ def _get_allowed_types_from_type_annotation(
         }
 
     # Allow everything by default
-    return _ALL_VALUE_TYPES
+    return _all_value_types()
 
 
 @dataclasses.dataclass

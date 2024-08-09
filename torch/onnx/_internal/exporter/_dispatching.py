@@ -4,38 +4,39 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
-import onnxscript
-from onnxscript import ir
-
 import torch
 import torch.fx
+from torch.onnx._internal import _lazy_import
 from torch.onnx._internal.exporter import _registration, _schemas
+
+
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
 
 
 logger = logging.getLogger(__name__)
 
-# Define utilities to convert PyTorch data types so users do not need to specify manually
-_TORCH_DTYPE_TO_ONNX_COMPATIBLE: dict[torch.dtype, ir.DataType] = {
-    torch.bfloat16: ir.DataType.BFLOAT16,
-    torch.bool: ir.DataType.BOOL,
-    torch.complex128: ir.DataType.DOUBLE,
-    torch.complex64: ir.DataType.FLOAT,
-    torch.float16: ir.DataType.FLOAT16,
-    torch.float32: ir.DataType.FLOAT,
-    torch.float64: ir.DataType.DOUBLE,
-    torch.float8_e4m3fn: ir.DataType.FLOAT8E4M3FN,
-    torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
-    torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
-    torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
-    torch.int16: ir.DataType.INT16,
-    torch.int32: ir.DataType.INT32,
-    torch.int64: ir.DataType.INT64,
-    torch.int8: ir.DataType.INT8,
-    torch.uint8: ir.DataType.UINT8,
-}
-
 
 def _torch_dtype_to_onnx_compatible_dtype(dtype: torch.dtype) -> ir.DataType:
+    # Define utilities to convert PyTorch data types so users do not need to specify manually
+    _TORCH_DTYPE_TO_ONNX_COMPATIBLE: dict[torch.dtype, ir.DataType] = {
+        torch.bfloat16: ir.DataType.BFLOAT16,
+        torch.bool: ir.DataType.BOOL,
+        torch.complex128: ir.DataType.DOUBLE,
+        torch.complex64: ir.DataType.FLOAT,
+        torch.float16: ir.DataType.FLOAT16,
+        torch.float32: ir.DataType.FLOAT,
+        torch.float64: ir.DataType.DOUBLE,
+        torch.float8_e4m3fn: ir.DataType.FLOAT8E4M3FN,
+        torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
+        torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
+        torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+        torch.int16: ir.DataType.INT16,
+        torch.int32: ir.DataType.INT32,
+        torch.int64: ir.DataType.INT64,
+        torch.int8: ir.DataType.INT8,
+        torch.uint8: ir.DataType.UINT8,
+    }
     return _TORCH_DTYPE_TO_ONNX_COMPATIBLE[dtype]
 
 

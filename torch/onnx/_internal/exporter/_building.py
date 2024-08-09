@@ -14,16 +14,23 @@ import inspect
 import logging
 from typing import Any, Mapping, Sequence, TYPE_CHECKING, Union
 
-import onnxscript
-from onnxscript import evaluator, ir
-from onnxscript.ir import convenience as ir_convenience
-
 import torch
-from torch.onnx._internal.exporter import _schemas, _tensors, errors
+from torch.onnx._internal import _lazy_import
+from torch.onnx._internal.exporter import _schemas, errors
 
 
 if TYPE_CHECKING:
     import onnx
+
+    from torch.onnx._internal.exporter import (
+        _tensors,  # Delay import to avoid onnxscript
+    )
+
+
+onnxscript = _lazy_import.onnxscript
+ir = _lazy_import.onnxscript_ir
+evaluator = _lazy_import.onnxscript_evaluator
+ir_convenience = _lazy_import.onnxscript_ir_convenience
 
 
 logger = logging.getLogger(__name__)
@@ -317,6 +324,8 @@ def _construct_node(
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
     """
+    from torch.onnx._internal.exporter import _tensors
+
     inputs: list[ir.Value | None] = []
     # Flatten variadic inputs
     for value in named_inputs.values():
@@ -437,6 +446,8 @@ class OpRecorder(evaluator.Evaluator):
         args: Sequence[AllowedArgType],
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor] | bool | int:
+        from torch.onnx._internal.exporter import _tensors
+
         try:
             # Special cases for handling IsScalar and Rank
             if function.name == "IsScalar":
