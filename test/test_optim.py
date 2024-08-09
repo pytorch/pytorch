@@ -596,7 +596,7 @@ class TestOptimRenewed(TestCase):
                 # For other pointwise optimizers, this distinction is trivial, but for LBFGS where
                 # there are reductions across all parameters (and all the grads get flattened into
                 # one long Tensor), this ordering matters. Why? Reductions (like sum) are NOT
-                # commutative, i.e., a + b + c != a + c + b in computers. Thus, we add a seed here
+                # associative, i.e., a + b + c != a + c + b in computers. Thus, we add a seed here
                 # to control the discrepancy that will happen with LBFGS. Note that in test_complex
                 # above, there is no need for a seed nor for increased tolerance, because results
                 # should be bitwise equivalent.
