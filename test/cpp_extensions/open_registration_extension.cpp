@@ -389,7 +389,7 @@ at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 std::optional<bool> pin_memory_opt) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
-  return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
+  return at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
 }
 
 // Some set operations for the basic use case
@@ -632,17 +632,12 @@ const at::Generator& default_generator(c10::DeviceIndex device_index) {
 }
 
 void fallback_with_undefined_tensor() {
-  at::Tensor first = at::empty((2,3)).to(at::DeviceType::PrivateUse1);
-  at::Tensor second = at::Tensor();
-  at::Tensor step = at::empty({}).fill_(2).to(at::DeviceType::PrivateUse1);
-  at::Tensor grad_scale = at::empty({}).fill_(0.00001).to(at::DeviceType::PrivateUse1);
-  at::Tensor found_inf = at::empty({}).fill_(1).to(at::DeviceType::PrivateUse1);
-  at::TensorList tensors = {first, first};
-  at::TensorList undefined_tensors = {first, second};
-  at::TensorList steps = {step, step};
-  return at::_fused_adamw_(tensors, tensors, tensors, tensors, undefined_tensors,
-                           steps, 0.001, 0.9, 0.999, 1e-2, 1e-8, false, false,
-                           grad_scale, found_inf);
+  at::Tensor a = at::randn({8, 8, 12}).to(at::DeviceType::PrivateUse1);
+  at::Tensor idx1 = at::ones(4, c10::TensorOptions().dtype(torch::kLong).device(at::DeviceType::PrivateUse1));
+  at::Tensor idx2 = at::Tensor();  // undefined
+
+  // runs the CPUFallback, which needs to handle an undefined tensor in the list of indices
+  at::index(a, {idx1, idx2});
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
