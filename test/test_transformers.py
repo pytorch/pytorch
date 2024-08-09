@@ -3588,7 +3588,7 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[
-                f"{'test' if not os.getcwd().endswith('test') else ''}/cpp_extensions/open_registration_extension.cpp",
+                f"{'test/' if not os.getcwd().endswith('test') else ''}cpp_extensions/open_registration_extension.cpp",
             ],
             extra_include_paths=["cpp_extensions"],
             extra_cflags=["-g"],
