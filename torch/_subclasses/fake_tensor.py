@@ -474,7 +474,7 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_cuda_context() -> None:
+def init_gpu_context() -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
         (
@@ -482,6 +482,9 @@ def init_cuda_context() -> None:
             if torch.version.hip is None
             else torch.zeros(1, device="cuda")
         )
+
+    if torch.xpu.is_available():
+        (torch.empty(1, device="xpu"))
 
 
 @contextlib.contextmanager
@@ -678,8 +681,8 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type == "cuda":
-            init_cuda_context()
+        if device.type in ["cuda", "xpu"]:
+            init_gpu_context()
 
         if (
             device.type
@@ -1212,6 +1215,10 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
+        if torch.xpu._is_compiled():
+            assert not torch.cuda._is_compiled()
+            return not torch.xpu.is_available()
+
         return not torch.cuda.is_available()
 
     @property
