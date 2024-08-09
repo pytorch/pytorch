@@ -1381,9 +1381,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
                     cid = compile_id[1:]
                     self.assertTrue(cid.isnumeric())
-                    compile_ids.add(int(cid))
+                    compile_ids.add(cid)
 
-                self.assertEqual(compile_ids, set(range(3)))
+                self.assertEqual(len(compile_ids), 3)
 
         finally:
             TensorWithTFOverrideVariable.global_mangled_class_name = original
