@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 # configurable
 bsz = 64
 imgsz = 64

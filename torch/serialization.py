@@ -254,7 +254,6 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
-    pass
 
 
 def _is_zipfile(f) -> bool:
@@ -766,7 +765,7 @@ def save(
         >>> # xdoctest: +SKIP("makes cwd dirty")
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
-        >>> torch.save(x, 'tensor.pt')
+        >>> torch.save(x, "tensor.pt")
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
@@ -794,7 +793,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages = {}
+    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -1115,23 +1114,29 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt', weights_only=True)
+        >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
+        ... )
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)  # type: ignore[attr-defined]
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     weights_only=True,
+        ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
-        >>> with open('tensor.pt', 'rb') as f:
+        >>> with open("tensor.pt", "rb") as f:
         ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
-        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
+        >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (

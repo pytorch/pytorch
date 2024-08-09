@@ -10,6 +10,7 @@ from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, Scheduler
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
+from ..debug_utils import DebugPrinterManager
 
 
 log = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class CUDACPPScheduling(BaseScheduling):
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 
@@ -100,6 +101,15 @@ class CUDACPPScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(src_code, node_schedule)
-        kernel.call_kernel(kernel_name, ctb)
+
+        # debug printing values of intermediate tensors
+        # Note: MultiKernel debug printing is not supported for now
+        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
+        _, call_args, _, arg_types = kernel.args.python_argdefs()
+        with DebugPrinterManager(
+            enable_debug_printer, call_args, kernel_name, kernel, arg_types
+        ):
+            kernel.call_kernel(kernel_name, ctb)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()

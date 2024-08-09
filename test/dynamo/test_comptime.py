@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
 
+
 # Because we don't support free variables in comptime at the moment,
 # we have to communicate via globals.  This also means these tests cannot
 # be run in parallel in a single process (not that you'd... ever want
@@ -95,7 +96,7 @@ s0""",
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    y = l_x_ * 2;  l_x_ = None""",
+    y = l_x_ * 2;  l_x_ = y = None""",
         )
 
     def test_print_disas(self):
@@ -391,7 +392,7 @@ y = TensorVariable()
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     y = l_x_ * 2;  l_x_ = None
-    add = y + 4;  y = None""",
+    add = y + 4;  y = add = None""",
         )
 
 
