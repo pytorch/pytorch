@@ -239,6 +239,20 @@ class _KinetoProfile:
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
 
+    def toggle_collection_dynamic(
+        self, enable: bool, activities: Iterable[ProfilerActivity]
+    ):
+        """Toggle collection of activities on/off
+
+        Args:
+            activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+                ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+                ``torch.profiler.ProfilerActivity.XPU``.
+        """
+        if not self.profiler:
+            return
+        self.profiler.toggle_collection_dynamic(enable, activities)
+
     def key_averages(
         self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
     ):
