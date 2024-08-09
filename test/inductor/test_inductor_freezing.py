@@ -10,6 +10,7 @@ import weakref
 
 import torch
 from torch import nn
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
@@ -472,129 +473,151 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 1)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn_with_module_sharing(self):
-        mod = (
-            ConvBN(32, 32, bias=True, kernel_size=3, stride=2)
-            .to(self.device)
-            .to(torch.float32)
-        )
-
-        # Update the default parameters of BN module
-        for _ in range(10):
-            mod(torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32))
-
-        mod.eval()
-        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-
-        def foo(mod, x):
-            mod(x)
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = foo(mod, x)
-            out_optimized_for_infernece, _ = run_and_get_code(
-                torch.compile(foo), mod, x
+        for use_bias in [True, False]:
+            mod = (
+                ConvBN(32, 32, bias=use_bias, kernel_size=3, stride=2)
+                .to(self.device)
+                .to(torch.float32)
             )
 
-        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            # Update the default parameters of BN module
+            for _ in range(10):
+                mod(torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32))
+
+            mod.eval()
+            x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
+
+            def foo(mod, x):
+                mod(x)
+                return mod(x)
+
+            with torch.no_grad():
+                out_eager = foo(mod, x)
+                out_optimized_for_infernece, _ = run_and_get_code(
+                    torch.compile(foo), mod, x
+                )
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_functional_bn_with_module_sharing(self):
-        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-        running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
-        running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
+        for use_bias in [True, False]:
+            x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
+            running_mean = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
+            running_var = nn.Buffer(torch.var(x, dim=(0, 2, 3)).to(self.device))
 
-        mod = (
-            ConvFunctionalBN(
-                32,
-                32,
-                bias=True,
-                kernel_size=3,
-                stride=2,
-                running_mean=running_mean,
-                running_var=running_var,
-                weight=torch.ones(32).to(self.device),
-                bn_bias=torch.zeros(32).to(self.device),
-            )
-            .eval()
-            .to(self.device)
-            .to(torch.float32)
-        )
-
-        def foo(mod, x):
-            mod(x)
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = foo(mod, x)
-            out_optimized_for_infernece, _ = run_and_get_code(
-                torch.compile(foo), mod, x
+            mod = (
+                ConvFunctionalBN(
+                    32,
+                    32,
+                    bias=use_bias,
+                    kernel_size=3,
+                    stride=2,
+                    running_mean=running_mean,
+                    running_var=running_var,
+                    weight=nn.Parameter(torch.ones(32).to(self.device)),
+                    bn_bias=nn.Parameter(torch.zeros(32).to(self.device)),
+                )
+                .eval()
+                .to(self.device)
+                .to(torch.float32)
             )
 
-        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            def foo(mod, x):
+                mod(x)
+                return mod(x)
+
+            with torch.no_grad():
+                out_eager = foo(mod, x)
+                out_optimized_for_infernece, _ = run_and_get_code(
+                    torch.compile(foo), mod, x
+                )
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 2)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_bn_with_multi_bn_share_conv(self):
-        mod = (
-            ConvMultiBN(32, 32, bias=True, kernel_size=3, stride=2)
-            .to(self.device)
-            .to(torch.float32)
-        )
-
-        # Update the default parameters of BN module
-        for _ in range(10):
-            mod(torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32))
-
-        mod.eval()
-        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = foo(mod, x)
-            out_optimized_for_infernece, _ = run_and_get_code(
-                torch.compile(foo), mod, x
+        for use_bias in [True, False]:
+            mod = (
+                ConvMultiBN(32, 32, bias=use_bias, kernel_size=3, stride=2)
+                .to(self.device)
+                .to(torch.float32)
             )
 
-        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            # Update the default parameters of BN module
+            for _ in range(10):
+                mod(torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32))
+
+            mod.eval()
+            x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
+
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out_eager = foo(mod, x)
+                out_optimized_for_infernece, _ = run_and_get_code(
+                    torch.compile(foo), mod, x
+                )
+
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
+            )
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_conv_functional_bn_with_multi_bn_share_conv(self):
-        x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
-        running_mean = torch.mean(x, dim=(0, 2, 3)).to(self.device)
-        running_var = torch.var(x, dim=(0, 2, 3)).to(self.device)
-        running_mean2 = torch.mean(x, dim=(0, 2, 3)).to(self.device)
+        for use_bias in [True, False]:
+            x = torch.rand(3, 32, 32, 32).to(self.device).to(torch.float32)
+            running_mean = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
+            running_var = nn.Buffer(torch.var(x, dim=(0, 2, 3)).to(self.device))
+            running_mean2 = nn.Buffer(torch.mean(x, dim=(0, 2, 3)).to(self.device))
 
-        mod = (
-            ConvMultiFunctionalBN(
-                32,
-                32,
-                bias=True,
-                kernel_size=3,
-                stride=2,
-                running_mean=running_mean,
-                running_var=running_var,
-                weight=torch.ones(32).to(self.device),
-                bn_bias=torch.zeros(32).to(self.device),
-                running_mean2=running_mean2,
+            mod = (
+                ConvMultiFunctionalBN(
+                    32,
+                    32,
+                    bias=use_bias,
+                    kernel_size=3,
+                    stride=2,
+                    running_mean=running_mean,
+                    running_var=running_var,
+                    weight=nn.Parameter(torch.ones(32).to(self.device)),
+                    bn_bias=nn.Parameter(torch.zeros(32).to(self.device)),
+                    running_mean2=running_mean2,
+                )
+                .eval()
+                .to(self.device)
+                .to(torch.float32)
             )
-            .eval()
-            .to(self.device)
-            .to(torch.float32)
-        )
 
-        def foo(mod, x):
-            return mod(x)
+            def foo(mod, x):
+                return mod(x)
 
-        with torch.no_grad():
-            out_eager = foo(mod, x)
-            out_optimized_for_infernece, _ = run_and_get_code(
-                torch.compile(foo), mod, x
+            with torch.no_grad():
+                out_eager = foo(mod, x)
+                out_optimized_for_infernece, _ = run_and_get_code(
+                    torch.compile(foo), mod, x
+                )
+            self.assertEqual(
+                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-        self.assertEqual(out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2)
+            if self.device == "cpu":
+                self.assertEqual(counters["inductor"]["conv_bn_folding"], 0)
 
     @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):

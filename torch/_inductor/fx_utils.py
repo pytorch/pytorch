@@ -52,6 +52,34 @@ def matches_module_function_pattern(
     return True
 
 
+# Check the pattern: (F.function/torch.Tensor.method, F.function/torch.Tensor.method) matched.
+# Works for length 2 patterns with 2 functions/methods.
+def matches_function_pattern(
+    pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
+    node: torch.fx.node.Node,
+) -> bool:
+    if len(node.args) == 0:
+        return False
+    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+        node, torch.fx.Node
+    ):
+        return False
+    # the first node is call_function or call_method
+    if node.args[0].op != "call_function" and node.args[0].op != "call_method":
+        return False
+    if node.args[0].target != pattern[0]:
+        return False
+    # the second node is call_function or call_method
+    if node.op != "call_function" and node.op != "call_method":
+        return False
+    if node.target != pattern[1]:
+        return False
+    # make sure node.args[0] output is only used by current node.
+    if len(node.args[0].users) > 1:
+        return False
+    return True
+
+
 class FakeTensorUpdater:
     """
     The main idea here is that it's difficult to maintain accurate fake

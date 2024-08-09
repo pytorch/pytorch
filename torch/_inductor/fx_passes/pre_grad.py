@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -18,7 +18,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
 from .. import config
-from ..fx_utils import matches_module_function_pattern
+from ..fx_utils import matches_function_pattern, matches_module_function_pattern
 from ..pattern_matcher import (
     init_once_fakemode,
     PatternMatcherPass,
@@ -338,6 +338,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         (torch.nn.Conv2d, F.batch_norm),
         (torch.nn.Conv3d, F.batch_norm),
     ]
+    function_patterns = [
+        (torch.conv1d, F.batch_norm),
+        (torch.conv2d, F.batch_norm),
+        (torch.conv3d, F.batch_norm),
+    ]
     modules = dict(gm.named_modules())
 
     class ConvBNFusion:
@@ -373,6 +378,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def is_fusion_enabled(self):
             return self.fusion_enabled
 
+    counters["inductor"]["conv_bn_folding"] = 0
     conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
         conv_bn_to_fuse.clear()
@@ -408,11 +414,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
+                    counters["inductor"]["conv_bn_folding"] += 1
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
 
-    gm.graph.lint()
     for pattern in module_function_patterns:
         conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:
@@ -500,9 +506,127 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_bias,
                 )
                 for bn_node in bn_nodes:
+                    counters["inductor"]["conv_bn_folding"] += 1
                     replace_node_module(bn_node.args[0], modules, fused_conv)
                     bn_node.replace_all_uses_with(bn_node.args[0])
                     gm.graph.erase_node(bn_node)
+
+    for pattern in function_patterns:  # type: ignore[assignment]
+        bn_nodes_to_fuse = []
+        for node in gm.graph.nodes:
+            if matches_function_pattern(pattern, node):
+                # TODO: support kwargs.
+                if len(node.args) != 8:
+                    continue
+                conv_node = node.args[0]
+                bn_training = node.args[5]
+                bn_eps = node.args[7]
+                if bn_training:
+                    continue
+                if type(bn_eps) is not float:
+                    continue
+
+                def same_conv_pass_to_same_bn(users):
+                    def pass_to_same_bn(users):
+                        conv_users = []
+                        for user in users:
+                            conv_users += list(user.users)
+                        if not all(user.target == F.batch_norm for user in conv_users):
+                            return False
+                        bn_running_mean_node = conv_users[0].args[1]
+                        bn_running_var_node = conv_users[0].args[2]
+                        bn_weight_node = conv_users[0].args[3]
+                        bn_bias_node = conv_users[0].args[4]
+                        return all(
+                            bn_running_mean_node == user.args[1]
+                            and bn_running_var_node == user.args[2]
+                            and bn_weight_node == user.args[3]
+                            and bn_bias_node == user.args[4]
+                            for user in conv_users
+                        )
+
+                    conv_weight_node = users[0].args[1]
+                    conv_bias_node = users[0].args[2]
+                    return all(
+                        conv_weight_node == user.args[1]
+                        and conv_bias_node == user.args[2]
+                        for user in users
+                    ) and pass_to_same_bn(users)
+
+                conv_args_is_constant = all(
+                    n is None
+                    or (
+                        n.op == "get_attr"
+                        and (
+                            len(n.users) == 1
+                            or same_conv_pass_to_same_bn(list(n.users))
+                        )
+                    )
+                    for n in conv_node.args[1:3]
+                )
+                bn_args_is_constant = all(
+                    n is None or n.op == "get_attr" for n in node.args[1:5]
+                )
+
+                if not conv_args_is_constant or not bn_args_is_constant:
+                    continue
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                if bn_running_mean is None or bn_running_var is None:
+                    continue
+
+                bn_nodes_to_fuse.append(node)
+
+        updated_conv_weights: Dict[str, Any] = {}
+        for node in bn_nodes_to_fuse:
+            counters["inductor"]["conv_bn_folding"] += 1
+            conv_node = node.args[0]
+            if conv_node.args[1].target in updated_conv_weights:
+                if conv_node.args[2] is None:
+                    conv_node.update_arg(
+                        2, updated_conv_weights[conv_node.args[1].target]
+                    )
+                node.replace_all_uses_with(node.args[0])
+                node.graph.erase_node(node)
+            else:
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_eps = node.args[7]
+                bn_weight = (
+                    fetch_attr(node.args[3].target, gm) if node.args[3] else None
+                )
+                bn_bias = fetch_attr(node.args[4].target, gm) if node.args[4] else None
+                conv_weight = fetch_attr(conv_node.args[1].target, gm)
+                conv_bias = (
+                    fetch_attr(conv_node.args[2].target, gm)
+                    if conv_node.args[2]
+                    else None
+                )
+                new_conv_weight, new_conv_bias = fuse_conv_bn_weights(
+                    conv_weight,
+                    conv_bias,
+                    bn_running_mean,
+                    bn_running_var,
+                    bn_eps,
+                    bn_weight,
+                    bn_bias,
+                )
+                setattr(gm, conv_node.args[1].target, new_conv_weight)
+                if conv_node.args[2]:
+                    setattr(gm, conv_node.args[2].target, new_conv_bias)
+                else:
+                    with gm.graph.inserting_before(conv_node):
+                        conv_bias_name = conv_node.args[1].target.replace(
+                            "weight", "bias"
+                        )
+                        setattr(gm, conv_bias_name, new_conv_bias)
+                        conv_bias_node = gm.graph.create_node(
+                            "get_attr", conv_bias_name, (), {}
+                        )
+                    conv_node.update_arg(2, conv_bias_node)
+                updated_conv_weights[conv_node.args[1].target] = conv_node.args[2]
+                node.replace_all_uses_with(node.args[0])
+                node.graph.erase_node(node)
     gm.graph.lint()
     gm.recompile()
 
