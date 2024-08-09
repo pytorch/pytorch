@@ -11,11 +11,16 @@ on:
         required: true
         type: string
         description: The build environment
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
         required: false
         default: linux.12xlarge
         type: string
-        description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
+        description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
         required: false
         default: 210
@@ -89,7 +94,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}

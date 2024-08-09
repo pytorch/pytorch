@@ -46,6 +46,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -67,6 +68,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
