@@ -1604,16 +1604,16 @@ def to_padded_tensor_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_from_padded_tensor.default,
-    "padded: t, offsets: t, dummy: jt, dim: any?, sum_S: any?",
+    "padded: t, offsets: t, dummy: jt, ragged_idx: any?, min_seqlen: any?, max_seqlen: any?, sum_S: any?",
 )
 def _nested_from_padded_tensor_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if new_kwargs["dim"] != 1:
+    if new_kwargs["ragged_idx"] != 1:
         raise RuntimeError(
-            "_nested_from_padded_tensor(): only dim=1 supported for jagged layout"
+            "_nested_from_padded_tensor(): only ragged_idx=1 supported for jagged layout"
         )
 
     padded, offsets = new_kwargs["padded"], new_kwargs["offsets"]
@@ -1635,7 +1635,21 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     elif len(padded_shape) < 3:
         values = values.squeeze(-1)
 
-    return NestedTensor(values, offsets)
+    ragged_idx = new_kwargs["ragged_idx"]
+    min_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["max_seqlen"]
+    metadata_cache = {}
+    if min_seqlen is not None:
+        metadata_cache["min_seqlen"] = min_seqlen
+    if max_seqlen is not None:
+        metadata_cache["max_seqlen"] = max_seqlen
+
+    return NestedTensor(
+        values,
+        offsets,
+        _ragged_idx=ragged_idx,
+        _metadata_cache=metadata_cache,
+    )
 
 
 @register_jagged_func(
