@@ -31,9 +31,11 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
+from torch.testing._internal.common_utils import TEST_HPU
 
 DEVICE_TYPE = (
-    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+    "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1
+    else "hpu" if TEST_HPU and torch.hpu.device_count() > 1 else "cpu"
 )
 
 NUM_DEVICES = 4
@@ -302,6 +304,8 @@ class DTensorTestBase(MultiProcessTestCase):
     @property
     def backend(self) -> str:
         backend = "nccl" if self.device_type == "cuda" else "gloo"
+        if TEST_HPU:
+            backend = "hccl"
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
@@ -311,7 +315,7 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "hccl", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         dist.init_process_group(
@@ -364,10 +368,12 @@ def with_comms(func: TestFunc) -> TestFunc:
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
         # if enough GPU we can use GPU, otherwise we fallback to CPU
-        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
-            self.device_type = "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
+        elif TEST_HPU and torch.hpu.device_count() >= self.world_size:
+            self.device_type = "hpu"
         else:
-            self.device_type = DEVICE_TYPE
+            self.device_type = "cpu"
 
         self.init_pg()
 
