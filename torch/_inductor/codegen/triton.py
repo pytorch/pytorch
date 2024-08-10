@@ -3162,12 +3162,9 @@ class TritonScheduling(SIMDScheduling):
             else:
                 # We have to clone the inplace updated arguments to avoid earlier calls
                 # generating out of range indices for later calls.
-                ms = benchmarker.benchmark_gpu(
-                    lambda: call(wrapped_jit_function.clone_args(*args)[0])
-                )
-                ms_clone = benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)[0]
-                )
+                kernel_callable = lambda: call(wrapped_jit_function.clone_args(*args)[0])
+                clone_callable = lambda: wrapped_jit_function.clone_args(*args)[0]
+                ms, ms_clone = benchmarker.benchmark_many_gpu([kernel_callable, clone_callable])
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",

@@ -1,7 +1,7 @@
 import inspect
 import time
 from functools import cached_property, wraps
-from statistics import median
+from statistics import mean, median
 from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
@@ -127,6 +127,11 @@ class Benchmarker:
     @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+    
+    @maybe_time
+    @count
+    def benchmark_many_gpu(self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any) -> List[float]:
+        return [self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables]
 
 
 class TritonBenchmarker(Benchmarker):
@@ -346,4 +351,113 @@ class InductorBenchmarker(TritonBenchmarker):
         return min(estimated_timing, benchmarked_timing)
 
 
-benchmarker = InductorBenchmarker()
+class InductorGroupedBenchmarker(InductorBenchmarker):
+    feature_name = "inductor_grouped_benchmarker"
+
+    def get_interleaved_event_pairs(
+        self: Self, num_callables: int, iters: int
+    ) -> List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]:
+        """Get `iters` interleaved `num_callables` pairs of CUDA events."""
+        return [self.get_event_pairs(num_callables) for _ in range(iters)]
+
+    def get_interleaved_event_pairs_min_timing(
+        self: Self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]
+    ) -> List[float]:
+        """Get the interleaved minimum timings, in milliseconds, for an interleaved
+        grouping of CUDA event pairs.
+        """
+        return [self.get_event_pairs_min_timing(list(event_pairs)) for event_pairs in zip(*interleaved_event_pairs)]
+
+    @maybe_fallback
+    @maybe_time
+    @count
+    def benchmark_many_gpu(
+        self: Self,
+        callables: List[Callable[[], Any]],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration: int = 25,
+        **kwargs: Any,
+    ) -> List[float]:
+        """Benchmark many GPU callables using a custom benchmarking implementation.
+
+        Arguments:
+        - callables: The callables to benchmark.
+
+        Keyword Arguments:
+        - estimation_iters: The number of iterations to run `_callable` during
+        runtime estimation.
+        - memory_warmup_iters: The number of iterations to flush the L2 cache
+        before benchmarking.
+        - benchmark_iters: The number of iterations to run `_callable` during
+        benchmarking.
+        - max_benchmark_duration: The maximum duration of the benchmarking per
+        callable, in milliseconds. An estimated duration is calculated based on
+        the values of `memory_warmup_iters` and `benchmark_iters`, along with the
+        estimated runtime of `_callable` and various other factors, and we then
+        shrink `benchmark_iters` to fit in the alloted maximum duration.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The minimum runtime of each callable in `callables`, in milliseconds.
+        """
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # warmup each callable in `callables` (and catches any failures in the process)
+        for _callable in callables:
+            _callable()
+        torch.cuda.synchronize()
+
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+
+        # estimate the runtime of `_callable`
+        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        for event_pairs in interleaved_event_pairs:
+            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+        torch.cuda.synchronize()
+        estimated_timings = self.get_interleaved_min_timings_ms(
+            interleaved_event_pairs
+        )
+
+        # adjust `benchmark_iters` to fit in the maximum benchmarking duration, we're
+        # alloted `max_benchmark_duration` per-callable, so we can just take the average
+        # of the estimated timings
+        benchmark_iters = max(
+            min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
+        )
+
+        # do the memory warmup
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark `_callable`
+        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        for event_pairs in interleaved_event_pairs:
+            for _callable, (start_event, end_event) in zip(callables, event_pairs):
+                buffer.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+        torch.cuda.synchronize()
+        benchmarked_timings = self.get_interleaved_min_timings_ms(
+            interleaved_event_pairs
+        )
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # return the minimum of estimated_timing and benchmarked_timing, since
+        # we just want the minimum timing overall we might check both
+        return [min(estimated_timing, benchmarked_timing) for estimated_timing, benchmarked_timing in zip(estimated_timings, benchmarked_timings)]
+
+
+benchmarker = InductorGroupedBenchmarker()
