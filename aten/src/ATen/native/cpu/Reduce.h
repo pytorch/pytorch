@@ -9,7 +9,7 @@
 #include <sstream>
 #include <type_traits>
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -132,13 +132,13 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
+inline std::enable_if_t<i == sizeof...(tuple_t), std::size_t>
 for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
+inline std::enable_if_t<i < sizeof...(tuple_t), std::size_t>
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
@@ -311,4 +311,4 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   sub_iter.for_each(loop, grain_size);
 }
 
-}}}  // namespace at::native::<anonymous>
+}} // namespace at::native::<anonymous>
