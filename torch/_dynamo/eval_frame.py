@@ -270,12 +270,12 @@ class OptimizedModule(torch.nn.Module):
         *args: Any,
     ) -> None:
         ends_with_suffix = [key.startswith(_OPTIMIZED_PREFIX) for key in state_dict.keys()]
-        all_ends_with_suffix = all(ends_with_suffix)
-        any_ends_with_suffix = any(ends_with_suffix)
+        all_end_with_suffix = all(ends_with_suffix)
+        any_end_with_suffix = any(ends_with_suffix)
 
-        if all_ends_with_suffix:
+        if all_end_with_suffix:
             return
-        elif any_ends_with_suffix:
+        elif any_end_with_suffix:
             raise ValueError("some keys end with {_OPTIMIZED_PREFIX} while some don't")
 
         _replace_by_prefix(state_dict, prefix, f"{prefix}{_OPTIMIZED_PREFIX}")
