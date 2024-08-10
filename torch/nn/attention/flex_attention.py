@@ -834,11 +834,7 @@ def _apply_kernel_options(query, key, value, kernel_options):
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
     kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
-    from torch._inductor.kernel.flex_attention import _use_flex_decoding
-
-    if (
-        query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0
-    ) and not _use_flex_decoding(query):
+    if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
         kernel_options["IS_DIVISIBLE"] = False
     else:
         kernel_options["IS_DIVISIBLE"] = True
