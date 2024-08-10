@@ -437,6 +437,7 @@ def fwd_compute_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     if is_last_block:
+        # Applying mod to index for last block for non divisible seqlen.
         m = offs_m[:, None] % Q_LEN
         n = offs_n[None, :] % KV_LEN
     else:
@@ -517,9 +518,12 @@ flex_attention_template = TritonTemplate(
 )
 
 
+# Decide which kernel to use, return true if use flex decoding kernel.
 def _use_flex_decoding(query):
-    # Decide which kernel to use, return true if use flex decoding kernel.
-    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    if isinstance(query, torch.Tensor):
+        return query.size(-2) < 128
+    else:
+        return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
 
 
 _h100_default_config = {
@@ -684,7 +688,6 @@ def flex_attention(
     )
     kernel_options = dict(kernel_options)
     if _use_flex_decoding(query):
-        kernel_options["IS_DIVISIBLE"] = True
         return create_flex_decoding_kernel(
             query,
             key,
