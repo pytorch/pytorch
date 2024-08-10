@@ -1208,7 +1208,9 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_simple(self, reverse, combine_mode, device):
+    def test_pointwise_associative_scan_reverse_simple(
+        self, reverse, combine_mode, device
+    ):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1217,7 +1219,9 @@ def forward(self, pred_1, x_1):
 
         x = torch.randn(3, 10, 2, device=device)
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = associative_scan(op, x, 0, reverse=reverse, combine_mode=combine_mode)
+            result = associative_scan(
+                op, x, 0, reverse=reverse, combine_mode=combine_mode
+            )
             result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
             if not reverse:
@@ -1226,19 +1230,27 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = associative_scan(add, x, 0, reverse=reverse, combine_mode=combine_mode)
+        cumsum1 = associative_scan(
+            add, x, 0, reverse=reverse, combine_mode=combine_mode
+        )
         cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
         if not reverse:
-            self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
         else:
-            self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
         self.assertEqual(cumsum1, cumsum_exp)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_dim(self, reverse, combine_mode, device):
+    def test_pointwise_associative_scan_reverse_dim(
+        self, reverse, combine_mode, device
+    ):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1254,7 +1266,9 @@ def forward(self, pred_1, x_1):
             x = torch.randn(*shapes, device=device)
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                result = associative_scan(op, x, rnd_scan_dim, reverse=reverse, combine_mode=combine_mode)
+                result = associative_scan(
+                    op, x, rnd_scan_dim, reverse=reverse, combine_mode=combine_mode
+                )
                 result_exp = _fake_associative_scan(
                     op, x, rnd_scan_dim, reverse=reverse
                 )
@@ -1289,7 +1303,9 @@ def forward(self, pred_1, x_1):
             )
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = associative_scan_fct(op, x, 0, reverse=reverse, combine_mode=combine_mode)
+            result = associative_scan_fct(
+                op, x, 0, reverse=reverse, combine_mode=combine_mode
+            )
             result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
             if not reverse:
@@ -1298,14 +1314,19 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = associative_scan(add, x, 0, reverse=reverse, combine_mode=combine_mode)
+        cumsum1 = associative_scan(
+            add, x, 0, reverse=reverse, combine_mode=combine_mode
+        )
         cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
         if not reverse:
-            self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
         else:
-            self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
         self.assertEqual(cumsum1, cumsum_exp)
-
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @unittest.skipIf(not importlib.util.find_spec("jax"), "Test requires JAX.")
@@ -1313,7 +1334,9 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_binary_operator(self, reverse, combine_mode, device):
+    def test_pointwise_associative_scan_binary_operator(
+        self, reverse, combine_mode, device
+    ):
         import jax
         import numpy as np
 
@@ -1325,7 +1348,7 @@ def forward(self, pred_1, x_1):
         torch.compiler.reset()
         associative_scan1 = torch.compile(associative_scan, fullgraph=True)
         associative_scan2 = associative_scan
-        
+
         state_dim = 20
         timesteps = 10
         projected_inputs = torch.randn(
@@ -1341,23 +1364,17 @@ def forward(self, pred_1, x_1):
         result2 = associative_scan2(
             fct, elements, 0, combine_mode=combine_mode, reverse=reverse
         )
-        expected_result = jax.lax.associative_scan(
-            fct, elements_jax, reverse=reverse
-        )
+        expected_result = jax.lax.associative_scan(fct, elements_jax, reverse=reverse)
         self.assertEqual(
             [r.cpu().detach().numpy() for r in result1],
             [np.array(r) for r in expected_result],
         )
-        self.assertEqual(
-            [r.device.type for r in result1], [device.type] * len(result1)
-        )
+        self.assertEqual([r.device.type for r in result1], [device.type] * len(result1))
         self.assertEqual(
             [r.cpu().detach().numpy() for r in result2],
             [np.array(r) for r in expected_result],
         )
-        self.assertEqual(
-            [r.device.type for r in result2], [device.type] * len(result2)
-        )
+        self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
@@ -1381,7 +1398,9 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_complex_pytree(self, reverse, combine_mode, device):
+    def test_pointwise_associative_scan_complex_pytree(
+        self, reverse, combine_mode, device
+    ):
         def fct_wrong_pytree(x, y):
             return {
                 "i": x["i"] * y["j"][0][0],
@@ -1416,12 +1435,10 @@ def forward(self, pred_1, x_1):
         result2 = associative_scan2(
             fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
         )
-        expected_result = _fake_associative_scan(
-            fct_pointwise, inp, 0, reverse=reverse
-        )
+        expected_result = _fake_associative_scan(fct_pointwise, inp, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
-        
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
@@ -1432,9 +1449,13 @@ def forward(self, pred_1, x_1):
 
         x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(Exception, ".*"):
-            out = associative_scan(non_pointwise, x, 0, reverse=reverse, combine_mode="pointwise")
+            out = associative_scan(
+                non_pointwise, x, 0, reverse=reverse, combine_mode="pointwise"
+            )
 
-        result1 = associative_scan(non_pointwise, x, 0, reverse=reverse, combine_mode="generic")
+        result1 = associative_scan(
+            non_pointwise, x, 0, reverse=reverse, combine_mode="generic"
+        )
         result_expected = _fake_associative_scan(non_pointwise, x, 0, reverse=reverse)
         self.assertEqual(result1, result_expected)
 

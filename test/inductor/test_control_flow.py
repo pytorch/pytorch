@@ -698,7 +698,6 @@ class WhileLoopTests(TestCase):
 
 class AssociativeScanTests(TestCase):
     @requires_gpu
-    # @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("combine_mode", ["generic"])
     @parametrize("backend", ["inductor"])
     @parametrize("device", [torch.device("cuda")])
@@ -714,8 +713,12 @@ class AssociativeScanTests(TestCase):
             )
             associative_scan2 = associative_scan
 
-            result1 = associative_scan1(fct, x, 0, reverse=False, combine_mode=combine_mode)
-            result2 = associative_scan2(fct, x, 0, reverse=False, combine_mode=combine_mode)
+            result1 = associative_scan1(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
             result3 = torch.cumsum(x, 0)
 
             self.assertEqual(result1, result2)
@@ -724,7 +727,10 @@ class AssociativeScanTests(TestCase):
             # Flip only non-compiled and compare with compiled reverse=True
             result1 = associative_scan1(fct, x, 0, reverse=True)
             result2 = torch.flip(
-                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode), [0]
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
@@ -733,9 +739,14 @@ class AssociativeScanTests(TestCase):
 
             # Flip only compiled and compare with non-compiled reverse=True
             result1 = torch.flip(
-                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode), [0]
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
-            result2 = associative_scan2(fct, x, 0, reverse=True, combine_mode=combine_mode)
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
             self.assertEqual(result1, result2)
@@ -743,10 +754,16 @@ class AssociativeScanTests(TestCase):
 
             # Use reverse=False, but flip both results before and after
             result1 = torch.flip(
-                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode), [0]
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result2 = torch.flip(
-                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode), [0]
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
@@ -754,8 +771,12 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result3)
 
             # Reverse=True
-            result1 = associative_scan1(fct, x, 0, reverse=True, combine_mode=combine_mode)
-            result2 = associative_scan2(fct, x, 0, reverse=True, combine_mode=combine_mode)
+            result1 = associative_scan1(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
             self.assertEqual(result1, result2)
