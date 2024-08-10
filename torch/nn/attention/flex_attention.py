@@ -805,8 +805,9 @@ def flex_attention(
     block_mask: Optional[BlockMask] = None,
     scale: Optional[float] = None,
     enable_gqa: bool = False,
+    return_lse: bool = False,
     kernel_options: Optional[Dict[str, Any]] = None,
-) -> Tensor:
+) -> Union[Tensor, Tuple[Tensor, Tensor]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -840,6 +841,7 @@ def flex_attention(
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
+        return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
@@ -901,10 +903,13 @@ def flex_attention(
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
-        out, _ = flex_attention_hop(
+        out, lse = flex_attention_hop(
             query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
         )
-        return out
+        if return_lse:
+            return out, lse * math.log(2)
+        else:
+            return out
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
@@ -917,7 +922,7 @@ def flex_attention(
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, _ = torch.compile(
+                out, lse = torch.compile(
                     _flex_attention_hop_wrapper, backend="eager", fullgraph=True
                 )(
                     query,
@@ -928,4 +933,7 @@ def flex_attention(
                     scale,
                     kernel_options,
                 )
-                return out
+                if return_lse:
+                    return out, lse * math.log(2)
+                else:
+                    return out
