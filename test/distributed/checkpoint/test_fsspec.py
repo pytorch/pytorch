@@ -3,7 +3,8 @@
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable
+from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
@@ -22,9 +23,11 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 
 
-def with_temp_dir(
-    func: Optional[Callable] = None,
-) -> Optional[Callable]:
+_P = ParamSpec("_P")
+_F = Callable[_P, None]
+
+
+def with_temp_dir(func: _F) -> _F:
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """

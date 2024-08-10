@@ -6,21 +6,24 @@ import os
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Callable
+from typing_extensions import ParamSpec
 
 import torch.distributed as dist
 
 
-def with_temp_dir(
-    func: Optional[Callable] = None,
-) -> Optional[Callable]:
+_P = ParamSpec("_P")
+_F = Callable[_P, None]
+
+
+def with_temp_dir(func: _F) -> _F:
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """
     assert func is not None
 
     @wraps(func)
-    def wrapper(self, *args: Any, **kwargs: Any) -> None:
+    def wrapper(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
         if dist.is_initialized():
             # Only create temp_dir when rank is 0
             if dist.get_rank() == 0:
