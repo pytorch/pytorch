@@ -1205,10 +1205,8 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cuda")]) 
+    @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_reverse_simple(self, reverse, device):
-        import random
-
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1223,25 +1221,6 @@ def forward(self, pred_1, x_1):
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result, result_exp_PT)
-            
-            # Check whether the graph contains at least two flip operations
-            def f(op, inp, dim, r):
-                result = associative_scan(op, inp, dim, r)
-                return result
-
-            # backend = EagerAndRecordGraphs()
-            # torch.compile(f, backend=backend)(add, x, 0, reverse)
-            # self.assertEqual(len(backend.graphs), 2)
-            # gm = backend.graphs[0]
-            # gm = make_fx(f, tracing_mode="symbolic")(op, x, 0)
-            # self.assertExpectedInline(
-            #     gm.code.strip(),
-            #     """""",  # noqa: B950
-            # )
-            # self.assertNotRegex(
-            #     gm.code.strip(),
-            #     ".*.*",
-            # )
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
@@ -1254,7 +1233,7 @@ def forward(self, pred_1, x_1):
         cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
         self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
         self.assertEqual(cumsum1, cumsum_exp)
-        
+
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
@@ -1275,7 +1254,9 @@ def forward(self, pred_1, x_1):
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
                 result = associative_scan(op, x, rnd_scan_dim, reverse=reverse)
-                result_exp = _fake_associative_scan(op, x, rnd_scan_dim, reverse=reverse)
+                result_exp = _fake_associative_scan(
+                    op, x, rnd_scan_dim, reverse=reverse
+                )
                 self.assertEqual(result, result_exp)
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
@@ -1283,11 +1264,11 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["compile", "compile_dynamic_shape"]) 
-    @parametrize("device", [torch.device("cuda")]) 
-    def test_pointwise_associative_scan_reverse_compile(self, reverse, compile_mode, device):
-        from torch._dynamo.testing import EagerAndRecordGraphs
-        
+    @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_reverse_compile(
+        self, reverse, compile_mode, device
+    ):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1296,10 +1277,14 @@ def forward(self, pred_1, x_1):
 
         x = torch.randn(3, 10, 2, device=device)
         torch.compiler.reset()
-        if compile_mode == "compile": 
-            associative_scan_fct = torch.compile(associative_scan, fullgraph=True, dynamic=False) 
+        if compile_mode == "compile":
+            associative_scan_fct = torch.compile(
+                associative_scan, fullgraph=True, dynamic=False
+            )
         else:
-            associative_scan_fct = torch.compile(associative_scan, fullgraph=True, dynamic=True) 
+            associative_scan_fct = torch.compile(
+                associative_scan, fullgraph=True, dynamic=True
+            )
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = associative_scan_fct(op, x, 0, reverse=reverse)
@@ -1323,23 +1308,6 @@ def forward(self, pred_1, x_1):
 
         x = torch.randn(3, 2, 2, device=device)
 
-        def f(op, x, dim, r):
-            result = associative_scan(op, x, dim, r)
-            return result
-        
-        # backend = EagerAndRecordGraphs()
-        # torch.compile(f, backend=backend)(add, x, 0, reverse)
-        # self.assertEqual(len(backend.graphs), 2)
-        # gm = backend.graphs[0]
-        # self.assertExpectedInline(
-        #     gm.code.strip(),
-        #     """""",  # noqa: B950
-        # )
-        # self.assertNotRegex(
-        #     gm.code.strip(),
-        #     ".*.*",
-        # )
-        
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport

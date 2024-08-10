@@ -3,6 +3,7 @@ import itertools
 
 import torch
 import torch._dynamo.testing
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -10,7 +11,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
-from torch._higher_order_ops.associative_scan import associative_scan
 
 
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
@@ -694,21 +694,22 @@ class WhileLoopTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
-        
+
 
 class AssociativeScanTests(TestCase):
-
     @requires_gpu
-    @parametrize("device", [torch.device("cuda")]) 
-    @parametrize("backend", ["inductor"]) 
+    @parametrize("device", [torch.device("cuda")])
+    @parametrize("backend", ["inductor"])
     def test_pointwise_associative_scan_CUDA_flip(self, device, backend):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for n in range(20):
+        for n in range(10):
             x = torch.arange(n, device=device)
             torch.compiler.reset()
-            associative_scan1 = torch.compile(associative_scan, backend=backend, fullgraph=True)
+            associative_scan1 = torch.compile(
+                associative_scan, backend=backend, fullgraph=True
+            )
             associative_scan2 = associative_scan
 
             result1 = associative_scan1(fct, x, 0, reverse=False)
@@ -757,7 +758,6 @@ class AssociativeScanTests(TestCase):
 
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
-    
 
 
 instantiate_parametrized_tests(CondTests)

@@ -14,7 +14,11 @@ from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM80OrLater, SM70OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    SM70OrLater,
+    SM80OrLater,
+)
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
