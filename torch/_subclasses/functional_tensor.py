@@ -743,9 +743,3 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
-
-
-def mb_unwrap_functional_tensor(tensor: torch.Tensor):
-    if isinstance(tensor, FunctionalTensor):
-        return torch._from_functional_tensor(tensor.elem)
-    return tensor
