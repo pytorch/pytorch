@@ -79,9 +79,10 @@ def _vmap_for_bhqkv(
     prefix: Tuple[Optional[int], ...],
     suffix: Tuple[Optional[int], ...] = (),
     out_dims: Union[int, List[Optional[int]]] = 0,
+    group_dim: bool = False,
 ):
-    """Used to vmap both score_mods and mask_mods over 4-dimensional inputs.
-    Mapping over the [b, h, q_idx, kv_idx] dimensions.
+    """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
+    Mapping over the [b, hq, q_idx, kv_idx] or [b, hkv, g, q_idx, kv_idx] dimensions.
 
     Args:
         fn (callable): The function to vmap.
@@ -98,10 +99,19 @@ def _vmap_for_bhqkv(
         callable: The vmapped function.
     """
     # We vamp a function 4 times, broadcasting the [b, h, q_idx, kv_idx] dimensions
+    dimensions: List[Tuple[None | int, None | int, None | int, None | int]] = []
     dimensions = [
         (None, None, None, 0),
         (None, None, 0, None),
         (None, 0, None, None),
+    ]
+
+    if group_dim:
+        dimensions += [
+            (None, 0, None, None),
+        ]
+
+    dimensions += [
         (0, None, None, None),
     ]
 
@@ -616,7 +626,7 @@ def create_mask(
     Args:
         mod_fn (Union[_score_mod_signature, _mask_mod_signature]): Function to modify attention scores.
         B (int): Batch size.
-        H (int): Number of heads.
+        H (int): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
@@ -698,7 +708,7 @@ def create_block_mask(
             It should return a boolean tensor indicating which attention connections are allowed (True)
             or masked out (False).
         B (int): Batch size.
-        H (int): Number of heads.
+        H (int): Number of query heads.
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
@@ -794,6 +804,7 @@ def flex_attention(
     score_mod: Optional[_score_mod_signature] = None,
     block_mask: Optional[BlockMask] = None,
     scale: Optional[float] = None,
+    enable_gqa: bool = False,
     return_lse: bool = False,
     kernel_options: Optional[Dict[str, Any]] = None,
 ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
@@ -819,21 +830,22 @@ def flex_attention(
         - ``score``: A scalar tensor representing the attention score,
           with the same data type and device as the query, key, and value tensors.
         - ``batch``, ``head``, ``q_idx``, ``k_idx``: Scalar tensors indicating
-          the batch index, head index, query index, and key/value index, respectively.
+          the batch index, query head index, query index, and key/value index, respectively.
           These should have the ``torch.int`` data type and be located on the same device as the score tensor.
 
     Args:
-        query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
-        key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
-        value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
+        query (Tensor): Query tensor; shape :math:`(B, Hq, L, E)`.
+        key (Tensor): Key tensor; shape :math:`(B, Hkv, S, E)`.
+        value (Tensor): Value tensor; shape :math:`(B, Hkv, S, Ev)`.
         score_mod (Optional[Callable]): Function to modify attention scores. By default no score_mod is applied.
         block_mask (Optional[BlockMask]): BlockMask object that controls the blocksparsity pattern of the attention.
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
+        enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
         return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
         kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
 
     Returns:
-        output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
+        output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
 
     Shape legend:
         - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
@@ -857,6 +869,20 @@ def flex_attention(
             raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
     if key.size(-2) % 128 != 0:
         raise NotImplementedError("NYI: L must be a multiple of 128")
+    if (not enable_gqa) and query.size(-3) != key.size(-3):
+        raise ValueError(
+            f"Expect query and key/value to have the same number of heads "
+            f"but got Hq={query.size(-3)} and Hkv={key.size(-3)}. "
+            f"Try setting enable_gqa=True for GQA."
+        )
+    if enable_gqa:
+        Hq = query.size(1)
+        Hkv = key.size(1)
+        if Hq % Hkv != 0:
+            raise ValueError(
+                f"Expect number of query heads to be a multiple of kv heads for GQA "
+                f"but got Hq={Hq} and Hkv={Hkv}."
+            )
 
     if score_mod is None:
         score_mod = _identity
@@ -873,8 +899,9 @@ def flex_attention(
     )
 
     if torch.compiler.is_dynamo_compiling():
-        # mark head_dim always to be static
+        # mark head_dim and number of heads to be static
         for x in [query, key, value]:
+            torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, lse = flex_attention_hop(
             query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
