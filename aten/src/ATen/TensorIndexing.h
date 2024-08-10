@@ -209,7 +209,9 @@ inline Tensor applySlice(
     const at::Device& self_device,
     const std::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
-  TORCH_CHECK_VALUE(step.sym_gt(0).expect_true(__FILE__, __LINE__), "step must be greater than zero");
+  TORCH_CHECK_VALUE(
+      step.sym_gt(0).expect_true(__FILE__, __LINE__),
+      "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
