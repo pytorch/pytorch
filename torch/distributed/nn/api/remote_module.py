@@ -412,11 +412,16 @@ class _RemoteModule(nn.Module):
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
-    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
+    def buffers(self, recurse: bool = True, *, persistent: Optional[bool] = None) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True,
+        *,
+        persistent: Optional[bool] = None,
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
