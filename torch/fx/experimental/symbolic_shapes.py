@@ -1269,8 +1269,6 @@ def _is_supported_equivalence(expr):
 
 def _has_unsupported_sympy_function(expr) -> bool:
     return expr.has(
-        torch.utils._sympy.functions.ToFloat,
-        torch.utils._sympy.functions.TruncToInt,
         torch.utils._sympy.functions.CeilToInt,
         # add more sympy functions that involve float<->int conversion here
         # since our solver does not know what to do with them

@@ -279,3 +279,11 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+    @staticmethod
+    def trunc_to_int(x):
+        return torch.sym_int(x)
+
+    @staticmethod
+    def to_float(x):
+        return torch.sym_float(x)
