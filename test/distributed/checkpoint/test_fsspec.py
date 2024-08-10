@@ -34,7 +34,7 @@ def with_temp_dir(func: _F) -> _F:
     assert func is not None
 
     @wraps(func)
-    def wrapper(self, *args: Any, **kwargs: Any) -> None:
+    def wrapper(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
         # Only create temp_dir when rank is 0
         if dist.get_rank() == 0:
             temp_dir = tempfile.mkdtemp()

@@ -286,7 +286,7 @@ class ConfigModule(ModuleType):
 
         return ConfigPatch()
 
-    def _make_closure_patcher(self, **changes: Any) -> Any:
+    def _make_closure_patcher(self, **changes: Any) -> Callable[[], Callable[[], None]]:
         """
         A lower-overhead version of patch() for things on the critical path.
 

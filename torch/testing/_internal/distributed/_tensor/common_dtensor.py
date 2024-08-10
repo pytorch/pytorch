@@ -6,7 +6,8 @@ import itertools
 import sys
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from typing import Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
@@ -351,7 +352,8 @@ class DTensorTestBase(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
 
-TestFunc = Callable[[object], object]
+_P = ParamSpec("_P")
+TestFunc = Callable[_P, None]
 
 
 # wrapper to initialize comms (processgroup)
@@ -359,9 +361,7 @@ def with_comms(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
-    def wrapper(
-        self, *args: Any, **kwargs: Any
-    ) -> None:
+    def wrapper(self, *args: _P.args, **kwargs: _P.kwargs) -> None:
         # if enough GPU we can use GPU, otherwise we fallback to CPU
         if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
             self.device_type = "cpu"
