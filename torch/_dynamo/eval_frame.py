@@ -126,7 +126,7 @@ DONT_WRAP_FILES = {
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
-_OPTIMIZED_PREFIX = "_orig_mod"
+_OPTIMIZED_PREFIX = "_orig_mod."
 
 
 def _debug_get_cache_entry_list(
@@ -269,7 +269,16 @@ class OptimizedModule(torch.nn.Module):
         prefix: str,
         *args: Any,
     ) -> None:
-        _replace_by_prefix(state_dict, prefix, prefix + f"{_OPTIMIZED_PREFIX}")
+        ends_with_suffix = [key.startswith(_OPTIMIZED_PREFIX) for key in state_dict.keys()]
+        all_ends_with_suffix = all(ends_with_suffix)
+        any_ends_with_suffix = any(ends_with_suffix)
+
+        if all_ends_with_suffix:
+            return
+        elif any_ends_with_suffix:
+            raise ValueError("some keys end with {_OPTIMIZED_PREFIX} while some don't")
+
+        _replace_by_prefix(state_dict, prefix, f"{prefix}{_OPTIMIZED_PREFIX}")
 
 
 def remove_from_cache(f):
