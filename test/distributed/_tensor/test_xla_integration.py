@@ -4,7 +4,7 @@
 import os
 import unittest
 from functools import wraps
-from typing import Any, Callable
+from typing import Callable
 from typing_extensions import ParamSpec
 
 import numpy as np

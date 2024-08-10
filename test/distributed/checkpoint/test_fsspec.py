@@ -3,7 +3,7 @@
 import shutil
 import tempfile
 from functools import wraps
-from typing import Any, Callable
+from typing import Callable
 from typing_extensions import ParamSpec
 
 import torch
