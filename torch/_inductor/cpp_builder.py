@@ -1149,11 +1149,6 @@ class CppTorchCudaOptions(CppTorchOptions):
         ) = get_cpp_torch_cuda_options(
             cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
         )
-
-        if compile_only:
-            cuda_libraries_dirs = []
-            cuda_libraries = []
-
         _append_list(self._definations, cuda_definations)
         _append_list(self._include_dirs, cuda_include_dirs)
         _append_list(self._cflags, cuda_cflags)
