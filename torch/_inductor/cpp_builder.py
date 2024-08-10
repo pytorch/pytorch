@@ -332,8 +332,8 @@ class BuildOptionsBase:
 
     def _process_compile_only_options(self) -> None:
         if self._compile_only:
-            self._torch_libraries_dirs = []
-            self._torch_libraries = []
+            self._libraries_dirs = []
+            self._libraries = []
 
     def _remove_duplicate_options(self) -> None:
         self._definations = _remove_duplication_in_list(self._definations)
