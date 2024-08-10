@@ -21,6 +21,9 @@ from tools.testing.test_run import TestRun
 # test to see files were involved in each tests and used to build a correlation
 # dict (where all ratings are 1).
 class Profiling(HeuristicInterface):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         test_ratings = get_ratings_for_tests(
             ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PROFILING_FILE

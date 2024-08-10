@@ -28,6 +28,9 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
     when the files edited by current PR were modified.
     """
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         ratings = _get_ratings_for_tests(set(tests))
         test_ratings = {

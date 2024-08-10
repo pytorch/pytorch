@@ -21,6 +21,9 @@ from tools.testing.test_run import TestRun
 # body, test_foo will be rated 1.  If I mention #123 in the PR body, and #123
 # mentions "test_foo", test_foo will be rated 1.
 class MentionedInPR(HeuristicInterface):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
     def _search_for_linked_issues(self, s: str) -> list[str]:
         return re.findall(r"#(\d+)", s) + re.findall(r"/pytorch/pytorch/.*/(\d+)", s)
 

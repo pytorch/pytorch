@@ -24,6 +24,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
 class PreviouslyFailedInPR(HeuristicInterface):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         critical_tests = get_previous_failures() | read_additional_test_failures_file()
         return TestPrioritizations(

@@ -23,6 +23,9 @@ from tools.testing.test_run import TestRun
 # future commits that change fileA should probably run testFileA. Based on this,
 # a correlation dict is built based on what files were edited in commits on main.
 class HistorialEditedFiles(HeuristicInterface):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         test_ratings = get_ratings_for_tests(
             ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_HISTORICAL_EDITED_FILES
