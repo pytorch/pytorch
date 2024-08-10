@@ -364,6 +364,7 @@ class OutputGraph:
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
         self.torch_function_mode_stack = get_torch_function_mode_stack()
+
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
         # for certain exceptions. THe idea is that if the user has applied
