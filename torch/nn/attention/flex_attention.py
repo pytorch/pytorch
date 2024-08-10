@@ -934,6 +934,6 @@ def flex_attention(
                     kernel_options,
                 )
                 if return_lse:
-                    return out, lse
+                    return out, lse * math.log(2)
                 else:
                     return out

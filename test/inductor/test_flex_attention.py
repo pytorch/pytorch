@@ -1353,6 +1353,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    def test_differentiable_logsumexp_compiled(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        lse_mask = torch.randn(2, 2, 128, device="cuda")
+
+        out, lse = flex_attention(q, k, v, return_lse=True)
+        (out.mean() + (lse * lse_mask).sum()).backward()
+        q_grad, k_grad, v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        out2, lse2 = torch.compile(flex_attention)(q, k, v, return_lse=True)
+        (out2.mean() + (lse2 * lse_mask).sum()).backward()
+        q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
+        tolerance = Tolerances(atol=1e-1, rtol=1e-1)
+
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(lse, lse2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(
+            q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            k_grad, k_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
     @common_utils.parametrize("score_mod_name", ["_head_offset"])
     @common_utils.parametrize("mode", ["eager", "aot_eager"])
     def test_captured_score_mod_aot_eager_gradcheck(
