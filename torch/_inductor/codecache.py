@@ -52,7 +52,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -1088,6 +1088,7 @@ class FxGraphCache:
         from .graph import GraphLowering
 
         GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
         trace_structured(
@@ -1255,6 +1256,7 @@ class FxGraphCache:
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         cache_state = None
+        cache_event_time = None
         key = None
         debug_lines = None
         try:
@@ -1290,6 +1292,7 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_miss"] += 1
                 cache_state = "miss"
                 start_time = time_ns()
+                cache_event_time = start_time
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
@@ -1306,24 +1309,28 @@ class FxGraphCache:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
+                cache_event_time = time_ns()
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
+            cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
+        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
+        ChromiumEventLogger.log_instant_event(
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(
-                {"key": key, "cache_state": cache_state, "components": debug_lines}
-            ),
+            payload_fn=lambda: json.dumps(cache_args),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
@@ -2051,8 +2058,29 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_file(compile_flags)
 
             else:
+                (
+                    object_output_name,
+                    object_output_dir,
+                ) = get_name_and_dir_from_output_file_path(input_path)
+                object_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    compile_only=True,
+                    use_absolute_path=use_absolute_path,
+                    use_mmap_weights=use_mmap_weights,
+                )
+                object_builder = CppBuilder(
+                    name=object_output_name,
+                    sources=input_path,
+                    output_dir=object_output_dir,
+                    BuildOption=object_build_options,
+                )
+                compile_cmd = object_builder.get_command_line()
+                output_o = object_builder.get_target_file_path()
+
                 # TODO: replace this with using the CppBuilder above
-                compile_cmd = cpp_compile_command(
+                compile_cmd_old = cpp_compile_command(
                     input=input_path,
                     output=output_o,
                     vec_isa=picked_vec_isa,
@@ -2063,8 +2091,15 @@ class AotCodeCompiler:
                     use_mmap_weights=use_mmap_weights,
                 )
 
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        compile_cmd.split(" "), compile_cmd_old.split(" ")
+                    )
+
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
+                    output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
@@ -2158,37 +2193,66 @@ class AotCodeCompiler:
 
                 archive_path = package_aoti(os.path.split(input_path)[0])
                 return archive_path
-
-            # TODO: replace this with using the CppBuilder above
-            link_cmd = cpp_compile_command(
-                input=[output_o, consts_o],
-                output=output_so,
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
-            )
-
-            log.debug("aot linkage command: %s", link_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, link_cmd.split())
-                os.chmod(output_so, 0o755)
             else:
-                run_command_and_check(link_cmd)
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
+                so_builder = CppBuilder(
+                    name=output_name,
+                    sources=[output_o, consts_o],
+                    output_dir=output_dir,
+                    BuildOption=so_build_options,
+                )
+                link_cmd = so_builder.get_command_line()
+                output_so = so_builder.get_target_file_path()
 
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
+                # TODO: replace this with using the CppBuilder above
+                link_cmd_old = cpp_compile_command(
+                    input=[output_o, consts_o],
+                    output=output_so,
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
 
-            # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
-                f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                f.write(f"// Link cmd\n// {link_cmd}\n")
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        link_cmd.split(" "), link_cmd_old.split(" ")
+                    )
+
+                log.debug("aot linkage command: %s", link_cmd)
+                if fbcode_aot_cpu_re:
+                    output_so = (
+                        config.aot_inductor.output_path
+                        if specified_so_name
+                        else os.path.splitext(input_path)[0] + ".so"
+                    )
+                    compile_file([output_o, consts_o], output_so, link_cmd.split())
+                    os.chmod(output_so, 0o755)
+                else:
+                    run_command_and_check(link_cmd)
+
+                if use_mmap_weights:
+                    with open(output_so, "a+b") as f_so:
+                        so_size = f_so.tell()
+                        # Page align the weights
+                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(serialized_weights)
+                        f_so.write(struct.pack("q", magic_number))
+
+                # Append cmds to the end of codegen-ed wrapper file
+                with open(input_path, "a") as f:
+                    f.write("\n")
+                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                    f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 
@@ -2507,14 +2571,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }
         template <> inline long parse_arg<long>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(result == -1 && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
+            if(unlikely(result == -1 && PyErr_Occurred()))
+                throw std::runtime_error("expected int arg");
             return result;
         }
         template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
-            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
+            if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
+                throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }
 
@@ -2522,10 +2586,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         static PyObject* %s_py(PyObject* self, PyObject* args) {
             try {
-                if(!PyTuple_CheckExact(args))
-                    [[unlikely]] throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != %s)
-                    [[unlikely]] throw std::runtime_error("requires %s args");
+                if(unlikely(!PyTuple_CheckExact(args)))
+                    throw std::runtime_error("tuple args required");
+                if(unlikely(PyTuple_GET_SIZE(args) != %s))
+                    throw std::runtime_error("requires %s args");
                 %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());

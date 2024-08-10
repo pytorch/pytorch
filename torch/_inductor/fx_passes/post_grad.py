@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device, GPU_TYPE, is_pointwise_use
+from ..utils import decode_device, get_gpu_type, is_pointwise_use
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -1248,4 +1248,4 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
-    ConstructorMoverPass(GPU_TYPE)(graph)
+    ConstructorMoverPass(get_gpu_type())(graph)

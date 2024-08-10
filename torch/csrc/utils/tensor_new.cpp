@@ -332,7 +332,17 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type =
         type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : options.device();
+
+    // Device preference is:
+    //  - explicitly user specified device in `device_opt`
+    //      - either by setting device='...'
+    //      - or setting torch.set_default_device(...)
+    //  - device of already constructed tensor
+    // This prevents an unnecessary device -> host copy when the tensor is
+    // already on the device, while respecting a default device and allows the
+    // user to overwrite the behavior explicitly.
+    at::Device device = device_opt.has_value() ? *device_opt : tensor.device();
+
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_device(device);
     return tensor.to(
