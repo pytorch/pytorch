@@ -874,7 +874,7 @@ def flex_attention(
     if key.size(-2) % 128 != 0:
         raise NotImplementedError(
             "Target sequence length (L) of key must be a multiple of 128, "
-            fbut got L={key.size(-2)}"
+            f"but got L={key.size(-2)}"
         )
     if (not enable_gqa) and query.size(-3) != key.size(-3):
         raise ValueError(
