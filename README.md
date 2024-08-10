@@ -279,7 +279,7 @@ python setup.py develop
 **On macOS**
 
 ```bash
-python3 setup.py develop
+USE_CUDA=0 USE_MKLDNN=0 USE_DISTRIBUTED=1 python3 setup.py develop
 ```
 
 **On Windows**
