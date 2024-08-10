@@ -53,13 +53,23 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask):
-    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
+def create_attention(score_mod, block_mask, enable_gqa=False):
+    return functools.partial(
+        flex_attention,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
+    )
 
 
 def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
-        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+        score_mod,
+        1,
+        1,
+        query.shape[-2],
+        key.shape[-2],
+        query.device,
     )
     return block_mask
 
@@ -276,7 +286,9 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         block_mask = None
-        sdpa_partial = create_attention(score_mod, block_mask)
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -541,6 +553,23 @@ class TestFlexAttention(InductorTestCase):
             B,
             H,
             S // 2,  # Seqlen of Q is different from seqlen of K/V
+            D,
+            B,
+            H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_GQA(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_test(
+            score_mod,
+            dtype,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
             D,
             B,
             H,
@@ -1167,6 +1196,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention)
 
     @supported_platform
+    def test_GQA_causal_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S // 8, S // 8)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=True
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
+            D,
+            B,
+            H,
+            S // 8,
+            D,
+        )
+
+    @supported_platform
     def test_custom_block_mask_generator(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -1657,12 +1709,12 @@ class GraphModule(torch.nn.Module):
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
-    class GraphModule(torch.nn.Module):
+    class score_mod_0(torch.nn.Module):
         def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
             mul: "f64[]" = child * child;  child = None
             return mul
 
-    class GraphModule(torch.nn.Module):
+    class mask_fn_0(torch.nn.Module):
         def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
             ge: "b8[]" = child_7 >= child_8;  child_7 = child_8 = None
             return ge
@@ -1699,12 +1751,12 @@ class GraphModule(torch.nn.Module):
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return (getitem_4, getitem_5, getitem_6)
 
-    class <lambda>(torch.nn.Module):
+    class fw_graph(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
 
-    class <lambda>(torch.nn.Module):
+    class joint_graph(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
@@ -1712,7 +1764,7 @@ class GraphModule(torch.nn.Module):
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
 
-    class <lambda>(torch.nn.Module):
+    class mask_graph(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full
