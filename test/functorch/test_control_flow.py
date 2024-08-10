@@ -1224,14 +1224,16 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = associative_scan(add, x, 0, reverse=False)
-        cumsum_exp = _fake_associative_scan(add, x, 0)
-        self.assertEqual(cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
-        self.assertEqual(cumsum1, cumsum_exp)
-
-        cumsum1 = associative_scan(add, x, 0, reverse=True)
-        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=True)
-        self.assertEqual(cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
+        cumsum1 = associative_scan(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        if not reverse:
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
+        else:
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
         self.assertEqual(cumsum1, cumsum_exp)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
@@ -1296,17 +1298,17 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        result = associative_scan_fct(add, x, 0, reverse=False)
-        result_exp = _fake_associative_scan(add, x, 0)
-        self.assertEqual(result, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64))
-        self.assertEqual(result, result_exp)
-
-        result = associative_scan_fct(add, x, 0, reverse=True)
-        result_exp = _fake_associative_scan(add, x, 0, reverse=True)
-        self.assertEqual(result, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64))
-        self.assertEqual(result, result_exp)
-
-        x = torch.randn(3, 2, 2, device=device)
+        cumsum1 = associative_scan_fct(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        if not reverse:
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
+        else:
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
+        self.assertEqual(cumsum1, cumsum_exp)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
