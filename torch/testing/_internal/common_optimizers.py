@@ -419,7 +419,7 @@ def optim_error_inputs_func_adafactor(device, dtype):
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=[complex_param],
-                    kwargs=dict(),
+                    kwargs={},
                     desc="does not support complex parameters",
                 ),
                 error_type=RuntimeError,

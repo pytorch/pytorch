@@ -2037,7 +2037,7 @@ class Scheduler:
         Ensure nodes is in topologically sorted order
         """
         seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
-        name_to_node: Dict[str, BaseSchedulerNode] = dict()
+        name_to_node: Dict[str, BaseSchedulerNode] = {}
         result: List[BaseSchedulerNode] = []
 
         def visit(n: BaseSchedulerNode) -> None:

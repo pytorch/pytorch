@@ -536,7 +536,7 @@ class TestDeserialize(TestCase):
         def _deepcopy_inputs(inputs):
             # copy.deepcopy(deepcopy) can fail if tensor inputs have attribute (i.e. __dict__).
             # we remove __dict__ when deepcopying.
-            dict_mapping = dict()
+            dict_mapping = {}
             inputs_clone = ()
             for idx, i in enumerate(inputs):
                 if isinstance(i, torch.Tensor) and hasattr(inputs[0], "__dict__"):

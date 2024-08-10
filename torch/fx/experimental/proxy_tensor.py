@@ -1013,7 +1013,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.sympy_expr_tracker: Dict[sympy.Symbol, object] = dict()
+        self.sympy_expr_tracker: Dict[sympy.Symbol, object] = {}
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1405,7 +1405,7 @@ class DecompositionInterpreter(fx.Interpreter):
         # Blegh
         self.tracer.tensor_tracker = WeakTensorKeyDictionary()
         self.tracer.symnode_tracker = weakref.WeakKeyDictionary()
-        self.tracer.sympy_expr_tracker = dict()
+        self.tracer.sympy_expr_tracker = {}
         self.decomposition_table = decomposition_table or {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
