@@ -5,7 +5,6 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -243,6 +242,8 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
+        from torch.fx.experimental.symbolic_shapes import has_free_symbols
+
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
         values = inner_tensors["_values"]
