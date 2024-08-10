@@ -48,7 +48,8 @@ constexpr size_t kMaxAlignment = 16;
  * Returns the likely file format based on the magic header bytes in @p header,
  * which should contain the first bytes of a file or data stream.
  */
-inline FileFormat getFileFormat(const char* data) {
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline FileFormat getFileFormat(const char* data) {
   // The size of magic strings to look for in the buffer.
   static constexpr size_t kMagicSize = 4;
 
@@ -88,10 +89,12 @@ inline FileFormat getFileFormat(const char* data) {
  * If the stream position changes while inspecting the data, this function will
  * restore the stream position to its original offset before returning.
  */
-inline FileFormat getFileFormat(std::istream& data) {
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline FileFormat getFileFormat(std::istream& data) {
   FileFormat format = FileFormat::UnknownFileFormat;
   std::streampos orig_pos = data.tellg();
-  std::array<char, kFileFormatHeaderSize> header{};
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  std::array<char, kFileFormatHeaderSize> header;
   data.read(header.data(), header.size());
   if (data.good()) {
     format = getFileFormat(header.data());
@@ -104,12 +107,14 @@ inline FileFormat getFileFormat(std::istream& data) {
  * Returns the likely file format based on the magic header bytes of the file
  * named @p filename.
  */
-inline FileFormat getFileFormat(const std::string& filename) {
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline FileFormat getFileFormat(const std::string& filename) {
   std::ifstream data(filename, std::ifstream::binary);
   return getFileFormat(data);
 }
 
-inline void file_not_found_error() {
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static void file_not_found_error() {
   std::stringstream message;
   message << "Error while opening file: ";
   if (errno == ENOENT) {
@@ -120,7 +125,8 @@ inline void file_not_found_error() {
   TORCH_CHECK(false, message.str());
 }
 
-inline std::tuple<std::shared_ptr<char>, size_t> get_file_content(
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline std::tuple<std::shared_ptr<char>, size_t> get_file_content(
     const char* filename) {
 #if defined(HAVE_MMAP)
   int fd = open(filename, O_RDONLY);
@@ -153,7 +159,8 @@ inline std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   return std::make_tuple(data, size);
 }
 
-inline std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
     std::istream& in) {
   // get size of the stream and reset to orig
   std::streampos orig_pos = in.tellg();
@@ -162,7 +169,7 @@ inline std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
   in.seekg(orig_pos, in.beg);
 
   // read stream
-  // make sure buffer size is multiple of alignment
+  // NOLINT make sure buffer size is multiple of alignment
   size_t buffer_size = (size / kMaxAlignment + 1) * kMaxAlignment;
   std::shared_ptr<char> data(
       static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
@@ -173,7 +180,8 @@ inline std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
   return std::make_tuple(data, size);
 }
 
-inline std::tuple<std::shared_ptr<char>, size_t> get_rai_content(
+// NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
+static inline std::tuple<std::shared_ptr<char>, size_t> get_rai_content(
     caffe2::serialize::ReadAdapterInterface* rai) {
   size_t buffer_size = (rai->size() / kMaxAlignment + 1) * kMaxAlignment;
   std::shared_ptr<char> data(
