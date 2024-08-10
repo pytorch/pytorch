@@ -6,7 +6,6 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
-#include <sstream>
 #include <type_traits>
 
 namespace at::native { inline namespace CPU_CAPABILITY {
@@ -81,7 +80,7 @@ inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n,
 template <typename func_t, typename vec_func_t>
 inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
-  int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
     vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
