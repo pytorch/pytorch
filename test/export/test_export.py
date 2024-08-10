@@ -1868,6 +1868,118 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    def test_mismatched_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x["k"]["k"][0] + x["k"]["k"][1]
+
+        inputs = ({"k": {"k": [torch.rand(4), torch.rand(4)]}},)
+        dim = torch.export.Dim("dim")
+
+        dynamic_shapes = {
+            "k": {"k": [dim, dim]}
+        }  # ValueError: Node keys mismatch; missing key(s): {'x'}; extra key(s): {'k'}.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "When `dynamic_shapes` is specified as a dict, its top-level keys "
+                "must be the arg names ['x'] of `inputs`, but here they are ['k']. "
+                "Since here `inputs` is a list/tuple enclosing a single dict, "
+                "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": [dim, dim]}},
+        )  # torch._dynamo.exc.UserError: Unexpected dynamic_shape .*dim.* of Tensor, try None instead
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Unexpected input tensor shape .*dim.* "
+            + re.escape(
+                "specified at `dynamic_shapes[0]['k']['k'][0]` "
+                "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
+                " where each dimension is None, an int, or a Dim)"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": (dim, dim)}},
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got <class 'tuple'>.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is a <class 'tuple'>"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = ({"k": {"k": [(dim,), (dim,)]}},)  # ok
+        export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": dim}},
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*_Dim.*.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is not"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = {
+            "x": {"k": [(dim,), (dim,)]},
+            "k": {"k": [(dim,), (dim,)]},
+        }  # ValueError: Node arity mismatch; expected 1, but got 2.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "When `dynamic_shapes` is specified as a dict, its top-level keys "
+                "must be the arg names ['x'] of `inputs`, but here they are ['x', 'k']. "
+                "Alternatively, you could also ignore arg names entirely "
+                "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": [(dim,), (dim,), (dim,)]}},
+        )  # ValueError: Node arity mismatch; expected 2, but got 3.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` has 2 elements, but `dynamic_shapes[0]['k']['k']` has 3 elements"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"K": [(dim,), (dim,), (dim,)]}},
+        )  # ValueError: Node keys mismatch; missing key(s): {'k'}; extra key(s): {'K'}.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']` has keys ['k'], but `dynamic_shapes[0]['k']` has keys ['K']"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x["k"]["k1"][0] + x["k"]["k2"][0]
+
+        inputs = ({"k": {"k1": [torch.rand(4)], "k2": [torch.rand(4)]}},)
+        dim = torch.export.Dim("dim")
+
+        dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
+        export(N(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
             def forward(self, x1, x2, x3, y):
@@ -2041,8 +2153,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # and asserting the applied fix was suggested in the previous try.
             # Using this API avoids the need to define multiple versions of the same test
             # module, as in `test_suggested_fixes_for_data_dependent_errors_basic` above.
-            import re
-
             def code(snippets):
                 return f"[{', '.join(snippets)}]"
 
@@ -5480,7 +5590,7 @@ def forward(self, b_pred, b_t, x, y):
             """\
 def forward(self, b_t, x, y):
     submod_3 = self.submod_1
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
+    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, x, b_t, y);  submod_3 = x = b_t = y = None
     getitem = add_1[0];  add_1 = None
     return (getitem,)""",
         )

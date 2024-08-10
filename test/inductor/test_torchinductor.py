@@ -2196,6 +2196,23 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_cumsum_inf(self):
+        def fn(x):
+            return x.cumsum(-1)
+
+        def make_tensor(shape):
+            return torch.full(
+                shape, float("inf"), device=self.device, dtype=torch.float64
+            )
+
+        cfn = torch.compile(fn)
+
+        for n in [100, 10, 100]:
+            inp = torch.full(
+                (2, n), float("inf"), device=self.device, dtype=torch.float64
+            )
+            self.assertEqual(cfn(inp), fn(inp))
+
     def test_logcumsumexp(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(1)
@@ -9562,13 +9579,14 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     @requires_gpu()
+    @parametrize("prefer_nd_tiling", (False, True))
     @parametrize("use_block_ptr", (False, True))
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
     @skipIfRocm
-    def test_sdpa(self, use_block_ptr):
+    def test_sdpa(self, use_block_ptr: bool, prefer_nd_tiling: bool):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
             arg3_1 = None
@@ -9620,7 +9638,12 @@ class CommonTemplate:
         weights = torch.randn((C_bias, H), device=DEVICE, dtype=DTYPE)
         inps = (query, key, value, bias, weights)
 
-        with config.patch("triton.use_block_ptr", use_block_ptr):
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": prefer_nd_tiling,
+                "triton.use_block_ptr": use_block_ptr,
+            }
+        ):
             # Check accuracy
             self.common(
                 foo,
@@ -10869,6 +10892,28 @@ class CommonTemplate:
         x2 = x.clone()
         _, code = run_and_get_code(fn, x, x2)
         FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
+
+    @requires_gpu()
+    def test_scalar_cpu_tensor_arg(self):
+        def fn(x, y):
+            return x + y.sum()
+
+        test_dtypes = [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+        ]
+        for cpu_dtype in test_dtypes:
+            x = torch.rand([20], device=GPU_TYPE)
+            y = torch.rand([4], device="cpu", dtype=cpu_dtype)
+            self.common(
+                fn,
+                (x, y),
+                check_lowp=False,
+                copy_to_gpu=False,
+                reference_in_float=False,
+            )
 
     def test_float16_to_int16(self):
         def fn(x):

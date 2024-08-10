@@ -52,7 +52,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -1256,6 +1256,7 @@ class FxGraphCache:
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
         cache_state = None
+        cache_event_time = None
         key = None
         debug_lines = None
         try:
@@ -1291,6 +1292,7 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_miss"] += 1
                 cache_state = "miss"
                 start_time = time_ns()
+                cache_event_time = start_time
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
@@ -1307,24 +1309,28 @@ class FxGraphCache:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
+                cache_event_time = time_ns()
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
+            cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
+        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
+        ChromiumEventLogger.log_instant_event(
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(
-                {"key": key, "cache_state": cache_state, "components": debug_lines}
-            ),
+            payload_fn=lambda: json.dumps(cache_args),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
@@ -2224,7 +2230,11 @@ class AotCodeCompiler:
 
                 log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
-                    output_so = os.path.splitext(input_path)[0] + ".so"
+                    output_so = (
+                        config.aot_inductor.output_path
+                        if specified_so_name
+                        else os.path.splitext(input_path)[0] + ".so"
+                    )
                     compile_file([output_o, consts_o], output_so, link_cmd.split())
                     os.chmod(output_so, 0o755)
                 else:

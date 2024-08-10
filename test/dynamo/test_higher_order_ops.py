@@ -326,7 +326,7 @@ class GraphModule(torch.nn.Module):
         l_d_y_1_2_ = L_d_y_1_2_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_d_x_, l_d_y_0_, l_d_y_1_2_);  wrap_body_0 = l_d_x_ = l_d_y_0_ = l_d_y_1_2_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_d_x_, l_d_y_0_, l_d_y_1_2_);  wrap_body_0 = l_d_x_ = l_d_y_0_ = l_d_y_1_2_ = None
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -364,7 +364,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -384,7 +384,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, s0);  wrap_body_0 = l_x_ = s0 = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -1845,7 +1845,7 @@ class GraphModule(torch.nn.Module):
         l_arg2_0_ = L_arg2_0_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_arg1_0_, l_arg2_0_);  wrap_body_0 = l_arg1_0_ = l_arg2_0_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_arg1_0_, l_arg2_0_);  wrap_body_0 = l_arg1_0_ = l_arg2_0_ = None
         getitem: "f32[3]" = wrap[0]
         getitem_1: "f32[3]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
@@ -2042,7 +2042,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         a: "f32[2, 3]" = wrap[0]
         b: "f32[2, 3]" = wrap[1];  wrap = None
 
@@ -2080,7 +2080,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -5385,6 +5385,45 @@ class GraphModule(torch.nn.Module):
         torch.vmap(fn, randomness="same")(x)
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
+
+    def test_vmap_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.vmap\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.vmap(fn)(x)
+
+    def test_grad_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.grad\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.grad(fn)(x)
+
+    def test_jvp_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Calling torch.func.jvp\\(compiled_fn\\) function from eager mode is not supported",
+        ):
+            torch.func.jvp(fn, (x,), (x,))
 
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):
