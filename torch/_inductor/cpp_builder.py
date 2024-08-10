@@ -330,7 +330,7 @@ class BuildOptionsBase:
         self._use_absolute_path: bool = use_absolute_path
         self._compile_only: bool = compile_only
 
-    def _process_compile_only_options(self):
+    def _process_compile_only_options(self) -> None:
         if self._compile_only:
             self._torch_libraries_dirs = []
             self._torch_libraries = []
@@ -344,7 +344,7 @@ class BuildOptionsBase:
         self._libraries = _remove_duplication_in_list(self._libraries)
         self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
-    def _finalize_options(self):
+    def _finalize_options(self) -> None:
         self._process_compile_only_options
         self._remove_duplicate_options
 
