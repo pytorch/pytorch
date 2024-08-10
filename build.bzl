@@ -18,7 +18,6 @@ def define_targets(rules):
         definitions = [
             "CAFFE2_PERF_WITH_AVX",
             "CAFFE2_PERF_WITH_AVX2",
-            "CAFFE2_PERF_WITH_AVX512",
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",
