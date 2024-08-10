@@ -123,6 +123,7 @@ class Benchmarker:
         run_for(warmup)
         return median(run_for(rep))
 
+    @maybe_time
     @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
@@ -214,7 +215,7 @@ def maybe_fallback(
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        if self.should_fallback():
+        if not is_feature_enabled(self.feature_name):
             fallback_fn = getattr(super(type(self), self), fn.__name__)
             log.debug(
                 "benchmarking.%s.%s falls back to benchmarking.%s.%s.",
@@ -230,26 +231,25 @@ def maybe_fallback(
 
 
 class InductorBenchmarker(TritonBenchmarker):
-    should_fallback = lambda: not is_feature_enabled(
-        "inductor_benchmarker"
-    )  # noqa: E731
+    feature_name = "inductor_benchmarker"
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
+        """Get the L2 cache size of the current device."""
         device = torch.cuda.current_device()
         props = torch.cuda.get_device_properties(device)
         return props.L2_cache_size
 
     def get_event_pairs(
-        self: Self, num_pairs: int
+        self: Self, iters: int
     ) -> List[Tuple[torch.cuda.Event, torch.cuda.Event]]:
-        """Get `num_pairs` pairs of CUDA events."""
+        """Get `iters` pairs of CUDA events."""
         return [
             (
                 torch.cuda.Event(enable_timing=True),
                 torch.cuda.Event(enable_timing=True),
             )
-            for _ in range(num_pairs)
+            for _ in range(iters)
         ]
 
     def get_event_pairs_min_timing(

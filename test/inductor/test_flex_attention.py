@@ -53,13 +53,23 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask):
-    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
+def create_attention(score_mod, block_mask, enable_gqa=False):
+    return functools.partial(
+        flex_attention,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
+    )
 
 
 def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
-        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+        score_mod,
+        1,
+        1,
+        query.shape[-2],
+        key.shape[-2],
+        query.device,
     )
     return block_mask
 
@@ -276,7 +286,9 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         block_mask = None
-        sdpa_partial = create_attention(score_mod, block_mask)
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -541,6 +553,23 @@ class TestFlexAttention(InductorTestCase):
             B,
             H,
             S // 2,  # Seqlen of Q is different from seqlen of K/V
+            D,
+            B,
+            H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_GQA(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_test(
+            score_mod,
+            dtype,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
             D,
             B,
             H,
@@ -1165,6 +1194,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_GQA_causal_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S // 8, S // 8)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=True
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
+            D,
+            B,
+            H,
+            S // 8,
+            D,
+        )
 
     @supported_platform
     def test_custom_block_mask_generator(self):
