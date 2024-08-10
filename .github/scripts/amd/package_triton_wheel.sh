@@ -30,7 +30,12 @@ fi
 # Remove packaged libs and headers
 rm -rf $TRITON_ROCM_DIR/include/*
 
-LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+else
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+fi
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
 
@@ -45,16 +50,9 @@ do
     cp $lib $TRITON_ROCM_DIR/lib/
 done
 
-# Required ROCm libraries
-if [[ "${MAJOR_VERSION}" == "6" ]]; then
-    libamdhip="libamdhip64.so.6"
-else
-    libamdhip="libamdhip64.so.5"
-fi
-
 # Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
-    "${libamdhip}"
+    "libamdhip64.so.6"
     "libhsa-runtime64.so.1"
     "libamd_comgr.so.2"
     "libdrm.so.2"
