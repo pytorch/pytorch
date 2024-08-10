@@ -2079,24 +2079,6 @@ class AotCodeCompiler:
                 compile_cmd = object_builder.get_command_line()
                 output_o = object_builder.get_target_file_path()
 
-                # TODO: replace this with using the CppBuilder above
-                compile_cmd_old = cpp_compile_command(
-                    input=input_path,
-                    output=output_o,
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-
-                # Temp: add command debug code.
-                if config.is_fbcode():
-                    _temp_validate_new_and_old_command(
-                        compile_cmd.split(" "), compile_cmd_old.split(" ")
-                    )
-
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
                     output_o = os.path.splitext(input_path)[0] + ".o"
@@ -2211,22 +2193,6 @@ class AotCodeCompiler:
                 )
                 link_cmd = so_builder.get_command_line()
                 output_so = so_builder.get_target_file_path()
-
-                # TODO: replace this with using the CppBuilder above
-                link_cmd_old = cpp_compile_command(
-                    input=[output_o, consts_o],
-                    output=output_so,
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-
-                # Temp: add command debug code.
-                if config.is_fbcode():
-                    _temp_validate_new_and_old_command(
-                        link_cmd.split(" "), link_cmd_old.split(" ")
-                    )
 
                 log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
