@@ -41,10 +41,11 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.utils import _get_shape_env, _detect_fake_mode_from_gm
+from torch._export.utils import _get_shape_env_from_gm, _detect_fake_mode_from_gm, _collect_constant_attrs
 from torch._export.verifier import Verifier
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
+from torch.export._remove_unneccessary_copy_op_pass import _remove_unneccessary_copy_op_pass
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
@@ -302,24 +303,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
     # and overwrite the new graph signature using the previous program.
-    constant_attrs = ConstantAttrMap()
-    non_persistent_buffers = {
-        spec.target
-        for spec in ep.graph_signature.input_specs
-        if spec.kind == InputKind.BUFFER and not spec.persistent
-    }
-    for name, value in ep.constants.items():
-        if name in non_persistent_buffers:
-            continue
-        # recursive getattr
-        _mod = mod
-        *atoms, attr = name.split(".")
-        for atom in atoms:
-            _mod = getattr(_mod, atom)
-        # remove as buffer, reassign as constant/non-persistent buffer
-        _mod._buffers.pop(attr, None)
-        setattr(_mod, attr, value)
-        constant_attrs.add(value, name)
+    constant_attrs = _collect_constant_attrs(ep.graph_signature, ep.constants, mod)
 
     # get params & buffers after excluding constants
     fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
@@ -395,6 +379,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         node.meta[k] = v
 
     # overwrite signature for non-persistent buffers
+    non_persistent_buffers = {
+        spec.target
+        for spec in ep.graph_signature.input_specs
+        if spec.kind == InputKind.BUFFER and not spec.persistent
+    }
+
     for spec in new_graph_signature.input_specs:
         if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
             spec.persistent = False
@@ -402,19 +392,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
     _verify_placeholder_names(gm, new_graph_signature)
-    
-    with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
-        for node in gm.graph.nodes:
-            if node.op == "output":
-                args, _ = pytree.tree_flatten(node.args)
-                for out in args:
-                    if out.name in new_graph_signature.buffers_to_mutate:
-                        if out.op == "call_function" and out.target == torch.ops.aten.copy.default:
-                            out.replace_all_uses_with(out.args[1])
-                            gm.graph.erase_node(out)
-        gm.recompile()
 
-    return gm, new_graph_signature
+    return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
 
 
 def _decompose_exported_program(
@@ -955,7 +934,7 @@ def _get_updated_range_constraints(
 ) -> "Dict[sympy.Symbol, Any]":
     assert old_range_constraints is not None
 
-    shape_env = _get_shape_env(gm)
+    shape_env = _get_shape_env_from_gm(gm)
     if shape_env is None:
         return {}
 
