@@ -1123,6 +1123,40 @@ class trace:
     log_autotuning_results: bool = False
 
 
+def get_feature_local_version(feature_name: str) -> Optional[int]:
+    try:
+        from torch._inductor.fb import benchmarking
+    except ImportError:
+        return None
+    return getattr(benchmarking, feature_name.upper() + "_VERSION", None)
+
+
+class benchmarking:
+    # feature enablement:
+    # 1. `env_val`` takes priority, if `env_val=1` we force enable, if `env_val=0` we
+    # force disable
+    # 2a. [OSS] If `env_val` is unset, default to `oss_default` value
+    # 2b. [Internal] JK-based, if `local_version` is greater than or equal to the JK
+    # version the feature is enabled, otherwise default to disablement
+    class inductor_benchmarker:
+        # Flags to control enablement of experimental inductor benchmarker feature
+        env_val: Optional[str] = os.environ.get(
+            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_BENCHMARKER"
+        )
+        oss_default: bool = True
+        local_version: Optional[int] = get_feature_local_version("inductor_benchmarker")
+
+    class inductor_grouped_benchmarker:
+        # Flags to control enablement of experimental inductor benchmarker feature
+        env_val: Optional[str] = os.environ.get(
+            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER"
+        )
+        oss_default: bool = False
+        local_version: Optional[int] = get_feature_local_version(
+            "inductor_grouped_benchmarker"
+        )
+
+
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
