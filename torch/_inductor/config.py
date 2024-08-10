@@ -1151,7 +1151,7 @@ class benchmarking:
         env_val: Optional[str] = os.environ.get(
             "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER"
         )
-        oss_default: bool = False
+        oss_default: bool = True
         local_version: Optional[int] = get_feature_local_version(
             "inductor_grouped_benchmarker"
         )
