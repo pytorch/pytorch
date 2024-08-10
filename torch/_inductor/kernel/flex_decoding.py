@@ -503,8 +503,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
 
     input_gen_fns = {
-        5: create_num_blocks_fake_generator(full_kv_indices),
+        5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
+        7: create_num_blocks_fake_generator(full_kv_indices),
+        8: create_indices_fake,
     }
 
     buf_ACC = autotune_select_algorithm(
