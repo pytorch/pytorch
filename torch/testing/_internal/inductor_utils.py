@@ -9,8 +9,8 @@ from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
-from torch._inductor.utils import get_gpu_shared_memory
-from torch._inductor.utils import GPU_TYPES, GPU_TYPE  # noqa: F401 required to import from Inductor UT
+from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
+from torch._inductor.utils import GPU_TYPES, get_gpu_type
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -41,6 +41,8 @@ HAS_CUDA = torch.cuda.is_available() and has_triton()
 HAS_XPU = torch.xpu.is_available() and has_triton()
 
 HAS_GPU = HAS_CUDA or HAS_XPU
+
+GPU_TYPE = get_gpu_type()
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
@@ -105,3 +107,5 @@ IS_H100 = LazyVal(
     lambda: HAS_CUDA
     and get_gpu_shared_memory() == 232448
 )
+
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))
