@@ -5,6 +5,7 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch.utils._pytree as pytree
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
+from torch.utils._device import DeviceContext
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -49,6 +50,12 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
+
+# Today set default device is placed in the graph and guarded on separately
+# so we should not trace through it. In the future we can trace it once
+# mode tracing is implemented and not put in the graph, but this is more
+# of a BE project and can be evaluated later
+IGNORED_MODES = {DeviceContext}
 
 
 def _get_all_args(args, kwargs):
