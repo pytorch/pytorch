@@ -17,7 +17,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 
 namespace torch::unwind {
 
@@ -40,10 +39,7 @@ struct Section {
 /// 2. Used in unity to load the elf file.
 struct MemFile {
   explicit MemFile(const char* filename_)
-      : fd_(open(filename_, O_RDONLY)),
-        mem_(nullptr),
-        n_bytes_(0),
-        name_(filename_) {
+      : fd_(open(filename_, O_RDONLY)), name_(filename_) {
     UNWIND_CHECK(
         fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
     // NOLINTNEXTLINE
@@ -100,7 +96,7 @@ struct MemFile {
     if (mem_) {
       munmap((void*)mem_, n_bytes_);
     }
-    if (fd_) {
+    if (fd_ >= 0) {
       close(fd_);
     }
   }
@@ -139,8 +135,8 @@ struct MemFile {
     return (T*)(mem_ + offset);
   }
   int fd_;
-  char* mem_;
-  size_t n_bytes_;
+  char* mem_{nullptr};
+  size_t n_bytes_{0};
   std::string name_;
   Elf64_Ehdr* ehdr_;
   Elf64_Shdr* shdr_;
