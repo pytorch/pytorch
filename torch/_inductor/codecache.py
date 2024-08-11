@@ -2001,16 +2001,16 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
 
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Callable[[], Union[DLLWrapper, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
-    def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
-        return cdll.LoadLibrary(path)
+    def _load_library_inner(path: str, key: str) -> Union[DLLWrapper, ModuleType]:
+        return DLLWrapper(path)
 
     @classmethod
-    def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
+    def _load_library(cls, path: str, key: str) -> Union[DLLWrapper, ModuleType]:
         try:
             result = cls._load_library_inner(path, key)
             result.key = key  # type: ignore[union-attr]
@@ -2146,7 +2146,7 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Callable[[], Union[DLLWrapper, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
@@ -2312,7 +2312,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
 @clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Callable[[], Union[DLLWrapper, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": True,
@@ -2375,7 +2375,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
 @clear_on_fresh_inductor_cache
 class HalideCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
+    cache: Dict[str, Callable[[], Union[ModuleType, DLLWrapper]]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: Optional[str] = None
     prefix = textwrap.dedent(

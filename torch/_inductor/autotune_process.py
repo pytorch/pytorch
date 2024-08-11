@@ -11,7 +11,7 @@ import queue
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from ctypes import byref, c_size_t, c_void_p, CDLL
+from ctypes import byref, c_size_t, c_void_p
 from typing import (
     Any,
     Callable,
@@ -819,7 +819,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.hash_key = get_hash(source_code)
-        self.DLL: Optional[Union[CDLL, ModuleType]] = None
+        self.DLL: Optional[Union[DLLWrapper, ModuleType]] = None
 
     def precompile(self):
         # Prepopulate CppCodeCache
@@ -860,8 +860,10 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
             """
             Check close attr due to it crash on Windows.
             """
-            if hasattr(self.DLL, "close"):
-                self.DLL.close()
+            if not hasattr(self.DLL, "close"):
+                raise RuntimeError("self.DLL don't have close attr.")
+
+            self.DLL.close()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"
