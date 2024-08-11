@@ -99,7 +99,7 @@ struct dummy_uint1_7_t {};
 // TODO: To add unsigned int types here, we must define accumulate type.
 // But uint8 currently accumulates into int64, so we would have to make
 // an inconsistent choice for the larger types.  Difficult.
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(_) \
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_INCLUDING_COMPLEX_HALF_F8NZ(_) \
   _(uint8_t, Byte)                                                      \
   _(int8_t, Char)                                                       \
   _(int16_t, Short)                                                     \
@@ -108,6 +108,7 @@ struct dummy_uint1_7_t {};
   _(at::Half, Half)                                                     \
   _(float, Float)                                                       \
   _(double, Double)                                                     \
+  _(c10::complex<c10::Half>, ComplexHalf)                               \
   _(c10::complex<float>, ComplexFloat)                                  \
   _(c10::complex<double>, ComplexDouble)                                \
   _(bool, Bool)                                                         \
