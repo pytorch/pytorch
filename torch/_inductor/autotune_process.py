@@ -11,7 +11,7 @@ import queue
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from ctypes import byref, c_size_t, c_void_p, CDLL
+from ctypes import byref, c_size_t, c_void_p
 from typing import (
     Any,
     Callable,
@@ -30,6 +30,7 @@ from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import (
+    CppCodeBuilder,
     CppCodeCache,
     CUDACodeCache,
     DLLWrapper,
@@ -41,7 +42,6 @@ from torch._inductor.codecache import (
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
     from multiprocessing.queues import Queue
-    from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
@@ -819,7 +819,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.hash_key = get_hash(source_code)
-        self.DLL: Optional[Union[CDLL, ModuleType]] = None
+        self.DLL: Optional[DLLWrapper] = None
 
     def precompile(self):
         # Prepopulate CppCodeCache
@@ -832,7 +832,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
-        self.DLL = CppCodeCache.load(self.source_code, cuda=False)
+        self.DLL = DLLWrapper(CppCodeBuilder(self.source_code, cuda=False))
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",
@@ -857,11 +857,10 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
-            """
-            Check close attr due to it crash on Windows.
-            """
-            if hasattr(self.DLL, "close"):
-                self.DLL.close()
+            if not hasattr(self.DLL, "close"):
+                raise RuntimeError("self.DLL don't have close attr.")
+
+            self.DLL.close()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"
