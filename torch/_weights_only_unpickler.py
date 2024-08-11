@@ -25,6 +25,7 @@
 import functools as _functools
 import warnings
 from collections import Counter, OrderedDict
+from _codecs import encode
 from pickle import (
     APPEND,
     APPENDS,
@@ -158,6 +159,8 @@ def _get_allowed_globals():
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
         "torch.device": torch.device,
+        "_codecs.encode": encode,  # for bytes
+        "builtins.bytearray": bytearray  # for bytearray
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
