@@ -64,6 +64,7 @@ run_tests() {
         elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+            "$SCRIPT_HELPERS_DIR"/test_inductor.bat
         fi
     fi
 }
