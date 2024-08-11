@@ -327,4 +327,3 @@ class HeuristicInterface:
         positive means run, 0 means no idea, and magnitude = how confident the
         heuristic is. Used by AggregatedHeuristicsRankings.
         """
-        pass
