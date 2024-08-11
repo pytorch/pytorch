@@ -7,9 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-
 from torch.distributed._tensor import DeviceMesh, DTensor
-
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -27,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -131,22 +130,15 @@ dtensor_fails = {
     xfail("combinations"),
     xfail("complex"),
     xfail("constant_pad_nd"),
-    xfail("corrcoef"),
     xfail("count_nonzero"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("cumsum"),
     xfail("cumulative_trapezoid"),
-    xfail("diag"),
-    xfail("diag_embed"),
-    xfail("diagflat"),
-    xfail("diagonal"),
-    xfail("diagonal_copy"),
     xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("dot"),
-    xfail("einsum"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),
@@ -208,7 +200,6 @@ dtensor_fails = {
     xfail("linalg.cross"),
     xfail("linalg.det"),
     xfail("linalg.det", "singular"),
-    xfail("linalg.diagonal"),
     xfail("linalg.eig"),
     xfail("linalg.eigh"),
     xfail("linalg.eigvals"),
@@ -234,7 +225,6 @@ dtensor_fails = {
     xfail("linalg.norm", "subgradients_at_zero"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
-    xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
@@ -387,11 +377,9 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
-    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
-    xfail("qr"),
     xfail("quantile"),
     xfail("rand_like"),
     xfail("randint_like"),
@@ -445,7 +433,6 @@ dtensor_fails = {
     xfail("special.xlog1py"),
     xfail("special.zeta"),
     xfail("squeeze", "multiple"),
-    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),

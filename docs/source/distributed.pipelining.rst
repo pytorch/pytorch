@@ -52,7 +52,7 @@ Overall, the ``pipelining`` package provides the following features:
 
 * Splitting of model code based on simple specification.
 * Rich support for pipeline schedules, including GPipe, 1F1B,
-  Interleaved 1F1B and Looped BFS, and providing the infrastruture for writing
+  Interleaved 1F1B and Looped BFS, and providing the infrastructure for writing
   customized schedules.
 * First-class support for cross-host pipeline parallelism, as this is where PP
   is typically used (over slower interconnects).
@@ -149,7 +149,7 @@ model.
 
           self.tok_embeddings = nn.Embedding(...)
 
-          # Using a ModuleDict lets us delete layers witout affecting names,
+          # Using a ModuleDict lets us delete layers without affecting names,
           # ensuring checkpoints will correctly save and load.
           self.layers = torch.nn.ModuleDict()
           for layer_id in range(model_args.n_layers):

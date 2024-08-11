@@ -364,7 +364,7 @@ public:
   bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
-  // instead of optional<TypePtr> once types are mandatory.
+  // instead of std::optional<TypePtr> once types are mandatory.
   TypePtr keyType() const;
   TypePtr valueType() const;
 

@@ -12,12 +12,6 @@ import unittest
 from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
@@ -31,6 +25,14 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .utils import same
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 unsupported = eval_frame.unsupported
 three = 3
@@ -57,8 +59,8 @@ def collect_results(model, prediction, loss, example_inputs):
     #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
     #     )
 
-    grads = dict()
-    params = dict()
+    grads = {}
+    params = {}
     for name, param in model.named_parameters():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)
@@ -71,7 +73,7 @@ def collect_results(model, prediction, loss, example_inputs):
         params[name] = param_copy
     results.append(grads)
     results.append(params)
-    buffers = dict()
+    buffers = {}
     for name, buffer in model.named_buffers():
         if isinstance(model, eval_frame.OptimizedModule):
             name = remove_optimized_module_prefix(name)
