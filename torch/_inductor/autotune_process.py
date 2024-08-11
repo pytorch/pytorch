@@ -31,7 +31,6 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeBuilder,
-    CppCodeCache,
     CUDACodeCache,
     DLLWrapper,
     get_hash,
@@ -825,7 +824,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         # Prepopulate CppCodeCache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CppCodeCache.load(self.source_code, cuda=False)
+        CppCodeBuilder(self.source_code, cuda=False)
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
