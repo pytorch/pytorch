@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import os
 import platform
-
 import re
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from typing import Any, Callable, Dict, List
 
 import torch
 from torch._inductor import config
+
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -89,7 +89,11 @@ cdll.LoadLibrary("__lib_path__")
 
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.cpp_builder import (
+            CppBuilder,
+            CppTorchOptions,
+            normalize_path_separator,
+        )
 
         key, input_path = write(
             code,
@@ -111,7 +115,9 @@ cdll.LoadLibrary("__lib_path__")
             )
             try:
                 # Check if the output file exist, and compile when not.
-                output_path = x86_isa_help_builder.get_target_file_path()
+                output_path = normalize_path_separator(
+                    x86_isa_help_builder.get_target_file_path()
+                )
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
 
@@ -122,6 +128,7 @@ cdll.LoadLibrary("__lib_path__")
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
+                    cwd=output_dir,
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
@@ -332,7 +339,7 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
-    if config.is_fbcode():
+    if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()

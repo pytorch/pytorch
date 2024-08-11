@@ -314,17 +314,11 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   Py_INCREF(Py_None);
   if (storage.data()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t base_size;
-    void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
-        storage.mutable_data(), &base_size);
-    ptrdiff_t offset_bytes = (char*)storage.data() - (char*)base_ptr;
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaIpcMemHandle_t handle;
-    C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_ptr));
-
-    _handle = PyBytes_FromStringAndSize((char*)&handle, CUDA_IPC_HANDLE_SIZE);
-    _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
+    auto shandle =
+        c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
+    _handle = PyBytes_FromStringAndSize(
+        shandle.handle.c_str(), (Py_ssize_t)shandle.handle.size());
+    _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)shandle.offset);
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
@@ -427,7 +421,6 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
     TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
   }
-  TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }
