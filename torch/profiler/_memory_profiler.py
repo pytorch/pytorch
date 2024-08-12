@@ -249,19 +249,13 @@ class SchemaMatcher:
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
         signature = tuple(
             # Tensor
-            (
-                TensorKey.from_tensor(i)
-                if isinstance(i, _TensorMetadata)
-                #
-                # TensorList
-                else (
-                    [TensorKey.from_tensor(j) for j in i]
-                    if isinstance(i, list)
-                    #
-                    # Scalar and uncaptured inputs.
-                    else i
-                )
-            )
+            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            #
+            # TensorList
+            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            #
+            # Scalar and uncaptured inputs.
+            else i
             for i in t.inputs
         )
 
@@ -1185,8 +1179,8 @@ class MemoryProfileTimeline:
         title = "\n\n".join(
             ([title] if title else [])
             + [
-                f"Max memory allocated: {max_memory_allocated / (1024**3):.2f} GiB \n"
-                f"Max memory reserved: {max_memory_reserved / (1024**3):.2f} GiB"
+                f"Max memory allocated: {max_memory_allocated/(1024**3):.2f} GiB \n"
+                f"Max memory reserved: {max_memory_reserved/(1024**3):.2f} GiB"
             ]
         )
         axes.set_title(title)

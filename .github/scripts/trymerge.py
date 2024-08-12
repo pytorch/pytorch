@@ -670,7 +670,7 @@ def get_ghstack_prs(
         if not open_only or not candidate.is_closed():
             return False
         print(
-            f"Skipping {idx + 1} of {len(rev_list)} PR (#{candidate.pr_num}) as its already been merged"
+            f"Skipping {idx+1} of {len(rev_list)} PR (#{candidate.pr_num}) as its already been merged"
         )
         return True
 
@@ -1419,9 +1419,9 @@ def find_matching_merge_rule(
         pending_checks, failed_checks, _ = categorize_checks(
             checks,
             required_checks,
-            ok_failed_checks_threshold=(
-                IGNORABLE_FAILED_CHECKS_THESHOLD if rule.ignore_flaky_failures else 0
-            ),
+            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+            if rule.ignore_flaky_failures
+            else 0,
         )
 
         # categorize_checks assumes all tests are required if required_checks is empty.
@@ -1491,7 +1491,7 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 
 
 def checks_to_markdown_bullets(
-    checks: List[Tuple[str, Optional[str], Optional[int]]],
+    checks: List[Tuple[str, Optional[str], Optional[int]]]
 ) -> List[str]:
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
@@ -2202,9 +2202,9 @@ def merge(
                 checks,
                 required_checks
                 + [x for x in checks.keys() if x not in required_checks],
-                ok_failed_checks_threshold=(
-                    IGNORABLE_FAILED_CHECKS_THESHOLD if ignore_flaky_failures else 0
-                ),
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
+                if ignore_flaky_failures
+                else 0,
             )
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(

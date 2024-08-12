@@ -354,7 +354,7 @@ class Interpreter:
         attr_itr = self.module
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
-                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}")
+                raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i+1])}")
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
 

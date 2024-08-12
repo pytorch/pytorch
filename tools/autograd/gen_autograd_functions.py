@@ -447,7 +447,7 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
 def get_infos_with_derivatives_list(
-    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]]
 ) -> list[DifferentiabilityInfo]:
     diff_info_list = [
         info
@@ -719,7 +719,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
         elif type == OptionalCType(BaseCType(stringT)):
-            saved_variables.append(f"c10::optional<std::string> {name};")
+            saved_variables.append(f"std::optional<std::string> {name};")
             getter_definitions.append(
                 GETTER_DEFINITION_OPT.substitute(
                     op=info.op, name=name, body=GETTER_BODY_STRING

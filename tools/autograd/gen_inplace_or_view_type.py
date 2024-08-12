@@ -62,6 +62,8 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_nested_get_values",
     "_nested_view_from_buffer",
     "_nested_view_from_jagged",
+    "_nested_strided_to_jagged",
+    "_nested_jagged_to_strided",
 ]
 
 VIEW_FUNCTIONS = {
@@ -636,12 +638,12 @@ def gen_inplace_or_view_type_env(
             if definition is not None
             else []
         ),
-        "inplace_or_view_method_definitions": (
-            [definition] if definition is not None else []
-        ),
-        "inplace_or_view_wrapper_registrations": (
-            [registration] if registration is not None else []
-        ),
+        "inplace_or_view_method_definitions": [definition]
+        if definition is not None
+        else [],
+        "inplace_or_view_wrapper_registrations": [registration]
+        if registration is not None
+        else [],
     }
 
 

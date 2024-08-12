@@ -22,7 +22,8 @@ if typing.TYPE_CHECKING:
 
 
 class _SarifLogBuilder(Protocol):
-    def sarif_log(self) -> sarif.SarifLog: ...
+    def sarif_log(self) -> sarif.SarifLog:
+        ...
 
 
 def _assert_has_diagnostics(
@@ -367,9 +368,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.rules = _RuleCollectionForTest()
         with contextlib.ExitStack() as stack:
-            self.context: infra.DiagnosticContext[infra.Diagnostic] = (
-                stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
-            )
+            self.context: infra.DiagnosticContext[
+                infra.Diagnostic
+            ] = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 

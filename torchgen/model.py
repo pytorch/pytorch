@@ -1681,11 +1681,9 @@ class FunctionSchema:
             for a in itertools.chain(
                 # Order is important here (otherwise e.g. inplace with mutable args
                 # and out= with mutable args won't have the same signature)
-                (
-                    [self.arguments.self_arg.argument]
-                    if self.arguments.self_arg is not None
-                    else []
-                ),
+                [self.arguments.self_arg.argument]
+                if self.arguments.self_arg is not None
+                else [],
                 self.arguments.out,
                 self.arguments.post_self_positional,
             )
@@ -2276,11 +2274,9 @@ class Arguments:
             pre_self_positional=tuple(
                 map(strip_arg_annotation, self.pre_self_positional)
             ),
-            self_arg=(
-                SelfArgument(strip_arg_annotation(self.self_arg.argument))
-                if self.self_arg is not None
-                else None
-            ),
+            self_arg=SelfArgument(strip_arg_annotation(self.self_arg.argument))
+            if self.self_arg is not None
+            else None,
             post_self_positional=tuple(
                 map(strip_arg_annotation, self.post_self_positional)
             ),
@@ -2567,7 +2563,9 @@ class BaseOperatorName:
             i = (
                 "_"
                 if self.inplace
-                else "_functional" if self.functional_overload else ""
+                else "_functional"
+                if self.functional_overload
+                else ""
             )
             return f"{self.base}{i}"
 

@@ -246,11 +246,9 @@ def get_static_quant_module_class(
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
     all_mappings = get_combined_dict(
-        (
-            DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
-            if is_reference
-            else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
-        ),
+        DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
+        if is_reference
+        else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
         additional_static_quant_mapping,
     )
     static_quant_module_class = all_mappings.get(float_module_class, None)
