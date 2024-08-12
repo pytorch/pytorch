@@ -53,10 +53,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -1534,9 +1535,7 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
-                fake_mode
-            ):
+            with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
                     graph = make_fx(
                         graph_with_interpreter,
