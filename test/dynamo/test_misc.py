@@ -1258,6 +1258,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         self.assertTrue(same(ref2, res2))
         self.assertEqual(counts.frame_count, 2)
 
+    @skipIfWindows
     def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -1275,6 +1276,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+    @skipIfWindows
     def test_compare_shapes_tuple_eq(self):
         def compare_shapes(a, b):
             x = tuple(a.unsqueeze(-1).shape)
@@ -1286,6 +1288,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
         torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
 
+    @skipIfWindows
     def test_compare_shapes_tuple_neq(self):
         def compare_shapes(a, b):
             x = tuple(a.unsqueeze(-1).shape)
@@ -1297,6 +1300,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
         torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
 
+    @skipIfWindows
     def test_compare_shapes_neq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -1402,6 +1406,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         # Make sure we just call "list(dict.keys())" once
         self.assertEqual(pycode.count("keys"), 1)
 
+    @skipIfWindows
     def test_os_environ_get(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1667,6 +1672,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
 
+    @skipIfWindows
     def test_assert(self):
         @torch.compile
         def fn1(x):
@@ -2726,6 +2732,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
+    @skipIfWindows
     def test_numpy_no_raise(self):
         def _inf_nan_preprocess(t, t_np):
             t_np = np.nan_to_num(t_np)
@@ -2849,6 +2856,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         else:
             self.assertExpectedInline(str(cnts.frame_count), """2""")
 
+    @skipIfWindows
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
 
@@ -2922,6 +2930,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
 
+    @skipIfWindows
     def test_trace_ndarray_frame_2(self):
         # no tensors/ndarray as inputs in the frame
         def fn(x):
@@ -5630,6 +5639,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             )
         )
 
+    @skipIfWindows
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
 
@@ -5659,6 +5669,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         pred = torch.tensor(False)
         self.assertTrue(same(module(pred, x), opt_m(pred, x)))
 
+    @skipIfWindows
     def test_map_with_quantization(self):
         from functorch.experimental.control_flow import map
 
@@ -5703,6 +5714,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([1.25, 1.25]), a))
 
+    @skipIfWindows
     def test_map_side_effects(self):
         from functorch.experimental.control_flow import map
 
@@ -5730,6 +5742,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
+    @skipIfWindows
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
 
@@ -5775,6 +5788,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         )  # * -1 then add x
         self.assertTrue(cc.frame_count, 2)
 
+    @skipIfWindows
     def test_cond_export(self):
         from functorch.experimental.control_flow import cond
 
@@ -5820,6 +5834,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
+    @skipIfWindows
     def test_cond_export_single_arg(self):
         from functorch.experimental.control_flow import cond
 
@@ -6962,6 +6977,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         inputs = [torch.randn(10, 10) for _ in range(4)]
         self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
+    @skipIfWindows
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
 
@@ -6987,6 +7003,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    @skipIfWindows
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y
@@ -7577,6 +7594,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(dyn_fn)(y)
 
+    @skipIfWindows
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
         # Tests the following case:
@@ -8521,6 +8539,7 @@ def ___make_guard_fn():
         opt = torch._dynamo.optimize("eager")(fn)
         opt()
 
+    @skipIfWindows
     def test_tracing_py_tree(self):
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
@@ -8534,6 +8553,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
+    @skipIfWindows
     def test_tracing_nested_py_tree(self):
         import torch.utils._pytree as pytree
 
@@ -8552,6 +8572,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 12)
 
+    @skipIfWindows
     def test_tracing_nested_py_tree_tuples(self):
         import torch.utils._pytree as pytree
 
@@ -8570,6 +8591,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 12)
 
+    @skipIfWindows
     def test_tracing_nested_py_tree_dicts(self):
         import torch.utils._pytree as pytree
 
@@ -8608,6 +8630,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 2)
 
+    @skipIfWindows
     def test_tracing_nested_py_tree_mixed_all(self):
         import torch.utils._pytree as pytree
 
@@ -8632,6 +8655,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
 
+    @skipIfWindows
     def test_any_all_symnode(self):
         cnt = CompileCounter()
 
@@ -8658,6 +8682,7 @@ def ___make_guard_fn():
         self.assertEqual(fn(y3), y3 - 3)
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfWindows
     def test_tracing_py_tree_tensor_subclass(self):
         import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor
@@ -8679,6 +8704,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 2)
 
+    @skipIfWindows
     def test_tracing_tree_map_only(self):
         import torch.utils._pytree as pytree
 
@@ -9439,6 +9465,7 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    @skipIfWindows
     def test_itertools_repeat(self):
         counters.clear()
 
@@ -9525,6 +9552,7 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    @skipIfWindows
     def test_itertools_infinite_cycle(self):
         counters.clear()
 
@@ -9638,6 +9666,7 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    @skipIfWindows
     def test_packaging_version_parse(self):
         from packaging import version
 
@@ -10173,6 +10202,7 @@ ShapeEnv not equal: field values don't match:
             else:
                 res.backward(grad)
 
+    @skipIfWindows
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2
@@ -10295,6 +10325,7 @@ ShapeEnv not equal: field values don't match:
             torch.compile(fn4, backend="eager")(x)
             self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
+    @skipIfWindows
     def test_funcname_cache(self):
         src = """\
 import torch
