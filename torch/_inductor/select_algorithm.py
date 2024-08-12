@@ -40,8 +40,8 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
-from .runtime.runtime_utils import do_bench
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -952,7 +952,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(algo, args, {})
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1417,24 +1417,22 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                (
-                    unique_example_inputs[input_node.get_name()]
-                    if unique_example_inputs[input_node.get_name()].is_mkldnn
-                    else torch.as_strided(
-                        unique_example_inputs[input_node.get_name()],
-                        V.graph.sizevars.size_hints(
-                            input_node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hints(
-                            input_node.get_stride(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                        V.graph.sizevars.size_hint(
-                            input_node.get_layout().offset,
-                            fallback=config.unbacked_symint_fallback,
-                        ),
-                    )
+                unique_example_inputs[input_node.get_name()]
+                if unique_example_inputs[input_node.get_name()].is_mkldnn
+                else torch.as_strided(
+                    unique_example_inputs[input_node.get_name()],
+                    V.graph.sizevars.size_hints(
+                        input_node.get_size(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hints(
+                        input_node.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hint(
+                        input_node.get_layout().offset,
+                        fallback=config.unbacked_symint_fallback,
+                    ),
                 )
                 for input_node in input_nodes
             ]
@@ -1724,9 +1722,9 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_epilogue_fusion
-        )
+        kwargs[
+            "return_multi_template"
+        ] = torch._inductor.config.benchmark_epilogue_fusion
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

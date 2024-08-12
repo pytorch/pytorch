@@ -20,7 +20,6 @@ printers. So simple operations like minimum and maximum cannot be translated to
 SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
-
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
@@ -33,6 +32,7 @@ from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
+from .sizevars import evaluate_expr
 from .utils import generate_assert
 from .virtualized import V
 
@@ -249,12 +249,14 @@ class IndexPropagation:
         name: Literal["indirect_indexing"],
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-    ) -> IndexPropVar: ...
+    ) -> IndexPropVar:
+        ...
 
     @overload
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> IndexPropResult: ...
+    ) -> IndexPropResult:
+        ...
 
     def fallback(
         self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -323,12 +325,7 @@ class IndexPropagation:
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
-        evaluated = self.shape_env._maybe_evaluate_static(
-            e,
-            axioms=self.axioms,
-            var_to_range=var_to_range,
-        )
-        return bool(evaluated)
+        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
         self,

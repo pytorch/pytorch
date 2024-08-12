@@ -82,7 +82,7 @@ def get_types_for_subclass(tensor_subclass):
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]],
+    curr_args: Union[List[Any], Tuple[Any, ...]]
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []

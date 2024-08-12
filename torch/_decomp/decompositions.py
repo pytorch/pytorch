@@ -421,6 +421,15 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
+@register_decomposition(aten._safe_softmax)
+def safe_softmax(self, dim, dtype=None):
+    out = torch.softmax(self, dim=dim, dtype=dtype)
+    masked = self.eq(float("-inf"))
+    masked_rows = torch.all(masked, dim=dim, keepdim=True)
+    zeros = torch.zeros_like(out)
+    return torch.where(masked_rows, zeros, out)
+
+
 @register_decomposition(aten.smooth_l1_loss)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -1576,7 +1585,7 @@ def native_group_norm_backward(
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
-        lambda: f"Expect input to have { N * C * HxW} elements",
+        lambda: f"Expect input to have {N * C * HxW} elements",
     )
     torch._check(
         mean.shape == (N, group),
@@ -3358,9 +3367,8 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
     orig_hx = hidden[0]
     orig_cx = hidden[1]
-    hx, cx = (
-        orig_hx.narrow(0, 0, last_batch_size),
-        orig_cx.narrow(0, 0, last_batch_size),
+    hx, cx = orig_hx.narrow(0, 0, last_batch_size), orig_cx.narrow(
+        0, 0, last_batch_size
     )
 
     for inp in split_inp:
@@ -4984,6 +4992,10 @@ def sum_default(
 
 @register_decomposition([aten.squeeze.default, aten.squeeze.dim])
 def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    # handle a scalar directly
+    if not isinstance(self, torch.Tensor):
+        return self
+    # perform squeeze
     if dim is None:
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:

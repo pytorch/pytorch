@@ -65,18 +65,13 @@ class BenchmarkRunner:
         random.seed(time.time())
         self.main(args.num_samples, args.num_reps)
 
-    def get_random_between_pow2(self, min_power2: int, max_power2: int) -> int:
-        i = random.randint(min_power2, max_power2 - 1)
-        lower = 2**i + 1
-        upper = 2 ** (i + 1) - 1
-        assert lower <= upper, "lower must not be greater than upper"
-        return random.randint(lower, upper)
+    @abstractmethod
+    def run_benchmark(self, *args: Any) -> None:
+        ...
 
     @abstractmethod
-    def run_benchmark(self, *args: Any) -> None: ...
-
-    @abstractmethod
-    def create_input(self) -> Tuple[Any, ...]: ...
+    def create_input(self) -> Tuple[Any, ...]:
+        ...
 
     def main(self, num_samples: int, num_reps: int) -> None:
         for _ in tqdm(range(num_samples)):

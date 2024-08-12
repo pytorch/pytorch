@@ -254,19 +254,19 @@ def format_trace_inputs(f: NativeFunction) -> str:
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     "fill": """\
-    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
+    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
     jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
     jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
     jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
-    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
     "zero": """\
-    jit::tracer::addInputs(node, "options", c10::optional<ScalarType>());
+    jit::tracer::addInputs(node, "options", ::std::optional<ScalarType>());
     jit::tracer::addInputs(node, "options", layout_or_default(::std::nullopt));
     jit::tracer::addInputs(node, "options", device_or_default(::std::nullopt));
     jit::tracer::addInputs(node, "options", pinned_memory_or_default(::std::nullopt));
-    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    ::std::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 """,
 }
@@ -321,16 +321,14 @@ def format_prerecord_trace(f: NativeFunction) -> str:
     return PRE_RECORD_TRACE.substitute(
         set_op_name=format_trace_op_name(f),
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
-        inplace_guard=(
-            INPLACE_GUARD.substitute(
-                name=cpp.name(f.func),
-                mutable_input=(
-                    f.func.arguments.out[0].name if f.func.arguments.out else "self"
-                ),
-            )
-            if is_inplace
-            else ""
-        ),
+        inplace_guard=INPLACE_GUARD.substitute(
+            name=cpp.name(f.func),
+            mutable_input=f.func.arguments.out[0].name
+            if f.func.arguments.out
+            else "self",
+        )
+        if is_inplace
+        else "",
     )
 
 

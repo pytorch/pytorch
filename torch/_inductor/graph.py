@@ -342,14 +342,15 @@ class GraphLowering(torch.fx.Interpreter):
         # you don't start adding new ones in the lowering process
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
-        self.ras_by_symbol: Dict[sympy.Symbol, List[RuntimeAssert]] = (
-            shape_env.deferred_runtime_asserts.copy()
-        )
+        self.ras_by_symbol: Dict[
+            sympy.Symbol, List[RuntimeAssert]
+        ] = shape_env.deferred_runtime_asserts.copy()
         self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -421,9 +422,10 @@ class GraphLowering(torch.fx.Interpreter):
             user_visible_outputs if user_visible_outputs is not None else {}
         )
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
-        # This is the path in the filesystem where the compiled artifact is stored
-        self.cache_path: str = ""
-        self.cache_linemap: List[Tuple[int, str]] = (
+        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
+        self.cache_linemap: List[
+            Tuple[int, str]
+        ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
@@ -444,6 +446,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+
+        # Below field is related to printing debug intermediate tensor values info for debugging
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -1718,6 +1723,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
+
+        log.debug(
+            "Finished codegen for all nodes. The list of kernel names available: %s",
+            V.graph.all_codegen_kernel_names,
+        )
+
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
         return result
@@ -1857,4 +1868,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list

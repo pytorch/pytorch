@@ -7,21 +7,22 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import black
 import isort
-from isort import Config as IsortConfig
-from ufmt.core import ufmt_string
-from ufmt.util import make_black_config
-from usort import Config as UsortConfig
+import usort
 
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-ISORT_SKIPLIST = re.compile(
+
+# TODO: remove this when it gets empty and remove `black` in PYFMT
+USE_BLACK_FILELIST = re.compile(
     "|".join(
         (
             r"\A\Z",  # empty string
@@ -30,32 +31,39 @@ ISORT_SKIPLIST = re.compile(
                 [
                     # **
                     # .ci/**
+                    ".ci/**",
                     # .github/**
+                    ".github/**",
                     # benchmarks/**
+                    "benchmarks/**",
                     # functorch/**
+                    "functorch/**",
                     # tools/**
+                    "tools/**",
                     # torchgen/**
+                    "torchgen/**",
                     # test/**
-                    # test/[a-c]*/**
-                    # test/d*/**
-                    # test/dy*/**
-                    # test/[e-h]*/**
-                    # test/i*/**
-                    # test/j*/**
-                    # test/[k-p]*/**
-                    # test/[q-z]*/**
+                    # test/[a-h]*/**
+                    "test/[a-h]*/**",
+                    # test/[i-j]*/**
+                    "test/[i-j]*/**",
+                    # test/[k-z]*/**
+                    "test/[k-z]*/**",
                     # torch/**
-                    # torch/_[a-c]*/**
-                    # torch/_d*/**
-                    # torch/_[e-h]*/**
+                    # torch/_[a-h]*/**
+                    "torch/_[a-h]*/**",
                     # torch/_i*/**
+                    "torch/_i*/**",
                     # torch/_[j-z]*/**
+                    "torch/_[j-z]*/**",
                     # torch/[a-c]*/**
                     "torch/[a-c]*/**",
                     # torch/d*/**
+                    "torch/d*/**",
                     # torch/[e-n]*/**
                     "torch/[e-n]*/**",
                     # torch/[o-z]*/**
+                    "torch/[o-z]*/**",
                 ],
             ),
         )
@@ -95,7 +103,7 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
         path=filename,
         line=None,
         char=None,
-        code="UFMT",
+        code="PYFMT",
         severity=LintSeverity.ADVICE,
         name="command-failed",
         original=None,
@@ -104,36 +112,79 @@ def format_error_message(filename: str, err: Exception) -> LintMessage:
     )
 
 
+def run_isort(content: str, path: Path) -> str:
+    isort_config = isort.Config(settings_path=str(REPO_ROOT))
+
+    is_this_file = path.samefile(__file__)
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", content)
+
+    content = isort.code(content, config=isort_config, file_path=path)
+
+    if not is_this_file:
+        content = re.sub(r"(#.*\b)isort: split\b", r"\g<1>usort: skip", content)
+
+    return content
+
+
+def run_usort(content: str, path: Path) -> str:
+    usort_config = usort.Config.find(path)
+
+    return usort.usort_string(content, path=path, config=usort_config)
+
+
+def run_black(content: str, path: Path) -> str:
+    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))  # type: ignore[attr-defined,arg-type]
+    # manually patch options that do not have a 1-to-1 match in Mode arguments
+    black_config["target_versions"] = {
+        black.TargetVersion[ver.upper()]  # type: ignore[attr-defined]
+        for ver in black_config.pop("target_version", [])
+    }
+    black_config["string_normalization"] = not black_config.pop(
+        "skip_string_normalization", False
+    )
+    black_mode = black.Mode(**black_config)
+    black_mode.is_pyi = path.suffix.lower() == ".pyi"
+    black_mode.is_ipynb = path.suffix.lower() == ".ipynb"
+
+    return black.format_str(content, mode=black_mode)
+
+
+def run_ruff_format(content: str, path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            [
+                sys.executable,
+                "-m",
+                "ruff",
+                "format",
+                "--config",
+                str(REPO_ROOT / "pyproject.toml"),
+                "--stdin-filename",
+                str(path),
+                "-",
+            ],
+            input=content,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+        )
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(exc.output) from exc
+
+
 def check_file(filename: str) -> list[LintMessage]:
     path = Path(filename).absolute()
-    original = path.read_text(encoding="utf-8")
+    original = replacement = path.read_text(encoding="utf-8")
 
     try:
-        usort_config = UsortConfig.find(path)
-        black_config = make_black_config(path)
-
-        if not path.samefile(__file__) and not ISORT_SKIPLIST.match(
-            path.absolute().relative_to(REPO_ROOT).as_posix()
-        ):
-            isorted_replacement = re.sub(
-                r"(#.*\b)isort: split\b",
-                r"\g<1>usort: skip",
-                isort.code(
-                    re.sub(r"(#.*\b)usort:\s*skip\b", r"\g<1>isort: split", original),
-                    config=IsortConfig(settings_path=str(REPO_ROOT)),
-                    file_path=path,
-                ),
-            )
+        # NB: run isort first to enforce style for blank lines
+        replacement = run_isort(replacement, path=path)
+        replacement = run_usort(replacement, path=path)
+        if USE_BLACK_FILELIST.match(path.absolute().relative_to(REPO_ROOT).as_posix()):
+            replacement = run_black(replacement, path=path)
         else:
-            isorted_replacement = original
-
-        # Use UFMT API to call both usort and black
-        replacement = ufmt_string(
-            path=path,
-            content=isorted_replacement,
-            usort_config=usort_config,
-            black_config=black_config,
-        )
+            replacement = run_ruff_format(replacement, path=path)
 
         if original == replacement:
             return []
@@ -143,7 +194,7 @@ def check_file(filename: str) -> list[LintMessage]:
                 path=filename,
                 line=None,
                 char=None,
-                code="UFMT",
+                code="PYFMT",
                 severity=LintSeverity.WARNING,
                 name="format",
                 original=original,
@@ -157,7 +208,7 @@ def check_file(filename: str) -> list[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Format files with ufmt (black + usort).",
+        description="Format files with usort + ruff-format.",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
@@ -174,11 +225,11 @@ def main() -> None:
 
     logging.basicConfig(
         format="<%(processName)s:%(levelname)s> %(message)s",
-        level=(
-            logging.NOTSET
-            if args.verbose
-            else logging.DEBUG if len(args.filenames) < 1000 else logging.INFO
-        ),
+        level=logging.NOTSET
+        if args.verbose
+        else logging.DEBUG
+        if len(args.filenames) < 1000
+        else logging.INFO,
         stream=sys.stderr,
     )
 

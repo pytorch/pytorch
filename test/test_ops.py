@@ -536,12 +536,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
-    @parametrize(
-        "executor",
-        [
-            "aten",
-        ],
-    )
+    @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -566,12 +561,7 @@ class TestCommon(TestCase):
 
         op = copy(op)
         op.op = partial(make_traced(op.op), executor=executor)
-        self._ref_test_helper(
-            contextlib.nullcontext,
-            device,
-            dtype,
-            op,
-        )
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1325,11 +1315,9 @@ class TestCommon(TestCase):
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
-                lambda x: (
-                    x.to(torch.complex64)
-                    if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
-                    else x
-                )
+                lambda x: x.to(torch.complex64)
+                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                else x
             )
             expected = op(
                 transformed_sample.input,
@@ -1340,11 +1328,9 @@ class TestCommon(TestCase):
             # we get `inf`s easily (eg. with `pow`, `exp`),
             # so we cast `cfloat` back to `chalf`.
             expected = tree_map(
-                lambda x: (
-                    x.to(torch.complex32)
-                    if isinstance(x, torch.Tensor) and x.dtype is torch.complex64
-                    else x
-                ),
+                lambda x: x.to(torch.complex32)
+                if isinstance(x, torch.Tensor) and x.dtype is torch.complex64
+                else x,
                 expected,
             )
 
@@ -2376,10 +2362,7 @@ supported_dynamic_output_op_tests = (
 )
 
 # some inputs invoke dynamic output shape operators, some do not
-sometimes_dynamic_output_op_test = (
-    "__getitem__",
-    "index_select",
-)
+sometimes_dynamic_output_op_test = ("__getitem__", "index_select")
 
 data_dependent_op_tests = (
     "equal",

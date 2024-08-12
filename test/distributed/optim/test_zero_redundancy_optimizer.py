@@ -1215,8 +1215,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     ddp_loss.cpu(),
                     rtol=1e-03,
                     atol=1e-08,
-                    msg="Losses differ between local optimizer and ZeRO",
-                )
+                ), "Losses differ between local optimizer and ZeRO"
 
                 for local_p, ddp_p in zip(
                     local_model.parameters(), ddp_model.parameters()
@@ -1226,8 +1225,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                         ddp_p.cpu(),
                         rtol=1e-03,
                         atol=1e-04,
-                        msg="Models differ after a step",
-                    )
+                    ), "Models differ after a step"
 
     @common_distributed.skip_if_lt_x_gpu(4)
     @parametrize(

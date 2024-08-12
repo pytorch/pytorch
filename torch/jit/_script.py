@@ -6,7 +6,6 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
-
 import collections
 import copy
 import enum
@@ -23,7 +22,6 @@ from torch._jit_internal import _get_model_id, _qualified_name
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
-
 from torch.jit._monkeytype_config import (
     JitTypeTraceConfig,
     JitTypeTraceStore,
@@ -53,6 +51,7 @@ from torch.package import PackageExporter, PackageImporter
 from torch.utils import set_module
 
 from ._serialization import validate_map_location
+
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -315,10 +314,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__["_actual_script_module"] = (
-                    torch.jit._recursive.create_script_module(
-                        self, make_stubs, share_types=not added_methods_in_init
-                    )
+                self.__dict__[
+                    "_actual_script_module"
+                ] = torch.jit._recursive.create_script_module(
+                    self, make_stubs, share_types=not added_methods_in_init
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule

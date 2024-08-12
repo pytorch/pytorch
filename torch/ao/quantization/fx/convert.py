@@ -1046,9 +1046,9 @@ def convert(
 
     assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
-    node_name_to_scope: Dict[str, Tuple[str, type]] = (
-        observed_graph_module_attrs.node_name_to_scope
-    )
+    node_name_to_scope: Dict[
+        str, Tuple[str, type]
+    ] = observed_graph_module_attrs.node_name_to_scope
     prepare_custom_config: PrepareCustomConfig = (
         observed_graph_module_attrs.prepare_custom_config
     )
