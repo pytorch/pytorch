@@ -33,6 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1698,6 +1699,7 @@ def forward(self, x, y):
                 decomposition_table={torch.ops.aten.t.default: nop},
             )
 
+    @skipIfWindows
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_module_layer(self):
         from functorch.experimental.control_flow import cond
@@ -1736,6 +1738,7 @@ def forward(self, x, y):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @skipIfWindows
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_branches_calling_methods(self):
         from functorch.experimental.control_flow import cond
@@ -1769,6 +1772,7 @@ def forward(self, x, y):
         dynamo_result = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @skipIfWindows
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_closure(self):
         from functorch.experimental.control_flow import cond
@@ -1824,6 +1828,7 @@ def forward(self, x, y):
             dynamo_result = out_graph(pred, x)
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @skipIfWindows
     def test_export_with_cond_with_closed_function(self):
         def hello(x):
             return x + 1
@@ -1847,6 +1852,7 @@ def forward(self, x, y):
         dynamo_result = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @skipIfWindows
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
 
@@ -1916,6 +1922,7 @@ def forward(self, l_x_):
             test_x = torch.randn(3, 2)
             mod(test_x)
 
+    @skipIfWindows
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
 
@@ -2094,6 +2101,7 @@ def forward(self, x):
     return pytree.tree_unflatten([matmul], self._out_spec)""",
         )
 
+    @skipIfWindows
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
@@ -3189,6 +3197,7 @@ def forward(self, x):
 
         self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @skipIfWindows
     def test_cond_supported_pred_types(self):
         def true_fn(x):
             return x.cos()
@@ -3331,6 +3340,7 @@ def forward(self, x):
         ):
             f_non_tensor_operands(*example_inputs)
 
+    @skipIfWindows
     def test_cond_raise_user_error_on_branch_args_mismatch(self):
         def true_fn(x, y):
             return x.sin()
@@ -3353,6 +3363,7 @@ def forward(self, x):
                 *example_inputs,
             )
 
+    @skipIfWindows
     @config.patch(suppress_errors=True)
     def test_uncaptured_higher_order_op_error_not_suppresed(self):
         def true_fn(x, y):
@@ -3376,6 +3387,7 @@ def forward(self, x):
                 *example_inputs,
             )
 
+    @skipIfWindows
     def test_cond_raise_user_error_on_branch_return_non_tensor(self):
         def f_branch_return_non_tensor(x):
             return cond(x.shape[0] <= 5, lambda x: 3.14, lambda x: 3.14, [x])
@@ -3390,6 +3402,7 @@ def forward(self, x):
                 aten_graph=True,
             )(*example_inputs)
 
+    @skipIfWindows
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
             return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
@@ -3412,6 +3425,7 @@ def forward(self, x):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         torch._dynamo.export(TopKModel())(x)
 
+    @skipIfWindows
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):
             return x
@@ -3431,6 +3445,7 @@ def forward(self, x):
                 aten_graph=True,
             )(*example_inputs)
 
+    @skipIfWindows
     def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
         def true_fn(x):
             return torch.tensor([[3], [2]])
@@ -3603,6 +3618,7 @@ class GraphModule(torch.nn.Module):
             [[], [], [], []],
         )
 
+    @skipIfWindows
     def test_invalid_input_global(self) -> None:
         global bulbous_bouffant
         bulbous_bouffant = torch.randn(3)
@@ -3620,6 +3636,7 @@ G['bulbous_bouffant'], accessed at:
 """,
         )
 
+    @skipIfWindows
     def test_invalid_input_global_multiple_access(self) -> None:
         global macademia
         macademia = torch.randn(3)
@@ -3648,6 +3665,7 @@ G['macademia'], accessed at:
 """,
         )
 
+    @skipIfWindows
     def test_invalid_input_nonlocal(self) -> None:
         arglebargle = torch.randn(3)
 
@@ -3768,6 +3786,7 @@ G['macademia'], accessed at:
                     + str(aten_graph),
                 )
 
+    @skipIfWindows
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
             def __init__(self) -> None:
@@ -3804,6 +3823,7 @@ G['macademia'], accessed at:
         self.assertEqual(gm(torch.ones(6, 4)), M()(torch.ones(6, 4)))
         self.assertEqual(gm(torch.ones(3, 4)), M()(torch.ones(3, 4)))
 
+    @skipIfWindows
     def test_nested_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
             def __init__(self) -> None:
@@ -3847,6 +3867,7 @@ G['macademia'], accessed at:
         self.assertEqual(gm(torch.ones(5, 4)), M()(torch.ones(5, 4)))
         self.assertEqual(gm(torch.ones(3, 4)), M()(torch.ones(3, 4)))
 
+    @skipIfWindows
     def test_map_cond_param_buffer_lifted(self):
         from functorch.experimental.control_flow import cond, map
 
@@ -3898,6 +3919,7 @@ G['macademia'], accessed at:
         out_graph, _ = torch._dynamo.export(mod)(pred_x, x)
         self.assertEqual(real_result, out_graph(pred_y, y))
 
+    @skipIfWindows
     def test_cond_free_variables_overlapping(self):
         from functorch.experimental.control_flow import cond
 
@@ -3976,6 +3998,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     return (add_2,)""",
         )
 
+    @skipIfWindows
     @unittest.skipIf(
         common_utils.TEST_WITH_ASAN,
         "Times out with ASAN, see https://github.com/pytorch/pytorch/issues/110416",
@@ -4017,6 +4040,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
 
+    @skipIfWindows
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -4067,6 +4091,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertTrue(torch.allclose(gm(inp_test)["a"][1], gm2(inp_test)["a"][1]))
         self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
 
+    @skipIfWindows
     def test_retracibility_nested_list_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -4121,6 +4146,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
 
+    @skipIfWindows
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)
@@ -4195,6 +4221,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         for name, buffer in gm.named_buffers():
             self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
 
+    @skipIfWindows
     def test_predispatch_with_higher_order(self):
         def f(x):
             return cond(x.shape[0] > 4, lambda x: x + 5, lambda x: x - 3, [x])
@@ -4207,6 +4234,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
         self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
 
+    @skipIfWindows
     def test_predispatch_with_higher_order_nested(self):
         def f(x):
             def true_fn(x):
@@ -4240,6 +4268,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
         self.assertTrue(torch.allclose(m(x), gm(x)))
 
+    @skipIfWindows
     def test_predispatch_with_for_out_dtype_nested(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
@@ -4312,6 +4341,7 @@ def forward(self, arg0_1, arg1_1):
             if node.op == "call_function":
                 self.assertIn("nn_module_stack", node.meta)
 
+    @skipIfWindows
     def test_preserve_fx_node_metadata(self):
         class Module1(torch.nn.Module):
             def forward(self, x):
@@ -4394,6 +4424,7 @@ def forward(self, x):
                 )
             self.assertEqual(nd1.meta["stack_trace"], nd2.meta["stack_trace"])
 
+    @skipIfWindows
     def test_preserve_fx_node_metadata_recompile(self):
         def fn(x):
             return torch.sin(x)
@@ -4423,6 +4454,7 @@ def forward(self, x):
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
+    @skipIfWindows
     def test_preserve_fx_node_metadata_inline(self):
         def f1(x):
             return torch.sin(x)
@@ -4446,6 +4478,7 @@ def forward(self, x):
     return pytree.tree_unflatten([sin], self._out_spec)""",
         )
 
+    @skipIfWindows
     def test_preserve_fx_node_metadata_graph_break(self):
         def fn(x):
             x = torch.sin(x)
@@ -4486,6 +4519,7 @@ def forward(self, x):
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
 
+    @skipIfWindows
     def test_torch_inference_mode_ctx(self):
         @torch.inference_mode()
         def fn(x):
@@ -4610,6 +4644,7 @@ def forward(self, x, b, y):
         ):
             gm, _ = torch._dynamo.export(fn)(x, b, y)
 
+    @skipIfWindows
     def test_dynamo_list_index(self):
         def fn(x, in_list):
             return x + in_list.index(2)
