@@ -119,7 +119,6 @@ class L1Loss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -234,7 +233,6 @@ class NLLLoss(_WeightedLoss):
         >>> loss = loss_fn(output, target)
         >>> loss.backward()
     """
-
     __constants__ = ["ignore_index", "reduction"]
     ignore_index: int
 
@@ -333,7 +331,6 @@ class PoissonNLLLoss(_Loss):
         - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
           the same shape as the input.
     """
-
     __constants__ = ["log_input", "full", "eps", "reduction"]
     log_input: bool
     full: bool
@@ -430,7 +427,6 @@ class GaussianNLLLoss(_Loss):
         Conference on Neural Networks (ICNN'94), Orlando, FL, USA, 1994, pp. 55-60
         vol.1, doi: 10.1109/ICNN.1994.374138.
     """
-
     __constants__ = ["full", "eps", "reduction"]
     full: bool
     eps: float
@@ -529,7 +525,6 @@ class KLDivLoss(_Loss):
         >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
     """
-
     __constants__ = ["reduction"]
 
     def __init__(
@@ -604,7 +599,6 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -688,7 +682,6 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
-
     __constants__ = ["reduction"]
 
     def __init__(
@@ -881,7 +874,6 @@ class HingeEmbeddingLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
     """
-
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -956,7 +948,6 @@ class MultiLabelMarginLoss(_Loss):
         tensor(0.85...)
 
     """
-
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -1037,7 +1028,6 @@ class SmoothL1Loss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
-
     __constants__ = ["reduction"]
 
     def __init__(
@@ -1100,7 +1090,6 @@ class HuberLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
-
     __constants__ = ["reduction", "delta"]
 
     def __init__(self, reduction: str = "mean", delta: float = 1.0) -> None:
@@ -1143,7 +1132,6 @@ class SoftMarginLoss(_Loss):
           shape as input.
 
     """
-
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -1284,7 +1272,6 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
     ignore_index: int
     label_smoothing: float
@@ -1351,7 +1338,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
     """
-
     __constants__ = ["reduction"]
 
     def __init__(
@@ -1420,7 +1406,6 @@ class CosineEmbeddingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
-
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -1486,7 +1471,6 @@ class MarginRankingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
-
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -1566,7 +1550,6 @@ class MultiMarginLoss(_WeightedLoss):
         >>> loss(x, y)
         tensor(0.32...)
     """
-
     __constants__ = ["p", "margin", "reduction"]
     margin: float
     p: int
@@ -1670,7 +1653,6 @@ class TripletMarginLoss(_Loss):
     .. _Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
-
     __constants__ = ["margin", "p", "eps", "swap", "reduction"]
     margin: float
     p: float
@@ -1808,7 +1790,6 @@ class TripletMarginWithDistanceLoss(_Loss):
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
-
     __constants__ = ["margin", "swap", "reduction"]
     margin: float
     swap: bool
@@ -1978,7 +1959,6 @@ class CTCLoss(_Loss):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
     """
-
     __constants__ = ["blank", "reduction"]
     blank: int
     zero_infinity: bool

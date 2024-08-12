@@ -182,7 +182,7 @@ class NNModuleToString:
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
                 module_str = f"{module_str}.cuda()"
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
@@ -201,9 +201,7 @@ class NNModuleToString:
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
-            model_str += (
-                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
-            )
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -212,7 +210,7 @@ class NNModuleToString:
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
+            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
         # attrs = dir(gm)
@@ -420,9 +418,9 @@ def cast_to(dtype, model, inputs):
         model = cast_dtype_args_to_fp64(model)
 
     inputs = tree_map(
-        lambda x: (
-            x.to(dtype) if isinstance(x, torch.Tensor) and x.is_floating_point() else x
-        ),
+        lambda x: x.to(dtype)
+        if isinstance(x, torch.Tensor) and x.is_floating_point()
+        else x,
         inputs,
     )
     return model, inputs
@@ -649,6 +647,8 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -658,7 +658,9 @@ class InputWriter:
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
-        if _storage_offset_or_default(None) != t.storage_offset():
+        if not statically_known_true(
+            _storage_offset_or_default(None) == t.storage_offset()
+        ):
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
@@ -717,7 +719,6 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-
         pass
 
     # Dictionary for tensors from annotations

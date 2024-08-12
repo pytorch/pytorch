@@ -360,9 +360,9 @@ class ActivationSparsifier:
                 configs["hook"] = configs["layer"].register_forward_pre_hook(
                     self._sparsify_hook(name)
                 )
-            configs["hook_state"] = (
-                "sparsify"  # signals that sparsify hook is now attached
-            )
+            configs[
+                "hook_state"
+            ] = "sparsify"  # signals that sparsify hook is now attached
 
     def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing

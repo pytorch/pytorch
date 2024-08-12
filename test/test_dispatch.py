@@ -961,9 +961,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         )
         module = torch.utils.cpp_extension.load(
             name="dangling_impl_extension",
-            sources=[
-                extension_path,
-            ],
+            sources=[extension_path],
             extra_cflags=["-g"],
             verbose=True,
         )

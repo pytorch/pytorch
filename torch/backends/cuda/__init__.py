@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
-
 from typing import Union
 from typing_extensions import deprecated
 
 import torch
+
 
 __all__ = [
     "is_built",
@@ -151,7 +151,7 @@ _LinalgBackends_str = ", ".join(_LinalgBackends.keys())
 
 
 def preferred_linalg_library(
-    backend: Union[None, str, torch._C._LinalgBackend] = None,
+    backend: Union[None, str, torch._C._LinalgBackend] = None
 ) -> torch._C._LinalgBackend:
     r"""
     Override the heuristic PyTorch uses to choose between cuSOLVER and MAGMA for CUDA linear algebra operations.
@@ -219,7 +219,7 @@ _BlasBackends_str = ", ".join(_BlasBackends.keys())
 
 
 def preferred_blas_library(
-    backend: Union[None, str, torch._C._BlasBackend] = None,
+    backend: Union[None, str, torch._C._BlasBackend] = None
 ) -> torch._C._BlasBackend:
     r"""
     Override the library PyTorch uses for BLAS operations. Choose between cuBLAS and cuBLASLt.
@@ -261,6 +261,7 @@ def preferred_blas_library(
 
 
 from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
+
 
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"

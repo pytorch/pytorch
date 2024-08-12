@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 11."""
-
 from __future__ import annotations
 
 import functools

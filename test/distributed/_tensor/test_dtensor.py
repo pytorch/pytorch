@@ -916,11 +916,9 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 from torch.distributed._tensor._collective_utils import unpad_tensor
 
                 unpadded_list = [
-                    (
-                        unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
-                        if pad_sizes[i] > 0
-                        else tensor
-                    )
+                    unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
+                    if pad_sizes[i] > 0
+                    else tensor
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [

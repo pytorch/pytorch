@@ -106,12 +106,10 @@ def _interpolate(name, dim, interpolate_mode):
             )
         if scales is None:
             scales = [
-                (
-                    1.0
-                    if i < 2
-                    else float(output_size[-(dim - i)])
-                    / float(input.type().sizes()[-(dim - i)])
-                )
+                1.0
+                if i < 2
+                else float(output_size[-(dim - i)])
+                / float(input.type().sizes()[-(dim - i)])
                 for i in range(0, dim)
             ]
         return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)

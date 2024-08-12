@@ -598,9 +598,8 @@ class TestInductorDynamic(TestCase):
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = (
-                get_same_padding(ih, k[0], s[0], d[0]),
-                get_same_padding(iw, k[1], s[1], d[1]),
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -923,7 +922,7 @@ class TestInductorDynamic(TestCase):
             y = sum(xs)
             return torch.zeros(y, device=device)
 
-        f(torch.tensor([5] * 80))
+        f(torch.tensor([5] * 320))
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
