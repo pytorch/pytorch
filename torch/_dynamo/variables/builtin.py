@@ -32,6 +32,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    does_not_override_dict_iter_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -898,14 +899,11 @@ class BuiltinVariable(VariableTracker):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will
                 # trace fine
-                fn, args = (
-                    torch.select,
-                    [
-                        args[0],
-                        variables.ConstantVariable.create(0),
-                        args[1],
-                    ],
-                )
+                fn, args = torch.select, [
+                    args[0],
+                    variables.ConstantVariable.create(0),
+                    args[1],
+                ]
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
@@ -1334,6 +1332,8 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
         if not kwargs:
             if not args:
                 args = ({},)
@@ -1359,13 +1359,24 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                func_var = arg.var_getattr(tx, "items")
-                if not isinstance(func_var, variables.UserFunctionVariable):
-                    unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
-                out = tx.inline_user_function_return(func_var, args, kwargs)
-                if isinstance(out, ConstDictVariable):
-                    return out
-                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
+                if does_not_override_dict_iter_methods(type(arg.value)):
+                    # These are implemeted in C, so we will have to manually construct the items
+
+                    if tx.output.side_effects.has_pending_mutation(arg):
+                        unimplemented(
+                            f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
+                        )
+
+                    new_dict = dict(arg.value.items())
+                    return SourcelessBuilder.create(tx, new_dict)
+                else:
+                    func_var = arg.var_getattr(tx, "items")
+                    if not isinstance(func_var, variables.UserFunctionVariable):
+                        unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
+                    out = tx.inline_user_function_return(func_var, args, kwargs)
+                    if isinstance(out, ConstDictVariable):
+                        return out
+                    return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(

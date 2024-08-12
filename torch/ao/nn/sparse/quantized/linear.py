@@ -104,7 +104,6 @@ class Linear(torch.nn.Module):
     r"""
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
-
     _version = 1
     _FLOAT_MODULE = torch.nn.Linear
 

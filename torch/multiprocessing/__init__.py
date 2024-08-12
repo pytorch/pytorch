@@ -14,12 +14,13 @@ memory.
 Because of the similarity of APIs we do not document most of this package
 contents, and we recommend referring to very good docs of the original module.
 """
-
 import multiprocessing
 import sys
 
 import torch
+
 from .reductions import init_reductions
+
 
 __all__ = ["set_sharing_strategy", "get_sharing_strategy", "get_all_sharing_strategies"]
 

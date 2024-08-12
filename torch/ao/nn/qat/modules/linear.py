@@ -28,7 +28,6 @@ class Linear(nn.Linear):
     Attributes:
         weight: fake quant module for weight
     """
-
     _FLOAT_MODULE = nn.Linear
 
     def __init__(

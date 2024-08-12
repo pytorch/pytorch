@@ -1791,6 +1791,9 @@ class TestOperators(TestCase):
                 ),  # NYI: forward-AD for soft_margin_loss_backward
                 xfail("nn.functional.ctc_loss", ""),  # NYI: forward-AD for _ctc_loss
                 xfail("nn.functional.pdist", ""),  # NYI: forward-AD with _pdist_forward
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # NYI: forward-AD for _safe_softmax
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail(
@@ -1973,6 +1976,9 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.ctc_loss"
                 ),  # ForwardAD not implemented and no decomposition
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # ForwardAD not implemented
                 xfail("nn.functional.dropout2d"),  # calls random op
                 xfail("nn.functional.dropout3d"),  # calls random op
                 xfail("nn.functional.dropout"),  # calls random op
@@ -2174,8 +2180,9 @@ class TestOperators(TestCase):
                 else:
                     weight = torch.randn(weight_shape, device=device)
                 target = torch.randint(0, C, target_shape, device=device)
-                # Since we're ignoring index 0, at least one element must be non-zero
-                target[0] = 1
+                target[
+                    0
+                ] = 1  # since we're ignoring index 0, at least one element must be non-zero
 
                 fn = functools.partial(
                     torch.nn.functional.nll_loss, target=target, weight=weight, **kwargs

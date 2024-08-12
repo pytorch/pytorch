@@ -482,9 +482,8 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = (
-            nn.Parameter(torch.randn(1, 1)),
-            nn.Parameter(torch.randn(4, 4)),
+        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(
+            torch.randn(4, 4)
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {"test": 3}
@@ -586,9 +585,8 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
             nn.Parameter(torch.randn(4, 4)),
             nn.Parameter(torch.randn(5, 5)),
         )
-        param4, param5 = (
-            nn.Parameter(torch.randn(10, 10)),
-            nn.Parameter(torch.randn(4, 4)),
+        param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(
+            torch.randn(4, 4)
         )
         data_list = [("param1", param1), ("param2", param2), ("param3", param3)]
         defaults = {

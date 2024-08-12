@@ -191,11 +191,9 @@ if __name__ == "__main__":
         DRY_RUN = True
 
     logging.basicConfig(
-        format=(
-            "[DRY_RUN] %(levelname)s: %(message)s"
-            if DRY_RUN
-            else "%(levelname)s: %(message)s"
-        ),
+        format="[DRY_RUN] %(levelname)s: %(message)s"
+        if DRY_RUN
+        else "%(levelname)s: %(message)s",
         level=logging.INFO,
         stream=sys.stderr,
     )

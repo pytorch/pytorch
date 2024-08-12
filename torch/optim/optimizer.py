@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Base optimizer."""
-
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
@@ -328,15 +327,9 @@ class Optimizer:
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
-    _optimizer_state_dict_post_hooks: (
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    )
-    _optimizer_load_state_dict_pre_hooks: (
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
-    )
-    _optimizer_load_state_dict_post_hooks: (
-        'OrderedDict[int, Callable[["Optimizer"], None]]'
-    )
+    _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+    _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
     def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
@@ -968,10 +961,12 @@ class Optimizer:
                         torch._foreach_zero_(grads)
 
     @overload
-    def step(self, closure: None = ...) -> None: ...
+    def step(self, closure: None = ...) -> None:
+        ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float: ...
+    def step(self, closure: Callable[[], float]) -> float:
+        ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         r"""Perform a single optimization step to update parameter.

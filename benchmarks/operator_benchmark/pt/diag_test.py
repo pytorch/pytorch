@@ -24,11 +24,9 @@ diag_configs_short = op_bench.config_list(
 class DiagBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dim, M, N, diagonal, out, device):
         self.inputs = {
-            "input": (
-                torch.rand(M, N, device=device)
-                if dim == 2
-                else torch.rand(M, device=device)
-            ),
+            "input": torch.rand(M, N, device=device)
+            if dim == 2
+            else torch.rand(M, device=device),
             "diagonal": diagonal,
             "out": out,
             "out_tensor": torch.tensor(

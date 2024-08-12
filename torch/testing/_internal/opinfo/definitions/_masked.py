@@ -103,9 +103,8 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = (
-                sample_input.args,
-                dict(mask=mask, **sample_input.kwargs),
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(
+                mask=mask, **sample_input.kwargs
             )
             yield SampleInput(
                 sample_input.input.detach().requires_grad_(requires_grad),
@@ -226,9 +225,8 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
             op_info, device, dtype, requires_grad, **kwargs
         ):
             sample_input_args, sample_input_kwargs = (
-                (ord,) + sample_input.args,
-                sample_input.kwargs.copy(),
-            )
+                ord,
+            ) + sample_input.args, sample_input.kwargs.copy()
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
                 args=sample_input_args,
@@ -279,9 +277,8 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
             for mask in _generate_masked_op_mask(
                 sample_input.input.shape, device, **kwargs
             ):
-                sample_input_args, sample_input_kwargs = (
-                    sample_input.args,
-                    dict(mask=mask, **sample_input.kwargs),
+                sample_input_args, sample_input_kwargs = sample_input.args, dict(
+                    mask=mask, **sample_input.kwargs
                 )
                 yield SampleInput(
                     sample_input.input.detach().requires_grad_(requires_grad),
@@ -369,9 +366,8 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
         ):
             if type(mask) != torch.Tensor:
                 continue
-            sample_input_args, sample_input_kwargs = (
-                sample_input.args,
-                dict(mask=mask, **sample_input.kwargs),
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(
+                mask=mask, **sample_input.kwargs
             )
             if "keepdim" in sample_input_kwargs:
                 sample_input_kwargs.pop("keepdim")
@@ -764,11 +760,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.mean",
-        ref=(
-            reference_reduction_numpy(np.mean)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_reduction_numpy(np.mean)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,
@@ -901,11 +895,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.var",
-        ref=(
-            reference_masked_std_var(np.var)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_masked_std_var(np.var)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,
@@ -986,11 +978,9 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.std",
-        ref=(
-            reference_masked_std_var(np.std)
-            if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
-            else None
-        ),
+        ref=reference_masked_std_var(np.std)
+        if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
+        else None,
         method_variant=None,
         nan_policy="propagate",
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes

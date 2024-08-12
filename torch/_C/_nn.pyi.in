@@ -1,7 +1,7 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
-from typing import overload, Sequence
+from typing import Literal, overload, Sequence
 
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _int, _size
@@ -64,6 +64,7 @@ def pad_sequence(
     sequences: list[Tensor] | tuple[Tensor, ...],
     batch_first: bool = False,
     padding_value: float = 0.0,
+    padding_side: Literal["left", "right"] = "right",
 ) -> Tensor: ...
 def flatten_dense_tensors(tensors: list[Tensor]) -> Tensor: ...
 def unflatten_dense_tensors(flat: Tensor, tensors: list[Tensor]) -> list[Tensor]: ...

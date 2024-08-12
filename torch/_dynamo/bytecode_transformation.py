@@ -954,11 +954,9 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
             is_op.positions = inst.positions
             if sys.version_info < (3, 12):
                 jump_op = create_instruction(
-                    (
-                        "POP_JUMP_FORWARD_IF_TRUE"
-                        if "FORWARD" in inst.opname
-                        else "POP_JUMP_BACKWARD_IF_TRUE"
-                    ),
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if "FORWARD" in inst.opname
+                    else "POP_JUMP_BACKWARD_IF_TRUE",
                     target=inst.target,
                 )
             else:

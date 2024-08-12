@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the NAdam algorithm."""
-
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
