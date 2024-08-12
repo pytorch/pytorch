@@ -437,11 +437,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 d["fw"] = d["fw"] + 1
                 return 2 * a.clone()
 
+            def foo_meta(a):
+                return a.clone()
+
             def foo_bwd(ctx, grad):
                 return grad.clone()
 
-            for backend in ["CPU", "CUDA", "Meta"]:
+            for backend in ["CPU", "CUDA"]:
                 lib.impl("zoo", foo_impl, backend)
+
+            lib.impl("zoo", foo_meta, "Meta")
+
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                "_mylib::zoo", "Autograd"
+            ):
+                self.skipTest(
+                    "Double registration of Autograd kernel for test custom op"
+                )
 
             torch.library.register_autograd("_mylib::zoo", foo_bwd)
 
