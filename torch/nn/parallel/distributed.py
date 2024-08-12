@@ -673,7 +673,10 @@ class DistributedDataParallel(Module, Joinable):
             self.process_group = device_mesh.get_group(mesh_dim=0)
             from torch.distributed.device_mesh import _mesh_resources
 
-            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            # if a root mesh is not the same as device_mesh,
+            # meaning the device_mesh is sliced out from the root mesh.
+            if root_mesh != device_mesh:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
                 # sound and the state_dict works out of the box.
@@ -1485,7 +1488,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1498,7 +1501,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch.compiler.is_compiling():
+        if not self._lazy_init_ran and not torch._utils.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:
