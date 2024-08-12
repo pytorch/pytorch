@@ -250,7 +250,7 @@ static void meta_func_cum_ops(
   maybe_wrap_dim(dim, self.dim());
 
   const auto& result = meta.maybe_get_output();
-  ScalarType out_dtype;
+  ScalarType out_dtype{};
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
@@ -1639,7 +1639,7 @@ Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool kee
     return out;
   }
 
-  if (dim->size() == 0) {
+  if (dim->empty()) {
     if (self.scalar_type() == kByte) {
       // Convert to a 1 or 0 mask
       auto out = at::empty_like(self);
@@ -1814,8 +1814,8 @@ static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
-              "std and var only supports tensors on a CPU or CUDA device, but got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda() || self.device().is_xpu(),
+              "std and var supports tensors on a CPU, CUDA, or XPU device only, but got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
@@ -1887,8 +1887,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              fname, " only supports tensors on a CPU or CUDA device, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              fname, " supports tensors on a CPU, CUDA, or XPU device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
