@@ -49,6 +49,10 @@ def _is_cpu_support_amx_tile() -> bool:
     r"""Returns a bool indicating if CPU supports AMX_TILE."""
     return torch._C._cpu._is_cpu_support_amx_tile()
 
+def _is_cpu_support_amx_fp16() -> bool:
+    r"""Returns a bool indicating if CPU supports AMX_TILE."""
+    return torch._C._cpu._is_cpu_support_amx_fp16()
+
 
 def _init_amx() -> bool:
     r"""Initializes AMX instructions."""

@@ -41,6 +41,14 @@ bool is_cpu_support_amx_tile() {
 #endif
 }
 
+bool is_cpu_support_amx_fp16() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  return cpuinfo_initialize() && cpuinfo_has_x86_amx_fp16();
+#else
+  return false;
+#endif
+}
+
 bool init_amx() {
   if (!is_cpu_support_amx_tile()) {
     return false;

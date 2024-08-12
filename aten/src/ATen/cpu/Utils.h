@@ -15,6 +15,9 @@ TORCH_API bool is_cpu_support_avx512_vnni();
 // Detect if CPU support Advanced Matrix Extension.
 TORCH_API bool is_cpu_support_amx_tile();
 
+// Detect if CPU support Advanced Matrix Extension for fp16.
+TORCH_API bool is_cpu_support_amx_fp16();
+
 // Enable the system to use AMX instructions.
 TORCH_API bool init_amx();
 

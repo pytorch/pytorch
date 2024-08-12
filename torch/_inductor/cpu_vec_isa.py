@@ -221,6 +221,24 @@ extern "C" void __amx_chk_kernel() {
 
 
 @dataclasses.dataclass
+class VecAMXFP16(VecAVX512):
+    # _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+
+    def __str__(self) -> str:
+        return super().__str__() + " amx_tile"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx() and torch.cpu._is_cpu_support_amx_fp16():
+                return True
+        return False
+
+@dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
@@ -295,7 +313,7 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMXFP16(), VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content

@@ -9,7 +9,7 @@ import sympy
 import torch
 
 from .. import ir
-from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
+from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAMXFP16, VecAVX2, VecAVX512, VecISA
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
@@ -676,6 +676,60 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         else:
             return LayoutType.VNNI2
 
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAMXFP16,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32), (32, 64, 64)],
+        input_dtype=torch.half,
+        output_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMXFP16,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32), (32, 64, 64)],
+        input_dtype=torch.half,
+        output_dtype=torch.half,
+        extra_check=check_amx_extra,
+    ),
+)
+class CppMicroBrgemm(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using oneDNN brgemm.
+    It supports input types of torch.half.
+    """
+
+    TEMPLATE_ENTRY = r"""
+#include <ATen/native/CPUBlas.h>
+{{declare_kernel}} {
+    // TODO(jgong5): loop unroll for M and N
+    at::native::cpublas::brgemm(
+      M, N, K,
+      lda, ldb, ldc,
+      1.f, accum ? 1.f : 0.f,
+      A,
+      B,
+      C);
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": self.register_blocking.block_m,
+            "block_n": self.register_blocking.block_n,
+            "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
+            **self.get_common_options(),
+        }
+        result = KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def get_b_layout(self):
+        assert self.input_dtype == torch.half
+        return LayoutType.VNNI2
 
 def create_micro_gemm(
     name,
@@ -715,7 +769,7 @@ def create_micro_gemm(
     matched_configs = []
     for cls, configs in micro_gemm_configs.items():
         for config in configs:
-            if not issubclass(vec_isa.__class__, config.vec_isa_cls):
+            if not issubclass(vec_isa.__class__, config.vec_isa_cls) and not issubclass(config.vec_isa_cls, VecAMXFP16):
                 continue
             if (
                 config.input_dtype == input_dtype
@@ -734,7 +788,7 @@ def create_micro_gemm(
                 # 3. Number of mxn blocks is large enough to occupy all the threads
                 # 4. Register blocks are larger
                 isa_score = 0
-                if config.vec_isa_cls == VecAMX:
+                if config.vec_isa_cls in [VecAMX, VecAMXFP16]:
                     isa_score += 1
                 dividable_score = 0
                 if m % block_m == 0:

@@ -531,7 +531,7 @@ struct Pack : public Kernel_Cache<PackKey, pack_t> {
 //     `batch_size` value passed at object construction stage.
 // C Pointer to a tensor C (accumulation buffer).
 // scratchpad Pointer to a scratchpad buffer.
-void brgemm(
+TORCH_API void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
@@ -548,7 +548,7 @@ void brgemm(
 
 // Batch-reduce GEMM
 // Batch size is 1, which means it is equivalent to gemm
-void brgemm(
+TORCH_API void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
