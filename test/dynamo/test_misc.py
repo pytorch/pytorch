@@ -221,7 +221,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()
 
-        @torch.library.custom_op("mylib::foo", mutates_args={})
+        @torch.library.custom_op("mylib::foo9", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
             torch._dynamo.graph_break()
             return x.clone()
@@ -274,7 +274,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             @torch.compile(backend="eager")
             def g(x):
-                return foo._opoverload(x)
+                return torch.ops.mylib.foo2.default(x)
 
             x = torch.randn(2)
             g(x)  # compiles
