@@ -62,7 +62,7 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v44
         with:
-          tags_pattern: 'ciflow/binaries_wheel/121979'
+          tags_pattern: 'ciflow/binaries_wheel/*'
         # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
         # with:
         #   since_last_remote_commit: true
