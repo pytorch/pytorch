@@ -1601,6 +1601,8 @@ class TestSDPAFailureModes(NNTestCase):
             dtype = torch.float16
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else SdpaShape(2, 2, 3, 257)
+            if TEST_WITH_ROCM:  # On ROCM, FA and EA share the backend GPU kernels
+                size = SdpaShape(2, 2, 3, 257)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -1637,6 +1639,8 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self, device):
+        if TEST_WITH_ROCM:  # ROCm GPU kernels does not have strict alignment requirements
+            return
         # The alignment is depdent on arch so we specifiy SM80OrLater
         dtype = torch.float16
         size = SdpaShape(2, 2, 8, 5)
