@@ -2580,11 +2580,11 @@ def _max_unpoolnd(
     indices_nc_shape[:-dim] = self.shape[:-dim]
     indices_flat = (
         indices + aten.arange(nc, device=self.device).view(indices_nc_shape) * hw
-    ).view(-1)
+    ).reshape(-1)
 
     output = self.new_zeros(list(self.shape[:-dim]) + list(output_size))
     return aten._unsafe_index_put(
-        output.view(-1), [indices_flat], self.view(-1), accumulate=False
+        output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
 
 
