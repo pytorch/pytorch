@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1257,6 +1258,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """11""")
 
+    @skipIfWindows
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1264,6 +1266,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
+    @skipIfWindows
     def test_function_in_skipfiles(self):
         cnt = torch._dynamo.testing.CompileCounter()
         torch.compile(torch.sin, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
@@ -1912,6 +1915,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(fn(y, contextlib.nullcontext), y.sin().cos().sin()))
 
+    @skipIfWindows
     def test_no_grad_inline(self):
         @torch.no_grad()
         def a(x):
@@ -1924,6 +1928,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
+    @skipIfWindows
     def test_longtensor_list(self):
         for partition in [0, 5, 10]:
 
@@ -3551,6 +3556,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
         self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
 
+    @skipIfWindows
     def test_list_index(self):
         for i, list_type in enumerate(
             (
@@ -3590,6 +3596,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
 
+    @skipIfWindows
     def test_list_index_tensor_unsupported(self):
         for index in ([], [2], [0, 3]):
 
@@ -4070,6 +4077,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_fn(inp, other, alpha=alpha, out=compile_out)
             self.assertTrue(same(out, compile_out))
 
+    @skipIfWindows
     def test_negative_shape_guard(self):
         def fn(x):
             if x.size() != (5, 1, 2, 3):
@@ -4085,6 +4093,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x2), opt_fn(x2))
         self.assertEqual(counter.frame_count, 2)
 
+    @skipIfWindows
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_deferred_runtime_asserts(self):
         @torch.compile(fullgraph=True)
@@ -4682,6 +4691,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
 
+    @skipIfWindows
     def test_detectron2_instances_cat(self):
         class Instances:
             def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
@@ -5209,6 +5219,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch.compile(fn2)()
 
+    @skipIfWindows
     def test_jit_script_defaults(self):
         @torch.jit.script
         def fast_cos(x, c: float = 2.0):
