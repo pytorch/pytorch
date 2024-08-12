@@ -2,8 +2,8 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union, List
 from collections import defaultdict
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -315,7 +315,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # maps tensor cdata every tensor address to the tensor.
         self.tensors_look_up = {}
 
-
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -343,7 +342,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-     
         for arg in args:
             if isinstance(arg, torch.Tensor):
                 self.storage_to_aliases[arg.untyped_storage()._cdata].add(arg._cdata)
@@ -434,7 +432,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(func, self.storage_to_aliases, self.tensors_look_up, args, kwargs)
+            return do_auto_functionalize(
+                func, self.storage_to_aliases, self.tensors_look_up, args, kwargs
+            )
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -449,7 +449,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
         )
-        
+
         # Expectation: functionalization should not **already** be enabled above our mode.
         # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
         # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.

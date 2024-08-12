@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -148,7 +147,7 @@ def auto_functionalized_dense(
                     else None
                 )
             )
-        result.append(new_kwargs[name])   
+        result.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
     latest_value_for = {}
@@ -161,13 +160,18 @@ def auto_functionalized_dense(
                 _only_clone_these_tensors is not None
                 and name not in _only_clone_these_tensors
             ):
-                # if the argument is mutated in place, item would have already observed the effect. 
+                # if the argument is mutated in place, item would have already observed the effect.
                 pass
             else:
-                # observe the effect on `name`
+                # observe the effect that happened on `name`
                 mutation_source = new_kwargs[name]
-                alias_with_effects = alias_with_effects.as_strided_scatter(mutation_source, mutation_source.size(), mutation_source.stride(), mutation_source.storage_offset())
-    result.append(alias_with_effects)
+                alias_with_effects = alias_with_effects.as_strided_scatter(
+                    mutation_source,
+                    mutation_source.size(),
+                    mutation_source.stride(),
+                    mutation_source.storage_offset(),
+                )
+        result.append(alias_with_effects)
 
     if isinstance(out, tuple):
         return (*out, *result)  # type: ignore[return-value]
@@ -268,28 +272,28 @@ def do_auto_functionalize(
         )
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
-    
+
     arg_to_aliased = {}
     all_aliased_addresses = set()
 
     for arg in mutable_args_names:
-        ls =  list(storage_to_aliases[normalized_kwargs[arg]._typed_storage()._cdata])
-        
+        ls = list(storage_to_aliases[normalized_kwargs[arg]._typed_storage()._cdata])
+
         # remove self from aliases.
         ls.remove(normalized_kwargs[arg]._cdata)
 
         all_aliased_addresses |= set(ls)
 
-        # get tensors from tensors addresses. 
-        arg_to_aliased[arg] =   ctx.unwrap_tensors([tensors_look_up[item] for item in  ls])
-  
+        # get tensors from tensors addresses.
+        arg_to_aliased[arg] = ctx.unwrap_tensors([tensors_look_up[item] for item in ls])
+
     # take the union of all the aliased items.
     for arg in mutable_args_names:
         all_aliased_addresses.discard(normalized_kwargs[arg]._cdata)
-    
-    all_aliased_original = [tensors_look_up[item] for item in  all_aliased_addresses]
-    all_aliased_unwrapped =  ctx.unwrap_tensors(all_aliased_original)
-  
+
+    all_aliased_original = [tensors_look_up[item] for item in all_aliased_addresses]
+    all_aliased_unwrapped = ctx.unwrap_tensors(all_aliased_original)
+
     with ctx.redispatch_to_next():
         # output of auto_functionalized is going to be as the following:
         # op_output, mutated_arg1, ..., all_aliased[0], ...
@@ -301,7 +305,9 @@ def do_auto_functionalize(
         : -len(mutable_args_names)
     ]
 
-    unwrapped_mutable_out = unwrapped_outs[-(len(mutable_args_names)+len(all_aliased_original)):]
+    unwrapped_mutable_out = unwrapped_outs[
+        -(len(mutable_args_names) + len(all_aliased_original)) :
+    ]
 
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
@@ -312,8 +318,10 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    original_args =   [normalized_kwargs[name] for name in mutable_args_names] + all_aliased_original
-    
+    original_args = [
+        normalized_kwargs[name] for name in mutable_args_names
+    ] + all_aliased_original
+
     for orig_arg, unwrapped_out in zip(original_args, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
@@ -342,10 +350,8 @@ def do_auto_functionalize(
 
 
 @auto_functionalized.py_functionalize_impl
-def auto_functionalized_func(ctx, _mutable_op, _arg_to_aliased, _all_aliased, **kwargs):
+def auto_functionalized_func(ctx, _mutable_op, **kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
-        result = auto_functionalized(
-            _mutable_op, _arg_to_aliased, _all_aliased, **unwrapped_kwargs
-        )
+        result = auto_functionalized(_mutable_op, {}, [], **unwrapped_kwargs)
     return ctx.wrap_tensors(result)

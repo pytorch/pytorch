@@ -462,9 +462,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+
+        viewed_input = None
         if mutated_arg.op in ("placeholder", "get_attr"):
+            viewed_input = mutated_arg
+        else:
+            for view in shared_view_nodes:
+                if view.op in ("placeholder", "get_attr"):
+                    viewed_input = view
+                    break
+
+        if viewed_input:
             # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg, None)
+            copy_node = copy_nodes.get(viewed_input, None)
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -476,11 +486,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
 
             return True
-        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # If mutated arg is view of any of the inputs of the graph,
-            # do not allow for inplacing.
-            # This would require more sophisticated algorithm to handle
-            return False
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
