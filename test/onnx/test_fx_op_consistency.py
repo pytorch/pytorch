@@ -46,13 +46,12 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
 import error_reproduction
-
 import onnx_test_common
-
 import parameterized
 import pytest
 import pytorch_test_common
@@ -65,7 +64,10 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -1197,11 +1199,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "squeeze",
         variant_name="multiple",
         reason="fixme: https://github.com/microsoft/onnxscript/issues/1264",
-    ),
-    xfail(
-        "squeeze_copy",
-        dtypes=(torch.int8, torch.uint8, torch.int16),
-        reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
         "svd_lowrank",

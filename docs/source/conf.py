@@ -24,8 +24,8 @@ from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
-
 import torch
+
 
 try:
     import torchvision  # noqa: F401
@@ -37,6 +37,7 @@ except ImportError:
 RELEASE = os.environ.get("RELEASE", False)
 
 import pytorch_sphinx_theme
+
 
 # -- General configuration ------------------------------------------------
 
@@ -849,8 +850,6 @@ coverage_ignore_functions = [
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "make_fx",
-    "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
     "set_meta",
@@ -2165,6 +2164,8 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
+    # torch.cuda.memory
+    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -3475,6 +3476,7 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+
 # NB: Due to some duplications of the following modules/functions, we keep
 # them as expected failures for the time being instead of return 1
 ignore_duplicated_modules = {
@@ -3722,10 +3724,10 @@ import sphinx.ext.doctest
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
-
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.util.docfields import TypedField
+
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ""

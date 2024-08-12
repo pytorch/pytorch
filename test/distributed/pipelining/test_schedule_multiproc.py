@@ -6,15 +6,17 @@ import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP
-from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
+from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
+from schedule_registry import ScheduleUnbalanced, ScheduleVShaped
 
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
+    _ScheduleForwardOnly,
     pipeline,
     PipelineStage,
     Schedule1F1B,
+    ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
@@ -29,6 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skip_but_pass_in_sandcastle_if,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,56 @@ class ScheduleTest(MultiProcContinousTest):
         super().setUpClass()
         dev_id = cls.rank % torch.cuda.device_count()
         cls.device = torch.device(f"cuda:{dev_id}")
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [_ScheduleForwardOnly])
+    def test_forward_only(self, ScheduleClass):
+        mod = MultiMLP(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        mod_ref = copy.deepcopy(mod)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        x_clone = x.clone()
+
+        num_microbatches = 4
+        x_mb = x.chunk(num_microbatches)[0]
+
+        # Create a pipeline
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            mb_args=(x_mb,),
+            split_spec=split_spec,
+        )
+
+        stage = pipe.build_stage(
+            self.rank,
+            self.device,
+        )
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stage, num_microbatches)
+
+        # Run
+        num_iters = 20
+        for _ in range(num_iters):
+            if self.rank == 0:
+                schedule.step(x)
+                dist.recv(x, src=self.world_size - 1)
+            elif self.rank == self.world_size - 1:
+                out = schedule.step()
+                dist.send(out, dst=0)
+            else:
+                schedule.step()
+
+        # Validate pipelined output is the same as reference model
+        if self.rank == self.world_size - 1:
+            for _ in range(num_iters):
+                x_clone = mod_ref(x_clone)
+
+            torch.testing.assert_close(x_clone, out)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -473,11 +526,11 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleWithW])
-    def test_schedule_with_weight_update(self, ScheduleClass):
+    @parametrize("ScheduleClass", [ScheduleFlexibleInterleaved1F1B])
+    def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
-        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod = MultiMLPWithDw(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
         ref_mod = copy.deepcopy(full_mod)
@@ -487,42 +540,54 @@ class ScheduleTest(MultiProcContinousTest):
             # Add a small perturbation
             target = y + torch.randn(batch_size, d_hid, device=self.device)
 
-        loss_fn = torch.nn.MSELoss(reduction="sum")
+        ref_loss_fn = torch.nn.MSELoss(reduction="sum")
+        full_loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Run reference
-        for _ in range(2):
-            ref_mod.zero_grad()
-            ref_out = ref_mod(x)
-            ref_loss = loss_fn(ref_out, target)
-            ref_loss.backward()
+        full_mod.toggle()
 
         # Get a submodule, e.g. `layers.0` or `layers.1`
         stage_indices = [
             self.rank + i * self.world_size for i in range(stages_per_rank)
         ]
-        print(f"Rank {self.rank} stages: {stage_indices}")
         submod_names = [f"layers.{i}" for i in stage_indices]
         stage_modules = [
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
 
+        # Run reference
+        for _ in range(2):
+            ref_stage_modules = [
+                ref_mod.get_submodule(submod_name) for submod_name in submod_names
+            ]
+            for stage_module in ref_stage_modules:
+                stage_module.zero_grad()
+
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = ref_loss_fn(ref_out, target)
+            ref_loss.backward()
+
         class CustomState:
-            def __init__(self):
+            def __init__(self, stage_module, stage_idx, rank):
                 self.i = 0
+                self.stage_module = stage_module
+                self.stage_idx = stage_idx
+                self.rank = rank
 
             def dw_builder(self):
-                """This simulates a function attached to a model with a custom backward.
-                Each call to builder gives a new dw_runner that has some updated state to compute the latest dw.
-                """
-
                 def dw_runner():
                     # This inner function would be called by PipelineStage during `backward_weight_one_chunk`
-                    print(f"dw called {self.i}th time")
                     self.i += 1
+                    print(
+                        f"[Rank {self.rank}] dw_count={self.i} stage={self.stage_idx}"
+                    )
+                    self.stage_module.compute_dW()
 
                 return dw_runner
 
-        cs = CustomState()
+        cs = {}
+        for stage_module, stage_idx in zip(stage_modules, stage_indices):
+            cs[stage_idx] = CustomState(stage_module, stage_idx, self.rank)
 
         # Create a pipeline stage to wrap that submodule
         chunks = 2
@@ -534,15 +599,16 @@ class ScheduleTest(MultiProcContinousTest):
                 n_stages,
                 self.device,
                 input_args=input_args,
-                dw_builder=cs.dw_builder,
+                dw_builder=cs[stage_idx].dw_builder,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(
+            stages, chunks, loss_fn=full_loss_fn, enable_zero_bubble=True
+        )
 
-        # Run
         for _ in range(2):
             # Zero gradients
             for stage_module in stage_modules:
@@ -556,11 +622,11 @@ class ScheduleTest(MultiProcContinousTest):
                 schedule.step()
 
         dist.barrier()
-
         # Last rank checks result
         if self.rank == self.world_size - 1:
             # Check output
             torch.testing.assert_close(out, ref_out)
+
             # Check loss
             # Since the reduction used in the loss function above is "sum", we use
             # "sum" here to reduce microbatch losses into a single value too.
@@ -574,11 +640,7 @@ class ScheduleTest(MultiProcContinousTest):
             # Check gradients per parameter
             for name, p in stage_module.named_parameters():
                 ref_p = ref_submod.get_parameter(name)
-                try:
-                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
-                except AssertionError:
-                    print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
-                    raise
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
 
 
 instantiate_parametrized_tests(ScheduleTest)
