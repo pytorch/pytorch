@@ -15,7 +15,7 @@ namespace torch::jit {
 
 #if AT_ONEDNN_ENABLED()
 
-namespace mkldnn {
+namespace onednn {
 
 const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
     fusion_rewrite_map = {
@@ -23,7 +23,7 @@ const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
         {"relu", {}},
 };
 
-} // namespace mkldnn
+} // namespace onednn
 
 #endif // AT_ONEDNN_ENABLED()
 

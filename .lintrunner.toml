@@ -1448,7 +1448,7 @@ exclude_patterns = [
     'torch/utils/hooks.py',
     'torch/utils/jit/__init__.py',
     'torch/utils/jit/log_extract.py',
-    'torch/utils/mkldnn.py',
+    'torch/utils/onednn.py',
     'torch/utils/mobile_optimizer.py',
     'torch/utils/model_dump/__init__.py',
     'torch/utils/model_dump/__main__.py',

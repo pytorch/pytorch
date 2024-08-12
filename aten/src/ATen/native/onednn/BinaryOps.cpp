@@ -63,7 +63,7 @@ static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
         c10::typeMetaToScalarType(other.dtype()));
     TORCH_CHECK(
         self.device() == other.device(),
-        "Expected same device for binary mkldnn op");
+        "Expected same device for binary onednn op");
     return empty_mkldnn(
         out_size,
         out_dtype,
@@ -133,7 +133,7 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
     return result;
   } else {
     TORCH_CHECK(self.sizes() == other.sizes(),
-               "mkldnn_mul_out: currently mkldnn not support broadcasting");
+               "mkldnn_mul_out: currently onednn not support broadcasting");
     ideep::tensor y = itensor_from_mkldnn(other);
     ideep::binary::compute(x, y, z, dnnl::algorithm::binary_mul);
 

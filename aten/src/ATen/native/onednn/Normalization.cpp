@@ -147,7 +147,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
         "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
   TORCH_CHECK(weight.defined() && bias.defined(),
-             "mkldnn_batch_norm: currently mkldnn only support affine model");
+             "mkldnn_batch_norm: currently onednn only support affine model");
 
   ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor w = itensor_from_tensor(weight);
@@ -159,7 +159,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   if (train) {
     // TODO: enable 3d batchnorm.
     TORCH_CHECK(input.dim() == 4,
-        "mkldnn_batch_norm: currently mkldnn training only support 2d batchnorm");
+        "mkldnn_batch_norm: currently onednn training only support 2d batchnorm");
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
@@ -186,7 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
                                  weight.options().device_opt()));
   } else {
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
-        "mkldnn_batch_norm: currently mkldnn inference only support 2d and 3d batchnorm");
+        "mkldnn_batch_norm: currently onednn inference only support 2d and 3d batchnorm");
     if (use_running_stat) {
       ideep::tensor m = itensor_from_tensor(running_mean);
       ideep::tensor v = itensor_from_tensor(running_var);
@@ -195,7 +195,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
           x, m, v, w, b, y, eps);
     } else {
       // TODO: keep running estimates.
-      TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
+      TORCH_CHECK(false, "mkldnn_batch_norm: onednn inference is not keep running estimates.");
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -256,7 +256,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
 
-  TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
+  TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently onednn only support train model");
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
   ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor w = itensor_from_tensor(weight);

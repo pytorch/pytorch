@@ -2964,7 +2964,7 @@ class TestFrozenOptimizations(JitTestCase):
 
     @unittest.skipIf(torch.backends.mkldnn.is_available(), "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
-        # test no error when mkldnn not available
+        # test no error when onednn not available
         with set_default_dtype(torch.float):
             mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
             frozen = torch.jit.freeze(mod)

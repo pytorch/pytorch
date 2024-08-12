@@ -92,7 +92,7 @@ Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
 }
 
 Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_transpose_: in-place onednn operations are not supported yet");
 }
 
 } // namespace native

@@ -1408,7 +1408,7 @@ void nnc_mkldnn_prepacked_conv_run(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  using namespace at::native::mkldnn;
+  using namespace at::native::onednn;
 
   auto tensors = constructTensors(
       bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);

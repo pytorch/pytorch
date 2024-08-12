@@ -143,12 +143,12 @@ static void check_shape_forward(const Tensor& input,
 //  output view:    NHWC(internal) -> NHWC(user)
 //
 // 3. Blocked (ONEDNN tensor):
-//  By explicitly converting a tensor to mkldnn, e.g. `x.to_mkldnn()`,
+//  By explicitly converting a tensor to onednn, e.g. `x.to_mkldnn()`,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
 //  For inference case, weight can be prepacked into blocked format by
 //  (so as to save weight reoder overhead):
-//      model = torch.utils.mkldnn.to_mkldnn(model)
+//      model = torch.utils.onednn.to_mkldnn(model)
 //
 //  For training case, grad_output can be CPU tensor or ONEDNN tensor,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
@@ -592,7 +592,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
 std::vector<int64_t> _original_deconv_weight_size(
     const Tensor& weight_t,
     int64_t groups) {
-  TORCH_CHECK(weight_t.is_mkldnn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
+  TORCH_CHECK(weight_t.is_mkldnn() || weight_t.is_meta(), "expects weight_t to be onednn or meta tensor");
   // The size of weight_t is the prepacked size.
   //  Groups > 1: [g*o, i/g, ...]
   //  Groups == 1: [o, i, ...]
@@ -662,7 +662,7 @@ Tensor _mkldnn_convolution_transpose(
 
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_mkldnn()) {
-    // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+    // onednn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
@@ -1045,39 +1045,39 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, OnednnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_pointwise_.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
+TORCH_LIBRARY_IMPL(onednn, Meta, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
 }
 }}  // namespace at::native

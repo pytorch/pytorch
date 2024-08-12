@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.fx.passes.shape_prop import ShapeProp
 import copy
 from collections import defaultdict
-import torch.utils.mkldnn as th_mkldnn
+import torch.utils.onednn as th_mkldnn
 import operator
 import time
 import logging
@@ -403,7 +403,7 @@ def optimize_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.getLogger(__name__).info("mkldnn conversions: %s", mkldnn_conversions)
+    logging.getLogger(__name__).info("onednn conversions: %s", mkldnn_conversions)
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

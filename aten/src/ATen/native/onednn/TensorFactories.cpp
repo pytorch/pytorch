@@ -15,7 +15,7 @@ namespace at { namespace native {
 Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
      !optional_memory_format.has_value(),
-     "'memory_format' argument is incompatible with mkldnn tensor");
+     "'memory_format' argument is incompatible with onednn tensor");
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());

@@ -430,7 +430,7 @@ def _prepare_input(
     # Prepares the inputs to be passed into the function while including the new
     # modified input.
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
-        # Convert back to mkldnn
+        # Convert back to onednn
         if maybe_perturbed_input is not None:
             return maybe_perturbed_input.to_mkldnn()
         else:

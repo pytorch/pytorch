@@ -1113,7 +1113,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         # Not supported by this API: we can either support them in the future
         # or provide some other CustomOp.def_* function. This depends on how
         # common the use cases are.
-        for invalid_type in ["hip", "xla", "mkldnn", ["cpu", "hip"]]:
+        for invalid_type in ["hip", "xla", "onednn", ["cpu", "hip"]]:
             with self.assertRaisesRegex(ValueError, "we only support device_type"):
                 custom_ops.impl(
                     f"{TestCustomOp.test_ns}::foo", device_types=invalid_type

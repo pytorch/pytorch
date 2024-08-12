@@ -139,7 +139,7 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channles last
+                        # For CPU and onednn enable, we always using channles last
                         nonlocal fmt
                         if (
                             torch.backends.mkldnn.enabled
@@ -278,9 +278,9 @@ class CPUReproTests(TestCase):
                 return res
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.onednn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.onednn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         for dtype in dtypes:
             with torch.no_grad():
@@ -370,9 +370,9 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.onednn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.onednn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
             [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False], dtypes
@@ -424,7 +424,7 @@ class CPUReproTests(TestCase):
         in_channel = 1
         out_channel = 3
         amp_enabled_configs = [False]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.onednn._is_mkldnn_bf16_supported():
             # When amp is enabled here, the input to Conv is a FlexibleLayout.
             # While it's disabled, the input is a FixedLayout.
             amp_enabled_configs.append(True)
@@ -459,9 +459,9 @@ class CPUReproTests(TestCase):
             seq_len,
         ) in itertools.product(*list(params_dict.values())):
             dtypes = [torch.float]
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            if torch.ops.onednn._is_mkldnn_bf16_supported():
                 dtypes.append(torch.bfloat16)
-            if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            if torch.ops.onednn._is_mkldnn_fp16_supported():
                 dtypes.append(torch.float16)
             for dtype in dtypes:
                 counters.clear()
@@ -603,7 +603,7 @@ class CPUReproTests(TestCase):
             fn_opt = torch._dynamo.optimize("inductor")(mod)
             _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
-            self.assertFalse("torch.ops.mkldnn._lstm" in code)
+            self.assertFalse("torch.ops.onednn._lstm" in code)
             self.assertEqual(fn_opt(*inps), mod(*inps))
 
     @patch("torch.cuda.is_available", lambda: False)
@@ -3471,9 +3471,9 @@ class CPUReproTests(TestCase):
         dtypes = [
             torch.float32,
         ]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.onednn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if torch.ops.onednn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
         temp = torch.randn(1, 16, 1, 1)
