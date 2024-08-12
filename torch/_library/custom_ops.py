@@ -14,6 +14,7 @@ from typing import (
     Union,
 )
 
+import torch
 from torch.utils._exposed_in import exposed_in
 
 from .. import _C, _library, _ops, autograd, library, Tensor
@@ -264,7 +265,17 @@ class CustomOpDef:
                             backend_impl,
                             _C._dispatch_key_for_device(device_type),
                         )
-                self._backend_fns[device_type] = fn
+
+                # Wrap function to choose between the default implementation or the device-specific
+                # implementation depending on if the kernel is disabled.
+                @torch._disable_dynamo
+                def wrapped_fn(*args, **kwargs):
+                    if device_type in self._disabled_kernel:
+                        return self._init_fn(*args, **kwargs)
+                    else:
+                        return fn(*args, **kwargs)
+
+                self._backend_fns[device_type] = wrapped_fn
             return fn
 
         # See NOTE: [Supporting decorator and non-decorator usage]
