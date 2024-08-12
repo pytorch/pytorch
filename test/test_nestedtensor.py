@@ -48,17 +48,17 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     markDynamoStrictTest,
+    NestedTensorTestCase,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
-    TestCase,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -263,20 +263,6 @@ def convert_jagged_to_nested_tensor(
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
-
-
-# Base TestCase for NT tests; used to define common helpers, etc.
-class NestedTensorTestCase(TestCase):
-    def assertEqualIgnoringNestedInts(self, a, b):
-        # unbinding NJTs allows us to compare them as essentially equal without
-        # caring about exact nested int comparison
-        def _unbind_njts(x):
-            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
-                return x.unbind()
-            else:
-                return x
-
-        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
 
 
 @markDynamoStrictTest
