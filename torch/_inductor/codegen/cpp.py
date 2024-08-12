@@ -3904,46 +3904,42 @@ class CppScheduling(BaseScheduling):
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
-    def split_loop(self, nodes):
-        can_split = False
-        split_var = None
-        split_number = None
-        divide_index_name = None
-        for node in nodes:
-            # No reduce
-            if len(node.group[1][1]) != 0:
-                can_split = False
-                break
+    def optimize_loop_order(self, nodes):
+        """
+        Apply loop split optimization.
+        When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
+        to avoid non-contiguous loads, subject to the following conditions:
+            1. No reduction and no mudular index for all nodes.
+            2. Only one node's one indexing_exprs contains a division, according to this indexing_exprs,
+               we can get the dimension that needs to be split, and the split dimension is contiguous
+               in all other indexing_exprs.
 
-            # No modular index
+        For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
+        {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
+        we will spilt z2 -> 30*z2 + z3, then the node's var_ranges will be changed to
+        {z0: 2, z1: 9216, z2: 32, z3: 30} and indexing_exprs will be changed to
+        {'index0': 8847360*z0 + 960*z1 + 30*z2 + z3, 'index1': 32*z0 + z2, 'index2': 30*z2 + z3}.
+        """
+
+        def has_reduce_or_modular_index(node):
             def has_modular_index(expr):
                 if isinstance(expr, ModularIndexing):
                     return True
                 return any(has_modular_index(arg) for arg in expr.args)
 
-            if any(
-                has_modular_index(expr)
-                for name, expr in node._body.indexing_exprs.items()
-            ):
-                can_split = False
-                break
+            return len(node.group[1][1]) != 0 or any(
+                has_modular_index(expr) for _, expr in node._body.indexing_exprs.items()
+            )
 
-            (
-                (original_index_size, original_reduce_size),
-                _,
-                _,
-            ) = node.node.get_default_sizes_body()
+        # No reduction and no mudular
+        if any(has_reduce_or_modular_index(node) for node in nodes):
+            return nodes
 
-            # 4D tensor and 2 dims have been fused.
-            if not (
-                len(original_index_size) == 4
-                and len(original_reduce_size) == 0
-                and len([*node._body.var_ranges.values()]) == 3
-            ):
-                can_split = False
-                break
+        split_var = None
+        split_number = None
+        divide_index_name = None
 
-            # Check index: The split dim has a divider at 1 index_expr
+        def has_one_div(node):
             def has_div(expr, name):
                 if isinstance(expr, FloorDiv):
                     nonlocal split_var
@@ -3959,26 +3955,27 @@ class CppScheduling(BaseScheduling):
                     )
                 return any(has_div(arg, name) for arg in expr.args)
 
-            if not any(
-                has_div(expr, name) for name, expr in node._body.indexing_exprs.items()
-            ):
-                continue
-
-            # Check index: The split dim is contiguous at all other index_expr
-            if not all(
-                stride_at_vec_range(
-                    expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
+            return (
+                len(
+                    [
+                        expr
+                        for name, expr in node._body.indexing_exprs.items()
+                        if has_div(expr, name)
+                    ]
                 )
                 == 1
-                for name, expr in node._body.indexing_exprs.items()
-                if name != divide_index_name
-            ):
-                can_split = False
-                break
+            )
 
-            can_split = True
-
-        if not can_split:
+        nodes_have_div = [node for node in nodes if has_one_div(node)]
+        # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
+        if len(nodes_have_div) != 1 or any(
+            stride_at_vec_range(
+                expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
+            )
+            != 1
+            for name, expr in nodes_have_div[0]._body.indexing_exprs.items()
+            if name != divide_index_name
+        ):
             return nodes
 
         for node in nodes:
@@ -4000,9 +3997,12 @@ class CppScheduling(BaseScheduling):
             )
 
             def new_indexing_from_args(indices):
-                assert len([*node._body.var_ranges.values()]) == 3
-                z3 = sympy.core.symbol.Symbol("z3", integer=True, nonnegative=True)
-                replacements = {split_var: split_var * split_number + z3}  # type: ignore[operator]
+                new_index = sympy.core.symbol.Symbol(
+                    "z" + str(len([*node._body.var_ranges.values()])),
+                    integer=True,
+                    nonnegative=True,
+                )
+                replacements = {split_var: split_var * split_number + new_index}  # type: ignore[operator]
                 return {
                     name: sympy_subs(expr, replacements)
                     for name, expr in node._body.indexing_exprs.items()
@@ -4229,7 +4229,7 @@ class CppScheduling(BaseScheduling):
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
             # Apply loop split optimization
-            nodes = self.split_loop(nodes)
+            nodes = self.optimize_loop_order(nodes)
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
             cpp_kernel_proxy.codegen_nodes(nodes)
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
