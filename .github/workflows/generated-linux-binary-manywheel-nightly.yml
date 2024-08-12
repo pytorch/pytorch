@@ -7,7 +7,6 @@ name: linux-binary-manywheel
 
 on:
   push:
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
       - nightly
     tags:
@@ -32,52 +31,38 @@ env:
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  DOCKER_ID: ${{ secrets.DOCKER_ID }}
+  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+  WITH_DOCKER_BUILD: ${{ github.event_name == 'push' && ( startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel')) }}
+
 concurrency:
   group: linux-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  test-get-pr:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/github-script@v7
-        id: get_pr_data
-        with:
-          script: |
-              console.log(context.payload.compare)
-              const commitRegex = /.*compare\/([a-f0-9]+)\^\.\.\.([a-f0-9]+)/g;
-              const match = context.payload.compare.match(commitRegex);
-              console.log(match);
-              console.log(context);
-              console.log(context.payload.commits);
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v44
-        with:
-          tags_pattern: 'ciflow/binaries_wheel/*'
-        # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
-        # with:
-        #   since_last_remote_commit: true
-
-      - name: List all changed files
-        run: |
-          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-            echo "$file was changed"
-          done
-
-
+  calculate-manylinux-builder-cpu:
+  if: env.WITH_DOCKER_BUILD == 'true'
+  runs-on: linux.9xlarge.ephemeral
+  steps:
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      with:
+        submodules: false
+    - name: Calculate docker image
+      id: calculate-docker-image
+      uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+      with:
+        docker-image-name: manylinux-builder-cpu
+        docker-build-dir:  .ci/docker/manywheel
+        always-rebuild: true
+        push: true
 
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: calculate-manylinux-builder-cpu
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -86,7 +71,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && "pytorch/manylinux-builder:cpu-main" || needs.calculate-manylinux-builder-cpu.outputs.image }}
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
