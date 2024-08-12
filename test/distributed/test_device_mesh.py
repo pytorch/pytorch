@@ -606,12 +606,14 @@ class TestMeshEnv(DTensorTestBase):
         )
 
         dp_cp_mesh = mesh_3d["dp", "cp"]
-        cp_dp_mesh = mesh_3d["cp", "dp"]
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        cp_tp_mesh = mesh_3d["cp", "tp"]
         dp_mesh = mesh_3d["dp"]
         cp_mesh = mesh_3d["cp"]
         tp_mesh = mesh_3d["tp"]
         self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(cp_dp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_tp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(cp_tp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
