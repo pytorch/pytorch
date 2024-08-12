@@ -13,6 +13,7 @@ import warnings
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
+
 import onnx
 import onnx.numpy_helper
 import pytorch_test_common
@@ -96,7 +97,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return x.contiguous().transpose(0, 1).sum()
 
         class TraceMe(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo()
 
@@ -148,7 +149,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = PythonModule()
 
@@ -168,7 +169,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.jit.trace(ModuleToInline(), torch.zeros(1, 2, 3))
 
@@ -187,7 +188,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.neg(x)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
 
@@ -250,7 +251,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.m = torch.nn.Parameter(torch.ones(3, 3))
                 self.unused = torch.nn.Parameter(torch.ones(1, 2, 3))
@@ -260,7 +261,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 return torch.mm(x, self.m)
 
         class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = ModuleToInline()
                 self.param = torch.nn.Parameter(torch.ones(3, 4))
@@ -374,7 +375,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # Will be expanded during ONNX export
                 self.ln = torch.nn.LayerNorm([1])
@@ -484,7 +485,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 "box_coder": BoxCoder,
             }
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.box_coder = BoxCoder(1.4)
 
@@ -673,7 +674,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertRaises(RuntimeError, check_proto)
 
     def test_maintain_dynamic_shapes_of_unreliable_nodes(self):
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
+        def symbolic_pythonop(g, *args, **kwargs):
             return g.op("com.microsoft::PythonOp")
 
         torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
@@ -887,7 +888,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         mask_start_point = 0
 
         class LSTMTraceWrapper(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.rnn = torch.nn.LSTM(
@@ -1002,7 +1003,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_onnx_aten_fallback_must_not_fallback(self):
         # For BUILD_CAFFE2=0, aten fallback only when not exportable
         class ONNXExportable(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.fc1 = torch.nn.Linear(12, 8)
