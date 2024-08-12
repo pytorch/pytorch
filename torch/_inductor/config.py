@@ -102,7 +102,7 @@ memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 benchmark_harness = True
 
 # fuse pointwise into templates
-epilogue_fusion = True
+epilogue_fusion = not (os.environ.get("TORCHINDUCTOR_DISABLE_EPILOGUE_FUSION", "0") == "1")
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
