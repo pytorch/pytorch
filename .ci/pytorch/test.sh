@@ -166,7 +166,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
-  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
+  # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # Check XPU status before testing
@@ -358,10 +358,12 @@ test_inductor_shard() {
 test_inductor_aoti() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # We need to hipify before building again
+    python3 tools/amd_build/build_amd.py
   fi
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
 test_inductor_cpp_wrapper_abi_compatible() {
