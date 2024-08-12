@@ -42,7 +42,6 @@ __all__ = [
     "save_on_cpu",
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
-    "register_multi_post_accumulate_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
     "GradientEdge",
