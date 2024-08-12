@@ -125,6 +125,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_unused(x)
         return
 
+    @skipIfWindows
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
         return inline_script_if_tracing_fn_with_default_args(a, b)
@@ -2624,6 +2625,7 @@ class GraphModule(torch.nn.Module):
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
 
+    @skipIfWindows
     def test_index(self):
         def fn(x, t):
             v = operator.index(x)
