@@ -2714,7 +2714,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # Calling a torch.compiled function
                 f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
                 f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
-                "For more information, see PyTorch issue #128711."
+                "For more information, see PyTorch issue #128711.\n"
                 # if it reaches here, it means Dynamo failed to inline a functorch function
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
