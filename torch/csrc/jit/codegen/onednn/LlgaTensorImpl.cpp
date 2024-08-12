@@ -86,7 +86,7 @@ at::Tensor empty_llga(
 
 static const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
-      tensor.is_onednn(), "get_llga_desc expects Mkldnn tensor input");
+      tensor.is_onednn(), "get_llga_desc expects Onednn tensor input");
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();
 }
 

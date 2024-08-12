@@ -204,7 +204,7 @@ enum class DispatchKey : uint16_t {
   // intended for out of tree use; tested by aten/src/ATen/test/rng_test.cpp
   CustomRNGKeyId,
 
-  // TODO: Make Mkldnn a functionality key, so we can give it Meta
+  // TODO: Make Onednn a functionality key, so we can give it Meta
   // support
   // Here are backends which specify more specialized operators
   // based on the layout of the tensor.  Note that the sparse backends

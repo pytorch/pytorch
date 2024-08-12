@@ -823,7 +823,7 @@ coverage_ignore_functions = [
     "fuse",
     "gen_mkl_autotuner",
     "matches_module_pattern",
-    "modules_to_mkldnn",
+    "modules_to_onednn",
     "optimize_for_inference",
     "remove_dropout",
     "replace_node_module",
@@ -2011,7 +2011,7 @@ coverage_ignore_functions = [
     "time_cpu",
     "time_cuda",
     # torch.utils.onednn
-    "to_mkldnn",
+    "to_onednn",
     # torch.utils.mobile_optimizer
     "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary

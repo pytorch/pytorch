@@ -335,7 +335,7 @@ Operation BroadOp(const Node* node) {
       } else {
         // TODO: consider to initializing to a blocked layout
         // directly if needed
-        exp_a = a.to_dense().expand(out_size).to_mkldnn();
+        exp_a = a.to_dense().expand(out_size).to_onednn();
       }
 
       if (b_size.equals(out_size)) {
@@ -344,7 +344,7 @@ Operation BroadOp(const Node* node) {
       } else if (out_numel == b.numel()) {
         exp_b = b.reshape(out_size);
       } else {
-        exp_b = b.to_dense().expand(out_size).to_mkldnn();
+        exp_b = b.to_dense().expand(out_size).to_onednn();
       }
 
       if (stacked < 2) {
@@ -509,15 +509,15 @@ Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
 }
 
 // aten::convolution does a lot of precomputation and dispatching before
-// mkldnn_convolution is called. registering here we can directly invoke the op
+// onednn_convolution is called. registering here we can directly invoke the op
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not
-        // aten::mkldnn_convolution, which is different for some reason!
-        "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+        // aten::onednn_convolution, which is different for some reason!
+        "prim::onednn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
         [](jit::Stack& stack) {
           int64_t groups = pop(stack).toInt();
           auto dilation = pop(stack).toIntVector();
@@ -540,7 +540,7 @@ jit::RegisterOperators reg_fut_ops({
                 input.sizes(), weight.sizes(), padding, stride, dilation);
             push(
                 stack,
-                at::native::empty_mkldnn(
+                at::native::empty_onednn(
                     o,
                     c10::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
@@ -559,7 +559,7 @@ jit::RegisterOperators reg_fut_ops({
 
           push(
               stack,
-              at::native::mkldnn_convolution(
+              at::native::onednn_convolution(
                   input, weight, bias, padding, stride, dilation, groups));
         },
         aliasAnalysisFromSchema()),
@@ -572,7 +572,7 @@ jit::RegisterOperators reg_fut_ops({
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
-          auto out = at::native::empty_mkldnn(
+          auto out = at::native::empty_onednn(
               self.sizes(),
               c10::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
@@ -620,7 +620,7 @@ bool supportedMKLDNNWeight(const Tensor& weight) {
 
 void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
   Value* input = n->inputs().at(index);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
+  auto mkldnn_tensor = constant_as<Tensor>(input)->to_onednn();
   auto mkldnn_tensor_value =
       createConstantONEDNNTensorOp(n->owningGraph(), mkldnn_tensor)
           ->insertBefore(n)
@@ -644,13 +644,13 @@ void replaceInputWithMKLDNNTensor(
 
 void replaceInputWithMKLDNNTensor(Node* n, const std::string& name) {
   Value* input = n->namedInput(name);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
+  auto mkldnn_tensor = constant_as<Tensor>(input)->to_onednn();
   replaceInputWithMKLDNNTensor(n, name, mkldnn_tensor);
 }
 
 void moveConvWeightsToMKLDNN(Node* conv) {
   auto conv_w_mkldnn =
-      constant_as<Tensor>(conv->namedInput("weight")).value().to_mkldnn();
+      constant_as<Tensor>(conv->namedInput("weight")).value().to_onednn();
   std::vector<int64_t> padding =
       toIValue(conv->namedInput("padding"))->toIntVector();
   std::vector<int64_t> stride =
@@ -660,10 +660,10 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
 
   if (conv->kind() == aten::conv2d) {
-    conv_w_mkldnn = mkldnn_reorder_conv2d_weight(
+    conv_w_mkldnn = onednn_reorder_conv2d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else if (conv->kind() == aten::conv3d) {
-    conv_w_mkldnn = mkldnn_reorder_conv3d_weight(
+    conv_w_mkldnn = onednn_reorder_conv3d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else {
     TORCH_INTERNAL_ASSERT(false);
@@ -723,12 +723,12 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto to_mkldnn =
-        graph->create(c10::Symbol::fromQualString("aten::to_mkldnn"), 1)
+    auto to_onednn =
+        graph->create(c10::Symbol::fromQualString("aten::to_onednn"), 1)
             ->insertBefore(subgraph_node);
-    to_mkldnn->addInput(v);
-    to_mkldnn->addInput(none_value);
-    subgraph_node->replaceInput(i, to_mkldnn->output());
+    to_onednn->addInput(v);
+    to_onednn->addInput(none_value);
+    subgraph_node->replaceInput(i, to_onednn->output());
   }
 
   for (size_t i = 0; i < subgraph_node->outputs().size(); ++i) {
@@ -814,7 +814,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
         body_node->kind() == aten::conv3d) {
       // this node doesnt handle string padding yet...
       if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
-        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
+        body_node->replaceWithNewSymbol(Symbol::prim("onednn_convolution"));
         body_node->destroy();
         continue;
       }
@@ -861,13 +861,13 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
 // [onednn perf strategy]
 // Certain ops - aten::linear, aten::conv2d, aten::conv3d - provide a huge speed
 // up just by converting the constant weights to ONEDNN AOT, and then at runtime
-// converting the non-constant input to_mkldnn before the op, and then back to
+// converting the non-constant input to_onednn before the op, and then back to
 // its original layout after the op. The speed up holds even if you end up
-// converting the input to_mkldnn and output back to_dense. We start groups of
+// converting the input to_onednn and output back to_dense. We start groups of
 // ops to compute in ONEDNN only from these ops that are a strict speedup. Then,
 // we expand the groups to include operators which are computable in ONEDNN &
 // are roughly perf equal to eager. We do this in the hopes of joining multiple
-// fast nodes together, saving to_mkldnn and to_dense conversions.
+// fast nodes together, saving to_onednn and to_dense conversions.
 //
 // ONEDNN only supports float32 inputs for aten::linear, aten::conv2d &
 // aten::conv3d. We only fuse these nodes if the weights are float32, and then
@@ -953,11 +953,11 @@ class MKLDNNSubgraphSlicer {
     }
     auto k = v->node()->kind();
     if (k == prim::ONEDNNGroup || k == prim::ConstantONEDNNTensor ||
-        k == aten::to_mkldnn) {
+        k == aten::to_onednn) {
       return true;
     }
     for (const auto& use : v->uses()) {
-      if (use.user->kind() == aten::to_mkldnn &&
+      if (use.user->kind() == aten::to_onednn &&
           v_use->owningBlock() == use.user->owningBlock()) {
         return true;
       }

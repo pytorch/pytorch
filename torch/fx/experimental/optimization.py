@@ -128,7 +128,7 @@ mkldnn_map = {
 }
 
 
-def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+def modules_to_onednn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
     """
     For each node, if it's a module that can be preconverted into ONEDNN,
     then we do so and create a mapping to allow us to convert from the ONEDNN
@@ -148,7 +148,7 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
 
 def reset_modules(nodes: List[fx.Node], modules: Dict[str, nn.Module], old_modules: Dict[nn.Module, nn.Module]):
     """
-    Maps each module that's been changed with `modules_to_mkldnn` back to its
+    Maps each module that's been changed with `modules_to_onednn` back to its
     original.
     """
     for node in nodes:
@@ -196,7 +196,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
                 out = f()
             return time.time() - begin
 
-        mkl_time = benchmark(lambda: [i.to_dense() for i in submodule(*[i.to_mkldnn() for i in sample_inputs])])
+        mkl_time = benchmark(lambda: [i.to_dense() for i in submodule(*[i.to_onednn() for i in sample_inputs])])
 
         reset_modules(submodule.graph.nodes, dict(submodule.named_modules()), old_modules)
         no_mkl_time = benchmark(lambda: submodule(*sample_inputs))
@@ -286,7 +286,7 @@ def optimize_for_inference(
         YES = 2
         UNKNOWN = 3
 
-    # Inserts to_mkldnn and to_dense around every node we want to be a ONEDNN node.
+    # Inserts to_onednn and to_dense around every node we want to be a ONEDNN node.
     # If the op is in `mkldnn_supported` then we always treat it as a ONEDNN node.
     # However, if it's in `mkldnn_supported_unknown`, then we only treat it as
     # a ONEDNN node if its inputs are ONEDNN nodes.
@@ -311,7 +311,7 @@ def optimize_for_inference(
                 if not any(arg.target == 'to_dense' for arg in node.args):
                     continue
             with fx_graph.inserting_before(node):
-                mkldnn_args = fx.map_arg(node.args, lambda n: fx_graph.call_method('to_mkldnn', (n, )))
+                mkldnn_args = fx.map_arg(node.args, lambda n: fx_graph.call_method('to_onednn', (n, )))
 
             node.args = cast(Tuple[fx.node.Argument], mkldnn_args)
 
@@ -321,16 +321,16 @@ def optimize_for_inference(
                 dense_x.args = (node,)
 
     # Does pre-conversion of all modules into ONEDNN (when possible)
-    old_modules = modules_to_mkldnn(list(fx_graph.nodes), modules)
+    old_modules = modules_to_onednn(list(fx_graph.nodes), modules)
     fx_graph.old_modules = old_modules  # type: ignore[attr-defined]
 
-    # optimizes all a -> to_dense -> to_mkldnn -> b patterns into a -> b
+    # optimizes all a -> to_dense -> to_onednn -> b patterns into a -> b
     for node in fx_graph.nodes:
         if node.op == 'call_method' and node.target == 'to_dense':
             prv_node = node.args[0]
             users = list(node.users)
             for user in users:
-                if user.op == 'call_method' and user.target == 'to_mkldnn':
+                if user.op == 'call_method' and user.target == 'to_onednn':
                     user.replace_all_uses_with(prv_node)
                     fx_graph.erase_node(user)
             if len(node.users) == 0:
@@ -349,18 +349,18 @@ def optimize_for_inference(
 
 
     # This code is to find each ONEDNN subgraph. Each ONEDNN subgraph consists
-    # of input nodes (which are only `to_mkldnn` calls), output nodes
+    # of input nodes (which are only `to_onednn` calls), output nodes
     # (`to_dense` calls), and intermediate nodes, which are run entirely on
     # ONEDNN layout tensors.
     #
     # Specifically, this code does a flood fill on a directed acyclic graph
-    # (DAG), starting from each possible "start node" (i.e: `to_mkldnn` nodes).
+    # (DAG), starting from each possible "start node" (i.e: `to_onednn` nodes).
     # If every node only had one input, this would be sufficient. However, in
     # the case that a node has multiple inputs coming from different start
     # nodes (i.e. colors), we need to join these 2 colors into 1. That's done
     # using a Disjoint Set Union.
     for cur_idx, node in enumerate(fx_graph.nodes):
-        if node.op == 'call_method' and node.target == 'to_mkldnn':
+        if node.op == 'call_method' and node.target == 'to_onednn':
             node.start_color = cur_idx
             uf.make_set(cur_idx)
         elif node.op == 'call_method' and node.target == 'to_dense':
@@ -400,7 +400,7 @@ def optimize_for_inference(
 
     mkldnn_conversions = 0
     for node in fx_graph.nodes:
-        if node.target == 'to_mkldnn' or node.target == 'to_dense':
+        if node.target == 'to_onednn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
     logging.getLogger(__name__).info("onednn conversions: %s", mkldnn_conversions)

@@ -599,7 +599,7 @@ class TestProfiler(TestCase):
             return torch.rand(10, 10).cuda()
 
         def create_mkldnn_tensor():
-            return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
+            return torch.rand(10, 10, dtype=torch.float32).to_onednn()
 
         stats = run_profiler(create_cpu_tensor)
         check_metrics(
@@ -678,7 +678,7 @@ class TestProfiler(TestCase):
                     "test_user_scope_alloc",
                     "aten::rand",
                     "aten::empty",
-                    "aten::to_mkldnn",
+                    "aten::to_onednn",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",

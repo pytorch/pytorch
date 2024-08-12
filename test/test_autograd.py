@@ -5676,7 +5676,7 @@ Done""",
         # when onednn inputs, forward mode testing is not allowed
         # Update tolerances below to make sure the gradient match even in single precision floats
         # Use the warning assert to hide the float32 warning
-        x = torch.ones(1).to_mkldnn().requires_grad_()
+        x = torch.ones(1).to_onednn().requires_grad_()
         with self.assertWarnsRegex(
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
@@ -5734,7 +5734,7 @@ Done""",
                 ValueError, "ONEDNN output is not supported at gradcheck yet"
             ):
                 gradcheck(
-                    lambda x: x.to_mkldnn(),
+                    lambda x: x.to_onednn(),
                     (root,),
                     check_batched_grad=False,
                     raise_exception=False,
@@ -6023,7 +6023,7 @@ Done""",
                 return x + y.to_dense()
 
             a = torch.rand(10, requires_grad=True)
-            b = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+            b = torch.rand(10, dtype=torch.float32).to_onednn().requires_grad_(True)
             self.assertTrue(
                 gradcheck(
                     fn, (a, b), atol=1e-1, check_batched_grad=False, fast_mode=fast_mode
@@ -6033,7 +6033,7 @@ Done""",
             def fn2(x, y):
                 return x.to_dense() + y.to_dense()
 
-            c = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+            c = torch.rand(10, dtype=torch.float32).to_onednn().requires_grad_(True)
             self.assertTrue(
                 gradcheck(
                     fn, (a, c), atol=1e-1, check_batched_grad=False, fast_mode=fast_mode

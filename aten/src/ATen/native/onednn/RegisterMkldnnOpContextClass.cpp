@@ -17,14 +17,14 @@ using namespace internal::convolution;
 
 static bool is_onednn_bf16_supported() {
 #if defined(__aarch64__)
-  return mkldnn_bf16_device_check_arm();
+  return onednn_bf16_device_check_arm();
 #else
-  return mkldnn_bf16_device_check();
+  return onednn_bf16_device_check();
 #endif
 }
 
 static bool is_onednn_fp16_supported() {
-  return mkldnn_fp16_device_check();
+  return onednn_fp16_device_check();
 }
 
 constexpr bool is_onednn_acl_supported() {

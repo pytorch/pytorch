@@ -12,7 +12,7 @@ namespace at { namespace native {
 
 #if AT_ONEDNN_ENABLED()
 
-Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_onednn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
      !optional_memory_format.has_value(),
      "'memory_format' argument is incompatible with onednn tensor");
@@ -26,8 +26,8 @@ Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::opt
 
 #else
 
-Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(false, "empty_mkldnn: oneDNN build is disabled");
+Tensor empty_onednn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(false, "empty_onednn: oneDNN build is disabled");
 }
 
 #endif // AT_ONEDNN_ENABLED()
