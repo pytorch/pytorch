@@ -7,11 +7,17 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
+from .. import config, ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
-from .flex_attention import compute_forward_block, compute_next_offset_func
+from .flex_attention import (
+    compute_forward_block,
+    compute_next_offset_func,
+    create_indices_fake,
+    create_num_blocks_fake_generator,
+)
 
 
 aten = torch.ops.aten
@@ -360,11 +366,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     configs: List[Tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
-    # if config.max_autotune:
-    #     configs += [
-    #         (64, 2, 2),
-    #         (32, 2, 3),
-    #     ]
+    if config.max_autotune:
+        configs += [
+            (64, 2, 2),
+            (32, 2, 3),
+            (128, 2, 3),
+        ]
     # TODO: fix autotuning.
 
     kernel_options["SM_SCALE"] = scale
@@ -417,6 +424,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         )
     )
 
+    query = ir.ExternKernel.realize_input(query)
+    q_stride = query.get_stride()
+
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
     gqa_query_shape = (
         query.get_size()[:1]
@@ -424,9 +434,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         + query.get_size()[2:]
     )
     gqa_query_stride = (
-        query.get_stride()[:1]
-        + [query.get_stride()[1] * gqa_shared_heads, query.get_stride()[1]]
-        + query.get_stride()[2:]
+        q_stride[:1] + [q_stride[1] * gqa_shared_heads, q_stride[1]] + q_stride[2:]
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
@@ -450,6 +458,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         kernel_options["BLOCK_N"] = BLOCK_N
         kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
 
+        # Work around https://github.com/pytorch/pytorch/issues/129625
+        if num_stages == 2:
+            continue
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -491,8 +502,19 @@ def create_flex_decoding_kernel(*args, **kwargs):
         + list(mask_mod_other_buffers)
     )
 
+    input_gen_fns = {
+        5: create_num_blocks_fake_generator(kv_indices),
+        6: create_indices_fake,
+        7: create_num_blocks_fake_generator(full_kv_indices),
+        8: create_indices_fake,
+    }
+
     buf_ACC = autotune_select_algorithm(
-        "flex_decoding", choices, inputs_for_flex_decoding, layout_acc
+        "flex_decoding",
+        choices,
+        inputs_for_flex_decoding,
+        layout_acc,
+        input_gen_fns=input_gen_fns,
     )
 
     # Reduction
