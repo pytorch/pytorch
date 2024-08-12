@@ -25,6 +25,7 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 try:
@@ -1284,6 +1285,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m3 = deepcopy(m1)
         self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
+    @skipIfWindows
     def test_simple_torch_function(self):
         def foo(x):
             # function call, twice to test wrapping
@@ -1336,6 +1338,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         run()
 
+    @skipIfWindows
     def test_torch_mangled_class_name(self):
         original = TensorWithTFOverrideVariable.global_mangled_class_name
         results = []

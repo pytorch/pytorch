@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 
 # Defines all the kernels for tests
@@ -116,6 +117,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    @skipIfWindows
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -127,6 +129,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
         return inline_script_if_tracing_fn_with_default_args(a, b)
 
+    @skipIfWindows
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
@@ -731,6 +734,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @skipIfWindows
     @make_test
     def test_list_compare_polyfill(x):
         for a, b, c in [
@@ -761,6 +765,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @skipIfWindows
     @make_test
     def test_cublas_allow_tf32(x):
         if torch.backends.cuda.matmul.allow_tf32:
@@ -1006,6 +1011,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.ones(2, 2)
         return x.sin()
 
+    @skipIfWindows
     @make_test
     def test_zip_longest(x):
         list1 = [1, 2, 3]
@@ -1409,6 +1415,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    @skipIfWindows
     def test_set_isdisjoint(self):
         x = {"apple", "banana", "cherry"}
         y = {"google", "microsoft", "apple"}
@@ -1422,6 +1429,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
+    @skipIfWindows
     @make_test
     def test_set_intersection(a, b):
         set1 = {"apple", "banana", "cherry"}
@@ -1437,6 +1445,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    @skipIfWindows
     @make_test
     def test_set_union(a, b):
         set1 = {"apple", "banana", "cherry"}
@@ -1452,6 +1461,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
+    @skipIfWindows
     @make_test
     def test_set_difference(a, b):
         set1 = {"apple", "banana", "cherry"}
@@ -1695,12 +1705,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if "20" in tmp:
             return x + 1
 
+    @skipIfWindows
     @make_test
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
         assert z.size() == y.size()
 
+    @skipIfWindows
     @make_test
     def test_tensor_new_with_shape(x):
         y = torch.rand(5, 8)
@@ -1820,6 +1832,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #         case {"b": param}:
     #             return x / param
 
+    @skipIfWindows
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)

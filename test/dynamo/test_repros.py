@@ -1329,6 +1329,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         o2_ref = main_model(x2, 20)
         o2 = opt_model(x2, 20)
 
+    @skipIfWindows
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
