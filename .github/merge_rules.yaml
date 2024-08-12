@@ -367,7 +367,7 @@
   - aten/src/ATen/native/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
-  - aten/src/ATen/native/mkldnn/**
+  - aten/src/ATen/native/onednn/**
   - test/test_mkl*.py
   approved_by:
   - mingfeima

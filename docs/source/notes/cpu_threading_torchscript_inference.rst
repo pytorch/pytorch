@@ -50,7 +50,7 @@ PyTorch uses an internal ATen library to implement ops. In addition to that,
 PyTorch can also be built with support of external libraries, such as MKL_ and MKL-DNN_,
 to speed up computations on CPU.
 
-ATen, MKL and MKL-DNN support intra-op parallelism and depend on the
+ATen, MKL and oneDNN support intra-op parallelism and depend on the
 following parallelization libraries to implement it:
 
 * OpenMP_ - a standard (and a library, usually shipped with a compiler), widely used in external libraries;
@@ -77,7 +77,7 @@ libraries at the build time with the following build options:
 +------------+------------------------+-----------------------------+----------------------------------------+
 | MKL        | ``MKL_THREADING``      | (same)                      | To enable MKL use ``BLAS=MKL``         |
 +------------+------------------------+-----------------------------+----------------------------------------+
-| MKL-DNN    | ``MKLDNN_CPU_RUNTIME`` | (same)                      | To enable MKL-DNN use ``USE_MKLDNN=1`` |
+| oneDNN    | ``ONEDNN_CPU_RUNTIME`` | (same)                      | To enable oneDNN use ``USE_ONEDNN=1`` |
 +------------+------------------------+-----------------------------+----------------------------------------+
 
 It is recommended not to mix OpenMP and TBB within one build.
