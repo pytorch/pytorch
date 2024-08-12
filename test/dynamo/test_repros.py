@@ -4279,6 +4279,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         "func_name",
         ["func1", "func2", "func3"],
     )
+    @skipIfWindows
     def test_tensor_set_data(self, backend, func_name):
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
