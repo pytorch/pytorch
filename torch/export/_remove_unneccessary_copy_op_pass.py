@@ -1,10 +1,11 @@
-import torch 
+import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from .graph_signature import ExportGraphSignature
+from typing import Tuple
 
 
-def _remove_unneccessary_copy_op_pass(gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature):
+def _remove_unneccessary_copy_op_pass(gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature) -> Tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """

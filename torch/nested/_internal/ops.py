@@ -426,6 +426,37 @@ register_jagged_func(
 )(is_contiguous_general)
 
 
+@register_jagged_func(
+    torch.ops.aten.clone.default, "input: jt_all, memory_format: any?"
+)
+def clone_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    new_meta = extract_kwargs(inp)
+
+    if inp._lengths is not None:
+        if new_kwargs["memory_format"] == torch.contiguous_format:
+            # need to copy to remove "holes" non-contiguity / lengths metadata
+            # TODO: write a kernel for this
+            from .nested_tensor import jagged_from_list
+
+            # TODO: We probably want the output to have the same ragged structure / nested int.
+            assert (
+                inp._ragged_idx == 1
+            ), "NJT with ragged_idx != 1 not supported for contiguous clone"
+            contig, _ = jagged_from_list(inp.unbind(), offsets=None)
+            return contig
+        else:
+            # need to preserve any lengths metadata present
+            new_meta["lengths"] = inp._lengths
+
+    return NestedTensor(func(inp._values, **new_kwargs), **new_meta)
+
+
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -480,20 +511,7 @@ def _to_copy_default(func, *args, **kwargs):
 
     # Copy to a new Python subclass NestedTensor
     new_offsets = inp._offsets.to(device=new_values.device)
-
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        mb_unwrap_functional_tensor,
-    )
-
-    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
-        # Temporary hack until we have the union find
-        tgt = mb_unwrap_functional_tensor(new_offsets)
-        src = mb_unwrap_functional_tensor(inp._offsets)
-        tgt.nested_int_memo = src.nested_int_memo
-    else:
-        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+    _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
 
@@ -661,8 +679,8 @@ def _softmax_default(func, *args, **kwargs):
     if reduce_on_ragged:
         padded_softmax_values = torch.nn.functional.softmax(
             torch.ops.aten._jagged_to_padded_dense_forward(
-                inp._values.flatten(
-                    start_dim=inp._ragged_idx
+                inp._values.reshape(
+                    inp._values.shape[0], -1
                 ),  # values are required to be 2D tensors for j2pd
                 [inp._offsets],
                 max_lengths=[inp._max_seqlen],  # max length of ragged dimension

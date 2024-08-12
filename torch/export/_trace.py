@@ -14,7 +14,6 @@ import torch
 import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.db.logging import (
@@ -2075,6 +2074,9 @@ def _export(
     _verify_stack_trace(gm)
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
 
     from torch._export.verifier import Verifier
 

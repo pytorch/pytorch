@@ -1,11 +1,9 @@
 
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import contextlib
 import copy
 import dataclasses
 import functools
-import re
 import types
 import warnings
 from collections import namedtuple
@@ -43,15 +41,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _get_shape_env_from_gm, _detect_fake_mode_from_gm, _collect_constant_attrs
 from torch._export.verifier import Verifier
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.export._remove_unneccessary_copy_op_pass import _remove_unneccessary_copy_op_pass
 from torch.fx._compatibility import compatibility
-from torch.fx._utils import first_call_function_nn_module_stack
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
     ArgumentSpec,
@@ -95,7 +91,7 @@ class ModuleCallEntry:
 def _disable_prexisiting_fake_mode(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             return fn(*args, **kwargs)
 
     return wrapper
@@ -256,9 +252,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _preserve_ops: Tuple[torch._ops.OpOverload],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import ConstantAttrMap
-    from torch._functorch.aot_autograd import aot_export_module
-    from torch._guards import detect_fake_mode
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
         _export_to_aten_ir,

@@ -252,7 +252,13 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
+            ChromiumEventLogger.log_event_start(key, time.time_ns())
+            if phase_name:
+                ChromiumEventLogger.log_event_start(phase_name, time.time_ns())
             yield
+            if phase_name:
+                ChromiumEventLogger.log_event_end(phase_name, time.time_ns())
+            ChromiumEventLogger.log_event_end(key, time.time_ns())
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -797,6 +803,105 @@ def clear_compilation_metrics() -> None:
 
 def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
     return list(_compilation_metrics)
+
+
+class ChromiumEventLogger:
+    """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
+
+    See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
+    a specification of the Chromium Event JSON format.
+    """
+
+    @staticmethod
+    def log_event_start(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the start of a single event.
+        :param str event_name Name of event to appear in trace
+        :param time_ns Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "B",
+            metadata,
+        )
+
+    @staticmethod
+    def log_event_end(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the end of a single event. This function should only be
+        called after log_event_start with the same event_name.
+        :param event_name: Name of event to appear in trace
+        :param time_ns: Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            metadata,
+        )
+
+    @staticmethod
+    def _log_timed_event(
+        event_name: str,
+        time_ns: int,
+        phase: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,  # Chromium events are in ms
+            "args": metadata,
+            "ph": phase,
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=False,  # Not every chromium event will have a trace_id
+        )
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an instant event with no associated duration.
+        :param str event_name: Name of event to appear in trace
+        :param int time_ns Timestamp in nanoseconds
+        :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
+        :param str cname optional color for the arrow in the trace
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,
+            "args": metadata,
+            "ph": "i",
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+            "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=True,
+        )
 
 
 @dataclasses.dataclass
@@ -1405,6 +1510,7 @@ def same(
                 relax_numpy_equality,
                 ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -1423,6 +1529,7 @@ def same(
             relax_numpy_equality,
             ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -1442,6 +1549,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                     ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
+                    use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -1553,15 +1661,16 @@ def same(
                     passes_test = True
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f"
+                        ", use_larger_multiplier_for_smaller_tensor: %d",
                         res_error,
                         ref_error,
                         res.size(),
                         res.dtype,
                         multiplier,
                         tol,
+                        use_larger_multiplier_for_smaller_tensor,
                     )
-                    # import pdb; pdb.set_trace()
                 return passes_test
 
             if ignore_non_fp:
@@ -1597,6 +1706,7 @@ def same(
             relax_numpy_equality=relax_numpy_equality,
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -1624,6 +1734,7 @@ def same(
                 relax_numpy_equality=relax_numpy_equality,
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for key in ref.__dict__.keys()
         )
@@ -2211,7 +2322,6 @@ def nn_module_get_all_hooks(
     check_backward_hooks=False,
     check_state_dict_hooks=False,
 ):
-    reset_code = torch._C._dynamo.eval_frame.reset_code
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
