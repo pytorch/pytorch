@@ -125,12 +125,14 @@ def auto_functionalized_dense(
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     _all_aliased = kwargs.pop("_all_aliased", [])
-    kwargs.pop("_arg_to_aliased", {})
+    
+    _mutable_args_names = get_mutable_arg_names(_mutable_op)
+    _arg_to_aliased = {}
+    for name in _mutable_args_names:
+        _arg_to_aliased[name] = kwargs.pop("_{}_aliases".format(name))
+        
     new_kwargs = dict(**kwargs)
     result = []
-
-    _mutable_args_names = get_mutable_arg_names(_mutable_op)
-
     for name in _mutable_args_names:
         if (
             _only_clone_these_tensors is not None
@@ -162,6 +164,8 @@ def auto_functionalized_dense(
             ):
                 # if the argument is mutated in place, item would have already observed the effect.
                 pass
+            if alias._cdata not in[t._cdata for t in _arg_to_aliased[name]]:
+                continue
             else:
                 # observe the effect that happened on `name`
                 mutation_source = new_kwargs[name]
@@ -292,10 +296,12 @@ def do_auto_functionalize(
     all_aliased_unwrapped = ctx.unwrap_tensors(all_aliased_original)
 
     with ctx.redispatch_to_next():
-        # output of auto_functionalized is going to be as the following:
-        # op_output, mutated_arg1, ..., all_aliased[0], ...
+       
+        for arg in mutable_args_names:
+            unwrapped_kwargs["_{}_aliases".format(arg)] = arg_to_aliased.get(arg,[])
+
         unwrapped_outs = auto_functionalized(
-            op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped, _arg_to_aliased=arg_to_aliased)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
