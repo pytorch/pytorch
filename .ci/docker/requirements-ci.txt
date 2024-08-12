@@ -312,3 +312,9 @@ lxml==5.0.0
 # Python-3.9 binaries
 
 PyGithub==2.3.0
+
+sympy==1.12.1 ; python_version == "3.8"
+sympy==1.13.1 ; python_version >= "3.9"
+#Description: The Z3 Theorem Prover Project
+#Pinned versions:
+#test that import:
