@@ -66,7 +66,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
 )
 
 # dead code elimination
@@ -453,6 +453,18 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# enable the combo kernel that combines data-independent kernels (additional
+# to foreach kernels) into a single one (Experimental)
+combo_kernels = False
+# benchmark combo kernels and only allow ones with perf gains
+benchmark_combo_kernel = False
+# combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
+# 2 - enable for all
+combo_kernels_autotune = 1
+# Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
+# for all except for foreach, 2 - enable for all
+combo_kernel_allow_mixed_sizes = 1
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
@@ -534,7 +546,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode() and worker_start_method != "subprocess":
+    elif is_fbcode():
         return 1
     else:
         cpu_count = (
@@ -790,6 +802,10 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
+    # Prefer higher dimensional tilings. This simplifies indexing expressions, making
+    # it easier to identify block pointers.
+    prefer_nd_tiling: bool = False
+
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
@@ -874,6 +890,15 @@ class aot_inductor:
     debug_dump_consts_bin: bool = (
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
+
+    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
+    # for debugging purpose
+    debug_intermediate_value_printer = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    )
+
+    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
@@ -969,10 +994,9 @@ class rocm:
     # If empty, the `native` arch is used
     arch: List[str] = []
 
-    # Enable for CDNA3 only for now
+    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    # Keep it ordered, unordered set can cause spurious inductor cache misses
-    supported_arch: List[str] = ["gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
