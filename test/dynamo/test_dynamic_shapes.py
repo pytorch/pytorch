@@ -5,7 +5,7 @@ import warnings
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import slowTest, TEST_Z3
+from torch.testing._internal.common_utils import IS_WINDOWS, slowTest, TEST_Z3
 
 
 try:
@@ -14,7 +14,6 @@ try:
         test_ctx_manager,
         test_export,
         test_functions,
-        test_higher_order_ops,
         test_misc,
         test_modules,
         test_repros,
@@ -26,7 +25,6 @@ except ImportError:
     import test_ctx_manager
     import test_export
     import test_functions
-    import test_higher_order_ops
     import test_misc
 
     import test_modules
@@ -34,6 +32,11 @@ except ImportError:
     import test_sdpa
     import test_subgraphs
 
+if not IS_WINDOWS:
+    try:
+        from . import test_higher_order_ops
+    except ImportError:
+        import test_higher_order_ops
 
 test_classes = {}
 
@@ -70,11 +73,14 @@ tests = [
     test_modules.NNModuleTests,
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
-    test_higher_order_ops.HigherOrderOpTests,
-    test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
     test_sdpa.TestSDPA,
 ]
+if not IS_WINDOWS:
+    tests += [
+        test_higher_order_ops.HigherOrderOpTests,
+        test_higher_order_ops.FuncTorchHigherOrderOpTests,
+    ]
 for test in tests:
     make_dynamic_cls(test)
 del test
