@@ -52,8 +52,7 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        # Fails due to https://github.com/pytorch/pytorch/issues/131929
-        dynamo_config.patch(inline_inbuilt_nn_modules=False),
+        dynamo_config.patch(inline_inbuilt_nn_modules=True),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -218,6 +217,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -248,6 +248,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             and epilogue != "mul"
             and epilogue != "div"
             or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype == torch.float32
+                and epilogue == "add"
+                and not bias
+                and dynamo_config.dynamic_shapes
+                and not dynamo_config.assume_static_by_default
+            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
@@ -256,6 +263,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    div fusion which is not supported for oneDNN linear.
             # 2. For float16, since oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
+            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
+            #    and linear w/o bias plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -617,7 +626,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @inductor_config.patch({"freezing": True})
     @patches
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch.no_grad
     @parametrize("batch_size", (3, 16, 32, 49))
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
