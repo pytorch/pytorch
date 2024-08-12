@@ -46,6 +46,8 @@ static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
     "NCCL_BLOCKING_WAIT"};
 
+// TODO: We want to eventually remove this variable and make users to use
+// the default value (3 - SkipCleanUp).
 // Control whether or not we perform Async Error Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
@@ -99,7 +101,7 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
-// Control the interval inside the watchdog thread to check the coordinated
+// Control the interval inside the monitoring thread to check the coordinated
 // signal from other ranks, e.g. to dump the debugging information.
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
@@ -477,8 +479,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
+  // This function returns a local uid for ProcessGroupNCCL.
   uint64_t getUid() {
-    return static_cast<uint64_t>(uid_);
+    return static_cast<uint64_t>(local_id_);
   }
 
   c10::intrusive_ptr<Options> getOptions() {
@@ -1119,7 +1122,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-  size_t uid_;
+  // The number of ProcessGroupNCCL created on the current rank.
+  size_t local_id_;
 
   std::string logPrefix_;
 
