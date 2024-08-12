@@ -26,6 +26,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     LAYOUT_TO_ATEN,
 )
+from .debug_utils import DebugPrinterManager
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
@@ -188,7 +189,15 @@ class CppWrapperCpu(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if config.profiler_mark_wrapper_call or enable_kernel_profile:
+            self.header.splice("#include <ATen/record_function.h>")
 
+        self.header.splice("typedef at::Half half;")
+        self.header.splice("typedef at::BFloat16 bfloat16;")
         self.header.splice("#include <c10/util/generic_math.h>")
 
         if not V.graph.aot_mode:
@@ -924,14 +933,27 @@ class CppWrapperCpu(WrapperCodeGen):
         ), "codegen_tensor_item is only used for the ABI-compatible mode"
         dtype_str = str(dtype).split(".")[-1]
         writer = indented_buffer or self
-        writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
 
-        # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-        tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            scalar_tmp = f"{scalar}_tmp"
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar_tmp};")
 
-        writer.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
-        )
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
+            )
+            writer.writeline(f"float {scalar} = float({scalar_tmp});")
+        else:
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
+            )
 
     @cache_on_self
     def get_output_refs(self):
@@ -1194,6 +1216,11 @@ class CppWrapperCpu(WrapperCodeGen):
         self.allow_stack_allocation = False
 
         wrapped_args = []
+        args_to_print = None
+        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
+        if enable_debug_printer:
+            args_to_print = []
+
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
@@ -1206,13 +1233,19 @@ class CppWrapperCpu(WrapperCodeGen):
                 if isinstance(piece, str) and piece.startswith(
                     ("buf", "arg", "wrap_with_raii_handle_if_needed")
                 ):
+                    # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
+                    # Find a more reliable way to detect tensor kernel args for extern kernel calls
+                    if enable_debug_printer:
+                        if piece.startswith(("buf", "arg")):
+                            args_to_print.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        shim_fn = self.get_c_shim_func_name(kernel)
-        self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
-        )
+        with DebugPrinterManager(enable_debug_printer, args_to_print, kernel):
+            shim_fn = self.get_c_shim_func_name(kernel)
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+            )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
         # registered output buffer name
@@ -1285,6 +1318,7 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.abi_compatible:
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
+            # TODO: add debug printing info for non-abi compatible mode extern kernel call
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_scatter_fallback(
@@ -2111,19 +2145,19 @@ class CppWrapperCpu(WrapperCodeGen):
             if isinstance(output_args, str):
                 output_args = [output_args]
 
-        if config.is_fbcode():
+        if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
             assert outputs is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -2191,6 +2225,24 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
                 return f'PyUnicode_FromString("{raw_arg}")'
+            elif isinstance(arg_type, torch.NumberType):
+                # Union[bool, int, float, complex]
+                # torch/_prims_common/__init__.py
+                if isinstance(raw_arg, int):
+                    return f"PyLong_FromLongLong({raw_arg})"
+                elif isinstance(raw_arg, float):
+                    return f"PyFloat_FromDouble({raw_arg})"
+                elif isinstance(raw_arg, bool):
+                    return f"PyBool_FromLong({1 if raw_arg else 0})"
+                elif isinstance(raw_arg, complex):
+                    return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
+                elif isinstance(raw_arg, torch.SymInt):
+                    expr = raw_arg.node.expr
+                    return f"PyLong_FromLongLong({self.expr_printer(expr)})"
+                else:
+                    raise NotImplementedError(
+                        f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
+                    )
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
@@ -2207,7 +2259,7 @@ if (custom_op_wrapper.get() == NULL) {
             lines += f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(raw_arg, arg_type)});\n"
         return lines
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_oss(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -2220,7 +2272,7 @@ if (custom_op_wrapper.get() == NULL) {
         raw_args=None,
         output_args: Optional[List[str]] = None,
     ):
-        if V.graph.aot_mode or not config.abi_compatible:
+        if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
             if cpp_kernel_key not in self.extern_call_ops:
                 self.writeline(
@@ -2288,7 +2340,7 @@ if (py_{buf_name}.get() == NULL) {{
             )
             self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
         self,
         cpp_kernel_key,
         op_overload,
@@ -2351,8 +2403,8 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            # uint64_t is long on Linux, but long long on MacOS
-            return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
+            # uint64_t is long on Linux, but long long on MacOS and Windows
+            return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
@@ -2408,12 +2460,7 @@ if (py_{buf_name}.get() == NULL) {{
                 else:
                     raise AssertionError("Can not map None to a known data type")
             else:
-                if isinstance(type_, torch.TensorType):
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"at::Tensor {var_name} = at::Tensor();")
-                    return var_name
-                else:
-                    return "std::nullopt"
+                return "std::nullopt"
 
         if isinstance(type_, torch.OptionalType):
             element_type = type_.getElementType()
@@ -2471,12 +2518,18 @@ if (py_{buf_name}.get() == NULL) {{
             ), f"{val} does not match with arg type {type_}"
             element_type = type_.getElementType()
             if config.abi_compatible:
-                assert len(val) > 0, "Empty array is not supported in C"
                 var_name = f"var_array_{next(self.var_array_id)}"
-                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
-                self.writeline(
-                    f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
-                )
+                if len(val) == 0:
+                    # Zero-size array is not supported in the C or C++ standard, so
+                    # we declare a null pointer for it.
+                    self.writeline(
+                        f"const {self.c_type_for_prim_type(element_type)}* {var_name} = nullptr;"
+                    )
+                else:
+                    result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+                    self.writeline(
+                        f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
+                    )
                 # Need to pass the array length because we can't use std::vector
                 return f"{var_name}, {len(val)}"
             else:

@@ -5,6 +5,7 @@ import inspect
 import logging
 import operator
 import textwrap
+import traceback
 import types
 import unittest
 from typing import Dict, List, TYPE_CHECKING
@@ -15,9 +16,6 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -27,6 +25,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented, UserError, UserErrorType
@@ -49,10 +48,16 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +137,7 @@ class TensorVariable(VariableTracker):
         is_contiguous=None,
         _is_name_set=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
         self.dtype = dtype
@@ -321,7 +326,9 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.is_sparse)
 
     def method_attr_data(self, tx):
-        return self.call_method(tx, "detach", [], {})
+        return variables.TorchInGraphFunctionVariable(
+            torch._C._autograd._get_data_attr
+        ).call_function(tx, [self], {})
 
     def method_attr_grad_fn(self, tx):
         if self.has_grad_fn:
@@ -436,6 +443,24 @@ class TensorVariable(VariableTracker):
         if result is None:
             raise NotImplementedError
         return result
+
+    def call_id(self, tx):
+        if not self.source:
+            unimplemented("call_id not supported for sourceless TensorVariable")
+
+        # For local source, we associate the real value. We use this real value
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        try:
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except Exception as exc:
+            unimplemented(f"error getting associated real value: {exc}")
+
+        if _input_associated_real_value is None:
+            unimplemented("call_id without associated real value")
+
+        install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+        id_value = id(_input_associated_real_value)
+        return ConstantVariable.create(id_value)
 
     def has_unpack_var_sequence(self, tx):
         return self.ndim > 0
@@ -746,6 +771,8 @@ class TensorVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
+        user_stack = torch._guards.TracingContext.extract_stack()
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
         log.warning(
             textwrap.dedent(
                 """\
@@ -754,8 +781,12 @@ class TensorVariable(VariableTracker):
                     or:
                         env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
                     to include these operations in the captured graph.
+
+                    Graph break: from user code at:
+                    %s
                 """
-            )
+            ),
+            user_stack_formatted,
         )
 
     def method___len__(self):
@@ -1042,7 +1073,7 @@ class SymNodeVariable(VariableTracker):
 
         return SymNodeVariable(proxy, sym_num, **options)
 
-    def __init__(self, proxy, sym_num, **kwargs):
+    def __init__(self, proxy, sym_num, **kwargs) -> None:
         super().__init__(**kwargs)
         self.proxy = proxy
         # TODO: Should we allow non SymTypes here?  Today it is allowed
@@ -1103,7 +1134,7 @@ class NumpyNdarrayVariable(TensorVariable):
     """
 
     @staticmethod
-    def create(tx, proxy, **options):
+    def create(tx: "InstructionTranslator", proxy, **options):
         from .builder import wrap_fx_proxy_cls
 
         return wrap_fx_proxy_cls(
@@ -1221,7 +1252,7 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(
         self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
-    ):
+    ) -> None:
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -1245,7 +1276,7 @@ class FakeItemVariable(TensorVariable):
         *TensorVariable._nonvar_fields,
     }
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs) -> None:
         need_unwrap = kwargs.pop("need_unwrap", False)
         super().__init__(proxy, **kwargs)
         self.need_unwrap = need_unwrap
@@ -1256,7 +1287,7 @@ class FakeItemVariable(TensorVariable):
 
 
 class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs):
+    def __init__(self, value, *args, **kwargs) -> None:
         self.value = value
         super().__init__(*args, **kwargs)
 
@@ -1298,7 +1329,7 @@ class UntypedStorageVariable(VariableTracker):
         from_tensor: TensorVariable,
         example_value: torch.UntypedStorage,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs),
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"

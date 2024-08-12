@@ -35,6 +35,7 @@ from torch.utils._foreach_utils import (
 )
 from torch.utils.hooks import RemovableHandle
 
+
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
@@ -209,7 +210,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:
