@@ -3,7 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ideep.hpp>
 
 #ifndef IDEEP_PREREQ
@@ -38,10 +38,10 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size);
 
-// Construct aten MKL-DNN tensor given an ideep tensor
+// Construct aten oneDNN tensor given an ideep tensor
 TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
-// Retrieve `ideep::tensor` from MKL-DNN tensor
+// Retrieve `ideep::tensor` from oneDNN tensor
 TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
 TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
@@ -56,12 +56,12 @@ TORCH_API ideep::tensor itensor_view_from_dense(
     const at::Tensor& tensor,
     const ideep::tensor::desc& desc);
 
-// Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
+// Helper function for getting an ideep tensor out of an aten Tensor or oneDNN tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr=false);
 
-// Set MKLDNN verbose level
+// Set ONEDNN verbose level
 TORCH_API int set_verbose(int level);
 
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -15,7 +15,7 @@ class TestMKLDNNVerbose(TestCase):
                 line = str(line, 'utf-8').strip()
                 if line.startswith("onednn_verbose"):
                     num = num + 1
-                elif line == 'Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope.':
+                elif line == 'Failed to set ONEDNN into verbose mode. Please consider to disable this verbose scope.':
                     return
         self.assertTrue(num > 0, 'oneDNN verbose messages not found.')
 

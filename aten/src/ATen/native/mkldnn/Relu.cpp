@@ -9,25 +9,25 @@
 #include <ATen/ops/threshold_backward_native.h>  // for mkldnn_relu_backward
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
 Tensor mkldnn_relu(const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_relu_(Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
-  TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -73,4 +73,4 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

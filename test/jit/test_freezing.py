@@ -2746,7 +2746,7 @@ class TestFrozenOptimizations(JitTestCase):
         self.assertEqual(output_s, output_f)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_freeze_mkdlnn(self):
         conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
@@ -2756,7 +2756,7 @@ class TestFrozenOptimizations(JitTestCase):
         self.assertEqual(out(inp.to_mkldnn()).to_dense(), conv(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_conv_to_mkldnn(self):
         with set_default_dtype(torch.float):
@@ -2779,11 +2779,11 @@ class TestFrozenOptimizations(JitTestCase):
 
                 FileCheck().check("conv").run(scripted_mod.graph)
                 # successfully no-ops with non-const inputs
-                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
                 FileCheck().check_not("to_mkldnn").run(scripted_mod.graph)
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
-                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
                 FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
                     "to_dense"
                 ).run(scripted_mod.graph)
@@ -2857,14 +2857,14 @@ class TestFrozenOptimizations(JitTestCase):
         return nn.Conv2d(8, 8, 1)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_collapse_adjacent_conversions(self):
         with set_default_dtype(torch.float):
             mod = nn.Sequential(self.conv(), self.conv()).eval()
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
-            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
             FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
                 "prim::mkldnn_convolution"
             ).check("to_dense").run(scripted_mod.graph)
@@ -2877,7 +2877,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(scripted_mod(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_mkldnn_fuser_broadcasting(self):
         class Add(nn.Module):
@@ -2893,7 +2893,7 @@ class TestFrozenOptimizations(JitTestCase):
                 mod = nn.Sequential(self.conv(), Add(torch.rand(add_inp))).eval()
                 scripted_mod = torch.jit.script(mod)
                 scripted_mod = torch.jit.freeze(scripted_mod)
-                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
                 FileCheck().check("prim::BroadcastMKLDNNTensors").run(
                     scripted_mod.graph
                 )
@@ -2910,7 +2910,7 @@ class TestFrozenOptimizations(JitTestCase):
                     )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_mkldnn_inplace_removal(self):
         class AddMul(nn.Module):
@@ -2925,7 +2925,7 @@ class TestFrozenOptimizations(JitTestCase):
             mod = nn.Sequential(self.conv(), AddMul(torch.rand([8]))).eval()
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
-            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
             # add gets uninplaced and reinplaced
             FileCheck().check("aten::to_mkldnn").check("aten::add_").check(
                 "aten::div_"
@@ -2935,7 +2935,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(scripted_mod(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     @skipIfNoTorchVision
     def test_maxpool_mkldnn(self):
@@ -2957,7 +2957,7 @@ class TestFrozenOptimizations(JitTestCase):
                 224,
             )
             inp = torch.randn(N, C, H, W)
-            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
             FileCheck().check("max_pool").check("to_dense").run(mod.graph)
             FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
             self.assertEqual(mod(inp), sub_model(inp))
@@ -2968,7 +2968,7 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
             frozen = torch.jit.freeze(mod)
-            self.run_pass("convert_frozen_ops_to_mkldnn", frozen.graph)
+            self.run_pass("convert_frozen_ops_to_onednn", frozen.graph)
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
@@ -3083,7 +3083,7 @@ class TestFrozenOptimizations(JitTestCase):
             )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_numel_less_than_size_with_padding(self):
         with set_default_dtype(torch.float):
@@ -3117,7 +3117,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertTrue(all(torch.allclose(x, y) for x, y in zip(out, eout)))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_incompatible_perf_formats(self):
         with set_default_dtype(torch.float):
@@ -3148,11 +3148,11 @@ class TestFrozenOptimizations(JitTestCase):
                 224,
             )
             inp = torch.randn(N, C, H, W)
-            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
             self.assertEqual(model(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_pool2d_batchnorm(self):
         with set_default_dtype(torch.float):
@@ -3189,12 +3189,12 @@ class TestFrozenOptimizations(JitTestCase):
                 # a size check in BatchNorm2d
                 removeExceptions(mod.graph)
                 self.run_pass("dce", mod.graph)
-                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
                 self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_pool3d_batchnorm(self):
         with set_default_dtype(torch.float):
@@ -3221,12 +3221,12 @@ class TestFrozenOptimizations(JitTestCase):
                 # a size check in BatchNorm2d
                 removeExceptions(mod.graph)
                 self.run_pass("dce", mod.graph)
-                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
                 self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     @skipIfNoTorchVision
     def test_conv_hardswish(self):
@@ -3273,14 +3273,14 @@ class TestFrozenOptimizations(JitTestCase):
                 sub_model.eval()
                 mod = torch.jit.freeze(torch.jit.script(sub_model))
                 inp = torch.randn(N, C, H, W)
-                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
                 FileCheck().check_count("aten::to_dense", 1, exactly=True).run(
                     mod.graph
                 )
                 self.assertEqual(sub_model(inp), mod(inp))
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_hardswish_hardsigmoid(self):
         with set_default_dtype(torch.float):
@@ -3309,7 +3309,7 @@ class TestFrozenOptimizations(JitTestCase):
                         self.assertEqual(aten_op(x, inplace=False), m(x).to_dense())
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_scalar_mul(self):
         with set_default_dtype(torch.float):
@@ -3357,7 +3357,7 @@ class TestFrozenOptimizations(JitTestCase):
 
 
 @skipIfTorchDynamo("somehow causing hanging during python shutdown")
-@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "oneDNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -3376,7 +3376,7 @@ class TestMKLDNNReinplacing(JitTestCase):
 
     def freezeAndConvert(self, mod):
         mod = torch.jit.freeze(torch.jit.script(mod.eval()))
-        self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+        self.run_pass("convert_frozen_ops_to_onednn", mod.graph)
         return mod
 
     def checkResults(self, mod1, mod2):

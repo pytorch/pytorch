@@ -691,7 +691,7 @@ constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
 constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
-constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
+constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::OnednnCPU);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
@@ -706,7 +706,7 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::Vulkan,
          DispatchKey::Metal,
          DispatchKey::CustomRNGKeyId,
-         DispatchKey::MkldnnCPU,
+         DispatchKey::OnednnCPU,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
          DispatchKey::SparseCsr,

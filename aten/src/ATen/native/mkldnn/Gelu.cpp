@@ -10,21 +10,21 @@
 #include <ATen/ops/gelu_backward_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
 Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
-  TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10::string_view approximate) {
-  TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -61,4 +61,4 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

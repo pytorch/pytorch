@@ -729,7 +729,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_constant_pooling",
         "torch._C._jit_pass_constant_propagation_immutable_types",
         "torch._C._jit_pass_constant_propagation",
-        "torch._C._jit_pass_convert_frozen_ops_to_mkldnn",
+        "torch._C._jit_pass_convert_frozen_ops_to_onednn",
         "torch._C._jit_pass_create_autodiff_subgraphs",
         "torch._C._jit_pass_create_functional_graphs",
         "torch._C._jit_pass_cse",

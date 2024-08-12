@@ -17,14 +17,14 @@
 #include <ATen/ops/mkldnn_convolution_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with ONEDNN support");
 }
 
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
@@ -33,7 +33,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -123,14 +123,14 @@ static void check_shape_forward(const Tensor& input,
       optTypeMetaToScalarType(options.dtype_opt()),                     \
       options.device_opt())
 
-// Note [MKLDNN Convolution Memory Formats]
+// Note [ONEDNN Convolution Memory Formats]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// MKLDNN has 3 types of memory formats in convolution:
+// ONEDNN has 3 types of memory formats in convolution:
 //
 // In case memory format passed from PyTorch (aka. user layout)
-// differs from the internal layout which MKLDNN used, a `reorder` is needed;
+// differs from the internal layout which ONEDNN used, a `reorder` is needed;
 // otherwise when user layout is identical to internal layout,
-// MKLDNN uses a memory `view` upon an existing CPU tensor.
+// ONEDNN uses a memory `view` upon an existing CPU tensor.
 //
 // 1. NCHW (CPU tensor, contiguous)
 //  input reorder:  NCHW(user) -> Blocked(internal)
@@ -142,7 +142,7 @@ static void check_shape_forward(const Tensor& input,
 //  weight reorder: OHWI(user) -> Blocked(internal)
 //  output view:    NHWC(internal) -> NHWC(user)
 //
-// 3. Blocked (MKLDNN tensor):
+// 3. Blocked (ONEDNN tensor):
 //  By explicitly converting a tensor to mkldnn, e.g. `x.to_mkldnn()`,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
@@ -150,7 +150,7 @@ static void check_shape_forward(const Tensor& input,
 //  (so as to save weight reoder overhead):
 //      model = torch.utils.mkldnn.to_mkldnn(model)
 //
-//  For training case, grad_output can be CPU tensor or MKLDNN tensor,
+//  For training case, grad_output can be CPU tensor or ONEDNN tensor,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
@@ -1060,7 +1060,7 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, OnednnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));

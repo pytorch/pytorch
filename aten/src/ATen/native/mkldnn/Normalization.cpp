@@ -16,7 +16,7 @@
 #endif
 #include <ATen/native/mkldnn/Utils.h>
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -26,7 +26,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
@@ -35,14 +35,14 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
     bool train,
     double eps,
     std::array<bool,3> grad_input_mask) {
-  TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace) {
-  TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
@@ -50,7 +50,7 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_mkldnn_batch_norm_legit: ATen not compiled with ONEDNN support");
 }
 
 
@@ -59,13 +59,13 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
-  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
@@ -73,13 +73,13 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/layer_norm.h>
@@ -282,4 +282,4 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

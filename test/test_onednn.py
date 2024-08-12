@@ -34,8 +34,8 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 types = [torch.float, torch.bfloat16, torch.half]
 
-# Comment the line below to find out the CI machines having MKL-DNN build disabled
-@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+# Comment the line below to find out the CI machines having oneDNN build disabled
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "oneDNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
@@ -142,11 +142,11 @@ class TestMkldnn(TestCase):
                                lambda: mkldnn_z.copy_(mkldnn_x))
         self.assertRaisesRegex(RuntimeError,
                                "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
-                               "Found self type = torch.FloatTensor and src type = Mkldnntorch.FloatTensor",
+                               "Found self type = torch.FloatTensor and src type = Onednntorch.FloatTensor",
                                lambda: x.copy_(mkldnn_x))
         self.assertRaisesRegex(RuntimeError,
                                "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
-                               "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
+                               "Found self type = Onednntorch.FloatTensor and src type = torch.FloatTensor",
                                lambda: mkldnn_x.copy_(x))
 
     def test_unsupported(self):
@@ -184,13 +184,13 @@ class TestMkldnn(TestCase):
                 torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
 
     def test_autograd_to_mkldnn(self):
-        # MKLDNN only supports float32
+        # ONEDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
 
         def func(root):
             return root.to_mkldnn().to_dense()
 
-        # because MKLDNN only supports float32, we need to lessen the precision.
+        # because ONEDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
@@ -200,13 +200,13 @@ class TestMkldnn(TestCase):
                               lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_autograd_from_mkldnn(self):
-        # MKLDNN only supports float32
+        # ONEDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
 
         def func(root):
             return root.to_dense()
 
-        # because MKLDNN only supports float32, we need to lessen the precision.
+        # because ONEDNN only supports float32, we need to lessen the precision.
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
@@ -529,7 +529,7 @@ class TestMkldnn(TestCase):
 
     def test_conv2d_legacy_jit_model(self):
         """
-        MKLDNN integration used to serialize models with 5d weight for grouped
+        ONEDNN integration used to serialize models with 5d weight for grouped
         convolutions, we'd like to preserve this behavior
         """
         g = 4
@@ -1382,7 +1382,7 @@ class TestMkldnn(TestCase):
             traced(*inputs).to_dense())
 
     def test_set_data_tensorimpl_type(self):
-        # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
+        # Dense tensor has impl of type `TensorImpl`, while oneDNN tensor has impl
         # of type `OpaqueTensorImpl<IDeepTensorWrapperPtr>`.
         x = torch.randn((1, 2), dtype=torch.float, device=torch.device('cpu'))
         x_mkldnn = x.to_mkldnn()

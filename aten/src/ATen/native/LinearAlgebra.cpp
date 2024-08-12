@@ -1357,7 +1357,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
-      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // Minimum dimension requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1376,7 +1376,7 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
 static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
-      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // Minimum size requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1512,7 +1512,7 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   bool dispatched = false;
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_ONEDNN_ACL_ENABLED()
   // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also

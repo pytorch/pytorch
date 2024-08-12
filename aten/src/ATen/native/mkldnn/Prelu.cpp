@@ -3,21 +3,21 @@
 #include <ATen/Config.h>
 
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
 Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -69,4 +69,4 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
 }
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -9,31 +9,31 @@
 #include <ATen/ops/tanh_native.h>             // for mkldnn_tanh, mkldnn_tanh_
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid_: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_tanh: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_tanh: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_tanh_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_tanh_: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -75,4 +75,4 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -17,7 +17,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
-#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_onednn.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -34,7 +34,7 @@
 #include <c10/core/Layout.h>
 #include <c10/util/StringUtil.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -46,7 +46,7 @@
 
 namespace torch::jit {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 using Tensor = at::Tensor;
 
@@ -224,11 +224,11 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 }
 
 // This is a factory function that creates an Operation that takes
-// MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
+// ONEDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other
 // words, this should: `aten_op(0) = 0` The reason for this precondition has to
-// do with blocked formats MKLDNN uses to lay tensor elements (nChw8c, nChw16c,
+// do with blocked formats ONEDNN uses to lay tensor elements (nChw8c, nChw16c,
 // etc). It splits the channel dimension into chunks of 8/16 makes it the
 // innermost dimension. Whenever the channel dim isn't divisible by 8/16 the
 // innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
@@ -312,7 +312,7 @@ Operation BroadOp(const Node* node) {
     auto b_size = b.sizes();
     auto a_size = a.sizes();
     if (a_size.equals(b_size)) {
-      // TODO: follow up with MKLDNN what the best way is
+      // TODO: follow up with ONEDNN what the best way is
       // to handle perf incompatible formats
       push(stack, a, b);
       return;
@@ -353,7 +353,7 @@ Operation BroadOp(const Node* node) {
         }
         // If one of the inputs was expanded and converted to nchw/nhwc
         // we might end up in a very bad spot if the second argument
-        // is in a blocked format. In this case, MKLDNN uses its
+        // is in a blocked format. In this case, ONEDNN uses its
         // reference implementation for a binary operation that follows
         // these broadcasts and it could be up to ~100x slower.
         // We use a very simple heuristic to convert an arg in nchw
@@ -362,7 +362,7 @@ Operation BroadOp(const Node* node) {
         auto a_it = at::native::itensor_from_mkldnn(exp_a);
         auto b_it = at::native::itensor_from_mkldnn(exp_b);
 
-        // `is_public_format` means a tensor's physical layout isn't in MKLDNN
+        // `is_public_format` means a tensor's physical layout isn't in ONEDNN
         // blocked layout e.g. nchw or nhwc but not nChw8c
         if (!a_it.is_public_format()) {
           if (b_it.is_public_format()) {
@@ -860,16 +860,16 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
 
 // [mkldnn perf strategy]
 // Certain ops - aten::linear, aten::conv2d, aten::conv3d - provide a huge speed
-// up just by converting the constant weights to MKLDNN AOT, and then at runtime
+// up just by converting the constant weights to ONEDNN AOT, and then at runtime
 // converting the non-constant input to_mkldnn before the op, and then back to
 // its original layout after the op. The speed up holds even if you end up
 // converting the input to_mkldnn and output back to_dense. We start groups of
-// ops to compute in MKLDNN only from these ops that are a strict speedup. Then,
-// we expand the groups to include operators which are computable in MKLDNN &
+// ops to compute in ONEDNN only from these ops that are a strict speedup. Then,
+// we expand the groups to include operators which are computable in ONEDNN &
 // are roughly perf equal to eager. We do this in the hopes of joining multiple
 // fast nodes together, saving to_mkldnn and to_dense conversions.
 //
-// MKLDNN only supports float32 inputs for aten::linear, aten::conv2d &
+// ONEDNN only supports float32 inputs for aten::linear, aten::conv2d &
 // aten::conv3d. We only fuse these nodes if the weights are float32, and then
 // we only include operators which we can prove will execute in float32. By
 // fusing topologically we can maintain the invariant that all tensor types in
@@ -943,9 +943,9 @@ class MKLDNNSubgraphSlicer {
   }
 
  private:
-  // MKLDNN only supports floats of dimension > 0, so we only support
+  // ONEDNN only supports floats of dimension > 0, so we only support
   // Tensors who have a known type or were previously verified
-  // to be usable in an MKLDNN Group
+  // to be usable in an ONEDNN Group
   bool tensorInputIsMKLDNNSupported(Value* v, Node* v_use) {
     auto const_tensor = constant_as<Tensor>(v);
     if (const_tensor) {
@@ -1173,7 +1173,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 #else
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
+  GRAPH_DUMP("ONEDNN Not enabled", graph);
 }
 
 #endif
