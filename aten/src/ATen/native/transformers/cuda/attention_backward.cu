@@ -419,6 +419,7 @@ _efficient_attention_backward(
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
   err = attn_bwd(mk_aotensor(q_t, "q"),
@@ -435,8 +436,8 @@ _efficient_attention_backward(
                  mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
-                 rng_engine_inputs.seed_.val,
-                 rng_engine_inputs.offset_.val,
+                 mk_aoscalartensor(philox_seed),
+                 mk_aoscalartensor(philox_offset),
                  is_causal,
                  stream);
 #else

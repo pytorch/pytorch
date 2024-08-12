@@ -190,17 +190,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     }
   }
 
-  at::PhiloxCudaState philox_args;
-  if (p_dropout > 0.0) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None)
-    {
-      philox_args = at::PhiloxCudaState(*seed_t.data_ptr<int64_t>(), *offset_t.data_ptr<int64_t>());
-    } else { // dropout + capture
-      philox_args = at::PhiloxCudaState(seed_t.data_ptr<int64_t>(), offset_t.data_ptr<int64_t>(), 0);
-    }
-  }
-
   // Transpose tensors to meet AOTriton's Flash API
   at::Tensor q_t = q_padded.permute({0,2,1,3});
   at::Tensor k_t = k_padded.permute({0,2,1,3});
@@ -220,6 +209,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   err = attn_fwd(mk_aotensor(q_t, "q"),
@@ -230,8 +220,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                  mk_aotensor<2>(M, "M"),
                  mk_aotensor(output_t, "Out"),
                  p_dropout,
-                 philox_args.seed_.val,
-                 philox_args.offset_.val,
+                 mk_aoscalartensor(seed_t),
+                 mk_aoscalartensor(offset_t),
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
@@ -392,17 +382,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     dv_expanded = dv;
   }
 
-  at::PhiloxCudaState philox_args;
-  if (p_dropout > 0.0) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None)
-    {
-      philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
-      philox_args = at::PhiloxCudaState(philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-    }
-  }
-
   at::Tensor q_t = q.permute({0,2,1,3});
   at::Tensor k_t = k.permute({0,2,1,3});
   at::Tensor v_t = v.permute({0,2,1,3});
@@ -420,6 +399,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   {
     using aotriton::v2::flash::attn_bwd;
     using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
     err = attn_bwd(mk_aotensor(q_t, "q"),
@@ -436,8 +416,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
                    p_dropout,
-                   philox_args.seed_.val,
-                   philox_args.offset_.val,
+                   mk_aoscalartensor(philox_seed),
+                   mk_aoscalartensor(philox_offset),
                    is_causal,
                    stream);
   }

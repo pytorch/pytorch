@@ -1147,6 +1147,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
   hipError_t err; // TODO: Error handling
@@ -1158,8 +1159,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                  mk_aotensor<2>(softmax_lse, "M"),
                  mk_aotensor(output_t, "Out"),
                  dropout_p,
-                 use_dropout ? *seed_t.data_ptr<int64_t>() : 0,
-                 use_dropout ? *offset_t.data_ptr<int64_t>() : 0,
+                 mk_aoscalartensor(seed_t),
+                 mk_aoscalartensor(offset_t),
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
