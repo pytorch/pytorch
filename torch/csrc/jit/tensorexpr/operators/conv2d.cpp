@@ -308,7 +308,7 @@ bool conv2dIsSupported(
   return true;
 }
 
-bool mkldnnPrepackedConvIsSupported(
+bool onednnPrepackedConvIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
     const std::vector<int64_t>& stride,
@@ -318,23 +318,23 @@ bool mkldnnPrepackedConvIsSupported(
 #if AT_ONEDNN_ENABLED()
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: only float32 allowed");
+    GRAPH_DEBUG("onednnPrepackedConvIsSupported: only float32 allowed");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: inputs are the wrong size");
+    GRAPH_DEBUG("onednnPrepackedConvIsSupported: inputs are the wrong size");
     return false;
   }
   if (stride.size() != 2) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported stride");
+    GRAPH_DEBUG("onednnPrepackedConvIsSupported: unsupported stride");
     return false;
   }
   if (pad.size() != 2) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported pad");
+    GRAPH_DEBUG("onednnPrepackedConvIsSupported: unsupported pad");
     return false;
   }
   if (dilation.size() != 2) {
-    GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: unsupported dilation");
+    GRAPH_DEBUG("onednnPrepackedConvIsSupported: unsupported dilation");
     return false;
   }
 
@@ -343,7 +343,7 @@ bool mkldnnPrepackedConvIsSupported(
   bool use_onednn = groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
       input.dims[0] > 1 ||
       input.dims[0] * input.dims[1] * input.dims[2] * input.dims[3] > 20480;
-  GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: ", use_onednn);
+  GRAPH_DEBUG("onednnPrepackedConvIsSupported: ", use_onednn);
   return use_onednn;
 #endif
   return false;
@@ -469,7 +469,7 @@ Tensor computePrepackedLinearClampRun(
   return Tensor(ResultBuf.node(), s);
 }
 
-Tensor computeMkldnnPrepackedConvRun(
+Tensor computeOnednnPrepackedConvRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
@@ -481,11 +481,11 @@ Tensor computeMkldnnPrepackedConvRun(
   }
 
   BufHandle ResultBuf(
-      "mkldnn_prepacked_conv_run", outputShape, outputStrides, dtype);
+      "onednn_prepacked_conv_run", outputShape, outputStrides, dtype);
   const BufHandle& inp = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
+      ResultBuf, "nnc_onednn_prepacked_conv_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
 }
 

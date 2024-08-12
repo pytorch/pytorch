@@ -5823,7 +5823,7 @@ add_docstr_all(
     "to_onednn",
     r"""
 to_onednn() -> Tensor
-Returns a copy of the tensor in ``torch.mkldnn`` layout.
+Returns a copy of the tensor in ``torch.onednn`` layout.
 
 """,
 )

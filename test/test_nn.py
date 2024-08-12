@@ -51,7 +51,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_onednn import bf32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -10590,7 +10590,7 @@ class TestNNDeviceType(NNTestCase):
         x1 = x.clone().requires_grad_(True)
         x2 = x.clone().requires_grad_(True)
 
-        torch._C._set_mkldnn_enabled(False)
+        torch._C._set_onednn_enabled(False)
         out1, _ = Net(x1)
         der_out1 = torch.autograd.grad(out1, x1,
                                        grad_outputs=torch.ones_like(out1),
@@ -10599,7 +10599,7 @@ class TestNNDeviceType(NNTestCase):
         loss1 = der_out1.sum()
         loss1.backward(retain_graph=True)
 
-        torch._C._set_mkldnn_enabled(True)
+        torch._C._set_onednn_enabled(True)
         out2, _ = Net(x2)
         der_out2 = torch.autograd.grad(out2, x2,
                                        grad_outputs=torch.ones_like(out2),

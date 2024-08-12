@@ -414,7 +414,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
       .def("_jit_pass_fold_frozen_linear_bn", &FoldFrozenLinearBatchnorm)
-      .def("_jit_pass_convert_frozen_ops_to_onednn", &ConvertFrozenOpsToMKLDNN)
+      .def("_jit_pass_convert_frozen_ops_to_onednn", &ConvertFrozenOpsToONEDNN)
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)

@@ -244,7 +244,7 @@ static size_t get_conv_groups_index(const torch::jit::Node* node) {
     default:
       TORCH_CHECK(
           false,
-          "mkldnnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
+          "onednnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
           node->kind());
   }
 }
@@ -288,7 +288,7 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
       groups->toInt());
 }
 
-bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
+bool onednnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
 #if AT_ONEDNN_ENABLED()
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
@@ -309,7 +309,7 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   if (node->input(1)->node()->kind() != prim::Constant ||
       node->input(2)->node()->kind() != prim::Constant) {
     GRAPH_DEBUG(
-        "mkldnnPrepackedConvIsSupported: weight or bias is not Constant");
+        "onednnPrepackedConvIsSupported: weight or bias is not Constant");
     return false;
   }
 
@@ -317,11 +317,11 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   if (!(isContiguous(node->input(0), at::MemoryFormat::ChannelsLast) &&
         isContiguous(node->input(1), at::MemoryFormat::ChannelsLast))) {
     GRAPH_DEBUG(
-        "mkldnnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
+        "onednnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
     return false;
   }
 
-  return mkldnnPrepackedConvIsSupported(
+  return onednnPrepackedConvIsSupported(
       *input,
       *weight,
       _pair_int(*stride),

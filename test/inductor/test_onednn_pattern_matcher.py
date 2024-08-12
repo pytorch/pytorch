@@ -86,7 +86,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype):
     #   (2) inductor always use channe_last format, there will
     #       be a to_channel_last format for input
     #   (3) to_dtype and to_channel_last for input can be fused
-    #   (4) inductor always get channel last format from mkldnn_conv_pointwise(binary),
+    #   (4) inductor always get channel last format from onednn_conv_pointwise(binary),
     #       and force the output to have same stride with eager.
     #       So there will be a to_contiguous for output if eager output is contiguouse
     mod = copy.deepcopy(mod)

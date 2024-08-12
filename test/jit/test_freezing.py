@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.utils import mkldnn as mkldnn_utils
+from torch.utils import onednn as onednn_utils
 
 
 try:
@@ -2750,7 +2750,7 @@ class TestFrozenOptimizations(JitTestCase):
     )
     def test_freeze_mkdlnn(self):
         conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
-        convmkl = mkldnn_utils.to_onednn(conv)
+        convmkl = onednn_utils.to_onednn(conv)
         out = torch.jit.freeze(torch.jit.script(convmkl.eval()))
         inp = torch.rand([4, 3, 4, 4]).float()
         self.assertEqual(out(inp.to_onednn()).to_dense(), conv(inp))
@@ -2879,7 +2879,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
-    def test_mkldnn_fuser_broadcasting(self):
+    def test_onednn_fuser_broadcasting(self):
         class Add(nn.Module):
             def __init__(self, tensor):
                 super().__init__()
@@ -2912,7 +2912,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
-    def test_mkldnn_inplace_removal(self):
+    def test_onednn_inplace_removal(self):
         class AddMul(nn.Module):
             def __init__(self, tensor):
                 super().__init__()
@@ -2938,7 +2938,7 @@ class TestFrozenOptimizations(JitTestCase):
         not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     @skipIfNoTorchVision
-    def test_maxpool_mkldnn(self):
+    def test_maxpool_onednn(self):
         with set_default_dtype(torch.float):
             model = torchvision.models.resnet18()
             sub_model = torch.nn.Sequential(
@@ -2962,8 +2962,8 @@ class TestFrozenOptimizations(JitTestCase):
             FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
             self.assertEqual(mod(inp), sub_model(inp))
 
-    @unittest.skipIf(torch.backends.mkldnn.is_available(), "Testing no mkldnn")
-    def test_conv_to_onednn_no_mkldnn(self):
+    @unittest.skipIf(torch.backends.mkldnn.is_available(), "Testing no onednn")
+    def test_conv_to_onednn_no_onednn(self):
         # test no error when onednn not available
         with set_default_dtype(torch.float):
             mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
@@ -3290,7 +3290,7 @@ class TestFrozenOptimizations(JitTestCase):
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
-            for mkldnn_opname, aten_op in op_map.items():
+            for onednn_opname, aten_op in op_map.items():
                 for size in input_sizes:
                     for inplace in (True, False):
                         inplace_str = "_" if inplace else ""
@@ -3298,7 +3298,7 @@ class TestFrozenOptimizations(JitTestCase):
                         graph_str = f"""graph(%input.1 : Tensor):
                             %33 : None = prim::Constant()
                             %34 : Tensor = aten::to_onednn(%input.1, %33)
-                            %35 : Tensor = {mkldnn_opname}{inplace_str}(%34)
+                            %35 : Tensor = {onednn_opname}{inplace_str}(%34)
                             return ({inplace_tgt})
                         """
                         g = torch._C.parse_ir(graph_str)
@@ -3358,7 +3358,7 @@ class TestFrozenOptimizations(JitTestCase):
 
 @skipIfTorchDynamo("somehow causing hanging during python shutdown")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "oneDNN build is disabled")
-class TestMKLDNNReinplacing(JitTestCase):
+class TestONEDNNReinplacing(JitTestCase):
     def setUp(self):
         super().setUp()
         self.default_dtype = torch.get_default_dtype()

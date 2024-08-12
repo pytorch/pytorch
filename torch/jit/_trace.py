@@ -648,7 +648,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if orig.layout != loaded.layout:
             return False
         # onednn is not supported for torch.allclose
-        if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
+        if orig.layout == torch._onednn:  # type: ignore[attr-defined]
             return True
         if type(orig) != type(loaded):
             return False

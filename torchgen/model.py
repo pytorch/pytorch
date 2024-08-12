@@ -84,7 +84,7 @@ class DispatchKey(Enum):
     MAIA = auto()
     Vulkan = auto()
     Metal = auto()
-    MKLDNN = auto()
+    ONEDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()

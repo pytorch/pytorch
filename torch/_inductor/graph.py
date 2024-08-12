@@ -1370,7 +1370,7 @@ class GraphLowering(torch.fx.Interpreter):
                         need_fixed_channels_last_layout = []
                         if not self.layout_opt:
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
-                        if torch._C._has_mkldnn:
+                        if torch._C._has_onednn:
                             need_fixed_layout += [
                                 torch.ops.onednn._linear_pointwise.default,
                                 torch.ops.onednn._linear_pointwise.binary,

@@ -30,7 +30,7 @@ from .virtualized import ops, V
 
 
 def register_onednn_fusion_ops():
-    if torch._C._has_mkldnn:
+    if torch._C._has_onednn:
         from . import onednn_ir
 
         aten_onednn_linear_unary = ExternKernelChoice(
@@ -45,13 +45,13 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=onednn_ir.LinearBinary.create,
         )
-        aten_mkldnn_qlinear_unary = ExternKernelChoice(
+        aten_onednn_qlinear_unary = ExternKernelChoice(
             torch.ops.onednn.qlinear_pointwise,
             "onednn::qlinear_pointwise",
             has_out_variant=False,
             kernel_creator=onednn_ir.QLinearPointwisePT2E.create,
         )
-        aten_mkldnn_qlinear_binary = ExternKernelChoice(
+        aten_onednn_qlinear_binary = ExternKernelChoice(
             torch.ops.onednn.qlinear_pointwise.binary,
             "onednn::qlinear_pointwise",
             has_out_variant=False,
@@ -341,7 +341,7 @@ def register_onednn_fusion_ops():
         ):
             return pytree.tree_map(
                 TensorBox.create,
-                onednn_ir.MkldnnRnnLayer.create(
+                onednn_ir.OnednnRnnLayer.create(
                     x,
                     w0,
                     w1,
@@ -691,7 +691,7 @@ def register_onednn_fusion_ops():
                 if bias is None:
                     kwargs["bias"] = None
                 choices.append(
-                    aten_mkldnn_qlinear_unary.bind(
+                    aten_onednn_qlinear_unary.bind(
                         (x, x_scale, x_zp, packed_weight, w_scale, w_zp)
                         if bias is None
                         else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, bias),
@@ -993,7 +993,7 @@ def register_onednn_fusion_ops():
                 if bias is None:
                     kwargs["bias"] = None
                 choices.append(
-                    aten_mkldnn_qlinear_binary.bind(
+                    aten_onednn_qlinear_binary.bind(
                         (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2)
                         if bias is None
                         else (x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2, bias),

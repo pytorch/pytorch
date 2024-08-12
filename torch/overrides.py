@@ -161,7 +161,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.finfo,
         torch.has_mkl,
         torch.has_mps,
-        torch.has_mkldnn,
+        torch.has_onednn,
         torch.has_openmp,
         torch.iinfo,
         torch.memory_format,

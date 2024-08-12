@@ -1380,8 +1380,8 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_set_sdp_use_cudnn", THPModule_setSDPUseCuDNN, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
-    {"_get_mkldnn_enabled", THPModule_userEnabledOnednn, METH_NOARGS, nullptr},
-    {"_set_mkldnn_enabled", THPModule_setuserEnabledOnednn, METH_O, nullptr},
+    {"_get_onednn_enabled", THPModule_userEnabledOnednn, METH_NOARGS, nullptr},
+    {"_set_onednn_enabled", THPModule_setuserEnabledOnednn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
@@ -1394,11 +1394,11 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setDeterministicCuDNN,
      METH_O,
      nullptr},
-    {"_get_mkldnn_deterministic",
+    {"_get_onednn_deterministic",
      THPModule_deterministicOnednn,
      METH_NOARGS,
      nullptr},
-    {"_set_mkldnn_deterministic",
+    {"_set_onednn_deterministic",
      THPModule_setdeterministicOnednn,
      METH_O,
      nullptr},
@@ -2161,7 +2161,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
-      set_module_attr("_has_mkldnn", at::hasONEDNN() ? Py_True : Py_False));
+      set_module_attr("_has_onednn", at::hasONEDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr(

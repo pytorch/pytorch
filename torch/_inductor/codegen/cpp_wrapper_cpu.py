@@ -756,7 +756,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
 
                 if tensor.is_onednn:
-                    opaque_metadata_tensor = torch.ops.onednn._get_mkldnn_serialized_md(
+                    opaque_metadata_tensor = torch.ops.onednn._get_onednn_serialized_md(
                         tensor
                     )
                     assert (

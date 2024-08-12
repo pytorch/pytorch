@@ -62,11 +62,11 @@ def change_cos_pass(graph):
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
     #  onednn fusion's pattern_matcher
-    # (torch/_inductor/fx_passes/mkldnn_fusion.py),
+    # (torch/_inductor/fx_passes/onednn_fusion.py),
     # and apply it to custom post_grad_passes.
-    def _register_mkldnn_conv_relu_fusion(self, custom_pass_dict):
+    def _register_onednn_conv_relu_fusion(self, custom_pass_dict):
         # pattern
-        def _mkldnn_conv_relu_pattern():
+        def _onednn_conv_relu_pattern():
             return CallFunction(
                 aten.relu,
                 CallFunction(
@@ -104,7 +104,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             return fn
 
-        _register_fusion_lowering(_mkldnn_conv_relu_pattern(), custom_pass_dict)
+        _register_fusion_lowering(_onednn_conv_relu_pattern(), custom_pass_dict)
 
     # custom post grad pass
     class _CustomPass(PatternMatcherPass):
@@ -157,7 +157,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             post_grad_custom_post_pass=None,
         ):
             # init onednn fusion on custom_matcher
-            self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_pre_pass)
+            self._register_onednn_conv_relu_fusion(config.post_grad_custom_pre_pass)
 
             mod = self._ConvReLU(16, 16).eval()
             x = torch.randn((1, 16, 56, 56), dtype=torch.float32)
@@ -182,7 +182,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             post_grad_custom_post_pass=self._CustomPass(),
         ):
             # init onednn fusion on custom_matcher
-            self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_post_pass)
+            self._register_onednn_conv_relu_fusion(config.post_grad_custom_post_pass)
 
             mod = self._ConvReLU(16, 16).eval()
             x = torch.randn((1, 16, 56, 56), dtype=torch.float32)

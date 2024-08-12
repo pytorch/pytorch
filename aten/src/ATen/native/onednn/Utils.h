@@ -16,7 +16,7 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+std::tuple<Tensor, Tensor, Tensor> onednn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace = false);
@@ -30,7 +30,7 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef dilation,
     bool ceil_mode);
 
-void check_mkldnn_binary_fusion_inputs(
+void check_onednn_binary_fusion_inputs(
     const Tensor& input,
     const Tensor& other,
     const Tensor& weight,
@@ -122,7 +122,7 @@ inline bool onednn_fp16_device_check() {
 }
 #endif
 
-inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
+inline void onednn_check_low_precision(ScalarType input_t, std::string name) {
   if (input_t == ScalarType::BFloat16) {
     TORCH_CHECK(
         onednn_bf16_device_check(),

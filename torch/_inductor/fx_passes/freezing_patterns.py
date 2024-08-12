@@ -70,7 +70,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     # The CPU weight packing always assume the conv's weight is channels last,
     # So make sure the layout_optimization is on when doing it.
     if (
-        torch._C._has_mkldnn
+        torch._C._has_onednn
         and config.cpp.weight_prepack
         and config.layout_optimization
     ):
@@ -85,10 +85,10 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C._has_mkldnn and config.cpp.weight_prepack:
-        from .onednn_fusion import _mkldnn_weight_pack_init
+    if torch._C._has_onednn and config.cpp.weight_prepack:
+        from .onednn_fusion import _onednn_weight_pack_init
 
-        _mkldnn_weight_pack_init()
+        _onednn_weight_pack_init()
 
     from .binary_folding import binary_folding_init
 

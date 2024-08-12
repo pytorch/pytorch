@@ -498,7 +498,7 @@ def _register_quantized_linear_binary_lowering(
             # to be the output of QLinear in this scenario.
             # Change the post op from sum to binary add for this case.
             # Refer to test case:
-            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+            #   test_onednn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
             binary_op_name = "add"
 
         computation_args = (
