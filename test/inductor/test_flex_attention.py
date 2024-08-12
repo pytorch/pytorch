@@ -1841,6 +1841,46 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
+    @supported_platform
+    def test_init_mismatched_full_kv(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
+            True, device
+        )
+
+        with self.assertRaises(AssertionError):
+            BlockMask(
+                kv_num_blocks=kv_num_blocks,
+                kv_indices=kv_indices,
+                full_kv_num_blocks=full_kv_num_blocks,
+                full_kv_indices=None,  # Mismatched, should raise error
+                q_num_blocks=kv_num_blocks,
+                q_indices=kv_indices,
+                full_q_num_blocks=None,
+                full_q_indices=None,
+                BLOCK_SIZE=(64, 64),
+                mask_mod=noop_mask,
+            )
+
+    @supported_platform
+    def test_init_mismatched_full_q(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
+
+        with self.assertRaises(AssertionError):
+            BlockMask(
+                kv_num_blocks=kv_num_blocks,
+                kv_indices=kv_indices,
+                full_kv_num_blocks=None,
+                full_kv_indices=None,
+                q_num_blocks=kv_num_blocks,
+                q_indices=kv_indices,
+                full_q_num_blocks=kv_num_blocks,
+                full_q_indices=None,  # Mismatched, should raise error
+                BLOCK_SIZE=(64, 64),
+                mask_mod=noop_mask,
+            )
+
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
