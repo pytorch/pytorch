@@ -2254,7 +2254,7 @@ class CheckFunctionManager:
 
         code_parts = []
         verbose_code_parts = []
-        structured_guard_fns = []
+        structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
 
         torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
             self.torch_function_mode_stack
