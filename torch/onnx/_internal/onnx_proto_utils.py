@@ -276,10 +276,8 @@ def _find_onnxscript_op(
             raise errors.UnsupportedOperatorError(
                 node_kind,
                 specified_version,
-                (
-                    onnx_function_group.get_min_supported()
-                    if onnx_function_group
-                    else None
-                ),
+                onnx_function_group.get_min_supported()
+                if onnx_function_group
+                else None,
             )
     return onnx_function_list, included_node_func

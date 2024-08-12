@@ -17,6 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -51,6 +52,7 @@ from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 zip = strict_zip
 
 log = logging.getLogger(__name__)
+static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
 # Note [Tangents must be contiguous]
@@ -545,9 +547,9 @@ from a multi-output view call"
                             output_type = (
                                 OutputType.alias_of_intermediate_save_as_output
                             )
-                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = (
-                                new_out_idx
-                            )
+                            intermediate_base_tensor_id_to_output_idx[
+                                id(o._base)
+                            ] = new_out_idx
                             intermediate_bases.append(o._base)
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
@@ -678,6 +680,10 @@ from a multi-output view call"
                 for i, arg in enumerate(flat_args)
                 if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
             ]
+
+        static_input_logger.debug(
+            "static input indices metadata analysis: %s", static_input_indices
+        )
 
         f_mutated_inputs = [
             inp

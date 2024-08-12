@@ -1449,11 +1449,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             inputs,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
-            matcher_check_fn=(
-                matcher_check_fn
-                if matcher_check_fn is not None
-                else _default_matcher_check_fn
-            ),
+            matcher_check_fn=matcher_check_fn
+            if matcher_check_fn is not None
+            else _default_matcher_check_fn,
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
@@ -1802,8 +1800,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
-                            "op_qlinear_pointwise.call",
-                            "op_qlinear_pointwise_binary.call",
+                            "op_onednn_qlinear_pointwise_tensor.call",
+                            "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,
@@ -1884,11 +1882,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             inputs,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
-            matcher_check_fn=(
-                matcher_check_fn
-                if matcher_check_fn is not None
-                else default_matcher_check_fn
-            ),
+            matcher_check_fn=matcher_check_fn
+            if matcher_check_fn is not None
+            else default_matcher_check_fn,
             is_dynamic=is_dynamic,
         )
 

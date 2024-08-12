@@ -17,11 +17,9 @@ class TestBatchMM(JitTestCase):
     @staticmethod
     def _get_test_tensors(n: int):
         return [
-            (
-                torch.tensor([[1 + x, 2 + x, 3 + x], [4 + x, 5 + x, 6 + x]])
-                if x % 2 == 0
-                else torch.tensor([[1 + x, 2 + x], [3 + x, 4 + x], [5 + x, 6 + x]])
-            )
+            torch.tensor([[1 + x, 2 + x, 3 + x], [4 + x, 5 + x, 6 + x]])
+            if x % 2 == 0
+            else torch.tensor([[1 + x, 2 + x], [3 + x, 4 + x], [5 + x, 6 + x]])
             for x in range(n)
         ]
 

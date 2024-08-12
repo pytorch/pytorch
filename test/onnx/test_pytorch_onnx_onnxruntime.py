@@ -9264,7 +9264,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             return (
                 loss.mean()
                 if reduction == "mean"
-                else loss.sum() if reduction == "sum" else loss
+                else loss.sum()
+                if reduction == "sum"
+                else loss
             )
 
         class LabelSmoothingCrossEntropy(torch.nn.Module):

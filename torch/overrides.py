@@ -1503,7 +1503,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__dlpack__: lambda self, stream=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
-    }
+    }  # fmt: skip
 
     privateuse1_backend_name = (
         torch.utils.backend_registration._privateuse1_backend_name
@@ -1512,9 +1512,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         ret[getattr(Tensor, privateuse1_backend_name)] = (
             lambda self, device=None, non_blocking=False, **kwargs: -1
         )
-        ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = (
-            lambda self: -1
-        )  # noqa: B009
+        ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = lambda self: -1
 
     ret2 = {}
     ignored = get_ignored_functions()
@@ -1563,10 +1561,10 @@ def wrap_torch_function(dispatcher: Callable):
 
     Examples
     --------
-    >>> def dispatcher(a): # Must have the same signature as func
+    >>> def dispatcher(a):  # Must have the same signature as func
     ...     return (a,)
     >>> @torch.overrides.wrap_torch_function(dispatcher)
-    >>> def func(a): # This will make func dispatchable by __torch_function__
+    >>> def func(a):  # This will make func dispatchable by __torch_function__
     ...     return a + 0
     """
 

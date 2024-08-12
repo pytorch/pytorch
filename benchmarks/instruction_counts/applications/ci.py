@@ -1,5 +1,5 @@
 """Collect instruction counts for continuous integration."""
-
+# mypy: ignore-errors
 import argparse
 import hashlib
 import json

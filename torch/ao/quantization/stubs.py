@@ -50,7 +50,6 @@ class QuantWrapper(nn.Module):
     will be swapped to `nnq.Quantize` which does actual quantization. Similarly
     for `DeQuantStub`.
     """
-
     quant: QuantStub
     dequant: DeQuantStub
     module: nn.Module

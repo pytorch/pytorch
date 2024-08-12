@@ -101,10 +101,17 @@ def assert_metadata_eq(
         assert_eq(m1.grad is not None, safe_grad(m2) is not None)
         if m1.grad is not None:
             go(m1.grad, safe_grad(m2))
+        # TODO: move "assert_eq(m1.layout, m2.layout)" out of sparse
+        #       branches (but not ready for prime time yet)...
         if m1.is_sparse:
+            assert_eq(m1.layout, m2.layout)
             assert_eq(m1.dense_dim, m2.dense_dim())
             assert_eq(m1.sparse_dim, m2.sparse_dim())
             assert_eq(m1.is_coalesced, m2.is_coalesced())
+        elif is_sparse_compressed(m1):
+            assert_eq(m1.layout, m2.layout)
+            assert_eq(m1.dense_dim, m2.dense_dim())
+            assert_eq(m1.sparse_dim, m2.sparse_dim())
         else:
             if not skip_symbolic:
                 assert_eq(m1.stride, m2.stride())
@@ -808,24 +815,13 @@ class MetaConverter:
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
-                    r = callback(
-                        lambda: empty_create(
-                            t,
-                            source,
-                            symbolic_context,
-                        )
+                    return self.meta_tensor(
+                        t,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=source,
+                        symbolic_context=symbolic_context,
                     )
-                    if self.copy_data:
-                        with torch.no_grad(), no_dispatch():
-                            r.real_tensor = torch.empty_strided(
-                                t.size,
-                                t.stride,
-                                dtype=t.dtype,
-                                device=t.device,
-                            )
-                            assert t.data is not None
-                            _safe_copy(r.real_tensor, t.data)
-                    return r
 
                 inner_tensors = {}
                 for attr, meta_tensor_desc in t.attrs.items():

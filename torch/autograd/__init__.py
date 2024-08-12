@@ -9,13 +9,13 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 
 import warnings
-from typing import Any, Callable, cast, List, Optional, Sequence, Tuple, Union
+from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
-
+from torch import _vmap_internals
+from torch.overrides import handle_torch_function, has_torch_function, is_tensor_like
 from torch.types import _size, _TensorOrTensors, _TensorOrTensorsOrGradEdge
-from .. import _vmap_internals
-from ..overrides import handle_torch_function, has_torch_function, is_tensor_like
+
 from . import forward_ad, functional, graph
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from .function import Function, NestedIOFunction
@@ -30,8 +30,8 @@ from .grad_mode import (
 )
 from .gradcheck import gradcheck, gradgradcheck
 from .graph import _engine_run_backward
-
 from .variable import Variable
+
 
 __all__ = [
     "Variable",
@@ -331,7 +331,9 @@ def backward(
     inputs = (
         (inputs,)
         if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs) if inputs is not None else ()
+        else tuple(inputs)
+        if inputs is not None
+        else ()
     )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -509,11 +511,9 @@ def grad(
                 "materialize_grads cannot be used when the given input is a GradientEdge"
             )
         result = tuple(
-            (
-                output
-                if output is not None
-                else torch.zeros_like(input, requires_grad=True)
-            )
+            output
+            if output is not None
+            else torch.zeros_like(input, requires_grad=True)
             for (output, input) in zip(result, inputs)
         )
     return result
@@ -571,12 +571,12 @@ from torch._C._autograd import (
     _record_function_with_args_exit,
     _set_empty_test_observer,
     _supported_activities,
+    _toggle_collection_dynamic,
     DeviceType,
     kineto_available,
     ProfilerEvent,
     SavedTensor,
 )
-
 from torch._C._profiler import ProfilerActivity, ProfilerConfig, ProfilerState
 
 from . import profiler

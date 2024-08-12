@@ -62,24 +62,22 @@ test_failures_cuda_wrapper = {
 
 
 if config.abi_compatible:
-    xfail_list = [
-        "test_profiler_mark_wrapper_call_cuda",
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=False
         )
-        test_failures_cuda_wrapper[f"{test_name}_dynamic_shapes"] = (
-            test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-        )
+        test_failures_cuda_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
     skip_list = []
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
         )
-        test_failures_cuda_wrapper[f"{test_name}_dynamic_shapes"] = (
-            test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
-        )
+        test_failures_cuda_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
 def make_test_case(
