@@ -11,7 +11,6 @@ from functools import partial
 from unittest.mock import patch
 
 import torch
-
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
@@ -44,6 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+
 
 try:
     try:
@@ -263,6 +263,7 @@ intentionally_not_handled = {
 # We should eventually always turn it on
 import torch._functorch.config as functorch_config
 
+
 if not functorch_config.view_replay_for_aliased_outputs:
     intentionally_not_handled['("as_strided", "partial_views")'] = {
         b8,
@@ -361,6 +362,10 @@ inductor_override_kwargs = {
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.multilabel_soft_margin_loss", "cpu", f16): {
+        "atol": 3e-4,
+        "rtol": 0.002,
+    },
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
@@ -653,7 +658,7 @@ class TestInductorOpInfo(TestCase):
                 samples = [next(samples)]
 
         class HasRngOp(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.has_rng_op = False
 

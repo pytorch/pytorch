@@ -24,7 +24,7 @@ from torchgen.api.types import (
     OptionalCType,
     symIntArrayRefT,
     SymIntT,
-    tensorT,  # See Note [Nested Arg Types]
+    tensorT,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -62,6 +62,8 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_nested_get_values",
     "_nested_view_from_buffer",
     "_nested_view_from_jagged",
+    "_nested_strided_to_jagged",
+    "_nested_jagged_to_strided",
 ]
 
 VIEW_FUNCTIONS = {
