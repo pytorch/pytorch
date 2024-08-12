@@ -1,7 +1,6 @@
 import numpy
-from pt import configs
-
 import operator_benchmark as op_bench
+from pt import configs
 
 import torch
 import torch.ao.nn.quantized as nnq
