@@ -3,7 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <torch/library.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <ideep.hpp>
 
@@ -97,14 +97,14 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dty
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
   Device device_ = device_or_default(device);
   return detail::make_tensor<MKLDNNTensorImpl>(
-    DispatchKeySet(DispatchKey::MkldnnCPU),
+    DispatchKeySet(DispatchKey::OnednnCPU),
     dtype_, device_, handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
-             "itensor_from_mkldnn expects MKL-DNN tensor input");
+             "itensor_from_mkldnn expects oneDNN tensor input");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
@@ -200,7 +200,7 @@ int set_verbose(int level) {
     return ideep::utils::set_verbose(level);
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, OnednnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
       TORCH_FN(data_ptr_from_mkldnn));
@@ -211,4 +211,4 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 
 }}
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

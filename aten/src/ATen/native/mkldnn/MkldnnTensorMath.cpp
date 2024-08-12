@@ -11,19 +11,19 @@
 #include <ATen/ops/zero_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_zero_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_zero_: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -51,4 +51,4 @@ Tensor& mkldnn_zero_(Tensor& self) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

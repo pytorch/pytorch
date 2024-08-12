@@ -315,7 +315,7 @@ bool mkldnnPrepackedConvIsSupported(
     const std::vector<int64_t>& pad,
     const std::vector<int64_t>& dilation,
     int64_t groups) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   if (input.dtype != c10::ScalarType::Float ||
       weight.dtype != c10::ScalarType::Float) {
     GRAPH_DEBUG("mkldnnPrepackedConvIsSupported: only float32 allowed");

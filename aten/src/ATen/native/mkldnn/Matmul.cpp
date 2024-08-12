@@ -4,7 +4,7 @@
 #include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -15,7 +15,7 @@ void mkldnn_matmul(
     const Tensor &result,
     float beta,
     float alpha) {
-  TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with ONEDNN support");
 }
 
 bool use_mkldnn_bf16_matmul(
@@ -82,13 +82,13 @@ void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -515,4 +515,4 @@ void mkldnn_matmul_i8i8i32(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

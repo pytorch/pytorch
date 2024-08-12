@@ -339,7 +339,7 @@ struct TORCH_API IValue final {
           isAliasOf(a, b.col_indices());
     }
 
-    // Opaque tensors such as the ones constructed by the MKL-DNN backend
+    // Opaque tensors such as the ones constructed by the oneDNN backend
     // don't have storage so we just compare their TensorImpls.
     // TODO: Find way to expose alias info for opaque tensors.
     if (!a.has_storage() || !b.has_storage()) {
@@ -1088,7 +1088,7 @@ struct TORCH_API IValue final {
         // tensor, but not sparse tensors that share an indices tensor.
         return hashTensor(ten.values());
       } else if (!ten.has_storage()) {
-        // Opaque tensors such as the ones constructed by the MKL-DNN backend
+        // Opaque tensors such as the ones constructed by the oneDNN backend
         // don't have storage so we just use their TensorImpls.
         // TODO: Find way to expose alias info for opaque tensors.
         return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());

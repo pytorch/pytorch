@@ -130,7 +130,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // not sparse
         // no other user-visible tensor references new_grad
         // new_grad obeys the "Gradient Layout Contract", there has a special
-        // case, For MKLDNN tensor, which is a opaque tensor, assuming it obeys
+        // case, For ONEDNN tensor, which is a opaque tensor, assuming it obeys
         // layout_contract. Under these conditions, we can steal new_grad
         // without a deep copy.
         update_grad(new_grad.detach());

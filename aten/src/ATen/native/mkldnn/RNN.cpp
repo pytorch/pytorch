@@ -19,7 +19,7 @@
 #include <ATen/ops/mkldnn_rnn_layer_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at::native {
 
@@ -41,7 +41,7 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with ONEDNN support");
   }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
@@ -68,14 +68,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with ONEDNN support");
     }
 
 REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
 
 } // namespace at::native
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -175,14 +175,14 @@ std::vector<int64_t> _output_size(const RNNParams& rnn) {
   return {rnn.seq_length, rnn.mini_batch, output_channels};
 }
 
-// MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
+// ONEDNN GRU gate order is different from PyTorch's which requires gates shuffle
 // (let rt,zt,nt be reset, update, new gates respectively)
 //
-//   MKLDNN GRU weight_ih/weight_hh gates order: (zt, rt, nt)
+//   ONEDNN GRU weight_ih/weight_hh gates order: (zt, rt, nt)
 //   PyTorch GRU weight_ih/weight_hh gates order: (rt, zt, nt)
 //
-// MKLDNN GRU bias has 4 gates instead of 3
-//  (PyTorch GRU bias)     (MKLDNN GRU bias)
+// ONEDNN GRU bias has 4 gates instead of 3
+//  (PyTorch GRU bias)     (ONEDNN GRU bias)
 //
 //  bias_ih    bias_hh          bias
 //  +-----+    +-----+       +---------+
@@ -435,14 +435,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
 }
 
-// MKLDNN RNN integration notes:
+// ONEDNN RNN integration notes:
 // I. Memory Formats
 //   a. mkldnn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
 //   b. All mkldnn memorys are created (in plain format) as views on ATen tensor,
 //      the weight reorder(if any) is handed automatically inside ideep (mkldnn bridge)
 //
-// II. MKLDNN Primitive Mapping
+// II. ONEDNN Primitive Mapping
 //   a. mkldnn rnn primitive doesn't support training with dropout or padded input sequence.
 //   b. here break a single RNN module into { num_layers * num_directions } mkldnn rnn primitives
 //      for future need to cover these feature gaps.
@@ -511,7 +511,7 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//// MKLDNN dispatch for the generic RNN ops (at::lstm, at::gru, ...)
+//// ONEDNN dispatch for the generic RNN ops (at::lstm, at::gru, ...)
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace {
@@ -563,4 +563,4 @@ REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
 } // namespace at::native
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

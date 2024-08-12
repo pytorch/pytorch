@@ -24,7 +24,7 @@
 #endif
 
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -36,7 +36,7 @@ Tensor mkldnn_max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(false, "mkldnn_max_pool2d: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_max_pool2d: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_max_pool3d(
@@ -46,7 +46,7 @@ Tensor mkldnn_max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(false, "mkldnn_max_pool3d: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_max_pool3d: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_avg_pool2d(
@@ -57,7 +57,7 @@ Tensor mkldnn_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_avg_pool2d_out(const Tensor& self,
@@ -68,7 +68,7 @@ Tensor& mkldnn_avg_pool2d_out(const Tensor& self,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_avg_pool3d(
@@ -79,7 +79,7 @@ Tensor mkldnn_avg_pool3d(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_avg_pool3d_out(const Tensor& self,
@@ -90,23 +90,23 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& self,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_max_pool2d_backward(
@@ -118,7 +118,7 @@ Tensor mkldnn_max_pool2d_backward(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(false, "mkldnn_max_pool2d_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_max_pool2d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_max_pool3d_backward(
@@ -130,7 +130,7 @@ Tensor mkldnn_max_pool3d_backward(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(false, "mkldnn_max_pool3d_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_max_pool3d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
@@ -142,7 +142,7 @@ Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor & grad_input) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_avg_pool2d_backward(
@@ -154,7 +154,7 @@ Tensor mkldnn_avg_pool2d_backward(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
@@ -166,7 +166,7 @@ Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor & grad_input) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_avg_pool3d_backward(
@@ -178,19 +178,19 @@ Tensor mkldnn_avg_pool3d_backward(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_adaptive_avg_pool2d_backward(
     const Tensor& grad_output,
     const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_backward: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -220,7 +220,7 @@ static Tensor _mkldnn_pooling(
   std::vector<int64_t> output_sizes;
 
   if (ceil_mode) {
-    // MKLDNN does not support ceil mode, so we adjust padding
+    // ONEDNN does not support ceil mode, so we adjust padding
     // on the right side to match behavior. Adjust output size
     // accordingly.
     const std::vector<int64_t> output_sizes_ceil = pool_output_sizes(
@@ -308,7 +308,7 @@ static Tensor _mkldnn_pooling_backward(
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
   if (ceil_mode) {
-    // MKLDNN does not support ceil mode, so we adjust padding
+    // ONEDNN does not support ceil mode, so we adjust padding
     // on the right side to match behavior. Adjust output size
     // accordingly.
     const std::vector<int64_t> output_sizes_ceil = pool_output_sizes(
@@ -670,4 +670,4 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -5670,7 +5670,7 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_gradcheck_validates_input_mkldnn(self):
         # when mkldnn inputs, forward mode testing is not allowed
@@ -5681,7 +5681,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "ONEDNN inputs are not support for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -5697,7 +5697,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "ONEDNN inputs are not support for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -5710,7 +5710,7 @@ Done""",
                 )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_gradcheck_test_outputs(self):
         def check(fast_mode):
@@ -5731,7 +5731,7 @@ Done""",
             # when mkldnn outputs (always raise even if raise_exception=False)
             root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN output is not supported at gradcheck yet"
+                ValueError, "ONEDNN output is not supported at gradcheck yet"
             ):
                 gradcheck(
                     lambda x: x.to_mkldnn(),
@@ -6015,7 +6015,7 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
     def test_gradcheck_multiple_mkldnn_inputs(self):
         def check(fast_mode):

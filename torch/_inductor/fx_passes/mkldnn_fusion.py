@@ -877,7 +877,7 @@ if torch._C._has_mkldnn:
 
     def _is_packable_convolution(match):
         """
-        Check if the node is supported for MKLDNN convolution.
+        Check if the node is supported for ONEDNN convolution.
         """
         conv_node = match.output_node()
         input_meta_value = conv_node.args[0].meta.get("val")
@@ -908,7 +908,7 @@ if torch._C._has_mkldnn:
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
-            # TODO: Support dynamic shape case for MKLDNN conv transpose.
+            # TODO: Support dynamic shape case for ONEDNN conv transpose.
             if has_free_symbols(input_size):
                 return False
             groups = conv_node.args[-1]
@@ -928,7 +928,7 @@ if torch._C._has_mkldnn:
 
     def _is_packable_linear(match):
         """
-        Check if the node is supported for MKLDNN linear.
+        Check if the node is supported for ONEDNN linear.
         """
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1

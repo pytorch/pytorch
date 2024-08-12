@@ -19,7 +19,7 @@
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -27,28 +27,28 @@ namespace native {
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight, const std::optional<Tensor>& bias_opt) {
-  TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with ONEDNN support");
 }
 Tensor mkldnn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_linear_backward_input: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_linear_backward_input: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
-  TORCH_CHECK(false, "mkldnn_linear_backward_weights: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_linear_backward_weights: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     const Tensor& input, const Tensor& grad_output_t,
     const Tensor& weight, std::array<bool,3> output_mask) {
-  TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -420,7 +420,7 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
-TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkl, OnednnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
@@ -435,7 +435,7 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, OnednnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
       TORCH_FN(mkldnn_linear_pointwise));
@@ -447,4 +447,4 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -131,7 +131,7 @@ def get_eltwise_fn(name):
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
-@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skipIf(LLGA_NOT_ENABLED, "oneDNN build is disabled")
 class TestOp(JitLlgaTestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
@@ -377,7 +377,7 @@ class TestOp(JitLlgaTestCase):
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
-@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skipIf(LLGA_NOT_ENABLED, "oneDNN build is disabled")
 class TestFusionPattern(JitLlgaTestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
@@ -724,7 +724,7 @@ class TestFusionPattern(JitLlgaTestCase):
         # correct strides info of the channels-last tensor.
         graph, _ = self.checkTrace(m, [x, y], dtype)
 
-@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skipIf(LLGA_NOT_ENABLED, "oneDNN build is disabled")
 class TestEnableDisableLlgaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -768,7 +768,7 @@ class TestEnableDisableLlgaFuser(JitTestCase):
         self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), LLGA_FUSION_GROUP, 0)
 
 
-@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skipIf(LLGA_NOT_ENABLED, "oneDNN build is disabled")
 @unittest.skip("Enable when integration with dynamo aot_autograd is more stable")
 class TestDynamoAOT(JitTestCase):
     def test_dynamo_aot_ts_onednn(self):
@@ -799,7 +799,7 @@ class TestDynamoAOT(JitTestCase):
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
-@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skipIf(LLGA_NOT_ENABLED, "oneDNN build is disabled")
 class TestModel(JitLlgaTestCase):
     @skipIfNoTorchVision
     def _test_vision(self, model_name, dtype):
