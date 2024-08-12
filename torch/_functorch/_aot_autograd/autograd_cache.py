@@ -4,19 +4,18 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pickle
 import shutil
-
+import time
 from dataclasses import dataclass
-
-from typing import Callable, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import ChromiumEventLogger, counters
 from torch._functorch import config
-
 from torch._inductor.codecache import (
     _ident,
     BypassFxGraphCache,
@@ -27,8 +26,8 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     write_atomic,
 )
-
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._logging import LazyString
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -39,8 +38,8 @@ from .runtime_wrappers import (
     RuntimeWrapper,
     SubclassMeta,
 )
-
 from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+
 
 if TYPE_CHECKING:
     from torch.fx.node import Node
@@ -230,7 +229,7 @@ def autograd_cache_key(
     example_inputs,
     config: AOTConfig,
     # TODO: add args and parameters
-) -> str:
+) -> Tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
@@ -238,9 +237,13 @@ def autograd_cache_key(
     details = AOTAutogradCacheDetails(gm, example_inputs, config)
     # The prefix distinguishes among the other kinds of objects we cache
     key = "a" + AOTAutogradCachePickler.get_hash(details)
-    debug_str = "\n".join(details.debug_lines())
-    log.debug("Autograd graph cache hash details for key %s:\n%s", key, debug_str)
-    return key
+    debug_lines = details.debug_lines()
+    log.debug(
+        "Autograd graph cache hash details for key %s:\n%s",
+        key,
+        LazyString(lambda: "\n".join(debug_lines)),
+    )
+    return key, debug_lines
 
 
 @dataclass
@@ -450,16 +453,23 @@ class AOTAutogradCache:
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         compiled_fn = None
         cache_key = None
+        debug_lines: List[str] = []
+        cache_event_time = time.time_ns()
+        cache_state = None
         try:
-            cache_key = autograd_cache_key(gm, args, aot_config)
+            cache_key, debug_lines = autograd_cache_key(gm, args, aot_config)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(cache_key)
             if entry is not None:
                 compiled_fn = entry.wrap_post_compile(args, aot_config)
                 log.info("AOTAutograd cache hit for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
+                cache_state = "hit"
+                cache_event_time = time.time_ns()
             if compiled_fn is None:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
+                cache_state = "miss"
+                cache_event_time = time.time_ns()
         # Count missing the FXGraphCache as a miss not a bypass
         except FXGraphCacheMiss as e:
             counters["aot_autograd"]["autograd_cache_miss"] += 1
@@ -468,12 +478,30 @@ class AOTAutogradCache:
         except BypassAOTAutogradCache as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            cache_state = "bypass"
+            cache_event_time = time.time_ns()
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
             aot_config.cache_key = cache_key
             compiled_fn = dispatch_and_compile()
+        cache_args = {
+            "key": cache_key,
+            "cache_state": cache_state,
+            "components": debug_lines,
+        }
+        ChromiumEventLogger.log_instant_event(
+            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
+        )
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aotautograd_cache_hash",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_args),
+        )
         return compiled_fn
 
     @staticmethod
