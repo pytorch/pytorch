@@ -172,7 +172,7 @@ def sympy_interp(
         dtype = torch.int64
     if isinstance(expr, SingletonInt):
         dtype = torch.int64
-        expr = expr._val
+        expr = expr._val  # unpack SingletonInt -> int
     elif isinstance(expr, sympy.Number):
         dtype = torch.double
 
