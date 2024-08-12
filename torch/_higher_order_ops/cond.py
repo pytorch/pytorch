@@ -238,7 +238,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"\n  false branch returns {len(flat_false_outs)} item(s)"
         )
 
-    for i in range(0, len(flat_true_outs)):
+    for i in range(len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
 

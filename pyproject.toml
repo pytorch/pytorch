@@ -108,10 +108,12 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
+    "PIE790",
     "PIE794",
     "PIE800",
     "PIE804",
     "PIE807",
+    "PIE808",
     "PIE810",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
@@ -167,6 +169,9 @@ select = [
 "test/torch_np/numpy_tests/**" = [
     "F821",
     "NPY201",
+]
+"test/dynamo/**" = [
+    "PIE808", # We don't want to modify the dynamo test as they test specify syntax
 ]
 "test/dynamo/test_bytecode_utils.py" = [
     "F821",

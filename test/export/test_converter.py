@@ -1389,7 +1389,6 @@ class TestConverter(TestCase):
                 torch.ao.quantization.fuse_modules(
                     self, [["conv2", "relu"]], inplace=True
                 )
-                pass
 
         with override_quantized_engine("qnnpack"):
             model = Standalone()

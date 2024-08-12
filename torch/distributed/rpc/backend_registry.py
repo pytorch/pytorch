@@ -419,7 +419,6 @@ def _tensorpipe_init_backend_handler(
                 # Notify all workers in group this rank has joined and set devices and reverse_device_map
                 # This is a synchronous operation that completes once all existing ranks are updated
                 _set_devices_and_reverse_device_map(agent)
-                pass
             except Exception:
                 api.shutdown()
                 raise

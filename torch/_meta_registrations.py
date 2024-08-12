@@ -1654,7 +1654,7 @@ def _padding_check_valid_input(input, padding, *, dim):
         for d in range(1, input_dim):
             valid_batch_mode = valid_batch_mode and input.size(d) != 0
     else:
-        for d in range(0, input_dim):
+        for d in range(input_dim):
             valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
 
     # allow empty batch size but not other dimensions.
@@ -6340,7 +6340,6 @@ def activate_meta():
                     "register meta function for it. Instead, we should let the decomposition run and write "
                     "meta kernels for the base operators."
                 )
-            pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.

@@ -648,13 +648,13 @@ class DistributedTest:
             return (group, group_id, rank)
 
         def _init_full_group_test(self, **kwargs):
-            group = list(range(0, dist.get_world_size()))
+            group = list(range(dist.get_world_size()))
             group_id = dist.new_group(**kwargs)
             rank = dist.get_rank()
             return (group, group_id, rank)
 
         def _init_global_test(self):
-            group = list(range(0, dist.get_world_size()))
+            group = list(range(dist.get_world_size()))
             group_id = dist.group.WORLD
             rank = dist.get_rank()
             return (group, group_id, rank)
@@ -1116,7 +1116,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
                     for params in model.parameters():
@@ -1145,7 +1145,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     for param_group in opt.param_groups:
                         for params in param_group["params"]:
@@ -1205,7 +1205,7 @@ class DistributedTest:
                 averager = averagers.PeriodicModelAverager(
                     period=period, warmup_steps=warmup_steps
                 )
-                for step in range(0, 20):
+                for step in range(20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
                     for params in model.parameters():
@@ -1286,7 +1286,7 @@ class DistributedTest:
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
             )
-            for step in range(0, 25):
+            for step in range(25):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
                 for params in model.parameters():
@@ -1392,7 +1392,7 @@ class DistributedTest:
 
             for val in ["1", "0"]:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
-                for src in range(0, world_size):
+                for src in range(world_size):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(
                         src
                     )
@@ -1411,7 +1411,7 @@ class DistributedTest:
                 for req in reqs:
                     req.wait()
 
-                for src in range(0, world_size):
+                for src in range(world_size):
                     self.assertEqual(recv_tensors[src], expected_tensors[src])
 
             self._barrier()
@@ -1508,7 +1508,7 @@ class DistributedTest:
             rank = dist.get_rank()
             p2p_op_list = []
 
-            for src in range(0, dist.get_world_size()):
+            for src in range(dist.get_world_size()):
                 if src == rank:
                     continue
                 send_tensor = _build_tensor(rank + 1)
@@ -1531,7 +1531,7 @@ class DistributedTest:
             rank = dist.get_rank()
             p2p_op_list = []
 
-            for src in range(0, dist.get_world_size()):
+            for src in range(dist.get_world_size()):
                 if src == rank:
                     continue
                 send_tensor = _build_tensor(rank + 1)
@@ -1606,10 +1606,10 @@ class DistributedTest:
             tensor = _build_tensor(rank + 1, device_id=device_id)
             profiler_cls = profiler_ctx if profiler_ctx is not None else nullcontext()
             with profiler_cls as prof:
-                for src in range(0, world_size):
+                for src in range(world_size):
                     if src == rank:
                         # Send mode
-                        for dst in range(0, world_size):
+                        for dst in range(world_size):
                             if dst == rank:
                                 continue
                             dist.send(tensor, dst)
@@ -1677,10 +1677,10 @@ class DistributedTest:
             tensor = _build_tensor(send_size)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for src in range(0, dist.get_world_size()):
+                for src in range(dist.get_world_size()):
                     if src == rank:
                         # Send mode
-                        for dst in range(0, dist.get_world_size()):
+                        for dst in range(dist.get_world_size()):
                             if dst == rank:
                                 continue
                             dist.send(tensor, dst)
@@ -1745,10 +1745,10 @@ class DistributedTest:
 
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for dst in range(0, dist.get_world_size()):
+                for dst in range(dist.get_world_size()):
                     if dst == rank:
                         # Recv mode
-                        for dst in range(0, dist.get_world_size()):
+                        for dst in range(dist.get_world_size()):
                             if dst == rank:
                                 continue
 
@@ -1849,10 +1849,10 @@ class DistributedTest:
             tensor = _build_tensor(send_recv_size, value=rank)
             ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
-                for dst in range(0, world_size):
+                for dst in range(world_size):
                     if dst == rank:
                         # Recv mode
-                        for src in range(0, world_size):
+                        for src in range(world_size):
                             if src == rank:
                                 continue
                             output_tensor = _build_tensor(send_recv_size, value=-1)
@@ -7450,7 +7450,7 @@ class DistributedTest:
             for num_early_join_ranks in num_uneven_ranks:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
-                        mapping = dict.fromkeys(range(0, num_early_join_ranks), baseline_iter)
+                        mapping = dict.fromkeys(range(num_early_join_ranks), baseline_iter)
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.

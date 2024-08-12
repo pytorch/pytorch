@@ -124,7 +124,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
         interval seconds. Releases the given semaphore once before going to work.
         """
         sem.release()
-        for i in range(0, n):
+        for i in range(n):
             mp_queue.put(TimerRequest(i, "test_scope", 0))
             time.sleep(interval)
 

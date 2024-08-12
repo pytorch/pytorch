@@ -416,7 +416,6 @@ main()
                 if is_bwd:
                     # should be boxed inputs
                     assert len(placeholders) == 1
-                    pass
                 else:
                     assert len(placeholders) > 1
 
@@ -880,7 +879,7 @@ main()
 
         eager_check()
 
-        for i in range(0, 5):
+        for i in range(5):
             with compiled_autograd.enable(compiler_fn):
                 eager_check()
 

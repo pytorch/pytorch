@@ -875,7 +875,7 @@ def _low_contention_all_gather(
             local_buf.copy_(tensor)
         # pull
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
@@ -910,7 +910,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     with torch.cuda.stream(_get_backend_stream()):
         # pull + offline reduction
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(
                 remote_rank,
@@ -947,7 +947,7 @@ def _low_contention_reduce_scatter_with_workspace(
     with torch.cuda.stream(_get_backend_stream()):
         # push + offline reduction
         workspace.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             dst_buf = workspace.get_buffer(
                 remote_rank, chunks[0].shape, chunks[0].dtype, chunks[0].numel() * rank

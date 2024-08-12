@@ -230,7 +230,6 @@ class LogsSpecs(ABC):
         Envs parameter contains env variables dict for each of the local ranks, where entries are defined in:
         :func:`~torchelastic.distributed.elastic.agent.server.local_elastic_agent.LocalElasticAgent._start_workers`.
         """
-        pass
 
     @property
     @abstractmethod
@@ -686,7 +685,7 @@ class MultiprocessContext(PContext):
             # pipe. Hence to prevent deadlocks on large return values,
             # we opportunistically try queue.get on each join call
             # See: https://docs.python.org/2/library/multiprocessing.html#all-platforms
-            for local_rank in range(0, self.nprocs):
+            for local_rank in range(self.nprocs):
                 return_queue = self._ret_vals[local_rank]
                 if not return_queue.empty():
                     # save the return values temporarily into a member var

@@ -858,7 +858,7 @@ def chunk_default(func, *args, **kwargs):
 
         return [
             NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
-            for i in range(0, chunk_size)
+            for i in range(chunk_size)
         ]
     else:
         return [
@@ -1103,7 +1103,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             # reduction cases: (ragged)
             values_ragged_dim_outer = inp._values.permute(
                 inp._ragged_idx - 1,  # outer dimension
-                *range(0, inp._ragged_idx - 1),
+                *range(inp._ragged_idx - 1),
                 *range(inp._ragged_idx, inp.dim() - 1),
             )  # shift reduction dimension of values backward to outer dimension
 

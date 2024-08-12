@@ -128,7 +128,7 @@ class AllReduce:
             rank_0_device = data[0][i].device
             # collect all data to the list and make them
             # all on rank 0 device
-            for src_rank in range(0, len(data)):
+            for src_rank in range(len(data)):
                 tensors.append(data[src_rank][i].to(rank_0_device))
 
             # now mimic reduce across all ranks
