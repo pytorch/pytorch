@@ -311,6 +311,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_prepare_profiler",
       prepareProfiler,
       py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_toggle_collection_dynamic",
+      toggleCollectionDynamic,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -441,6 +445,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         TORCH_CHECK(meta != nullptr);
         meta->set_creation_meta(new_creation_meta);
       });
+
+  m.def("_get_current_graph_task_keep_graph", []() {
+    return torch::autograd::get_current_graph_task_keep_graph();
+  });
+
+  m.def(
+      "_get_data_attr", [](const at::Tensor& t) { return t.variable_data(); });
 
   _C_m.def(
       "_register_py_class_for_device",
@@ -1247,11 +1258,23 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+PyObject* THPModule_increment_version(
+    PyObject* _unused,
+    PyObject* tensor_list) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
-  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  auto iterator = THPObjectPtr(PyObject_GetIter(tensor_list));
+  TORCH_CHECK(iterator, "increment_version expect a Iterable[Tensor] as input");
+  auto item = THPObjectPtr(PyIter_Next(iterator));
+  while (item) {
+    TORCH_CHECK(
+        THPVariable_Check(item),
+        "increment_version expects each element of the iterable to be a tensor");
+    auto t = THPVariable_Unpack(item);
+    if (!t.is_inference()) {
+      torch::autograd::increment_version(t);
+    }
+    item = THPObjectPtr(PyIter_Next(iterator));
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
