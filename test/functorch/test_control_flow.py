@@ -1204,9 +1204,8 @@ def forward(self, pred_1, x_1):
         self.assertEqual(true_outs, fake_outs)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_vmap(self):
-        device = torch.device("cuda")
-
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_vmap(self, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1227,11 +1226,10 @@ def forward(self, pred_1, x_1):
         def associative_scan_fct(x):
             return associative_scan(add, x, 0)
 
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(
-                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
-            )
-            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+        associative_scan1 = torch.compile(
+            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+        )
+        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
 
         result1 = associative_scan1(x)
         # result2 = associative_scan2(x)
@@ -1244,11 +1242,10 @@ def forward(self, pred_1, x_1):
         def associative_scan_fct(x):
             return associative_scan(add, x, 1)
 
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(
-                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
-            )
-            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+        associative_scan1 = torch.compile(
+            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+        )
+        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
 
         result1 = associative_scan1(x)
         # result2 = associative_scan2(x)
@@ -1261,11 +1258,10 @@ def forward(self, pred_1, x_1):
         def associative_scan_fct(x):
             return associative_scan(add, x, 1)
 
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(
-                torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True
-            )
-            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
+        associative_scan1 = torch.compile(
+            torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True
+        )
+        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
 
         result1 = associative_scan1(x)
         # result2 = associative_scan2(x)
@@ -1274,9 +1270,8 @@ def forward(self, pred_1, x_1):
         # self.assertEqual(result2, expected_result)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_generic_associative_scan_vmap_pytree(self):
-        device = torch.device("cuda")
-
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_vmap_pytree(self, device):
         def fct_pointwise(x, y):
             return {
                 "i": x["i"] * y["i"],
@@ -1303,11 +1298,10 @@ def forward(self, pred_1, x_1):
             return associative_scan(fct_pointwise, z, 0)
 
         torch.compiler.reset()
-        with torch._dynamo.utils.disable_cache_limit():
-            associative_scan1 = torch.compile(
-                torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
-            )
-            associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+        associative_scan1 = torch.compile(
+            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+        )
+        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
 
         result1 = associative_scan1(inp)
         # result2 = associative_scan2(inp)
@@ -3687,6 +3681,7 @@ def forward(self, l_inp_, l_tmp_):
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)
+instantiate_parametrized_tests(TestControlFlow)
 
 if __name__ == "__main__":
     run_tests()
