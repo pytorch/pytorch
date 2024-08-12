@@ -2648,7 +2648,6 @@ class TestJvp(TestCase):
         expected = (f(x), torch.zeros_like(x))
         self.assertEqual(actual, expected)
 
-
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
