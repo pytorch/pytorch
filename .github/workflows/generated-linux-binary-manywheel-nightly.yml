@@ -44,7 +44,7 @@ concurrency:
 jobs:
   calculate-manylinux-builder-cpu:
     runs-on: linux.9xlarge.ephemeral
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel-skip') }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
