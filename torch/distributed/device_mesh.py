@@ -119,7 +119,7 @@ else:
 
         def is_flatten_mesh(self, device_mesh: "DeviceMesh") -> bool:
             root_mesh = self.get_root_mesh(device_mesh)
-            if len(device_mesh.mesh_dim_names) != 1:
+            if not device_mesh.mesh_dim_names or len(device_mesh.mesh_dim_names) != 1:
                 return False
             else:
                 flatten_mesh_dim_name = device_mesh.mesh_dim_names[0]
