@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 
 from . import config, reset, utils
 
+
 log = logging.getLogger(__name__)
 
 
@@ -26,8 +27,9 @@ def run_tests(needs=()):
     if isinstance(needs, str):
         needs = (needs,)
     for need in needs:
-        if need == "cuda" and not torch.cuda.is_available():
-            return
+        if need == "cuda":
+            if not torch.cuda.is_available():
+                return
         else:
             try:
                 importlib.import_module(need)
