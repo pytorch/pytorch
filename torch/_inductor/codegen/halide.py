@@ -859,11 +859,11 @@ class HalideKernel(SIMDKernel):
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
-                    self.index_replacements[node.symbol()] = (
-                        V.graph.sizevars.simplify_with_ranges(
-                            ModularIndexing(full_index, node.divisor, node.length),
-                            self.halide_vars,  # type: ignore[arg-type]
-                        )
+                    self.index_replacements[
+                        node.symbol()
+                    ] = V.graph.sizevars.simplify_with_ranges(
+                        ModularIndexing(full_index, node.divisor, node.length),
+                        self.halide_vars,  # type: ignore[arg-type]
                     )
 
         # codegen the variable definitions
@@ -1184,9 +1184,9 @@ class HalideKernel(SIMDKernel):
 
         if isinstance(value, tuple):
             assert reduction_type == "welford_combine"
-            self.cse.reduction_cache[cache_key] = result_tuple = (
-                self.welford_combine_impl(*value)
-            )
+            self.cse.reduction_cache[
+                cache_key
+            ] = result_tuple = self.welford_combine_impl(*value)
             return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None

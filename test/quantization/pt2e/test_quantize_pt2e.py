@@ -252,16 +252,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         maxpool_node = node
                         input_act = maxpool_node.args[0]
                         assert isinstance(input_act, Node)
-                        maxpool_node.meta["quantization_annotation"] = (
-                            QuantizationAnnotation(
-                                input_qspec_map={
-                                    input_act: act_qspec,
-                                },
-                                output_qspec=SharedQuantizationSpec(
-                                    (input_act, maxpool_node)
-                                ),
-                                _annotated=True,
-                            )
+                        maxpool_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                            },
+                            output_qspec=SharedQuantizationSpec(
+                                (input_act, maxpool_node)
+                            ),
+                            _annotated=True,
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -753,16 +753,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                             (first_input_node, cat_node)
                         )
                         for input_node in input_nodes[1:]:
-                            input_qspec_map[input_node] = (
-                                share_qparams_with_input_act0_qspec
-                            )
+                            input_qspec_map[
+                                input_node
+                            ] = share_qparams_with_input_act0_qspec
 
-                        cat_node.meta["quantization_annotation"] = (
-                            QuantizationAnnotation(
-                                input_qspec_map=input_qspec_map,
-                                output_qspec=share_qparams_with_input_act0_qspec,
-                                _annotated=True,
-                            )
+                        cat_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act0_qspec,
+                            _annotated=True,
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -978,16 +978,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                             (first_input_node, cat_node)
                         )
                         for input_node in input_nodes[1:]:
-                            input_qspec_map[input_node] = (
-                                share_qparams_with_input_act0_qspec
-                            )
+                            input_qspec_map[
+                                input_node
+                            ] = share_qparams_with_input_act0_qspec
 
-                        cat_node.meta["quantization_annotation"] = (
-                            QuantizationAnnotation(
-                                input_qspec_map=input_qspec_map,
-                                output_qspec=share_qparams_with_input_act0_qspec,
-                                _annotated=True,
-                            )
+                        cat_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act0_qspec,
+                            _annotated=True,
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -1074,16 +1074,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         share_qparams_with_input_act1_qspec = SharedQuantizationSpec(
                             (second_input_node, cat_node)
                         )
-                        input_qspec_map[first_input_node] = (
-                            share_qparams_with_input_act1_qspec
-                        )
+                        input_qspec_map[
+                            first_input_node
+                        ] = share_qparams_with_input_act1_qspec
 
-                        cat_node.meta["quantization_annotation"] = (
-                            QuantizationAnnotation(
-                                input_qspec_map=input_qspec_map,
-                                output_qspec=share_qparams_with_input_act1_qspec,
-                                _annotated=True,
-                            )
+                        cat_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act1_qspec,
+                            _annotated=True,
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
@@ -1132,17 +1132,17 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         share_qparams_with_input_act1_qspec = SharedQuantizationSpec(
                             (second_input_node, add_node)
                         )
-                        input_qspec_map[first_input_node] = (
-                            share_qparams_with_input_act1_qspec
-                        )
+                        input_qspec_map[
+                            first_input_node
+                        ] = share_qparams_with_input_act1_qspec
 
-                        add_node.meta["quantization_annotation"] = (
-                            QuantizationAnnotation(
-                                input_qspec_map=input_qspec_map,
-                                output_qspec=share_qparams_with_input_act1_qspec,
-                                allow_implicit_sharing=False,
-                                _annotated=True,
-                            )
+                        add_node.meta[
+                            "quantization_annotation"
+                        ] = QuantizationAnnotation(
+                            input_qspec_map=input_qspec_map,
+                            output_qspec=share_qparams_with_input_act1_qspec,
+                            allow_implicit_sharing=False,
+                            _annotated=True,
                         )
 
             def validate(self, model: torch.fx.GraphModule) -> None:

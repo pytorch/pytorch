@@ -817,7 +817,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 # Extracts dimensions that might be passed either as a list/tuple or as varargs.
 # A typical case is Tensor.permute .
 def extract_dims_from_varargs(
-    dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]],
+    dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]
 ) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
@@ -1134,7 +1134,7 @@ def get_higher_dtype(
     assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
 
     def _extract_dtype(
-        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
+        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
     ) -> Optional[torch.dtype]:
         if x is None:
             return None
@@ -1352,7 +1352,7 @@ class RETURN_TYPE(Enum):
 
 # TODO: when NumberType contains the sym types, can simplify this
 def number_type(
-    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool],
+    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool]
 ) -> Type:
     if isinstance(x, torch.SymInt):
         return int

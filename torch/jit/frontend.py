@@ -73,6 +73,7 @@ from torch._sources import (
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
 
+
 _IS_ASTUNPARSE_INSTALLED = False
 try:
     import astunparse  # type: ignore[import]
@@ -474,22 +475,18 @@ def build_param_list(ctx, py_args, self_name, pdt_arg_types=None):
     arg_and_types = [
         (
             arg,
-            (
-                pdt_arg_types[arg.arg]
-                if pdt_arg_types and bool(pdt_arg_types[arg.arg])
-                else None
-            ),
+            pdt_arg_types[arg.arg]
+            if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+            else None,
         )
         for arg in py_args.args
     ]
     arg_and_types_kwonlyargs = [
         (
             arg,
-            (
-                pdt_arg_types[arg.arg]
-                if pdt_arg_types and bool(pdt_arg_types[arg.arg])
-                else None
-            ),
+            pdt_arg_types[arg.arg]
+            if pdt_arg_types and bool(pdt_arg_types[arg.arg])
+            else None,
         )
         for arg in py_args.kwonlyargs
     ]

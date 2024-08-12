@@ -199,11 +199,9 @@ class _ModuleStackMeta:
 
     def __init__(
         self,
-        nn_module_stack_meta: (
-            _FX_TRACER_NN_MODULE_STACK_META_TYPE
-            | _DYNAMO_NN_MODULE_STACK_META_TYPE
-            | None
-        ),
+        nn_module_stack_meta: _FX_TRACER_NN_MODULE_STACK_META_TYPE
+        | _DYNAMO_NN_MODULE_STACK_META_TYPE
+        | None,
         is_exported_program: bool = True,
     ):
         self._module_stack = []
