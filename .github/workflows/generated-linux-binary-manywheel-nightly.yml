@@ -47,10 +47,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: View context attributes
-        uses: actions/github-script@v7
+       - uses: actions/github-script@v7
+        id: get_pr_data
         with:
-          script: console.log(github)
+          script: |
+              console.log(context.payload.compare)
+              const commitRegex = /.*compare\/([a-f0-9]+)\^\.\.\.([a-f0-9]+)/g;
+              const match = context.payload.compare.match(commitRegex);
+              console.log(match);
+              console.log(context);
+              for commit in context.payload.commits do
+                echo "$commit was done"
+              done
 
       - name: Get changed files
         id: changed-files
@@ -67,22 +75,8 @@ jobs:
             echo "$file was changed"
           done
 
-      - uses: actions/github-script@v7
-        id: get_pr_data
-        with:
-          script: |
-              console.log(context.payload.compare)
-              const commitRegex = /.*compare\/([a-f0-9]+)\^\.\.\.([a-f0-9]+)/g;
-              const match = context.payload.compare.match(commitRegex);
-              console.log(match);
-              console.log(context);
-              console.log(
-                await github.rest.repos.listPullRequestsAssociatedWithCommit({
-                  commit_sha: context.sha,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                })
-              )
+
+
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
