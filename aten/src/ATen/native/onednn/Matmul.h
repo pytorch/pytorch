@@ -14,17 +14,17 @@ TORCH_API void mkldnn_matmul(
         float beta=1,
         float alpha=1);
 
-bool use_mkldnn_bf16_matmul(
+bool use_onednn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt);
 
-bool use_mkldnn_fp16_matmul(
+bool use_onednn_fp16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt);
 
-bool use_mkldnn_bf32_matmul(
+bool use_onednn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result_opt);
@@ -62,7 +62,7 @@ bool mkldnn_bf32_gemm(
     float beta,
     float *c, int64_t ldc);
 
-bool use_mkldnn_matmul(
+bool use_onednn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result);

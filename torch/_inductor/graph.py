@@ -850,7 +850,7 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
-                    not data.is_mkldnn
+                    not data.is_onednn
                     and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
@@ -1374,7 +1374,7 @@ class GraphLowering(torch.fx.Interpreter):
                             need_fixed_layout += [
                                 torch.ops.onednn._linear_pointwise.default,
                                 torch.ops.onednn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
+                                torch.ops.aten.onednn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
                                 torch.ops.onednn.qlinear_pointwise.binary,

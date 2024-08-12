@@ -28,9 +28,9 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
-        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        x_mkldnn = x if x.is_onednn else x.to_mkldnn()
+        y_mkldnn = torch._C._nn.onednn_linear(x_mkldnn, self.weight, self.bias)
+        y = y_mkldnn if x.is_onednn else y_mkldnn.to_dense()
         return y
 
 
@@ -198,9 +198,9 @@ class MkldnnPrelu(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        x_mkldnn = x if x.is_onednn else x.to_mkldnn()
         y_mkldnn = torch.prelu(x_mkldnn, self.weight)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        y = y_mkldnn if x.is_onednn else y_mkldnn.to_dense()
         return y
 
 def to_mkldnn(module, dtype=torch.float):

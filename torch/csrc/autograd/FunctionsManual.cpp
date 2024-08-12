@@ -1423,7 +1423,7 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    if (input.is_mkldnn())
+    if (input.is_onednn())
       return {};
     if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
@@ -7007,7 +7007,7 @@ Tensor to_sparse_backward(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
-mkldnn_rnn_layer_differentiable_backward(
+onednn_rnn_layer_differentiable_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,

@@ -496,9 +496,9 @@ class TORCH_API TensorBase {
   }
 
   /// Returns if a `Tensor` is onednn tensor.
-  bool is_mkldnn() const {
+  bool is_onednn() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_mkldnn();
+    return impl_->is_onednn();
   }
 
   /// Returns if a `Tensor` is mps tensor.

@@ -245,7 +245,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 dtype == torch.bfloat16
                 or (
                     dtype == torch.float16
-                    and torch.ops.onednn._is_mkldnn_fp16_supported()
+                    and torch.ops.onednn._is_onednn_fp16_supported()
                 )
             )
             and epilogue != "mul"
