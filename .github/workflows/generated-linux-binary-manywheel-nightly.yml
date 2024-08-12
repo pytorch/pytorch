@@ -60,10 +60,9 @@ jobs:
           push: true
 
   manywheel-py3_9-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ always() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: calculate-manylinux-builder-cpu
-    if: always()
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
