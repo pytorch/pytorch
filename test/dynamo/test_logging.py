@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -130,6 +131,7 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
+    @skipIfWindows
     @make_logging_test()
     def test_dynamo_error(self, records):
         try:

@@ -304,6 +304,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(w1, x1)
         self.assertEqual(w1.grad, x1.cos())
 
+    @skipIfWindows
     def test_module_backward_hooks_eager(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)

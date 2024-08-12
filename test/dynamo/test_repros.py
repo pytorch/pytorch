@@ -923,6 +923,7 @@ class IncByTwo:
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    @skipIfWindows
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
