@@ -56,9 +56,7 @@ jobs:
               const match = context.payload.compare.match(commitRegex);
               console.log(match);
               console.log(context);
-              for commit in context.payload.commits do
-                echo "$commit was done"
-              done
+              console.log(context.payload.commits[0]);
 
       - name: Get changed files
         id: changed-files
