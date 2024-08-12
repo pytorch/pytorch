@@ -534,10 +534,10 @@ class FakeTensorConfig:
 class SymIntMemoDescriptor:
     _name: str
     _is_unbacked: bool
-    # This flag disables version counter. We use this for NJT, where
-    # memoization of the nested int on the fake offsets should not be
-    # invalidated even if the offsets is mutated. This is only true given that
-    # each nested int is unique and not shared across multiple tensors.
+    # This flag disables version counting. We use this for NJT, where
+    # memo of the nested int on the fake offsets should not be invalidated
+    # even if the offsets is mutated. This is true given that each nested
+    # is not shared across multiple distinct tensors.
     _no_vc: bool
 
     def __init__(
