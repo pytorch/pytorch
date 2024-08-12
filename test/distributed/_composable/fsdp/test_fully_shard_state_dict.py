@@ -32,13 +32,21 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_1d_state_dict_save_load(self):
+    def test_dp_state_dict_save_load(self):
+        fsdp_mesh = init_device_mesh("cuda", (self.world_size,))
         self.run_subtests(
-            {"mlp_dim": [2, 3, 4, 5]},
-            self._test_1d_state_dict_save_load,
+            {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
+            self._test_dp_state_dict_save_load,
+        )
+        if self.world_size % 2 != 0:
+            return
+        hsdp_mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        self.run_subtests(
+            {"mlp_dim": [2, 3, 4, 5], "mesh": [hsdp_mesh]},
+            self._test_dp_state_dict_save_load,
         )
 
-    def _test_1d_state_dict_save_load(self, mlp_dim: int):
+    def _test_dp_state_dict_save_load(self, mlp_dim: int, mesh: DeviceMesh):
         torch.manual_seed(42)
         base_model = nn.Sequential(
             MLP(mlp_dim),
@@ -48,15 +56,15 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         # Check basic `reshard_after_forward=True`
         model1 = copy.deepcopy(base_model)
         for module in model1:
-            fully_shard(module)
-        fully_shard(model1)
+            fully_shard(module, mesh=mesh)
+        fully_shard(model1, mesh=mesh)
         self._test_state_dict_save_load(model1)
 
         # Check `reshard_after_forward=False` before and after a forward
         model2 = copy.deepcopy(base_model)
         for module in model2:
-            fully_shard(module, reshard_after_forward=False)
-        fully_shard(model2, reshard_after_forward=False)
+            fully_shard(module, mesh=mesh, reshard_after_forward=False)
+        fully_shard(model2, mesh=mesh, reshard_after_forward=False)
         self._test_state_dict_save_load(model2)
         ref_sharded_sd = model2.state_dict()
         inp = torch.randn((2, mlp_dim), device="cuda")
@@ -68,7 +76,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertEqual(value, sharded_sd[key])
 
     @skip_if_lt_x_gpu(2)
-    def test_1d_state_dict_cpu_offload(self):
+    def test_dp_state_dict_cpu_offload(self):
         mlp_dim = 4
         offload_policy = CPUOffloadPolicy(pin_memory=True)
         torch.manual_seed(42)
@@ -103,20 +111,57 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         for name, dtensor in state_dict.items():
             self.assertEqual(dtensor.device.type, "cpu")
 
-    # Temporarily disable 2D state dict test, while strided sharding is being devleoped.
-    # TODO: re-enable this test once 2d state_dict is ready.
+    def test_2d_state_dict_correctness(self):
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        mlp_dim = 4
+
+        # model init
+        model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
+        model_2d = copy.deepcopy(model)
+
+        # FSDP + TP
+        model_2d = parallelize_module(
+            model_2d,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in model_2d:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model_2d, mesh=dp_mesh)
+
+        # state_dict parity check
+        model_state_dict = model.state_dict()
+        model_2d_state_dict = model_2d.state_dict()
+        for tensor, dtensor in zip(
+            model_state_dict.values(), model_2d_state_dict.values()
+        ):
+            self.assertTrue(isinstance(dtensor, DTensor))
+            self.assertEqual(tensor, dtensor.full_tensor())
+
     @skip_if_lt_x_gpu(2)
-    def _temp_disable_test_2d_state_dict_save_load(self):
+    def test_dp_tp_state_dict_save_load(self):
         dp_size = 2
         global_mesh = init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5]},
-            functools.partial(self._test_2d_state_dict_save_load, global_mesh),
+            functools.partial(self._test_dp_tp_state_dict_save_load, global_mesh),
         )
 
-    def _test_2d_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
+    def _test_dp_tp_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])

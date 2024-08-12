@@ -7,6 +7,7 @@ from typing import List
 import torch
 import torch.utils._pytree as pytree
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -73,7 +74,7 @@ class FakeBackwardCFunction:
         self,
         real: torch.autograd.function.BackwardCFunction,
         saved_tensors: List[torch.Tensor],
-    ):
+    ) -> None:
         self.real = real
         self.saved_tensors = saved_tensors
 
