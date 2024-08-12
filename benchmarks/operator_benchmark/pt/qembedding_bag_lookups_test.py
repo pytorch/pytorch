@@ -1,7 +1,6 @@
 from typing import Optional
 
 import numpy as np
-
 import operator_benchmark as op_bench
 
 import torch
