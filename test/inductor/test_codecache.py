@@ -9,7 +9,6 @@ from typing import List
 from unittest import mock
 
 import torch
-import torch._inductor.compile_fx
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
@@ -23,6 +22,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
@@ -447,7 +447,7 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the inductor counters on a cache hit.
         """
-        compile_to_fn = torch._inductor.graph.GraphLowering.compile_to_fn
+        compile_to_fn = GraphLowering.compile_to_fn
 
         counter_name = "a_test_counter"
         counter_incr = 7
@@ -458,9 +458,7 @@ class TestFxGraphCache(TestCase):
             counters["inductor"][counter_name] += counter_incr
             return compile_to_fn(self)
 
-        with mock.patch.object(
-            torch._inductor.graph.GraphLowering, "compile_to_fn", bump_counter
-        ) as mocked:
+        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
 
             def fn(a, b):
                 return torch.mm(a, b)
@@ -478,7 +476,6 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(
                 counters["inductor"][counter_name], counter_val + counter_incr
             )
-            mocked.assert_called_once()
 
             # Verify the "hit" case.
             self.reset()
