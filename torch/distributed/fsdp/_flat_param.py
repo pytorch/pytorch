@@ -1396,7 +1396,10 @@ class FlatParamHandle:
         # HACK this should be handled by C10D
         if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
             tensor_list = list(
-                torch.chunk(padded_unsharded_flat_param, dist.get_world_size(pg))
+                torch.chunk(
+                    padded_unsharded_flat_param,
+                    dist.get_world_size(pg),  # type: ignore[arg-type]
+                )
             )
             dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
