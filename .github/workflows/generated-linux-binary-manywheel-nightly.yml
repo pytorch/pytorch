@@ -48,24 +48,16 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/github-script@v7
-        id: get_pr_data
+        id: get_base_commit
         with:
           script: |
-              console.log(context.payload.compare)
-              const commitRegex = /.*compare\/([a-f0-9]+)\^\.\.\.([a-f0-9]+)/g;
-              const match = context.payload.compare.match(commitRegex);
-              console.log(match);
-              console.log(context);
-              console.log(context.payload.commits[0]);
+              return context.payload.commits[0].id
 
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v44
         with:
-          base_sha: 1d9f5243a76e
-        # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
-        # with:
-        #   since_last_remote_commit: true
+          base_sha: "${{steps.get_base_commit.outputs.result}}"
 
       - name: List all changed files
         run: |
