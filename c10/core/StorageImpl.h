@@ -63,7 +63,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_(std::move(size_bytes)),
         size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
-        received_cuda_(false),
+        received_device_(false),
         allocator_(allocator) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
@@ -251,12 +251,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // This method can be used only after storage construction and cannot be used
   // to modify storage status
-  void set_received_cuda(bool received_cuda) {
-    received_cuda_ = received_cuda;
+  void set_received_device(bool received_device) {
+    received_device_ = received_device;
   }
 
-  bool received_cuda() {
-    return received_cuda_;
+  bool received_device() {
+    return received_device_;
   }
 
   impl::PyObjectSlot* pyobj_slot() {
@@ -329,7 +329,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
-  bool received_cuda_;
+  bool received_device_;
   // All special checks in data/data_ptr calls are guarded behind this single
   // boolean. This is for performance: .data/.data_ptr calls are commonly in the
   // hot-path.

@@ -5,6 +5,8 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
+#include <c10/core/Storage.h>
+#include <c10/core/DeviceGuard.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
@@ -72,6 +74,27 @@ struct TORCH_API AcceleratorHooksInterface {
       [[maybe_unused]] DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
+
+  virtual std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
+  StorageShareDevice(const c10::Storage& storage) const {
+    TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
+  };
+
+  virtual c10::DataPtr StorageNewSharedDevice(c10::DeviceIndex device,
+                                              bool event_sync_required,
+                                              std::string s_ipc_event_handle,
+                                              std::string s_handle,
+                                              std::string ref_counter_handle,
+                                              ptrdiff_t ref_counter_offset,
+                                              ptrdiff_t storage_offset_bytes) const {
+    TORCH_CHECK(false, "Backend doesn't support StorageNewSharedDevice");
+  };
+
+  virtual int64_t getIpcRefCounterFileSize() const {
+    TORCH_CHECK(false, "Backend doesn't support getIpcRefCounterFileSize");
+    return -1;
+  };
+
 };
 
 } // namespace at
