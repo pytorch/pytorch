@@ -74,7 +74,7 @@ def associative_scan(
     assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
     assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
 
-    if not torch.compiler.is_compiling():
+    if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
                 combine_fn, input, dim
@@ -168,10 +168,7 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
 def associative_scan_proxy_mode(mode, combine_fn, input, dim):
-    if mode.enable_tracing:
-        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
-    else:
-        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim)
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
