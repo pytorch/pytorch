@@ -184,7 +184,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 12)
 
-    @unittest.expectedFailure # https://github.com/pytorch/pytorch/issues/118204
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_across_graph_break(self):
         def fn(x):
