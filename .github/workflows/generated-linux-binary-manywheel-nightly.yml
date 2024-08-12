@@ -50,9 +50,11 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v44
-        # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
         with:
-          since_last_remote_commit: true
+          base_sha: "${{ github.base_ref }}"
+        # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
+        # with:
+        #   since_last_remote_commit: true
 
       - name: List all changed files
         run: |
