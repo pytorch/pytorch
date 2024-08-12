@@ -391,7 +391,7 @@ def generate_wheels_matrix(
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
                             if os != "linux-aarch64"
                             else ""
                         ),
@@ -414,7 +414,7 @@ def generate_wheels_matrix(
                             "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                             "package_type": package_type,
                             "pytorch_extra_install_requirements": (
-                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
+                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
                                 if os != "linux-aarch64"
                                 else ""
                             ),
@@ -463,7 +463,7 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
                             if os != "linux"
                             else ""
                         ),

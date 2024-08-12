@@ -118,11 +118,9 @@ def _to_numpy(elem) -> list | np.ndarray:
 
 def _inline_flatten_list(inputs, res_list) -> list:
     for i in inputs:
-        (
-            res_list.append(i)
-            if not isinstance(i, (list, tuple))
-            else _inline_flatten_list(i, res_list)
-        )
+        res_list.append(i) if not isinstance(
+            i, (list, tuple)
+        ) else _inline_flatten_list(i, res_list)
     return res_list
 
 
@@ -776,9 +774,8 @@ def verify(
     input_args: _InputArgsType,
     input_kwargs: _InputKwargsType | None = None,
     do_constant_folding: bool = True,
-    dynamic_axes: (
-        Mapping[str, Mapping[int, str] | Mapping[str, Sequence[int]]] | None
-    ) = None,
+    dynamic_axes: Mapping[str, Mapping[int, str] | Mapping[str, Sequence[int]]]
+    | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,

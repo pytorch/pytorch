@@ -99,6 +99,7 @@ from .source import (
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -543,9 +544,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
-            {}
-        )
+        self._cached_guard_managers: Dict[
+            str, torch._C._dynamo.guards.GuardManager
+        ] = {}
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -875,7 +876,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AttrSource):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
@@ -1416,6 +1417,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
+
         ok_types = tuple(
             common_constant_types
             | {
@@ -1430,6 +1432,21 @@ class GuardBuilder(GuardBuilderBase):
                 *np_types,
             }
         )
+        if torch.distributed.is_available():
+            from torch.distributed._tensor.placement_types import (
+                Partial,
+                Replicate,
+                Shard,
+            )
+            from torch.distributed.device_mesh import DeviceMesh
+
+            ok_types = ok_types + (
+                Shard,
+                Replicate,
+                Partial,
+                DeviceMesh,
+            )
+
         if istype(val, dict):
             assert all(
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
@@ -1914,7 +1931,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+                value, is_tensor=True, tensor_source=guard.originating_source
             )
 
             if not static:
@@ -2251,16 +2268,12 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": (
-                        structured.from_traceback(guard.stack.summary())
-                        if guard.stack
-                        else None
-                    ),
-                    "user_stack": (
-                        structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
-                        else None
-                    ),
+                    "stack": structured.from_traceback(guard.stack.summary())
+                    if guard.stack
+                    else None,
+                    "user_stack": structured.from_traceback(guard.user_stack)
+                    if guard.user_stack
+                    else None,
                 }
             )
 

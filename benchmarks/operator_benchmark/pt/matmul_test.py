@@ -34,16 +34,12 @@ mm_long_configs = op_bench.cross_product_configs(
 class MatMulBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, trans_a, trans_b, device):
         self.inputs = {
-            "input_one": (
-                torch.rand(M, N, device=device)
-                if trans_a
-                else torch.rand(N, M, device=device).t()
-            ),
-            "input_two": (
-                torch.rand(N, K, device=device)
-                if trans_b
-                else torch.rand(K, N, device=device).t()
-            ),
+            "input_one": torch.rand(M, N, device=device)
+            if trans_a
+            else torch.rand(N, M, device=device).t(),
+            "input_two": torch.rand(N, K, device=device)
+            if trans_b
+            else torch.rand(K, N, device=device).t(),
         }
         self.set_module_name("matmul")
 

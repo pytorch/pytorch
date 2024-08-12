@@ -386,9 +386,9 @@ def group_filter_overloads(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     pred: Callable[[NativeFunction], bool],
 ) -> dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]:
-    grouped: dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]] = (
-        defaultdict(list)
-    )
+    grouped: dict[
+        BaseOperatorName, list[PythonSignatureNativeFunctionPair]
+    ] = defaultdict(list)
     for pair in pairs:
         if pred(pair.function):
             grouped[pair.function.func.name.name].append(pair)
@@ -522,12 +522,12 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
     ) -> str:
         return kv[0].base
 
     def env_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
     ) -> dict[str, list[str]]:
         name, fn_pairs = kv
         return {
@@ -707,8 +707,9 @@ def emit_structseq_call(
     Generate block of named tuple type def inits, and add typeref snippets
     to declarations that use them
     """
-    # map from unique name + field name lists to typedef name
-    typenames: dict[str, str] = {}
+    typenames: dict[
+        str, str
+    ] = {}  # map from unique name + field name lists to typedef name
     typedefs: list[str] = []  # typedef declarations and init code
 
     for overload in overloads:
@@ -738,8 +739,9 @@ def generate_return_type_definition_and_registrations(
     and return named tuple for a native function which returns named tuple
     and registration invocations in same file.
     """
-    # map from unique name + field name lists to typedef name
-    typenames: dict[str, str] = {}
+    typenames: dict[
+        str, str
+    ] = {}  # map from unique name + field name lists to typedef name
     definitions: list[str] = []  # function definition to register the typedef
     registrations: list[str] = []  # register call for the typedef
 
@@ -787,8 +789,9 @@ def generate_return_type_declarations(
     Generate block of function declarations in `python_return_types.h` to initialize
     and return named tuple for a native function.
     """
-    # map from unique name + field name lists to typedef name
-    typenames: dict[str, str] = {}
+    typenames: dict[
+        str, str
+    ] = {}  # map from unique name + field name lists to typedef name
     declarations: list[str] = []  # function declaration to register the typedef
 
     for overload in overloads:

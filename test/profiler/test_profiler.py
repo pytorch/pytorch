@@ -1255,9 +1255,8 @@ class TestProfiler(TestCase):
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
-            t1, t2 = (
-                torch.ones(1, requires_grad=True),
-                torch.ones(1, requires_grad=True),
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                1, requires_grad=True
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -1311,9 +1310,8 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
 
             with _profile(use_kineto=True) as prof:
-                t1, t2 = (
-                    torch.ones(1, requires_grad=True),
-                    torch.ones(1, requires_grad=True),
+                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                    1, requires_grad=True
                 )
                 z = torch.add(t1, t2)
                 y = torch.ones(1)
@@ -1843,11 +1841,16 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         "profiling out of range",
                     )
 
-    def _schedule_helper(self, warmup, active, repeat):
+    def _schedule_helper(self, warmup, active, repeat, acc_events=True):
         with profile(
             schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
-            )
+                skip_first=0,
+                wait=0,
+                warmup=warmup,
+                active=active,
+                repeat=repeat,
+            ),
+            acc_events=acc_events,
         ) as prof:
             for i in range(100):
                 torch.add(1, 2)
@@ -1865,6 +1868,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
         self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
         self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+        self.assertEqual(
+            self._schedule_helper(warmup=0, active=5, repeat=0, acc_events=False), 0
+        )
+        self.assertEqual(
+            self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
+        )
 
     def _step_helper_func(self, prof):
         time.sleep(0.1)
@@ -2152,9 +2161,8 @@ class TestExperimentalUtils(TestCase):
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
-            t1, t2 = (
-                torch.ones(1, requires_grad=True),
-                torch.ones(1, requires_grad=True),
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                1, requires_grad=True
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)

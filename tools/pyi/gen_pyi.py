@@ -469,6 +469,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "dropout_p: float = 0.0",
                         "is_causal: bool = False",
                         "scale: float | None = None",
+                        "enable_gqa: bool = False",
                     ],
                     "Tensor",
                 )
@@ -817,6 +818,9 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 defs("_functionalize_commit_update", ["t: Tensor"], "None")
             ],
+            "_functionalize_unsafe_set": [
+                "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
+            ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 defs(
                     "_functionalize_mark_mutation_hidden_from_autograd",
@@ -848,6 +852,9 @@ def gen_pyi(
             "_functionalize_sync": [defs("_functionalize_sync", ["t: Tensor"], "None")],
             "_functionalize_was_storage_changed": [
                 defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
+            ],
+            "_functionalize_set_storage_changed": [
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 defs(
