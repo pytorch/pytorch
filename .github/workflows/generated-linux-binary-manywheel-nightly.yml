@@ -44,7 +44,7 @@ concurrency:
 jobs:
   calculate-manylinux-builder-cpu:
     runs-on: linux.9xlarge.ephemeral
-    if: env.WITH_DOCKER_BUILD == 'true'
+    if: ${{ env.WITH_DOCKER_BUILD == 'true' }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
