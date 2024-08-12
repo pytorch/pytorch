@@ -8753,7 +8753,7 @@ class TestNNMPS(NNTestCase):
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
         if torch.backends.mkldnn.is_available():
-            # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
+            # Disable ONEDNN explicitly, so that either NNPACK or THCNN will be used
             with torch.backends.mkldnn.flags(enabled=False):
                 y_ = torch.nn.functional.conv2d(x, weight, None)
                 self.assertEqual(y, y_)

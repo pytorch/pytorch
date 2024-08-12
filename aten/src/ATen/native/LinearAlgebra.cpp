@@ -18,7 +18,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/onednn/Matmul.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -1354,10 +1354,10 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-static inline int64_t get_mkldnn_matmul_min_dim() {
+static inline int64_t get_onednn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
-      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // Minimum dimension requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1366,17 +1366,17 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
 #endif
       return 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    const char* ptr = std::getenv("TORCH_onednn_matmul_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
   return value;
 }
 
 
-static inline int64_t get_mkldnn_matmul_min_size() {
+static inline int64_t get_onednn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
-      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // Minimum size requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1385,17 +1385,17 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 #endif
       return 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    const char* ptr = std::getenv("TORCH_onednn_matmul_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
   return value;
 }
 
 
-static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
-  const int64_t min_dim = get_mkldnn_matmul_min_dim();
-  const int64_t min_size = get_mkldnn_matmul_min_size();
-  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+static inline bool apply_onednn_matmul_heur(int64_t m, int64_t k, int64_t n) {
+  const int64_t min_dim = get_onednn_matmul_min_dim();
+  const int64_t min_size = get_onednn_matmul_min_size();
+  return at::globalContext().userEnabledOnednn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
@@ -1512,22 +1512,22 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   bool dispatched = false;
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_ONEDNN_ACL_ENABLED()
   // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    bool apply_heur = apply_onednn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
     if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
-        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+        onednn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
       } catch (const std::exception& e) {
-        TORCH_WARN("mkldnn_matmul failed, switching to BLAS gemm:", e.what());
-        at::globalContext().setUserEnabledMkldnn(false);
+        TORCH_WARN("onednn_matmul failed, switching to BLAS gemm:", e.what());
+        at::globalContext().setuserEnabledOnednn(false);
       }
     }
   }
@@ -1775,14 +1775,14 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
-  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+  bool apply_heur = apply_onednn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
+  if (apply_heur && use_onednn_matmul(batch1, batch2, self_or_result)) {
     try {
-      mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+      onednn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
     } catch (const std::exception& e) {
-      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
-      at::globalContext().setUserEnabledMkldnn(false);
+      TORCH_WARN("onednn_matmul failed, switching to baddbmm:", e.what());
+      at::globalContext().setuserEnabledOnednn(false);
     }
   }
 
@@ -3565,9 +3565,9 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledOnednn()) {
     try {
-      mkldnn_matmul_i8i8i32(self, mat2, result);
+      onednn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
     } catch (const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
