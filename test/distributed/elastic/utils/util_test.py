@@ -12,14 +12,13 @@ from multiprocessing.pool import ThreadPool
 from typing import List
 
 import torch.distributed as dist
-
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MockStore:
-    def __init__(self):
+    def __init__(self) -> None:
         self.ops = []
 
     def set_timeout(self, timeout: float) -> None:

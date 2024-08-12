@@ -20,12 +20,12 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -329,7 +329,7 @@ class ViewAndMutationMeta:
     deterministic: Optional[bool] = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
-    static_parameter_indices: List[int] = field(default_factory=list)
+    static_input_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -345,6 +345,11 @@ class ViewAndMutationMeta:
     indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
         default_factory=list
     )
+
+    # Indexes of saved tensors which are donated buffer.
+    # Donated buffer means the tensor is not alias of any forward user input, forward user output,
+    # and backward output.
+    bw_donated_idxs: Optional[List[int]] = None
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -597,7 +602,7 @@ class SubclassMeta:
     # Optional field because we don't compute for inference graphs
     grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
 
@@ -803,6 +808,7 @@ class AOTConfig:
     no_tangents: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
+    static_input_indices: Optional[List[int]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
     # this is always false outside of export.

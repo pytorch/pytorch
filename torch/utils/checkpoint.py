@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import platform
@@ -89,6 +90,8 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
 
 
 def _get_device_module(device="cuda"):
+    if device == "meta":
+        return torch.device("meta")
     device_module = getattr(torch, device)
     return device_module
 
@@ -167,13 +170,12 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
 
     def add_device_ids(arg):
         nonlocal fwd_device_ids
-        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+        if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
     tree_map(add_device_ids, args)
 
     fwd_device_states = []
     device_module = _get_device_module(_infer_device_type(*args))
-
     for device_id in fwd_device_ids:
         with device_module.device(device_id):
             fwd_device_states.append(device_module.get_rng_state())
@@ -193,6 +195,8 @@ def set_device_states(devices, states, *, device_type=None) -> None:
     """
     if device_type is None:
         device_type = DefaultDeviceType.get_device_type()
+    if device_type == "meta":
+        return
     device_module = _get_device_module(device_type)
     for device, state in zip(devices, states):
         with device_module.device(device):
@@ -273,7 +277,6 @@ class CheckpointFunction(torch.autograd.Function):
         inputs = list(ctx.inputs)
         tensor_indices = ctx.tensor_indices
         tensors = ctx.saved_tensors
-        device_module = _get_device_module(ctx.device_type)
 
         # Fill in inputs with appropriate saved tensors.
         for i, idx in enumerate(tensor_indices):
