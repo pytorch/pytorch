@@ -805,7 +805,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             # NOTE: cuda.Event wait is a no-op under compile, so it's okay to
             # always create a new cuda.Event here.
-            # Better approach is to reconstruct the exact same cuda.Event (similar to how we handle cuda.Stream),
+            # Better approach is to reconstruct the exact same cuda.Event (similar to cuda.Stream handling),
             # but currently there is no API to do this cuda.Event reconstruction.
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
