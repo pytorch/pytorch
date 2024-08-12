@@ -9,8 +9,7 @@
 
 #include <c10/util/string_view.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -140,7 +139,7 @@ MobileDebugTable::MobileDebugTable(
       }
 
       for (auto& val : lines.toTuple()->elements()) {
-        auto tup_elems = std::move(*std::move(val).toTuple()).elements();
+        auto tup_elems = std::move(*val.toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
         // byte_offset, debug_handle (=source range tag), source range
@@ -159,7 +158,7 @@ MobileDebugTable::MobileDebugTable(
         reader->getRecord(callstack_debug_file);
     CallStackDebugInfoUnpickler unpickler;
     callstack_ptr_map_ = unpickler.unpickle(
-        std::move(callstack_data), callstack_data_size, source_range_map, cu);
+        callstack_data, callstack_data_size, source_range_map, cu);
   }
 }
 
@@ -229,5 +228,4 @@ std::pair<std::string, std::string> MobileDebugTable::
       debug_infos, "top", top_module_type_name));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

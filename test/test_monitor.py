@@ -97,18 +97,12 @@ class TestMonitor(TestCase):
         log_event(e)
         self.assertEqual(len(events), 2)
 
-    def test_wait_counter__context_handler(self) -> None:
+    def test_wait_counter(self) -> None:
         wait_counter = _WaitCounter(
             "test_wait_counter",
         )
-        with wait_counter.guard() as _:
+        with wait_counter.guard() as wcg:
             pass
-
-    def test_wait_counter__start_stop(self) -> None:
-        wc_guard = _WaitCounter("test_wait_counter").guard()
-        wc_guard.start()
-        # do something.
-        wc_guard.stop()
 
 
 @skipIfTorchDynamo("Really weird error")
