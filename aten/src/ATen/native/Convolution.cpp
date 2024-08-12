@@ -26,8 +26,8 @@
 #include <nnpack.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -507,9 +507,9 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
-#if AT_MKLDNN_ENABLED()
-    if (!at::globalContext().userEnabledMkldnn()) {
+  bool use_onednn(const at::Tensor& input, const at::Tensor& weight) const  {
+#if AT_ONEDNN_ENABLED()
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (transposed && is_output_padding_big()) {
@@ -520,10 +520,10 @@ struct ConvParams {
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
-    return (input.is_mkldnn()) || // input is mkldnn Tensor
+    return (input.is_onednn()) || // input is onednn Tensor
       (input.device().is_cpu() &&
        input.scalar_type() == kFloat && // only on CPU Float Tensors
-       // For 1x1 filters, MKLDNN is faster than THNN when multi-threaded,
+       // For 1x1 filters, ONEDNN is faster than THNN when multi-threaded,
        // but THNN is faster when single-threaded.
        (is_strided() || is_dilated() || at::symint::size<T>(input, 0) >= 16 ||
         at::symint::size<T>(weight, -1) != 1 || at::symint::size<T>(weight, -2) != 1 || at::get_num_threads() > 1) &&
@@ -782,7 +782,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -790,13 +790,13 @@ static void check_input_same_type_as_parameters(
     const ConvBackend backend) {
   if (backend == ConvBackend::Mkldnn || backend == ConvBackend::MkldnnTranspose) {
     TORCH_CHECK(input.options().type_equal(weight.options())
-        || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
+        || (input.is_onednn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
         "Input type (", input.toString(), ") and weight type (", weight.toString(),
-        ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+        ") should be the same or input should be a ONEDNN tensor and weight is a dense tensor");
     TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-        || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
+        || (input.is_onednn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
         "Input type (", input.toString(), ") and bias type (", bias.toString(),
-        ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
+        ") should be the same or input should be a ONEDNN tensor and bias is a dense tensor");
   } else {
     check_input_same_type_as_parameters(input, weight, bias);
   }
@@ -1184,7 +1184,7 @@ at::Tensor convolution_overrideable(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/ONEDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 // Function to select the convolution backend based on the inputs and params.
@@ -1203,7 +1203,7 @@ ConvBackend _select_conv_backend(
 
   // don't send empty inputs through backends
   if (at::symint::size<T>(input, 0) == 0 || at::symint::size<T>(input, 1) == 0) {
-    return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
+    return input.is_onednn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
   } else if (at::symint::numel<T>(input) == 0) {
     TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
   }
@@ -1234,7 +1234,7 @@ ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_onednn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1330,7 +1330,7 @@ ConvBackend select_conv_backend(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+  if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1494,7 +1494,7 @@ at::Tensor _convolution(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+  if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1579,10 +1579,10 @@ at::Tensor _convolution(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       break;
     case ConvBackend::Mkldnn:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
-      if (!input.is_mkldnn()) {
-        // need to ensure contiguous for non-mkldnn tensors
+      if (!input.is_onednn()) {
+        // need to ensure contiguous for non-onednn tensors
         input = input.contiguous(backend_memory_format);
         weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
@@ -1590,14 +1590,14 @@ at::Tensor _convolution(
       output = at::mkldnn_convolution(
           input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #else
-      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
+      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without onednn support");
 #endif
       break;
     case ConvBackend::MkldnnTranspose:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
-      if (!input.is_mkldnn()) {
-        // need to ensure contiguous for non-mkldnn tensors
+      if (!input.is_onednn()) {
+        // need to ensure contiguous for non-onednn tensors
         input = input.contiguous(backend_memory_format);
         weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
@@ -1605,16 +1605,16 @@ at::Tensor _convolution(
       output = mkldnn_convolution_transpose_stub(input.device().type(),
           input, weight, bias, params.padding, params.output_padding, params.stride, params.dilation, params.groups);
 #else
-      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
+      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without onednn support");
 #endif
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       output = empty_mkldnn(
           calc_output_size(input, weight, params), optTypeMetaToScalarType(input.options().dtype_opt()),
           input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
 #else
-      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
+      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without onednn support");
 #endif
       break;
     case ConvBackend::Overrideable:
@@ -1692,7 +1692,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+  if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
     output = view3d(output);
   }
 
@@ -1716,7 +1716,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         const Tensor& grad_output, const Tensor& input, const Tensor& weight,
         IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
-   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+   TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_backward_overrideable: You are likely triggering this with tensor backend other than CPU/CUDA/ONEDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
           at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
@@ -2026,7 +2026,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+  if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -2123,9 +2123,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       }
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       if (output_mask[0]) {
-        if (input.is_mkldnn()) {
+        if (input.is_onednn()) {
           backend_grad_input = empty_mkldnn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),
               input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
           backend_grad_input.zero_();
@@ -2134,15 +2134,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         }
       }
       if (output_mask[1]) {
-        // mkldnn weight is not supported during training by the mkldnn backend
+        // onednn weight is not supported during training by the onednn backend
         backend_grad_weight = at::zeros_like(weight);
       }
       if (output_mask[2]) {
-        // mkldnn bias is not supported during training by the mkldnn backend
+        // onednn bias is not supported during training by the onednn backend
         backend_grad_bias = at::zeros(*bias_sizes_opt, weight.options());
       }
 #else
-      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
+      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without onednn support");
 #endif
       break;
     case ConvBackend::Miopen:
@@ -2169,9 +2169,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
       break;
     case ConvBackend::Mkldnn:
-      TORCH_CHECK(!weight.is_mkldnn(),
-          "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
-      if (!input.is_mkldnn()) {
+      TORCH_CHECK(!weight.is_onednn(),
+          "The ONEDNN backend does not support weight as an ONEDNN tensor during training");
+      if (!input.is_onednn()) {
         input = input.contiguous(backend_memory_format);
         weight = weight.contiguous(backend_memory_format);
       }
@@ -2180,9 +2180,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           params.stride, params.dilation, params.groups, output_mask);
       break;
     case ConvBackend::MkldnnTranspose:
-      TORCH_CHECK(!weight.is_mkldnn(),
-          "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
-      if (!input.is_mkldnn()) {
+      TORCH_CHECK(!weight.is_onednn(),
+          "The ONEDNN backend does not support weight as an ONEDNN tensor during training");
+      if (!input.is_onednn()) {
         input = input.contiguous(backend_memory_format);
         weight = weight.contiguous(backend_memory_format);
       }
@@ -2253,12 +2253,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
   // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+    if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
+    if (k == 3 && !input.is_onednn() && !input.is_xpu()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }
