@@ -196,9 +196,6 @@ def auto_functionalized_proxy(
     _mutable_op: OpOverload,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    if not mode.enable_tracing:
-        return auto_functionalized(_mutable_op, **kwargs)
-
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 
@@ -353,5 +350,5 @@ def do_auto_functionalize(
 def auto_functionalized_func(ctx, _mutable_op, **kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
-        result = auto_functionalized(_mutable_op, {}, [], **unwrapped_kwargs)
+        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
     return ctx.wrap_tensors(result)
