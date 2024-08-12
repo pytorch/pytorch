@@ -3966,8 +3966,8 @@ class CppScheduling(BaseScheduling):
                 == 1
             )
 
-        nodes_have_div = [node for node in nodes if has_one_div(node)]
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
+        nodes_have_div = [node for node in nodes if has_one_div(node)]
         if len(nodes_have_div) != 1 or any(
             stride_at_vec_range(
                 expr, split_var, cpu_vec_isa.pick_vec_isa().nelements(torch.float32)
