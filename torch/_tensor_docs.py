@@ -5820,10 +5820,10 @@ Example::
 )
 
 add_docstr_all(
-    "to_mkldnn",
+    "to_onednn",
     r"""
-to_mkldnn() -> Tensor
-Returns a copy of the tensor in ``torch.mkldnn`` layout.
+to_onednn() -> Tensor
+Returns a copy of the tensor in ``torch.onednn`` layout.
 
 """,
 )

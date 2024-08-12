@@ -729,7 +729,7 @@ Tensor class reference
     Tensor.tensor_split
     Tensor.tile
     Tensor.to
-    Tensor.to_mkldnn
+    Tensor.to_onednn
     Tensor.take
     Tensor.take_along_dim
     Tensor.tan

@@ -58,7 +58,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     autocast_dtype = {
         at::kBFloat16, // CPU
         at::kHalf, // CUDA.
-        at::ScalarType::Undefined, // Reserved for explicit MKLDNN
+        at::ScalarType::Undefined, // Reserved for explicit ONEDNN
         at::ScalarType::Undefined, // OpenGL
         at::ScalarType::Undefined, // OpenCL
         at::ScalarType::Undefined, // IDEEP.
@@ -229,7 +229,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(_convolution, deprecated, lower_precision_fp)
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
-  KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(onednn_rnn_layer, lower_precision_fp)
   KERNEL_CPU(conv_transpose1d, lower_precision_fp)
   KERNEL_CPU(conv_transpose2d, input, lower_precision_fp)
   KERNEL_CPU(conv_transpose3d, input, lower_precision_fp)

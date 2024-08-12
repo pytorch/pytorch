@@ -30,7 +30,7 @@ class TestDeviceAnalysis(JitTestCase):
         cls.vulkan = torch.device("vulkan")
         cls.mkldnn = torch.device(
             "mkldnn"
-        )  # MKLDNN can't mix with other device types at all
+        )  # ONEDNN can't mix with other device types at all
         cls.device_types = [cls.cpu, cls.cuda, cls.vulkan]
 
     @staticmethod
@@ -253,7 +253,7 @@ class TestDeviceAnalysis(JitTestCase):
             return x.cpu()
 
         def set_mkldnn(x):
-            return x.to_mkldnn()
+            return x.to_onednn()
 
         device_pairs = (
             (set_cuda, self.cuda),

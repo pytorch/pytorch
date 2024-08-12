@@ -598,7 +598,7 @@ method_only_ops = [
     "storage_offset",
     "sum_to_size",
     "to",
-    "to_mkldnn",
+    "to_onednn",
     "tolist",
     "type",
     "type_as",

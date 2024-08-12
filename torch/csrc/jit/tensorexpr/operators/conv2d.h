@@ -63,7 +63,7 @@ bool conv2dIsSupported(
     const std::vector<int64_t>& pad,
     const std::vector<int64_t>& dilation,
     int64_t groups);
-bool mkldnnPrepackedConvIsSupported(
+bool onednnPrepackedConvIsSupported(
     const TensorInfo& input,
     const TensorInfo& weight,
     const std::vector<int64_t>& stride,
@@ -94,7 +94,7 @@ Tensor computePrepackedLinearClampRun(
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
     at::Device device);
-Tensor computeMkldnnPrepackedConvRun(
+Tensor computeOnednnPrepackedConvRun(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,

@@ -15,7 +15,7 @@
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
-#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_onednn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -492,7 +492,7 @@ Module freeze(
 namespace {
 void optimize_for_inference(std::shared_ptr<Graph> graph) {
   FuseFrozenConvAddRelu(graph);
-  ConvertFrozenOpsToMKLDNN(graph);
+  ConvertFrozenOpsToONEDNN(graph);
   FrozenLinearTranspose(graph);
 }
 } // namespace

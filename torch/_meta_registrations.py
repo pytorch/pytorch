@@ -2266,13 +2266,13 @@ def meta_conv(
     return out
 
 
-if torch._C._has_mkldnn:
-    _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
-        "mkldnn", "IMPL", "Meta"
+if torch._C._has_onednn:
+    _meta_lib_dont_use_me_use_register_meta_for_onednn = torch.library.Library(
+        "onednn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
-    def meta_mkldnn_convolution_default(
+    @register_meta(torch.ops.onednn._convolution_pointwise.default)
+    def meta_onednn_convolution_default(
         input_tensor,
         weight,
         bias,
@@ -2294,7 +2294,7 @@ if torch._C._has_mkldnn:
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
-    @register_meta(torch.ops.mkldnn._linear_pointwise.default)
+    @register_meta(torch.ops.onednn._linear_pointwise.default)
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
@@ -5709,8 +5709,8 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
-@register_meta(aten.mkldnn_rnn_layer.default)
-def mkldnn_rnn_layer(
+@register_meta(aten.onednn_rnn_layer.default)
+def onednn_rnn_layer(
     input,
     w0,
     w1,
@@ -5894,8 +5894,8 @@ def meta_pixel_shuffle(self, upscale_factor):
     return out
 
 
-@register_meta(aten.mkldnn_rnn_layer_backward.default)
-def mkldnn_rnn_layer_backward(
+@register_meta(aten.onednn_rnn_layer_backward.default)
+def onednn_rnn_layer_backward(
     input,
     weight0,
     weight1,
@@ -6360,8 +6360,8 @@ def activate_meta():
         ):
             pass
         else:
-            if "mkldnn::" in op_overload.name():
-                _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
+            if "onednn::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             elif "onednn::" in op_overload.name():

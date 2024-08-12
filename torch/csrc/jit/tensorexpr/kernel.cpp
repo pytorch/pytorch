@@ -7,7 +7,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
+#include <torch/csrc/jit/passes/onednn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -244,7 +244,7 @@ static size_t get_conv_groups_index(const torch::jit::Node* node) {
     default:
       TORCH_CHECK(
           false,
-          "mkldnnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
+          "onednnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
           node->kind());
   }
 }
@@ -288,8 +288,8 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
       groups->toInt());
 }
 
-bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
-#if AT_MKLDNN_ENABLED()
+bool onednnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
+#if AT_ONEDNN_ENABLED()
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
   auto const& stride = toIValue(node->input(3));
@@ -305,11 +305,11 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
     return false;
   }
 
-  // Weights and bias should be Constant when using mkldnn backend
+  // Weights and bias should be Constant when using onednn backend
   if (node->input(1)->node()->kind() != prim::Constant ||
       node->input(2)->node()->kind() != prim::Constant) {
     GRAPH_DEBUG(
-        "mkldnnPrepackedConvIsSupported: weight or bias is not Constant");
+        "onednnPrepackedConvIsSupported: weight or bias is not Constant");
     return false;
   }
 
@@ -317,11 +317,11 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   if (!(isContiguous(node->input(0), at::MemoryFormat::ChannelsLast) &&
         isContiguous(node->input(1), at::MemoryFormat::ChannelsLast))) {
     GRAPH_DEBUG(
-        "mkldnnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
+        "onednnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
     return false;
   }
 
-  return mkldnnPrepackedConvIsSupported(
+  return onednnPrepackedConvIsSupported(
       *input,
       *weight,
       _pair_int(*stride),

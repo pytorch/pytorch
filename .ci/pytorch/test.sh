@@ -767,7 +767,7 @@ test_aten() {
   # This is a bit of a hack.
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
-  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+  ${SUDO} ln -sf "$TORCH_LIB_DIR"/libonednn* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
@@ -1353,7 +1353,7 @@ test_executorch() {
 }
 
 test_linux_aarch64(){
-  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+  python test/run_test.py --include test_modules test_onednn test_onednn_fusion test_openmp test_torch test_dynamic_shapes \
        test_transformers test_multiprocessing test_numpy_interop --verbose
 
   # Dynamo tests

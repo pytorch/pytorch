@@ -517,9 +517,9 @@ def _reduce_tensor(
     PyCodeCache would need more complexity to create a new module from its
     cache, but with the right constants attached as attributes.
     """
-    if t.is_mkldnn:
+    if t.is_onednn:
         # TODO: These tensors don't currently pickle, so we can't cache a
-        # compiled graph containing them. Just fail now. If mkldnn tensors
+        # compiled graph containing them. Just fail now. If onednn tensors
         # get pickling support, we can remove this.
         raise BypassFxGraphCache
 
@@ -1669,8 +1669,8 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                torch.ops.mkldnn._nbytes(tensor)
-                if tensor.is_mkldnn
+                torch.ops.onednn._nbytes(tensor)
+                if tensor.is_onednn
                 else tensor.untyped_storage().nbytes()
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
@@ -1750,9 +1750,9 @@ class AotCodeCompiler:
                 if t.numel() == 0:
                     return b""
 
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
+                if t.is_onednn:
+                    data_ptr = torch.ops.onednn.data_ptr(t)
+                    nbytes = torch.ops.onednn._nbytes(t)
                 else:
                     t_cpu = t.untyped_storage().cpu()
                     data_ptr = t_cpu.data_ptr()

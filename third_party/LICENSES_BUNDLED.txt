@@ -313,7 +313,7 @@ License: MIT
 Files: third_party/miniz-2.1.0
   For details, see: third_party/miniz-2.1.0/LICENSE
 
-Name: mkl-dnn
+Name: oneDNN
 License: Apache-2.0
 Files: third_party/ideep/mkl-dnn
   For details, see: third_party/ideep/mkl-dnn/LICENSE

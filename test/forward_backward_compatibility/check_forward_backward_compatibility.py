@@ -44,8 +44,8 @@ ALLOW_LIST = [
     # Internal
     ("static", datetime.date(9999, 1, 1)),
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
-    ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
-    ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::ONEDNNRelu6", datetime.date(9999, 1, 1)),
+    ("prim::ONEDNNRelu6_", datetime.date(9999, 1, 1)),
     ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),

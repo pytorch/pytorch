@@ -823,7 +823,7 @@ coverage_ignore_functions = [
     "fuse",
     "gen_mkl_autotuner",
     "matches_module_pattern",
-    "modules_to_mkldnn",
+    "modules_to_onednn",
     "optimize_for_inference",
     "remove_dropout",
     "replace_node_module",
@@ -2010,8 +2010,8 @@ coverage_ignore_functions = [
     "no_fuser",
     "time_cpu",
     "time_cuda",
-    # torch.utils.mkldnn
-    "to_mkldnn",
+    # torch.utils.onednn
+    "to_onednn",
     # torch.utils.mobile_optimizer
     "generate_mobile_module_lints",
     # torch.utils.tensorboard.summary
@@ -3317,13 +3317,13 @@ coverage_ignore_classes = [
     # torch.utils.hooks
     "BackwardHook",
     "RemovableHandle",
-    # torch.utils.mkldnn
-    "MkldnnBatchNorm",
-    "MkldnnConv1d",
-    "MkldnnConv2d",
-    "MkldnnConv3d",
-    "MkldnnLinear",
-    "MkldnnPrelu",
+    # torch.utils.onednn
+    "OnednnBatchNorm",
+    "OnednnConv1d",
+    "OnednnConv2d",
+    "OnednnConv3d",
+    "OnednnLinear",
+    "OnednnPrelu",
     # torch.utils.mobile_optimizer
     "LintCode",
     # torch.utils.show_pickle

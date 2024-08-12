@@ -84,12 +84,12 @@ class DispatchKey(Enum):
     MAIA = auto()
     Vulkan = auto()
     Metal = auto()
-    MKLDNN = auto()
+    ONEDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()
     CustomRNGKeyId = auto()
-    MkldnnCPU = auto()
+    OnednnCPU = auto()
     Sparse = auto()
     SparseCsr = auto()
     NestedTensor = auto()
@@ -275,7 +275,7 @@ dispatch_keys = [
     DispatchKey.CPU,
     DispatchKey.SparseCPU,
     DispatchKey.SparseCsrCPU,
-    DispatchKey.MkldnnCPU,
+    DispatchKey.OnednnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
