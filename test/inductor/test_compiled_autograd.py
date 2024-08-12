@@ -2190,6 +2190,37 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
+    def test_verbose_logs_aot_id(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn([2, 4])
+
+            @torch.compile
+            def forward(model, x):
+                return model(x)
+
+            result = forward(model, x).sum()
+            result.backward()
+            yield model[0].weight.grad
+            yield model[0].bias.grad
+            yield model[2].weight.grad
+            yield model[2].bias.grad
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn)
+
+        self.assertTrue("CompiledFunctionBackward0" in logs.getvalue())
+
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 

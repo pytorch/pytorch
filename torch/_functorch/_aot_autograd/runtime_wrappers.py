@@ -1481,6 +1481,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _compiled_autograd_should_lift = False
+            _aot_id = aot_config.aot_id
 
             @staticmethod
             def _compiled_autograd_key(ctx):
@@ -1977,6 +1978,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     class CompiledFunctionBackward(torch.autograd.Function):
                         # CompiledFunctionBackward is not yet supported in dynamo skipfiles
                         _compiled_autograd_should_lift = False
+                        _aot_id = aot_config.aot_id
 
                         @staticmethod
                         def forward(ctx, *unused_args):
