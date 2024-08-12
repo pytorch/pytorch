@@ -1234,23 +1234,6 @@ class RemovableHandleVariable(VariableTracker):
         return RemovableHandleClass
 
 
-class MutableMappingVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
-            return variables.UserMethodVariable(polyfill.mapping_get, self)
-        else:
-            return super().var_getattr(tx, name)
-
-
-class RandomVariable(UserDefinedObjectVariable):
-    pass
-
-
 class UnsupportedRemovableMultiHandleVariable(VariableTracker):
     """
     This variable class is only for removable multi-handles that are registered and removed
@@ -1274,3 +1257,20 @@ class UnsupportedRemovableMultiHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         else:
             unimplemented("unregistered hook removable multi-handle")
+
+
+class MutableMappingVariable(UserDefinedObjectVariable):
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+            return variables.UserMethodVariable(polyfill.mapping_get, self)
+        else:
+            return super().var_getattr(tx, name)
+
+
+class RandomVariable(UserDefinedObjectVariable):
+    pass

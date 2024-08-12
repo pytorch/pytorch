@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -494,9 +493,6 @@ class FSDPParamGroup:
         # Compile relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
         if ca.compiled_autograd_enabled:
-            if self._multi_grad_hook_handle is not None:
-                self._multi_grad_hook_handle.remove()
-                self._multi_grad_hook_handle = None
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
