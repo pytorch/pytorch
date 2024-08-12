@@ -5,17 +5,16 @@ import functools
 import inspect
 import operator
 import types
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
-
-from ..._guards import Source
+from torch._guards import Source
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
-from ..source import AttrSource, GetItemSource
+from ..exc import raise_observed_exception, unimplemented
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -30,6 +29,10 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class BaseListVariable(VariableTracker):
@@ -57,7 +60,7 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -83,7 +86,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -92,17 +95,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutable_local=MutableLocal() if self.mutable_local else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
@@ -129,7 +127,7 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -146,14 +144,14 @@ class BaseListVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def list_compare(tx, op, left, right):
+    def list_compare(tx: "InstructionTranslator", op, left, right):
         return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -282,7 +280,7 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -305,7 +303,7 @@ class RangeVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"range.{name}")
@@ -397,7 +395,7 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
@@ -435,7 +433,7 @@ class ListVariable(CommonListMethodsVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not list:
             return super().call_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
@@ -524,7 +522,7 @@ class TupleVariable(BaseListVariable):
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not tuple:
             return super().call_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
@@ -543,7 +541,7 @@ class SizeVariable(TupleVariable):
         items: List[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.proxy = proxy
         super().__init__(items, **kwargs)
 
@@ -656,7 +654,7 @@ class SizeVariable(TupleVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def get_item_dyn(self, tx, arg: VariableTracker):
+    def get_item_dyn(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -669,7 +667,7 @@ class SizeVariable(TupleVariable):
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(torch.Size, name))
 
 
@@ -679,7 +677,7 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs):
+    def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
 
@@ -709,7 +707,7 @@ class NamedTupleVariable(TupleVariable):
             + create_call_function(1, False)
         )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         def check_and_create_method():
             method = inspect.getattr_static(self.tuple_cls, name, None)
             if isinstance(method, classmethod):
@@ -733,12 +731,12 @@ class NamedTupleVariable(TupleVariable):
             return method
         return self.items[fields.index(name)]
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(self.tuple_cls, name))
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -774,7 +772,7 @@ class SliceVariable(BaseListVariable):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented(f"slice.{name}")
@@ -787,7 +785,7 @@ class ListIteratorVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, items, index: int = 0, **kwargs):
+    def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
@@ -797,14 +795,15 @@ class ListIteratorVariable(VariableTracker):
         self.items = items
         self.index = index
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise StopIteration
+            raise_observed_exception(StopIteration, tx, self)
+
         tx.output.side_effects.mutation(self)
         self.index += 1
         return self.items[old_index]
@@ -897,7 +896,9 @@ class RestrictedListSubclassVariable(ListVariable):
     def is_matching_cls(cls, user_cls: type):
         return cls._is_non_conflicting_subclass(user_cls, list)
 
-    def __init__(self, items, *, user_cls: type, user_cls_source: Source, **kwargs):
+    def __init__(
+        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
+    ) -> None:
         super().__init__(items=items, **kwargs)
         self.user_cls = user_cls
         self.user_cls_source = user_cls_source
@@ -963,6 +964,9 @@ class RestrictedListSubclassVariable(ListVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.call_method(tx, "__call__", args, kwargs)
