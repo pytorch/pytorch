@@ -3,7 +3,7 @@
 set -ex
 
 function install_nvpl {
-    
+
     mkdir -p /opt/nvpl/lib /opt/nvpl/include
 
     wget https://developer.download.nvidia.com/compute/nvpl/redist/nvpl_blas/linux-sbsa/nvpl_blas-linux-sbsa-0.3.0-archive.tar.xz
