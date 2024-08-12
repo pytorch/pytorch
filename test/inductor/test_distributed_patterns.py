@@ -143,6 +143,7 @@ def steps(m, inp):
 
 
 class DistributedPatternTests(TestCase):
+    @skipIfWindows
     def test_intermediate_hook_with_closure(self):
         @dataclasses.dataclass
         class CustomObj:

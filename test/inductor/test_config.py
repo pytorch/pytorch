@@ -5,6 +5,7 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -88,6 +89,7 @@ class TestInductorConfig(TestCase):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
 
+    @skipIfWindows
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_compile_api(self):
         # these are mostly checking config processing doesn't blow up with exceptions
