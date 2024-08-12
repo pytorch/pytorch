@@ -56,7 +56,7 @@ jobs:
               const match = context.payload.compare.match(commitRegex);
               console.log(match);
               console.log(context);
-              console.log(context.payload.commits[0]);
+              console.log(context.payload.commits);
 
       - name: Get changed files
         id: changed-files
