@@ -568,8 +568,12 @@ Tensor angle_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor mvlgamma_backward(const Tensor& grad, const Tensor& self, int64_t p) {
-  Tensor args =
-      at::arange(-static_cast<double>(p) / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args = at::arange(
+      -static_cast<double>(p) / 2. + 0.5,
+      0.5,
+      0.5,
+      // use strided here regardless of self's layout; useful for e.g. NJT
+      self.options().layout(c10::kStrided));
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
 }
@@ -2083,6 +2087,27 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
         (gradh - A.matmul(K)).matmul(pinvA).matmul(pinvAh) + pinvAhK -
         pinvAhK.matmul(pinvA).matmul(A);
   }
+}
+
+Tensor chunk_backward_nested(
+    const std::vector<torch::autograd::Variable>& grads,
+    const Tensor& self,
+    int64_t chunks,
+    int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      self.layout() == c10::kJagged,
+      "Nested Strided Tensor doesn't support chunk backward.")
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_INTERNAL_ASSERT(
+      dim != 0, "Nested Tensor doesn't support chunk backward on dim=0 yet.")
+  Tensor ret = at::zeros_like(self);
+  std::vector<Tensor> rets = at::chunk(ret, chunks, dim);
+  for (const auto j : c10::irange(grads.size())) {
+    if (grads[j].defined()) {
+      rets[j].copy_(grads[j]);
+    }
+  }
+  return ret;
 }
 
 Tensor split_with_sizes_backward(
