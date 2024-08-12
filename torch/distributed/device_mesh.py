@@ -117,6 +117,20 @@ else:
 
             return res_submesh
 
+        def is_flatten_mesh(self, device_mesh: "DeviceMesh") -> bool:
+            root_mesh = self.get_root_mesh(device_mesh)
+            if len(device_mesh.mesh_dim_names) != 1:
+                return False
+            else:
+                flatten_mesh_dim_name = device_mesh.mesh_dim_names[0]
+                return (
+                    root_mesh in self.root_to_flatten_mapping.keys()
+                    and flatten_mesh_dim_name
+                    in self.root_to_flatten_mapping[root_mesh].keys()
+                    and self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_name]
+                    == device_mesh
+                )
+
         def create_flatten_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             flatten_dims_in_root = [

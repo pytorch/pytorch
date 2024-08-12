@@ -582,16 +582,26 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_cp_mesh = mesh_3d["dp", "cp"]
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+        self.assertTrue(_mesh_resources.is_flatten_mesh(flattened_dp_cp_mesh))
 
         ref_pg_count = _world.group_count
+        flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         # Calling flatten again should not create a new pg.
-        dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(ref_pg_count, _world.group_count)
+        self.assertTrue(_mesh_resources.is_flatten_mesh(flattened_dp_cp_mesh_2))
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
         flattned_dp_tp_mesh = dp_tp_mesh._flatten()
         self.assertEqual(dp_tp_mesh.mesh.flatten(), flattned_dp_tp_mesh.mesh)
+        self.assertTrue(_mesh_resources.is_flatten_mesh(flattned_dp_tp_mesh))
+
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["dp", "cp"]))
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["dp", "tp"]))
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["cp", "tp"]))
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["dp"]))
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["cp"]))
+        self.assertTrue(not _mesh_resources.is_flatten_mesh(mesh_3d["tp"]))
 
 
 class TestMeshEnv(DTensorTestBase):
