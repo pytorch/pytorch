@@ -80,9 +80,9 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
-bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
+bool use_onednn(const Tensor& input, TensorList params, TensorList hx) {
 #if AT_ONEDNN_ENABLED()
-  if (!at::globalContext().userEnabledMkldnn()) {
+  if (!at::globalContext().userEnabledOnednn()) {
     return false;
   }
   auto is_cpu_backend = [&](const TensorList tensors) {
@@ -1458,7 +1458,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
-  if (use_mkldnn(_input, _params, hx)) {
+  if (use_onednn(_input, _params, hx)) {
     if (!has_projections) {
       if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
         TORCH_WARN_ONCE(

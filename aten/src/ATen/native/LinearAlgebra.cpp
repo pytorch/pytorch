@@ -1395,7 +1395,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_dim = get_mkldnn_matmul_min_dim();
   const int64_t min_size = get_mkldnn_matmul_min_size();
-  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+  return at::globalContext().userEnabledOnednn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
@@ -1527,7 +1527,7 @@ static void addmm_impl_cpu_(
         dispatched = true;
       } catch (const std::exception& e) {
         TORCH_WARN("mkldnn_matmul failed, switching to BLAS gemm:", e.what());
-        at::globalContext().setUserEnabledMkldnn(false);
+        at::globalContext().setuserEnabledOnednn(false);
       }
     }
   }
@@ -1776,13 +1776,13 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_onednn_matmul(batch1, batch2, self_or_result)) {
     try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
     } catch (const std::exception& e) {
       TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
-      at::globalContext().setUserEnabledMkldnn(false);
+      at::globalContext().setuserEnabledOnednn(false);
     }
   }
 
@@ -3565,7 +3565,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledOnednn()) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

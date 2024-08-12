@@ -1353,7 +1353,7 @@ test_executorch() {
 }
 
 test_linux_aarch64(){
-  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+  python test/run_test.py --include test_modules test_onednn test_onednn_fusion test_openmp test_torch test_dynamic_shapes \
        test_transformers test_multiprocessing test_numpy_interop --verbose
 
   # Dynamo tests

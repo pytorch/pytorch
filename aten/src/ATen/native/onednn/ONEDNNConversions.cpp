@@ -160,7 +160,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     memory_format = at::MemoryFormat::ChannelsLast;
   }
 
-  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto self_ = self.is_onednn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
   // Legacy onednn conv2d jitted module may contain a 5-d weight with an extra
@@ -217,7 +217,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     memory_format = at::MemoryFormat::ChannelsLast3d;
   }
 
-  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto self_ = self.is_onednn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
   auto desc = ideep::convolution_forward::expected_weights_desc(
@@ -459,7 +459,7 @@ static bool should_use_plain_format(ideep::tensor w) {
 #endif
 }
 
-static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
+static std::vector<Tensor> mkldnn_reorder_onednn_rnn_layer_weight(
  Tensor weight0,
  Tensor weight1,
  int64_t hidden_size,
@@ -549,8 +549,8 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
       TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_weight"),
       TORCH_FN(mkldnn_reorder_conv_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::_reorder_mkldnn_rnn_layer_weight"),
-      TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));
+      TORCH_SELECTIVE_NAME("onednn::_reorder_onednn_rnn_layer_weight"),
+      TORCH_FN(mkldnn_reorder_onednn_rnn_layer_weight));
 }
 
 TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {

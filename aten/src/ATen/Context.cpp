@@ -40,12 +40,12 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
-bool Context::userEnabledMkldnn() const {
-  return enabled_mkldnn;
+bool Context::userEnabledOnednn() const {
+  return enabled_onednn;
 }
 
-void Context::setUserEnabledMkldnn(bool e) {
-  enabled_mkldnn = e;
+void Context::setuserEnabledOnednn(bool e) {
+  enabled_onednn = e;
 }
 
 bool Context::deterministicCuDNN() const {
@@ -56,12 +56,12 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
-bool Context::deterministicMkldnn() const {
-  return deterministic_mkldnn;
+bool Context::deterministicOnednn() const {
+  return deterministic_onednn;
 }
 
-void Context::setDeterministicMkldnn(bool b) {
-  deterministic_mkldnn = b;
+void Context::setdeterministicOnednn(bool b) {
+  deterministic_onednn = b;
 }
 
 bool Context::deterministicAlgorithms() const {
@@ -344,7 +344,7 @@ bool Context::hasMKL() {
 #endif
 }
 
-bool Context::hasMKLDNN() {
+bool Context::hasONEDNN() {
 #if AT_ONEDNN_ENABLED()
   return true;
 #else

@@ -389,22 +389,22 @@ inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Ten
   }
 
   // disable NHWC for OnednnCPU tensor.
-  if (input.is_mkldnn() || weight.is_mkldnn()) {
+  if (input.is_onednn() || weight.is_onednn()) {
     return false;
   }
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  bool can_use_mkldnn_channels_last_2d =
+  bool can_use_onednn_channels_last_2d =
       (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
 
-  bool can_use_mkldnn_channels_last_3d =
+  bool can_use_onednn_channels_last_3d =
       (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
 
-  return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
+  return can_use_onednn_channels_last_2d || can_use_onednn_channels_last_3d;
 }
 
 inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {

@@ -3112,7 +3112,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     inp = inp.contiguous()
     hx = hx.contiguous()
     cx = cx.contiguous()
-    outputs = torch.ops.aten.mkldnn_rnn_layer.default(
+    outputs = torch.ops.aten.onednn_rnn_layer.default(
         inp,
         w0,
         w1,
@@ -3412,7 +3412,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
 
 def select_one_layer_lstm_function(input, hx, params):
-    r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
+    r"""Check whether we could use decompose lstm with onednn_rnn_layer.
     All the below conditions need to be met:
         * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
@@ -3426,7 +3426,7 @@ def select_one_layer_lstm_function(input, hx, params):
         * params: the weight and bias tensors of LSTM
     """
 
-    def use_mkldnn(input, hx, params):
+    def use_onednn(input, hx, params):
         if not torch._C._get_mkldnn_enabled():
             return False
 
@@ -3455,7 +3455,7 @@ def select_one_layer_lstm_function(input, hx, params):
 
     # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
     # will expand over the seq_len dim
-    if use_mkldnn(input, hx, params):
+    if use_onednn(input, hx, params):
         return mkldnn_one_layer_lstm
     else:
         return one_layer_lstm

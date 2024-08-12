@@ -255,7 +255,7 @@ if RUN_CPU:
             "",
             test_onednn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
-            and torch.ops.onednn._is_mkldnn_bf16_supported(),
+            and torch.ops.onednn._is_onednn_bf16_supported(),
         ),
         BaseTest(
             "test_linear_packed",
@@ -263,8 +263,8 @@ if RUN_CPU:
             test_cpu_repro.CPUReproTests(),
             torch.backends.mkldnn.is_available()
             and (
-                torch.ops.onednn._is_mkldnn_bf16_supported()
-                or torch.ops.onednn._is_mkldnn_fp16_supported()
+                torch.ops.onednn._is_onednn_bf16_supported()
+                or torch.ops.onednn._is_onednn_fp16_supported()
             ),
         ),
         BaseTest(

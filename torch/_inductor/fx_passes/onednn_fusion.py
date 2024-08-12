@@ -837,7 +837,7 @@ if torch._C._has_mkldnn:
             add_node.replace_all_uses_with(repl)
             match.erase_nodes(graph)
 
-    def _is_packable_mkldnn_rnn_layer(match):
+    def _is_packable_onednn_rnn_layer(match):
         lstm_node = match.output_node()
         POS_WEIGHTS = [1, 2]
         POS_INPUTS = [0, 5, 6]
@@ -862,13 +862,13 @@ if torch._C._has_mkldnn:
         # Check dtype
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.bfloat16
-            and not onednn._is_mkldnn_bf16_supported()
+            and not onednn._is_onednn_bf16_supported()
             for POS_ARG in POS_ARGS
         ):
             return False
         if any(
             lstm_node.args[POS_ARG].meta.get("val").dtype == torch.float16
-            and not onednn._is_mkldnn_fp16_supported()
+            and not onednn._is_onednn_fp16_supported()
             for POS_ARG in POS_ARGS
         ):
             return False
@@ -898,13 +898,13 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not onednn._is_mkldnn_bf16_supported():
+            if not onednn._is_onednn_bf16_supported():
                 return False
         if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not onednn._is_mkldnn_fp16_supported():
+            if not onednn._is_onednn_fp16_supported():
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -959,7 +959,7 @@ if torch._C._has_mkldnn:
         # on aarch64, use onednn op for fp32 as well if acl is enabled
         if (
             not is_lp_weight
-            and not onednn._is_mkldnn_acl_supported()
+            and not onednn._is_onednn_acl_supported()
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
             return False
@@ -984,13 +984,13 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not onednn._is_mkldnn_bf16_supported():
+            if not onednn._is_onednn_bf16_supported():
                 return False
         if (
             input_meta_value.dtype == torch.float16
             or weight_meta_value.dtype == torch.float16
         ):
-            if not onednn._is_mkldnn_fp16_supported():
+            if not onednn._is_onednn_fp16_supported():
                 return False
         return True
 
@@ -1006,7 +1006,7 @@ if torch._C._has_mkldnn:
         Arg(),
     )
 
-    _aten_mkldnn_rnn_layer_args = (
+    _aten_onednn_rnn_layer_args = (
         Arg(),  # input
         Arg(),  # weight0
         Arg(),  # weight1
@@ -1068,10 +1068,10 @@ if torch._C._has_mkldnn:
                 graph.erase_node(conv_node)
 
         @register_freezing_graph_pattern(
-            CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
-            extra_check=_is_packable_mkldnn_rnn_layer,
+            CallFunction(aten.onednn_rnn_layer.default, *_aten_onednn_rnn_layer_args),
+            extra_check=_is_packable_onednn_rnn_layer,
         )
-        def mkldnn_rnn_layer(match, *args, **kwargs):
+        def onednn_rnn_layer(match, *args, **kwargs):
             def get_item(graph, node, index):
                 return graph.call_function(operator.getitem, (node, index))
 
@@ -1080,12 +1080,12 @@ if torch._C._has_mkldnn:
             input = args[0]
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
-            packed_lstm_op = aten.mkldnn_rnn_layer.default
+            packed_lstm_op = aten.onednn_rnn_layer.default
             hidden_size = args[9]
             has_biases = args[11]
             batch_first = args[13]
             with graph.inserting_before(lstm_node):
-                packed_weight_op = onednn._reorder_mkldnn_rnn_layer_weight.default
+                packed_weight_op = onednn._reorder_onednn_rnn_layer_weight.default
                 packed_weight_inputs = (
                     weight0,
                     weight1,
@@ -1159,7 +1159,7 @@ if torch._C._has_mkldnn:
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert (
-                        is_lp_weight or onednn._is_mkldnn_acl_supported()
+                        is_lp_weight or onednn._is_onednn_acl_supported()
                     ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
@@ -1177,7 +1177,7 @@ if torch._C._has_mkldnn:
                     onednn._reorder_linear_weight
                     if (
                         is_lp_weight
-                        or onednn._is_mkldnn_acl_supported()
+                        or onednn._is_onednn_acl_supported()
                         or V.aot_compilation is True
                     )
                     else torch.ops.mkl._mkl_reorder_linear_weight
@@ -1189,7 +1189,7 @@ if torch._C._has_mkldnn:
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
                 if (
                     is_lp_weight
-                    or onednn._is_mkldnn_acl_supported()
+                    or onednn._is_onednn_acl_supported()
                     or V.aot_compilation is True
                 ):
                     packed_linear_inputs += (bias, "none", [], "")
@@ -1226,7 +1226,7 @@ if torch._C._has_mkldnn:
             torch._C._nn.mkldnn_reorder_conv3d_weight,
             onednn._reorder_convolution_transpose_weight,
             onednn._reorder_linear_weight,
-            onednn._reorder_mkldnn_rnn_layer_weight,
+            onednn._reorder_onednn_rnn_layer_weight,
         ]
         if torch._C.has_mkl:
             packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
@@ -1249,7 +1249,7 @@ if torch._C._has_mkldnn:
         if (
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
-            and not torch.ops.onednn._is_mkldnn_acl_supported()
+            and not torch.ops.onednn._is_onednn_acl_supported()
         ):
             _register_unary_fusion()
             _register_inplace_fusion()

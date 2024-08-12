@@ -3328,26 +3328,26 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
-- func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: onednn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_linear
-  autogen: mkldnn_linear.out
+    OnednnCPU: onednn_linear
+  autogen: onednn_linear.out
 
-- func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
+- func: onednn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_input
-  autogen: mkldnn_linear_backward_input.out
+    OnednnCPU: onednn_linear_backward_input
+  autogen: onednn_linear_backward_input.out
 
-- func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
+- func: onednn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward_weights
-  autogen: mkldnn_linear_backward_weights.out
+    OnednnCPU: onednn_linear_backward_weights
+  autogen: onednn_linear_backward_weights.out
 
-- func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: onednn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    OnednnCPU: mkldnn_linear_backward
-  autogen: mkldnn_linear_backward.out
+    OnednnCPU: onednn_linear_backward
+  autogen: onednn_linear_backward.out
 
 - func: _cslt_compress(Tensor input) -> Tensor
   dispatch:
@@ -4051,16 +4051,16 @@
     CompositeExplicitAutograd: mkldnn_convolution
   autogen: mkldnn_convolution.out
 
-- func: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
+- func: onednn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CPU: mkldnn_rnn_layer
-    OnednnCPU: mkldnn_rnn_layer
-  autogen: mkldnn_rnn_layer.out
+    CPU: onednn_rnn_layer
+    OnednnCPU: onednn_rnn_layer
+  autogen: onednn_rnn_layer.out
 
-- func: mkldnn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: onednn_rnn_layer_backward(Tensor input, Tensor weight1, Tensor weight2, Tensor weight3, Tensor weight4, Tensor hx_, Tensor cx_tmp, Tensor output, Tensor hy_, Tensor cy_, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, bool reverse, int mode, int hidden_size, int num_layers, bool has_biases, bool train, bool bidirectional, int[] batch_sizes, bool batch_first, Tensor workspace) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CPU: mkldnn_rnn_layer_backward
-  autogen: mkldnn_rnn_layer_backward.out
+    CPU: onednn_rnn_layer_backward
+  autogen: onednn_rnn_layer_backward.out
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
