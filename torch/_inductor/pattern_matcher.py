@@ -1632,6 +1632,8 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     The node need not have been in the graph at that time (we'll update it).
     """
     n = node
+    if "mutation_region_id" in n.meta:
+        return n.meta["mutation_region_id"]
     # Backtrack to the start of the the first mutation region
     # that doesn't involve auto_functionalized (this will have an even mutation_region_id)
     while (
@@ -1650,14 +1652,16 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
             "num_auto_functionalized_ops"
         ],
     }
+    mutation_region_id: Optional[int] = None
     while n is not node:
         n = n.next
         if "mutation_region_id" not in n.meta:
-            _update_mutation_region_id(graph_meta, n)
+            mutation_region_id = _update_mutation_region_id(graph_meta, n)
     graph.owning_module.meta["num_auto_functionalized_ops"] = graph_meta[
         "num_auto_functionalized_ops"
     ]
-    return node.meta["mutation_region_id"]
+    assert mutation_region_id is not None
+    return mutation_region_id
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
@@ -1680,11 +1684,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
         _update_mutation_region_id(gm.meta, nd)
 
 
-def _update_mutation_region_id(graph_meta, node):
+def _update_mutation_region_id(graph_meta: Dict[str, Any], node: torch.fx.Node) -> int:
     if node.target is torch.ops.higher_order.auto_functionalized:
         graph_meta["num_auto_functionalized_ops"] += 1
         # Get all nodes that are aliases of all reinplacing candidates
         mutable_op = node.args[0]
+        assert isinstance(mutable_op, torch._ops.OpOverload)
         mutable_args_names = (
             torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
         )
@@ -1707,9 +1712,10 @@ def _update_mutation_region_id(graph_meta, node):
         graph_meta["num_mutation_ops"] += 1
     region_id = _compute_region_id(graph_meta, is_auto_functionalized=False)
     node.meta["mutation_region_id"] = region_id
+    return region_id
 
 
-def _compute_region_id(graph_meta, is_auto_functionalized):
+def _compute_region_id(graph_meta: Dict[str, Any], is_auto_functionalized: bool) -> int:
     if is_auto_functionalized:
         return 2 * graph_meta["num_auto_functionalized_ops"] + 1
     return 2 * graph_meta["num_mutation_ops"]

@@ -204,9 +204,9 @@ class TestMutationRegionId(InductorTestCase):
         a, cos, select, sin, view, output = gm.graph.nodes
 
         # Basic tests
-        a_aliases = set(ref() for ref in alias_info.find_aliases(a))
+        a_aliases = {ref() for ref in alias_info.find_aliases(a)}
         self.assertEqual(a_aliases, {a, select, view})
-        cos_aliases = set(ref() for ref in alias_info.find_aliases(cos))
+        cos_aliases = {ref() for ref in alias_info.find_aliases(cos)}
         self.assertEqual(cos_aliases, {cos})
 
         # Test incremental update
@@ -214,7 +214,7 @@ class TestMutationRegionId(InductorTestCase):
             view2 = gm.graph.call_function(torch.ops.aten.view.default, args=(view, -1))
             view2.meta["val"] = view.meta["val"].view(-1)
 
-        a_aliases = set(ref() for ref in alias_info.find_aliases(a))
+        a_aliases = {ref() for ref in alias_info.find_aliases(a)}
         self.assertEqual(a_aliases, {a, select, view, view2})
 
     def test_mutations(self):

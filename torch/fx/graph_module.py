@@ -793,6 +793,9 @@ class {module_name}(torch.nn.Module):
         dict_without_graph = self.__dict__.copy()
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
+        # alias_info is a cache and not serializable.
+        if "alias_info" in self.meta:
+            del dict_without_graph["meta"]["alias_info"]
 
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, importer)
@@ -802,6 +805,9 @@ class {module_name}(torch.nn.Module):
         dict_without_graph = self.__dict__.copy()
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
+        # alias_info is a cache and not serializable.
+        if "alias_info" in self.meta:
+            del dict_without_graph["meta"]["alias_info"]
 
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()
@@ -822,6 +828,9 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
+        # alias_info is a cache and not serializable.
+        if "alias_info" in self.meta:
+            del dict_without_graph["meta"]["alias_info"]
 
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)

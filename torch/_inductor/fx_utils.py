@@ -2,7 +2,7 @@
 import operator
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Tuple, Type
 
 import sympy
 
@@ -265,8 +265,10 @@ class AliasInfo:
     """
 
     def __init__(self, gm: torch.fx.GraphModule):
-        self._data = weakref.WeakKeyDictionary()
-        self._queue = []
+        self._data: weakref.WeakKeyDictionary[
+            torch.UntypedStorage, List[weakref.ReferenceType[torch.fx.Node]]
+        ] = weakref.WeakKeyDictionary()
+        self._queue: List[weakref.ReferenceType[torch.fx.Node]] = []
         for node in gm.graph.nodes:
             self._update_aliases(node)
         # incrementally update aliases as new nodes get added.
@@ -274,18 +276,22 @@ class AliasInfo:
         # gets created.
         # We push the node to a queue and assume meta["val"] is available
         # when find_aliases gets called.
-        gm._register_create_node_hook(lambda n: self._queue.append(n))
+        gm._register_create_node_hook(lambda n: self._queue.append(weakref.ref(n)))
 
-    def find_aliases(self, node: torch.fx.Node):
-        for n in self._queue:
-            self._update_aliases(n)
+    def find_aliases(
+        self, node: torch.fx.Node
+    ) -> List[weakref.ReferenceType[torch.fx.Node]]:
+        for ref in self._queue:
+            nd = ref()
+            if nd:
+                self._update_aliases(nd)
         self._queue.clear()
         maybe_storage = get_node_storage_obj(node)
         if maybe_storage is None:
             return []
         return self._data.get(maybe_storage, [])
 
-    def _update_aliases(self, node: torch.fx.Node):
+    def _update_aliases(self, node: torch.fx.Node) -> None:
         maybe_storage = get_node_storage_obj(node)
         if maybe_storage is None:
             return
@@ -294,7 +300,7 @@ class AliasInfo:
         self._data[maybe_storage].append(weakref.ref(node))
 
 
-def get_node_storage_obj(node: torch.fx.Node):
+def get_node_storage_obj(node: torch.fx.Node) -> Optional[torch.UntypedStorage]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):
