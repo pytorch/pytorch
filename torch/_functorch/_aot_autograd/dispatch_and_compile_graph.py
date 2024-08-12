@@ -31,7 +31,11 @@ from .traced_function_transforms import (
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
-from .utils import root_module_when_exporting_non_strict, unlift_tokens
+from .utils import (
+    copy_fwd_metadata_to_bw_nodes,
+    root_module_when_exporting_non_strict,
+    unlift_tokens,
+)
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -278,7 +282,9 @@ def aot_dispatch_autograd_graph(
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
+    copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
+
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
