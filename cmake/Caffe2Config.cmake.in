@@ -107,7 +107,7 @@ if(@CAFFE2_USE_MKL@)
 endif()
 
 if(@USE_ONEDNN@)
-  include("${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake")
+  include("${CMAKE_CURRENT_LIST_DIR}/public/onednn.cmake")
 endif()
 
 # import targets
