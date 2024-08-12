@@ -205,6 +205,7 @@ class TestCuda(TestCase):
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
+    @unittest.skipIf(IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support")
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device="cuda")
 
