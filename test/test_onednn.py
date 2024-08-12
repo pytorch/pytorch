@@ -17,7 +17,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 import torch
 import torch.nn.functional as F
 import torch.jit
-import torch.backends.mkldnn
+import torch.backends.onednn
 from torch.utils import onednn as onednn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
@@ -35,7 +35,7 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 types = [torch.float, torch.bfloat16, torch.half]
 
 # Comment the line below to find out the CI machines having oneDNN build disabled
-@unittest.skipIf(not torch.backends.mkldnn.is_available(), "oneDNN build is disabled")
+@unittest.skipIf(not torch.backends.onednn.is_available(), "oneDNN build is disabled")
 class TestOnednn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
@@ -256,7 +256,7 @@ class TestOnednn(TestCase):
                 x1.requires_grad_()
                 x2.requires_grad_()
                 onednn_conv = copy.deepcopy(conv)
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 y_aten = conv(x1)
                 if train and dim != 1:
                     loss1 = y_aten.sum()
@@ -328,7 +328,7 @@ class TestOnednn(TestCase):
             # test thnn impl
             conv_lower = copy.deepcopy(conv).to(dtype=dtype)
             conv_ref = copy.deepcopy(conv_lower).float()
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 x_ref = x_lower.clone().float().detach().requires_grad_()
                 x_lower.requires_grad_()
                 y = conv_ref(x_ref)
@@ -427,7 +427,7 @@ class TestOnednn(TestCase):
             torch.float16: 2e-3,
         }
         prec = precisions[dtype]
-        with torch.backends.mkldnn.flags(enabled=False):
+        with torch.backends.onednn.flags(enabled=False):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=dtype, prec=prec)
@@ -462,7 +462,7 @@ class TestOnednn(TestCase):
             torch.float16: 3e-3,
         }
         prec = precisions[dtype]
-        with torch.backends.mkldnn.flags(enabled=False):
+        with torch.backends.onednn.flags(enabled=False):
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=dtype, prec=prec)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=dtype, prec=prec)
@@ -499,7 +499,7 @@ class TestOnednn(TestCase):
                 x_ref.requires_grad_()
 
             conv_ref = copy.deepcopy(conv)
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 y_ref = conv_ref(x_ref)
                 if train:
                     y_ref.sum().backward()
@@ -1511,7 +1511,7 @@ class TestOnednn(TestCase):
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
                 with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
-                    with torch.backends.mkldnn.flags(enabled=False):
+                    with torch.backends.onednn.flags(enabled=False):
                         torch.manual_seed(seed)
                         output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
                                                                              (self._cast_dtype(h1, bf16),
@@ -1524,7 +1524,7 @@ class TestOnednn(TestCase):
                     self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
 
                     if training:
-                        with torch.backends.mkldnn.flags(enabled=False):
+                        with torch.backends.onednn.flags(enabled=False):
                             torch.manual_seed(seed)
                             output1.sum().backward(retain_graph=True)
 
@@ -1536,14 +1536,14 @@ class TestOnednn(TestCase):
                             self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
                             self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
 
-                        with torch.backends.mkldnn.flags(enabled=False):
+                        with torch.backends.onednn.flags(enabled=False):
                             torch.manual_seed(seed)
                             hn1.sum().backward(retain_graph=True)
                         torch.manual_seed(seed)
                         hn2.sum().backward(retain_graph=True)
                         self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
 
-                        with torch.backends.mkldnn.flags(enabled=False):
+                        with torch.backends.onednn.flags(enabled=False):
                             torch.manual_seed(seed)
                             cn1.sum().backward(retain_graph=True)
                         torch.manual_seed(seed)

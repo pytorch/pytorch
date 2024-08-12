@@ -63,7 +63,7 @@ from torch.backends import (
     cudnn as cudnn,
     mha as mha,
     mkl as mkl,
-    mkldnn as mkldnn,
+    onednn as onednn,
     mps as mps,
     nnpack as nnpack,
     openmp as openmp,

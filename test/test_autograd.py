@@ -5670,9 +5670,9 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
+        not torch.backends.onednn.is_available(), "oneDNN build is disabled"
     )
-    def test_gradcheck_validates_input_mkldnn(self):
+    def test_gradcheck_validates_input_onednn(self):
         # when onednn inputs, forward mode testing is not allowed
         # Update tolerances below to make sure the gradient match even in single precision floats
         # Use the warning assert to hide the float32 warning
@@ -5710,7 +5710,7 @@ Done""",
                 )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
+        not torch.backends.onednn.is_available(), "oneDNN build is disabled"
     )
     def test_gradcheck_test_outputs(self):
         def check(fast_mode):
@@ -6015,9 +6015,9 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
+        not torch.backends.onednn.is_available(), "oneDNN build is disabled"
     )
-    def test_gradcheck_multiple_mkldnn_inputs(self):
+    def test_gradcheck_multiple_onednn_inputs(self):
         def check(fast_mode):
             def fn(x, y):
                 return x + y.to_dense()

@@ -635,7 +635,7 @@ class TestTorchTidyProfiler(TestCase):
         )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
+        not torch.backends.onednn.is_available(), "oneDNN build is disabled"
     )
     def test_onednn_tensors(self):
         x = torch.ones(4, 3).to_onednn()

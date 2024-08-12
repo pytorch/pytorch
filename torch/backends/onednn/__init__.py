@@ -37,7 +37,7 @@ class verbose:
 
         import torch
         model(data)
-        with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+        with torch.backends.onednn.verbose(torch.backends.onednn.VERBOSE_ON):
             model(data)
 
     Args:

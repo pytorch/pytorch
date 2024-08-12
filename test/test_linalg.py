@@ -34,7 +34,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, CDNA2OrLater
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_onednn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -8330,7 +8330,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # for bf16 accumulation in gemm ref path
         def check_correctness(fn, dtype, *args):
             expected = fn(*args).to(dtype=dtype)
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 def test():
                     lower_args = (arg.to(dtype=dtype) for arg in args)
                     tmp_result = fn(*lower_args)
