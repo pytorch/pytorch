@@ -11,6 +11,7 @@ from ..utils import _type_of
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
+
 def should_unwrap_unspec_arg(name: str):
     if V.graph.is_unspec_arg(name):
         # Unwrap on all devices except CPU
