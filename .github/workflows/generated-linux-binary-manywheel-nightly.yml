@@ -63,6 +63,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: calculate-manylinux-builder-cpu
+    if: always()
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
