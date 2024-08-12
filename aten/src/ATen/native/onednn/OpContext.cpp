@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 namespace onednn {
 
-c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
+c10::intrusive_ptr<ConvOpContext> OnednnConvOpContext::create_context(
     at::Tensor&& weight,
     std::optional<at::Tensor>&& bias,
     std::vector<int64_t>&& padding,
@@ -19,7 +19,7 @@ c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
   auto op_context = onednn::internal::convolution::create(
       weight, bias, padding, stride, dilation, groups, input_size, attr);
 
-  auto conv_op_context = c10::make_intrusive<MkldnnConvOpContext>(
+  auto conv_op_context = c10::make_intrusive<OnednnConvOpContext>(
       std::move(weight),
       std::move(bias),
       std::move(padding),
@@ -32,11 +32,11 @@ c10::intrusive_ptr<ConvOpContext> MkldnnConvOpContext::create_context(
   return conv_op_context;
 }
 
-Tensor MkldnnConvOpContext::run(const Tensor& input) {
+Tensor OnednnConvOpContext::run(const Tensor& input) {
   return onednn::internal::convolution::run(op_context_, input);
 }
 
-void MkldnnConvOpContext::run(const Tensor& input, void* output) {
+void OnednnConvOpContext::run(const Tensor& input, void* output) {
   onednn::internal::convolution::run(op_context_, input, output);
 }
 

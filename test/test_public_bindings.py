@@ -131,7 +131,7 @@ class TestPublicBindings(TestCase):
             "has_cudnn",
             "has_lapack",
             "has_mkl",
-            "has_mkldnn",
+            "has_onednn",
             "has_mps",
             "has_openmp",
             "has_spectral",

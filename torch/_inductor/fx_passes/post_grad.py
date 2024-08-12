@@ -150,11 +150,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C._has_mkldnn:
+    if torch._C._has_onednn:
         from . import decompose_mem_bound_mm  # noqa: F401
-        from .onednn_fusion import _mkldnn_fusion_init
+        from .onednn_fusion import _onednn_fusion_init
 
-        _mkldnn_fusion_init()
+        _onednn_fusion_init()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):

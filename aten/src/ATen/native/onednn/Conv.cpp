@@ -50,11 +50,11 @@ static void check_shape_forward(const Tensor& input,
                                 const IntArrayRef& stride,
                                 const IntArrayRef& dilation,
                                 const int64_t groups) {
-#define MKLDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
-  auto is_padding_neg = MKLDNN_CONV_ARG_CHECK(padding, <);
-  auto is_stride_nonpos = MKLDNN_CONV_ARG_CHECK(stride, <=);
-  auto is_dilation_nonpos = MKLDNN_CONV_ARG_CHECK(dilation, <=);
-#undef MKLDNN_CONV_ARG_CHECK
+#define ONEDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
+  auto is_padding_neg = ONEDNN_CONV_ARG_CHECK(padding, <);
+  auto is_stride_nonpos = ONEDNN_CONV_ARG_CHECK(stride, <=);
+  auto is_dilation_nonpos = ONEDNN_CONV_ARG_CHECK(dilation, <=);
+#undef ONEDNN_CONV_ARG_CHECK
   TORCH_CHECK(!is_padding_neg, "negative padding is not supported");
   TORCH_CHECK(!is_stride_nonpos, "non-positive stride is not supported");
   TORCH_CHECK(!is_dilation_nonpos, "non-positive dilation is not supported");
@@ -117,8 +117,8 @@ static void check_shape_forward(const Tensor& input,
   }
 }
 
-#define MKLDNNTensor(itensor, options)                                  \
-  new_with_itensor_mkldnn(                                              \
+#define ONEDNNTensor(itensor, options)                                  \
+  new_with_itensor_onednn(                                              \
       std::move(itensor),                                               \
       optTypeMetaToScalarType(options.dtype_opt()),                     \
       options.device_opt())
@@ -234,7 +234,7 @@ static Tensor _onednn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type(), "onednn_convolution");
+  onednn_check_low_precision(input_t.scalar_type(), "onednn_convolution");
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -267,9 +267,9 @@ static Tensor _onednn_convolution(
       op_attr);
 
   if (input_t.is_onednn()) {
-    return MKLDNNTensor(y, input_t.options());
+    return ONEDNNTensor(y, input_t.options());
   } else if (!use_channels_last) {
-    return onednn_to_dense(MKLDNNTensor(y, input_t.options()));
+    return onednn_to_dense(ONEDNNTensor(y, input_t.options()));
   } else {
     return output;
   }
@@ -359,7 +359,7 @@ Tensor onednn_convolution_pointwise_binary(
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
   // dtype is float, bfloat16 or half.
-  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+  check_onednn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -415,7 +415,7 @@ Tensor onednn_convolution_pointwise_binary(
       format_tag = ideep::tag::ndhwc;
     }
     auto other_desc = ideep::tensor::desc(
-        output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
+        output_size, get_onednn_dtype(weight.scalar_type()), format_tag);
 
     ideep::attr_t op_attr;
     ideep::post_ops po;
@@ -530,7 +530,7 @@ Tensor& onednn_convolution_pointwise_binary_(
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
   // dtype is float, bfloat16 or half.
-  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+  check_onednn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
@@ -640,7 +640,7 @@ Tensor _onednn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type(), "onednn_convolution_transpose");
+  onednn_check_low_precision(input_t.scalar_type(), "onednn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_onednn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
@@ -703,9 +703,9 @@ Tensor _onednn_convolution_transpose(
         op_attr);
   }
   if (input.is_onednn()) {
-    return MKLDNNTensor(y, input.options());
+    return ONEDNNTensor(y, input.options());
   } else if (!use_channels_last) {
-    return onednn_to_dense(MKLDNNTensor(y, input.options()));
+    return onednn_to_dense(ONEDNNTensor(y, input.options()));
   } else {
     return output;
   }
@@ -801,9 +801,9 @@ Tensor onednn_convolution_backward_input(
       is_channels_last);
 
   if (grad_output.is_onednn()) {
-    return MKLDNNTensor(grad_x, grad_output.options());
+    return ONEDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
-    return onednn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+    return onednn_to_dense(ONEDNNTensor(grad_x, grad_output.options()));
   } else {
     return grad_input;
   }
@@ -852,13 +852,13 @@ std::tuple<Tensor, Tensor> onednn_convolution_backward_weights(
 
   if (!is_channels_last) {
     return std::make_tuple(
-        onednn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        bias_defined ? onednn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        onednn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
-        bias_defined ? onednn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 
@@ -951,9 +951,9 @@ Tensor onednn_convolution_transpose_backward_input(
       is_channels_last);
 
   if (grad_output.is_onednn()) {
-    return MKLDNNTensor(grad_x, grad_output.options());
+    return ONEDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
-    return onednn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+    return onednn_to_dense(ONEDNNTensor(grad_x, grad_output.options()));
   } else {
     return grad_input;
   }
@@ -1003,13 +1003,13 @@ std::tuple<Tensor,Tensor> onednn_convolution_transpose_backward_weights(
 
   if (!is_channels_last) {
     return std::make_tuple(
-        onednn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        bias_defined ? onednn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        onednn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
-        bias_defined ? onednn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 

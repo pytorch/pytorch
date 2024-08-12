@@ -27,7 +27,7 @@ from .quantization import (
 )
 
 
-if torch._C._has_mkldnn:
+if torch._C._has_onednn:
     aten = torch.ops.aten
     onednn = torch.ops.onednn
     prims = torch.ops.prims
@@ -1243,7 +1243,7 @@ if torch._C._has_mkldnn:
                         gm.graph.erase_node(user_node)
 
     @functools.lru_cache(None)
-    def _mkldnn_fusion_init():
+    def _onednn_fusion_init():
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
         if (
@@ -1259,7 +1259,7 @@ if torch._C._has_mkldnn:
             _register_woq_lowerings()
 
     @functools.lru_cache(None)
-    def _mkldnn_weight_pack_init():
+    def _onednn_weight_pack_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()

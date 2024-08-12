@@ -94,7 +94,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   }
 }
 
-void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+void InplaceONEDNNSubgraph(std::shared_ptr<Graph> graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
   // Then we go through each node, if it's a node which has an equivalent
@@ -186,8 +186,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::ONEDNNHardSwish || k == prim::ONEDNNHardSigmoid ||
         k == prim::ONEDNNHardTanh || k == aten::tanh ||
-        k == prim::ONEDNNClamp || k == Symbol::prim("MKLDNNScalarMul") ||
-        k == Symbol::prim("MKLDNNLayerNorm")) {
+        k == prim::ONEDNNClamp || k == Symbol::prim("ONEDNNScalarMul") ||
+        k == Symbol::prim("ONEDNNLayerNorm")) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -241,8 +241,8 @@ Operation createUnaryOp(
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
-    auto a_it = at::native::itensor_from_mkldnn(a);
-    auto mkldnn_raw_data = a_it.get_data_handle();
+    auto a_it = at::native::itensor_from_onednn(a);
+    auto onednn_raw_data = a_it.get_data_handle();
     auto a_options_with_strided = a.options().layout(c10::kStrided);
 
     // tensor's physical size could be bigger than a logical one
@@ -252,21 +252,21 @@ Operation createUnaryOp(
         a_it.get_desc().get_size() / elementSize(a.scalar_type()));
     // we also wrap `a` storage into an aten tensor
     auto in_aten =
-        at::from_blob(mkldnn_raw_data, {nelem}, a_options_with_strided);
+        at::from_blob(onednn_raw_data, {nelem}, a_options_with_strided);
 
-    auto out_raw_data = mkldnn_raw_data;
+    auto out_raw_data = onednn_raw_data;
     auto out = a;
     if (!inplace) {
       // `a_it.get_desc()` will allocate a tensor
       // of the right physical size.
       auto it_empty = ideep::tensor(a_it.get_desc());
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
-      out = at::native::new_with_itensor_mkldnn(
+      out = at::native::new_with_itensor_onednn(
           std::move(it_empty),
           c10::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
-      out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
+      out_raw_data = at::native::itensor_from_onednn(out).get_data_handle();
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -279,7 +279,7 @@ Operation createUnaryOp(
   };
 }
 
-void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
+void ONEDNNLayerNormOp(Stack& stack, bool inplace) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
 
   // enable_cudnn not used
@@ -300,7 +300,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   auto input = pop(stack).toTensor();
 
   auto [dst, mean, rstd] =
-      at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
+      at::native::onednn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);
 };
@@ -359,8 +359,8 @@ Operation BroadOp(const Node* node) {
         // We use a very simple heuristic to convert an arg in nchw
         // to the blocked format of the other argument.
         c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-        auto a_it = at::native::itensor_from_mkldnn(exp_a);
-        auto b_it = at::native::itensor_from_mkldnn(exp_b);
+        auto a_it = at::native::itensor_from_onednn(exp_a);
+        auto b_it = at::native::itensor_from_onednn(exp_b);
 
         // `is_public_format` means a tensor's physical layout isn't in ONEDNN
         // blocked layout e.g. nchw or nhwc but not nChw8c
@@ -375,13 +375,13 @@ Operation BroadOp(const Node* node) {
         }
 
         auto a_options = exp_a.options();
-        auto a_out = at::native::new_with_itensor_mkldnn(
+        auto a_out = at::native::new_with_itensor_onednn(
             std::move(a_it),
             c10::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
-        auto b_out = at::native::new_with_itensor_mkldnn(
+        auto b_out = at::native::new_with_itensor_onednn(
             std::move(b_it),
             c10::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
@@ -477,14 +477,14 @@ const RegisterOperators BroadOpReg({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-const RegisterOperators MKLDNNLayerNormOpReg({
+const RegisterOperators ONEDNNLayerNormOpReg({
     torch::jit::Operator(
-        "prim::MKLDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
-        [](Stack& stack) { MKLDNNLayerNormOp(stack, false); },
+        "prim::ONEDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
+        [](Stack& stack) { ONEDNNLayerNormOp(stack, false); },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNLayerNorm_(Tensor(a!) input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor(a!)",
-        [](Stack& stack) { MKLDNNLayerNormOp(stack, true); },
+        "prim::ONEDNNLayerNorm_(Tensor(a!) input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor(a!)",
+        [](Stack& stack) { ONEDNNLayerNormOp(stack, true); },
         AliasAnalysisKind::FROM_SCHEMA),
 });
 
@@ -496,9 +496,9 @@ Operation ConstantONEDNNTensorOp(const Node* node) {
   };
 }
 
-Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
-  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
-  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+Tensor onednn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
+  ideep::tensor& x = at::native::itensor_from_onednn(tensor);
+  ideep::tensor& z = at::native::itensor_from_onednn(out);
   ideep::eltwise_forward::compute(
       x,
       z,
@@ -566,7 +566,7 @@ jit::RegisterOperators reg_fut_ops({
     // registering as custom operators avoids Scalar->Tensor->Scalar conversion
     // in default bindings
     jit::Operator(
-        "prim::MKLDNNScalarMul(Tensor self, Scalar other) -> Tensor",
+        "prim::ONEDNNScalarMul(Tensor self, Scalar other) -> Tensor",
         [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
               c10::autograd_dispatch_keyset);
@@ -579,18 +579,18 @@ jit::RegisterOperators reg_fut_ops({
               self.options().device_opt(),
               self.options().pinned_memory_opt());
 
-          mkldnn_tensor_scalar_mul(self, out, other);
+          onednn_tensor_scalar_mul(self, out, other);
           push(stack, out);
         },
         aliasAnalysisFromSchema()),
     jit::Operator(
-        "prim::MKLDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+        "prim::ONEDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
         [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
-          mkldnn_tensor_scalar_mul(self, self, other);
+          onednn_tensor_scalar_mul(self, self, other);
           push(stack, self);
         },
         aliasAnalysisFromSchema()),
@@ -599,57 +599,57 @@ jit::RegisterOperators reg_fut_ops({
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
 // TODO: make onednn tensor serialize...
-const RegisterOperators MKLDNNConstantOp({
+const RegisterOperators ONEDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantONEDNNTensor,
         ConstantONEDNNTensorOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-Node* createConstantONEDNNTensorOp(Graph* g, const Tensor& mkldnn_tensor) {
-  TORCH_INTERNAL_ASSERT(mkldnn_tensor.is_onednn());
+Node* createConstantONEDNNTensorOp(Graph* g, const Tensor& onednn_tensor) {
+  TORCH_INTERNAL_ASSERT(onednn_tensor.is_onednn());
   auto op = g->create(prim::ConstantONEDNNTensor);
-  op->t_(attr::value, mkldnn_tensor);
+  op->t_(attr::value, onednn_tensor);
   return op;
 }
 
-bool supportedMKLDNNWeight(const Tensor& weight) {
+bool supportedONEDNNWeight(const Tensor& weight) {
   return weight.device().is_cpu() && weight.dtype() == c10::ScalarType::Float &&
       weight.ndimension() != 0;
 }
 
-void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
+void replaceInputWithONEDNNTensor(Node* n, size_t index) {
   Value* input = n->inputs().at(index);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_onednn();
-  auto mkldnn_tensor_value =
-      createConstantONEDNNTensorOp(n->owningGraph(), mkldnn_tensor)
+  auto onednn_tensor = constant_as<Tensor>(input)->to_onednn();
+  auto onednn_tensor_value =
+      createConstantONEDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
-  mkldnn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
-  n->replaceInputWith(input, mkldnn_tensor_value);
+  onednn_tensor_value->setDebugName(input->debugName() + "_onednn");
+  n->replaceInputWith(input, onednn_tensor_value);
 }
 
-void replaceInputWithMKLDNNTensor(
+void replaceInputWithONEDNNTensor(
     Node* n,
     const std::string& name,
-    const at::Tensor& mkldnn_tensor) {
+    const at::Tensor& onednn_tensor) {
   Value* input = n->namedInput(name);
-  auto mkldnn_tensor_value =
-      createConstantONEDNNTensorOp(n->owningGraph(), mkldnn_tensor)
+  auto onednn_tensor_value =
+      createConstantONEDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
-  mkldnn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
-  n->replaceInputWith(input, mkldnn_tensor_value);
+  onednn_tensor_value->setDebugName(input->debugName() + "_onednn");
+  n->replaceInputWith(input, onednn_tensor_value);
 }
 
-void replaceInputWithMKLDNNTensor(Node* n, const std::string& name) {
+void replaceInputWithONEDNNTensor(Node* n, const std::string& name) {
   Value* input = n->namedInput(name);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_onednn();
-  replaceInputWithMKLDNNTensor(n, name, mkldnn_tensor);
+  auto onednn_tensor = constant_as<Tensor>(input)->to_onednn();
+  replaceInputWithONEDNNTensor(n, name, onednn_tensor);
 }
 
-void moveConvWeightsToMKLDNN(Node* conv) {
-  auto conv_w_mkldnn =
+void moveConvWeightsToONEDNN(Node* conv) {
+  auto conv_w_onednn =
       constant_as<Tensor>(conv->namedInput("weight")).value().to_onednn();
   std::vector<int64_t> padding =
       toIValue(conv->namedInput("padding"))->toIntVector();
@@ -660,33 +660,33 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
 
   if (conv->kind() == aten::conv2d) {
-    conv_w_mkldnn = onednn_reorder_conv2d_weight(
-        conv_w_mkldnn, padding, stride, dilation, groups);
+    conv_w_onednn = onednn_reorder_conv2d_weight(
+        conv_w_onednn, padding, stride, dilation, groups);
   } else if (conv->kind() == aten::conv3d) {
-    conv_w_mkldnn = onednn_reorder_conv3d_weight(
-        conv_w_mkldnn, padding, stride, dilation, groups);
+    conv_w_onednn = onednn_reorder_conv3d_weight(
+        conv_w_onednn, padding, stride, dilation, groups);
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
-  replaceInputWithMKLDNNTensor(conv, "weight", conv_w_mkldnn);
+  replaceInputWithONEDNNTensor(conv, "weight", conv_w_onednn);
 
   if (conv->namedInput("bias")->type() != NoneType::get()) {
-    replaceInputWithMKLDNNTensor(conv, "bias");
+    replaceInputWithONEDNNTensor(conv, "bias");
   }
 }
 
-void moveWeightsToMKLDNN(Node* n) {
+void moveWeightsToONEDNN(Node* n) {
   // conv goes through special pathway so we can call onednn reorder conv
   // primitive
   if (n->kind() == aten::conv2d || n->kind() == aten::conv3d) {
-    moveConvWeightsToMKLDNN(n);
+    moveConvWeightsToONEDNN(n);
   } else {
     for (size_t i = 0; i < n->inputs().size(); ++i) {
       if (!n->input(i)->type()->cast<TensorType>() ||
           n->input(i)->node()->kind() != prim::Constant) {
         continue;
       }
-      replaceInputWithMKLDNNTensor(n, i);
+      replaceInputWithONEDNNTensor(n, i);
     }
   }
 }
@@ -711,7 +711,7 @@ static void clamp_node_creator(
   body_node->destroy();
 }
 
-void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
+void ComputeSubgraphInONEDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
   Value* none_value = nullptr;
   {
@@ -736,12 +736,12 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto from_mkldnn = graph
+    auto from_onednn = graph
                            ->create(
                                c10::Symbol::fromQualString("aten::to_dense"),
                                {v, none_value, none_value})
                            ->insertAfter(subgraph_node);
-    v->replaceAllUsesAfterNodeWith(from_mkldnn, from_mkldnn->output());
+    v->replaceAllUsesAfterNodeWith(from_onednn, from_onednn->output());
   }
 
   auto subgraph = SubgraphUtils::getSubgraph(subgraph_node);
@@ -750,7 +750,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     Node* body_node = *it;
     it++;
 
-    moveWeightsToMKLDNN(body_node);
+    moveWeightsToONEDNN(body_node);
 
     if (body_node->kind() == aten::add ||
         (body_node->kind() == aten::mul &&
@@ -765,14 +765,14 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
     if (body_node->kind() == aten::mul &&
         body_node->input(1)->type()->isSubtypeOf(*NumberType::get())) {
-      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNScalarMul"));
+      body_node->replaceWithNewSymbol(Symbol::prim("ONEDNNScalarMul"));
       body_node->destroy();
       continue;
     }
 
     if (body_node->matches(
             "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
-      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNLayerNorm"));
+      body_node->replaceWithNewSymbol(Symbol::prim("ONEDNNLayerNorm"));
       body_node->destroy();
       continue;
     }
@@ -831,7 +831,7 @@ bool nonConstantParameters(Node* n) {
   return false;
 }
 
-bool frozenMkldnnCompatibleLinearNode(Node* n) {
+bool frozenOnednnCompatibleLinearNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
@@ -841,10 +841,10 @@ bool frozenMkldnnCompatibleLinearNode(Node* n) {
   }
 
   auto weight = constant_as<Tensor>(n->namedInput("weight")).value();
-  return supportedMKLDNNWeight(weight);
+  return supportedONEDNNWeight(weight);
 }
 
-bool frozenMkldnnCompatibleConvNode(Node* n) {
+bool frozenOnednnCompatibleConvNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
@@ -855,7 +855,7 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
   }
 
   auto weight = constant_as<Tensor>(n->namedInput("weight")).value();
-  return supportedMKLDNNWeight(weight);
+  return supportedONEDNNWeight(weight);
 }
 
 // [onednn perf strategy]
@@ -879,9 +879,9 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
 // prove in our first pass that the Add's inputs were both float32 without first
 // fusing the first conv.
 
-class MKLDNNSubgraphSlicer {
+class ONEDNNSubgraphSlicer {
  public:
-  MKLDNNSubgraphSlicer(
+  ONEDNNSubgraphSlicer(
       Block* block,
       std::shared_ptr<Graph> graph,
       AliasDb& aliasDb)
@@ -893,7 +893,7 @@ class MKLDNNSubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then unmerge them into the graph
     buildupSubgraphs();
-    computeSubgraphsInMKLDNN();
+    computeSubgraphsInONEDNN();
     // Run CSE globally onceto eliminate duplicates that may have occurred
     // while inlining subgraphs.
     EliminateCommonSubexpression(graph_);
@@ -928,7 +928,7 @@ class MKLDNNSubgraphSlicer {
     // Construct Subgraphs Recursively
     for (Node* n : block_->nodes()) {
       for (auto subBlock : n->blocks()) {
-        MKLDNNSubgraphSlicer(subBlock, graph_, aliasDb_).buildupSubgraphs();
+        ONEDNNSubgraphSlicer(subBlock, graph_, aliasDb_).buildupSubgraphs();
       }
     }
   }
@@ -939,17 +939,17 @@ class MKLDNNSubgraphSlicer {
       return true;
     }
     // see [onednn perf strategy]
-    return frozenMkldnnCompatibleConvNode(node);
+    return frozenOnednnCompatibleConvNode(node);
   }
 
  private:
   // ONEDNN only supports floats of dimension > 0, so we only support
   // Tensors who have a known type or were previously verified
   // to be usable in an ONEDNN Group
-  bool tensorInputIsMKLDNNSupported(Value* v, Node* v_use) {
+  bool tensorInputIsONEDNNSupported(Value* v, Node* v_use) {
     auto const_tensor = constant_as<Tensor>(v);
     if (const_tensor) {
-      return supportedMKLDNNWeight(*const_tensor);
+      return supportedONEDNNWeight(*const_tensor);
     }
     auto k = v->node()->kind();
     if (k == prim::ONEDNNGroup || k == prim::ConstantONEDNNTensor ||
@@ -967,10 +967,10 @@ class MKLDNNSubgraphSlicer {
 
   // We include ops here which are roughly perf-equivalent in onednn as with
   // aten (single & multithreaded) and whose inputs & outputs are float32.
-  bool computableInMKLDNN(Node* n) {
+  bool computableInONEDNN(Node* n) {
     for (Value* v : n->inputs()) {
       if (v->type()->cast<TensorType>() &&
-          !(tensorInputIsMKLDNNSupported(v, n))) {
+          !(tensorInputIsONEDNNSupported(v, n))) {
         return false;
       }
     }
@@ -1041,20 +1041,20 @@ class MKLDNNSubgraphSlicer {
     return false;
   }
 
-  void computeSubgraphsInMKLDNN() {
+  void computeSubgraphsInONEDNN() {
     auto curNode = *block_->nodes().begin();
     while (curNode != *block_->nodes().end()) {
       auto nextNode = curNode->next();
       if (curNode->kind() == prim::ONEDNNGroup) {
-        ComputeSubgraphInMKLDNN(curNode);
-        InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
+        ComputeSubgraphInONEDNN(curNode);
+        InplaceONEDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
         SubgraphUtils::unmergeSubgraph(curNode);
       }
       curNode = nextNode;
     }
     for (Node* n : block_->nodes()) {
       for (Block* b : n->blocks()) {
-        MKLDNNSubgraphSlicer(b, graph_, aliasDb_).computeSubgraphsInMKLDNN();
+        ONEDNNSubgraphSlicer(b, graph_, aliasDb_).computeSubgraphsInONEDNN();
       }
     }
   }
@@ -1064,8 +1064,8 @@ class MKLDNNSubgraphSlicer {
     if (node->kind() == prim::ONEDNNGroup) {
       return true;
     }
-    return frozenMkldnnCompatibleLinearNode(node) ||
-        frozenMkldnnCompatibleConvNode(node) || computableInMKLDNN(node);
+    return frozenOnednnCompatibleLinearNode(node) ||
+        frozenOnednnCompatibleConvNode(node) || computableInONEDNN(node);
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(Node* producer) {
@@ -1125,7 +1125,7 @@ bool containsONEDNNGroup(Block* b) {
         return true;
       }
     }
-    if (MKLDNNSubgraphSlicer::ONEDNNGroupStart(n)) {
+    if (ONEDNNSubgraphSlicer::ONEDNNGroupStart(n)) {
       return true;
     }
   }
@@ -1134,7 +1134,7 @@ bool containsONEDNNGroup(Block* b) {
 
 } // namespace
 
-void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
+void ConvertFrozenOpsToONEDNN(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before convert frozen ops to onednn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
@@ -1144,7 +1144,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     // running an op in onednn removes the aliasing relationships that
     // previously existed between input and output.
     RemoveTensorMutation(graph, [](Node* node_to_functionalize) {
-      static std::unordered_set<Symbol> mkldnn_ops = {
+      static std::unordered_set<Symbol> onednn_ops = {
           aten::add_,
           aten::mul_,
           aten::relu_,
@@ -1158,11 +1158,11 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::tanh_,
           aten::clamp_,
       };
-      return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
+      return onednn_ops.count(node_to_functionalize->kind()) != 0;
     });
 
     AliasDb db(graph);
-    MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
+    ONEDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to onednn", graph);
   } else {
@@ -1172,7 +1172,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 
 #else
 
-void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
+void ConvertFrozenOpsToONEDNN(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("ONEDNN Not enabled", graph);
 }
 

@@ -74,26 +74,26 @@ TORCH_LIBRARY(onednn, m) {
   m.def("_is_onednn_bf16_supported", &is_onednn_bf16_supported);
   m.def("_is_onednn_fp16_supported", &is_onednn_fp16_supported);
   m.def("_is_onednn_acl_supported", &is_onednn_acl_supported);
-  m.def("onednn::data_ptr(Tensor mkldnn_tensor) -> int");
-  m.def("onednn::_get_mkldnn_serialized_md (Tensor mkldnn_tensor) -> Tensor");
-  m.def("onednn::_nbytes(Tensor mkldnn_tensor) -> int");
+  m.def("onednn::data_ptr(Tensor onednn_tensor) -> int");
+  m.def("onednn::_get_onednn_serialized_md (Tensor onednn_tensor) -> Tensor");
+  m.def("onednn::_nbytes(Tensor onednn_tensor) -> int");
 }
 
-TORCH_LIBRARY(mkldnn_prepacked, m) {
+TORCH_LIBRARY(onednn_prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.onednn.ConvOpContext"));
+      "onednn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.onednn.ConvOpContext"));
 
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.onednn.ConvOpContext W_prepack) -> Tensor Y"));
+      "onednn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.onednn.ConvOpContext W_prepack) -> Tensor Y"));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn_prepacked, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_prepack"),
+      TORCH_SELECTIVE_NAME("onednn_prepacked::conv2d_prepack"),
       TORCH_FN(createConvPrePackOpContext));
 
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"), TORCH_FN(conv_run));
+      TORCH_SELECTIVE_NAME("onednn_prepacked::conv2d_run"), TORCH_FN(conv_run));
 }
 
 } // namespace onednn

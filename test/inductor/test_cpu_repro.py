@@ -405,7 +405,7 @@ class CPUReproTests(TestCase):
                 )
 
     @config.patch(freezing=True)
-    @unittest.skipIf(not torch._C._has_mkldnn, "ONEDNN is not enabled")
+    @unittest.skipIf(not torch._C._has_onednn, "ONEDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_conv_in_channel_1_dynamic_shapes(self):
@@ -437,7 +437,7 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
-    @unittest.skipIf(not torch._C._has_mkldnn, "ONEDNN is not enabled")
+    @unittest.skipIf(not torch._C._has_onednn, "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)

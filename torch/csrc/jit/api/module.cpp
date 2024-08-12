@@ -492,7 +492,7 @@ Module freeze(
 namespace {
 void optimize_for_inference(std::shared_ptr<Graph> graph) {
   FuseFrozenConvAddRelu(graph);
-  ConvertFrozenOpsToMKLDNN(graph);
+  ConvertFrozenOpsToONEDNN(graph);
   FrozenLinearTranspose(graph);
 }
 } // namespace

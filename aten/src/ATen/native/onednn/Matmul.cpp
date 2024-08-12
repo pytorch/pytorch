@@ -115,7 +115,7 @@ inline typename std::enable_if_t<
     std::is_same_v<scalar_t, c10::Half> ||
     std::is_same_v<scalar_t, c10::BFloat16>,
     bool>
-mkldnn_gemm(
+onednn_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -199,7 +199,7 @@ bool onednn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
-  return mkldnn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return onednn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 bool onednn_fp16_gemm(
@@ -210,7 +210,7 @@ bool onednn_fp16_gemm(
     const c10::Half *b, int64_t ldb,
     float beta,
     c10::Half *c, int64_t ldc) {
-  return mkldnn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return onednn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 bool onednn_bf32_gemm(
@@ -221,7 +221,7 @@ bool onednn_bf32_gemm(
     const float *b, int64_t ldb,
     float beta,
     float *c, int64_t ldc){
-      return mkldnn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      return onednn_gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
     }
 
 void onednn_matmul(
@@ -327,19 +327,19 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from onednn optimized gemm kernel
-  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  static const int64_t onednn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
-    return mat1.size(0) > mkldnn_gemm_min_size;
+    return mat1.size(0) > onednn_gemm_min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 1) {
     // aten::mv
-    return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) > onednn_gemm_min_size;
   } else if (mat2.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
-    return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat2.size(1) > onednn_gemm_min_size;
   } else {
     // aten::bmm, aten::baddbmm
-    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
+    return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > onednn_gemm_min_size;
   }
 }
 
@@ -452,7 +452,7 @@ static void _onednn_matmul_i8i8i32_with_primitive(
   primitive.execute(ideep::stream::default_stream(), args);
 }
 
-static void _mkldnn_gemm_i8i8i32_with_blas(
+static void _onednn_gemm_i8i8i32_with_blas(
   const Tensor& self,
   const Tensor& mat2,
   const Tensor& result) {
@@ -506,7 +506,7 @@ void onednn_matmul_i8i8i32(
   bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
 
   if (a_is_contigous && b_is_contigous) {
-    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+    _onednn_gemm_i8i8i32_with_blas(mat1, mat2, result);
   } else {
     _onednn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }

@@ -9,7 +9,7 @@ from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModul
 
 def is_available():
     r"""Return whether PyTorch is built with oneDNN support."""
-    return torch._C._has_mkldnn
+    return torch._C._has_onednn
 
 
 VERBOSE_OFF = 0
@@ -53,22 +53,22 @@ class verbose:
     def __enter__(self):
         if self.level == VERBOSE_OFF:
             return
-        st = torch._C._verbose.mkldnn_set_verbose(self.level)
+        st = torch._C._verbose.onednn_set_verbose(self.level)
         assert (
             st
         ), "Failed to set ONEDNN into verbose mode. Please consider to disable this verbose scope."
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        torch._C._verbose.mkldnn_set_verbose(VERBOSE_OFF)
+        torch._C._verbose.onednn_set_verbose(VERBOSE_OFF)
         return False
 
 
 def set_flags(_enabled, _deterministic=None):
-    orig_flags = (torch._C._get_mkldnn_enabled(), torch._C._get_mkldnn_deterministic())
-    torch._C._set_mkldnn_enabled(_enabled)
+    orig_flags = (torch._C._get_onednn_enabled(), torch._C._get_onednn_deterministic())
+    torch._C._set_onednn_enabled(_enabled)
     if _deterministic is not None:
-        torch._C._set_mkldnn_deterministic(_deterministic)
+        torch._C._set_onednn_deterministic(_deterministic)
     return orig_flags
 
 
@@ -83,13 +83,13 @@ def flags(enabled=False, deterministic=False):
             set_flags(*orig_flags)
 
 
-class MkldnnModule(PropModule):
+class OnednnModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
 
-    enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
+    enabled = ContextProp(torch._C._get_onednn_enabled, torch._C._set_onednn_enabled)
     deterministic = ContextProp(
-        torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+        torch._C._get_onednn_deterministic, torch._C._set_onednn_deterministic
     )
 
 
@@ -97,4 +97,4 @@ if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
 
-sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
+sys.modules[__name__] = OnednnModule(sys.modules[__name__], __name__)

@@ -53,12 +53,12 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
   virtual void run(const Tensor& input, void* output) = 0;
 };
 
-class MkldnnConvOpContext final : public ConvOpContext {
+class OnednnConvOpContext final : public ConvOpContext {
  private:
   ContextConv op_context_;
 
  public:
-  MkldnnConvOpContext(
+  OnednnConvOpContext(
       Tensor&& weight,
       std::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,

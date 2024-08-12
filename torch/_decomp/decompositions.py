@@ -3084,7 +3084,7 @@ def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
     return out, cur_hidden.squeeze(0)
 
 
-def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+def onednn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     w0 = params[0]
     w1 = params[1]
     if has_biases:
@@ -3108,7 +3108,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     train = False
     # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
-    # Same as aten/src/ATen/native/onednn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
+    # Same as aten/src/ATen/native/onednn/RNN.cpp: onednn_rnn: input = input.contiguous();
     inp = inp.contiguous()
     hx = hx.contiguous()
     cx = cx.contiguous()
@@ -3414,7 +3414,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 def select_one_layer_lstm_function(input, hx, params):
     r"""Check whether we could use decompose lstm with onednn_rnn_layer.
     All the below conditions need to be met:
-        * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
+        * ``torch._C._get_onednn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
         * Inference.
@@ -3427,7 +3427,7 @@ def select_one_layer_lstm_function(input, hx, params):
     """
 
     def use_onednn(input, hx, params):
-        if not torch._C._get_mkldnn_enabled():
+        if not torch._C._get_onednn_enabled():
             return False
 
         tensors = [input] + list(hx) + list(chain.from_iterable(params))
@@ -3453,10 +3453,10 @@ def select_one_layer_lstm_function(input, hx, params):
 
         return True
 
-    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
+    # onednn_one_layer_lstm does not depend on seq_len while one_layer_lstm
     # will expand over the seq_len dim
     if use_onednn(input, hx, params):
-        return mkldnn_one_layer_lstm
+        return onednn_one_layer_lstm
     else:
         return one_layer_lstm
 
