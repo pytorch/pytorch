@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
@@ -250,6 +251,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     self.assertTrue(torch.allclose(ref, res))
                 self.assertEqual(cnts.frame_count, 2)
 
+    @skipIfWindows
     def test_linear_setup_context(self):
         model = ModuleLinear()
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
@@ -353,6 +355,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, AllowInGraphFunc.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    @skipIfWindows
     def test_once_differentiable(self):
         from torch.autograd.function import once_differentiable
 
@@ -439,6 +442,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    @skipIfWindows
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
