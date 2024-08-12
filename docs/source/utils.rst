@@ -81,7 +81,7 @@ torch.utils
 .. py:module:: torch.utils.hipify.version
 .. py:module:: torch.utils.hooks
 .. py:module:: torch.utils.jit.log_extract
-.. py:module:: torch.utils.mkldnn
+.. py:module:: torch.utils.onednn
 .. py:module:: torch.utils.mobile_optimizer
 .. py:module:: torch.utils.show_pickle
 .. py:module:: torch.utils.tensorboard.summary

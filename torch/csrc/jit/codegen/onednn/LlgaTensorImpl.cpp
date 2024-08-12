@@ -1,6 +1,6 @@
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <c10/core/CPUAllocator.h>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 
@@ -49,7 +49,7 @@ LlgaTensorImpl::LlgaTensorImpl(
     const LlgaTensorDesc& desc)
     : at::TensorImpl(
           std::move(storage),
-          c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
+          c10::DispatchKeySet(c10::DispatchKey::OnednnCPU),
           data_type),
       desc_(desc) {
   set_sizes_and_strides(desc.sizes(), desc.strides());
@@ -123,11 +123,11 @@ data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
 
 LlgaTensorDesc LlgaTensorDesc::supplementTensorInfo(const at::Tensor& t) const {
   if (t.is_mkldnn()) {
-    // if input tensor is of mkldnn, it's originated from an upstream
+    // if input tensor is of onednn, it's originated from an upstream
     // LLGA partition which carries opaque layout info
     return get_llga_desc(t).tid(tid_);
   } else {
-    // if input tensor is not an mkldnn tensor, use default layout
+    // if input tensor is not an onednn tensor, use default layout
     auto sizes = t.sizes().vec();
     auto strides = t.strides().vec();
     auto dtype = getLlgaDataType(t.scalar_type());
@@ -157,4 +157,4 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
 } // namespace jit
 } // namespace torch
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

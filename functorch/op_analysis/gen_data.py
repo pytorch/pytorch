@@ -95,7 +95,7 @@ def gen_data(special_op_lists, analysis_name):
                 continue
             if (
                 "cudnn" in op["name"]
-                or "mkldnn" in op["name"]
+                or "onednn" in op["name"]
                 or "miopen" in op["name"]
                 or "native" in op["name"]
                 or "thnn" in op["name"]
