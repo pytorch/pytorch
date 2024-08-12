@@ -14,9 +14,8 @@ from typing import (
 
 import torch
 from torch._utils import _get_device_index
-
-from ..modules import Module
-from . import comm
+from torch.nn.modules import Module
+from torch.nn.parallel import comm
 
 
 if TYPE_CHECKING:
@@ -94,7 +93,7 @@ def _broadcast_coalesced_reshape(
     devices: Sequence[Union[int, torch.device]],
     detach: bool = False,
 ) -> List[List[torch.Tensor]]:
-    from ._functions import Broadcast
+    from torch.nn.parallel._functions import Broadcast
 
     if detach:
         return comm.broadcast_coalesced(tensors, devices)

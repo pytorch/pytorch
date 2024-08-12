@@ -5,6 +5,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <fmt/core.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
@@ -737,7 +738,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
-  py::str user_defined_s = "user_defined";
 
   using namespace c10::cuda::CUDACachingAllocator;
 
@@ -761,8 +761,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return segment_unmap_s;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
-      case TraceEntry::USER_DEFINED:
-        return user_defined_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -786,6 +784,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace.append(trace_entry);
     }
     traces.append(trace);
+  }
+
+  py::list external_annotations;
+  for (const auto& ae : snapshot.external_annotations) {
+    py::dict annotation_entry;
+    for (const auto& md : ae.metadata_) {
+      annotation_entry[(py::str)md.first] = md.second;
+    }
+    annotation_entry[device_s] = ae.device_;
+    annotation_entry[time_us_s] = ae.time_.t_;
+    external_annotations.append(annotation_entry);
   }
 
   py::dict allocator_settings;
@@ -825,6 +834,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
+  result["external_annotations"] = external_annotations;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -905,6 +915,34 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+std::string uuid_to_string(const char* uuid_bytes) {
+  // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+  // For string representation, the code here expands this to
+  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+  return fmt::format(
+      "{:02x}{:02x}{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+      (uint8_t)uuid_bytes[0],
+      (uint8_t)uuid_bytes[1],
+      (uint8_t)uuid_bytes[2],
+      (uint8_t)uuid_bytes[3],
+      (uint8_t)uuid_bytes[4],
+      (uint8_t)uuid_bytes[5],
+      (uint8_t)uuid_bytes[6],
+      (uint8_t)uuid_bytes[7],
+      (uint8_t)uuid_bytes[8],
+      (uint8_t)uuid_bytes[9],
+      (uint8_t)uuid_bytes[10],
+      (uint8_t)uuid_bytes[11],
+      (uint8_t)uuid_bytes[12],
+      (uint8_t)uuid_bytes[13],
+      (uint8_t)uuid_bytes[14],
+      (uint8_t)uuid_bytes[15]);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -923,37 +961,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
             return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
           })
       .def("__str__", [](const CUuuid& uuid) {
-        // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
-        // For string representation, the code here expands this to
-        // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
-        // Size is 16x2 hex characters + 4 hyphens + 1 null byte.
-        constexpr size_t size = sizeof(CUuuid) * 2 + 4 + 1;
-        char device_path_str[size] = {0};
-        snprintf(
-            device_path_str,
-            sizeof(device_path_str),
-            "%02x%02x%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x-"
-            "%02x%02x%02x%02x%02x%02x",
-            (uint8_t)uuid.bytes[0],
-            (uint8_t)uuid.bytes[1],
-            (uint8_t)uuid.bytes[2],
-            (uint8_t)uuid.bytes[3],
-            (uint8_t)uuid.bytes[4],
-            (uint8_t)uuid.bytes[5],
-            (uint8_t)uuid.bytes[6],
-            (uint8_t)uuid.bytes[7],
-            (uint8_t)uuid.bytes[8],
-            (uint8_t)uuid.bytes[9],
-            (uint8_t)uuid.bytes[10],
-            (uint8_t)uuid.bytes[11],
-            (uint8_t)uuid.bytes[12],
-            (uint8_t)uuid.bytes[13],
-            (uint8_t)uuid.bytes[14],
-            (uint8_t)uuid.bytes[15]);
-        return std::string(device_path_str);
+        return uuid_to_string(uuid.bytes);
       });
 #endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
@@ -986,6 +994,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
 #endif
+      .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -996,9 +1005,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
 #ifndef FBCODE_CAFFE2
-               << ", uuid=" << std::string(prop.uuid.bytes, 16)
+               << ", uuid=" << uuid_to_string(prop.uuid.bytes)
 #endif
-               << ")";
+               << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
+               << "MB)";
         return stream.str();
       });
 

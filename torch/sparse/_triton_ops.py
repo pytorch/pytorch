@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 import os
@@ -6,8 +7,11 @@ from functools import lru_cache
 from typing import Optional, Tuple
 
 import torch
+from torch._dynamo.utils import warn_once
 from torch.utils._triton import has_triton
+
 from ._triton_ops_meta import get_meta
+
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
     os.getenv("TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE", 2)
@@ -745,8 +749,12 @@ def bsr_dense_addmm_meta(
     num_stages=None,
     sparsity=None,
     dtype=None,
+    _version=0,
     **extra,
 ):
+    # Specifying _version is useful for situations when one wants to
+    # discard existing triton kernel tuning results, say, in testing
+    # bsr_dense_addmm_meta functionality.
     if dtype is None:
         dtype = torch.float16
     if sparsity is None:
@@ -755,27 +763,39 @@ def bsr_dense_addmm_meta(
         device_name = torch.cuda.get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         meta = get_meta(
-            "bsr_dense_addmm", key, device_name, version=(0, dtype, sparsity)
+            "bsr_dense_addmm", key, device_name, version=(_version, dtype, sparsity)
         )
         if meta is None and sparsity != 0.5:
             meta = get_meta(
-                "bsr_dense_addmm", key, device_name, version=(0, dtype, 0.5)
+                "bsr_dense_addmm", key, device_name, version=(_version, dtype, 0.5)
             )
-            if meta is None:
-                # find approximate meta such that N % SPLIT_N == 0.
-                matching_meta = get_meta(
-                    "bsr_dense_addmm",
-                    (*key[:2], "*", *key[3:]),
-                    device_name,
-                    version=(0, dtype, 0.5),
-                )
-                for mkey in sorted(matching_meta or {}):
-                    meta_ = matching_meta[mkey]
-                    if N % meta_["SPLIT_N"] == 0 and mkey[2] <= N:
-                        meta = meta_
+        if meta is None:
+            # find approximate meta such that N % SPLIT_N == 0.
+            matching_meta = get_meta(
+                "bsr_dense_addmm",
+                (*key[:2], "*", *key[3:]),
+                device_name,
+                version=(_version, dtype, 0.5),
+            )
+            for mkey in sorted(matching_meta or {}):
+                meta_ = matching_meta[mkey]
+                n = mkey[2]
+                split_n = meta_["SPLIT_N"]
+                c = n // split_n
+                if N % c == 0 and n <= N:
+                    meta = dict(meta_)
+                    meta["SPLIT_N"] = N // c
         if meta is not None:
             meta.update(**extra)
             return meta
+        else:
+            # see [Computing optimal kernel parameters] in
+            # _triton_ops_meta.py for ways to avoid this warning
+            # message
+            warn_once(
+                f"bsr_dense_addmm uses non-optimal triton kernel parameters for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=}"
+            )
+
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
