@@ -452,7 +452,6 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
-        pass
 
     @staticmethod
     def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102

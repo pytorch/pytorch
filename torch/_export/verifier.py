@@ -149,7 +149,6 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:

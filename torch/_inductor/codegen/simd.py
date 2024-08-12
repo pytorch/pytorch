@@ -398,7 +398,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction

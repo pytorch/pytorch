@@ -357,7 +357,6 @@ class MemoryPlanningLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Second pass to output code"""
-        pass
 
     def __str__(self) -> str:
         """

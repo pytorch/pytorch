@@ -1161,7 +1161,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             def setup_context(ctx, inputs, output):
                 _, mask = inputs
                 ctx.mark_non_differentiable(mask)
-                pass
 
             @staticmethod
             def backward(ctx, i):

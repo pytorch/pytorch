@@ -707,8 +707,6 @@ class BypassFxGraphCache(Exception):
     Exception to indicate that the FxGraphCache should be bypassed.
     """
 
-    pass
-
 
 class FxGraphHashDetails:
     """

@@ -6340,7 +6340,6 @@ def activate_meta():
                     "register meta function for it. Instead, we should let the decomposition run and write "
                     "meta kernels for the base operators."
                 )
-            pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.

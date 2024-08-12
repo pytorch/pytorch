@@ -813,7 +813,6 @@ class TestAssertClose(TestCase):
         the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
         exception here to avoid triggering possible handling of them.
         """
-        pass
 
     @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
     def test_unexpected_error_originate(self, _):

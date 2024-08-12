@@ -714,8 +714,6 @@ class _WorldMeta(type):
 class group(metaclass=_WorldMeta):
     """Group class. Placeholder."""
 
-    pass
-
 
 class GroupMember(metaclass=_WorldMeta):
     """Group member class."""

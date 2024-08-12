@@ -1334,8 +1334,6 @@ class OnnxExporterError(RuntimeError):
 class InvalidExportOptionsError(RuntimeError):
     """Raised when user specified an invalid value for the :class:`ExportOptions`."""
 
-    pass
-
 
 def _assert_dependencies(export_options: ResolvedExportOptions):
     opset_version = export_options.onnx_registry.opset_version

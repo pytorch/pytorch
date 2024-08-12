@@ -42,8 +42,6 @@ class InconsistentMetadata(Exception):
     not match the metadata it would store if the file didn't exist.
     """
 
-    pass
-
 
 class AutoHeuristic:
     """

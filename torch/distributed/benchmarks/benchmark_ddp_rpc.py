@@ -286,7 +286,6 @@ def run_worker(rank, world_size):
             rpc_backend_options=rpc_backend_options,
         )
         # parameter server do nothing
-        pass
 
     # block until all rpcs finish
     rpc.shutdown()
