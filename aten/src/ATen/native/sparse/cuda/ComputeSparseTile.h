@@ -9,18 +9,6 @@
 // sparsification, as a bitmask.
 // NOTE: Algorithms might select LESS than 8 values in total in some cases.
 
-namespace cutlass {
-namespace platform {
-template <>
-struct numeric_limits<cutlass::bfloat16_t> {
-  CUTLASS_HOST_DEVICE
-  static cutlass::bfloat16_t infinity() {
-    return cutlass::bfloat16_t::bitcast(0x7f80);
-  }
-};
-} // namespace platform
-} // namespace cutlass
-
 namespace at::native{
 
 template <typename Element, typename Pointwise>
@@ -70,7 +58,7 @@ template <typename Op = IdentityOp>
 struct LargestValuesGreedy {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
-    return -cutlass::platform::numeric_limits<T>::infinity();
+    return -std::numeric_limits<T>::infinity();
   }
 
   template <typename Tile4x4Accessor>
@@ -130,7 +118,7 @@ template <typename Op = IdentityOp>
 struct Causal1122 {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
-    return -cutlass::platform::numeric_limits<T>::infinity();
+    return -std::numeric_limits<T>::infinity();
   }
 
   template <typename Tile4x4Accessor>
