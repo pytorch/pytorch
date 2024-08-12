@@ -156,7 +156,7 @@
 namespace at {
 
 namespace detail {
-  static void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
+  static void check_linalg_norm_dtype(std::optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
     if (opt_dtype.has_value()) {
       auto dtype = opt_dtype.value();
       TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype), name, ": dtype should"
@@ -280,7 +280,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 

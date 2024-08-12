@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 """
 # Inductor Pattern Matcher
 
@@ -32,8 +33,6 @@ The match DAG is represented by a graph of `PatternExpr` nodes. Each PatternExpr
 implements a `_match` method which returns either a `Match` object for a
 successful match or a `FailedMatch` object for a failure to match.
 """
-
-# mypy: disallow-untyped-defs
 
 from __future__ import annotations
 
@@ -81,7 +80,8 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1615,6 +1615,12 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     return node.kwargs.get("out") is not None
 
 
+def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+    assert "mutation_region_id" in a.meta
+    assert "mutation_region_id" in b.meta
+    return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
+
+
 def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     n = node
     while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
@@ -1802,12 +1808,19 @@ def fx_to_pattern(
 
 @torch.no_grad()
 def fwd_only(
-    fn: Callable[..., Any], args: Sequence[Any], *, run_dce: bool = True
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    *,
+    run_dce: bool = True,
+    get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+        decompositions = (
+            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
+        )
+        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 
@@ -1916,9 +1929,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     def lazy_init() -> Any:
         counters_ref = counters["inductor"].copy()
 
-        with torch._guards.tracing(
-            None
-        ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn()
 
         # clear view matches encountered during tracing
