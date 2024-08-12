@@ -47,11 +47,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: View context attributes
+        uses: actions/github-script@v7
+        with:
+          script: console.log(github)
+
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v44
         with:
-          base_sha: "${{ github.base_ref }}"
+          base_sha: 1d9f5243a76e
         # To compare changes between the current commit and the last pushed remote commit set `since_last_remote_commit: true`. e.g
         # with:
         #   since_last_remote_commit: true
