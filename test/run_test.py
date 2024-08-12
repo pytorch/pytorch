@@ -187,6 +187,13 @@ ROCM_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -430,7 +437,14 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
+        replacement = {"-f": "-x"}
+        unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if options.showlocals:
+        if options.pytest:
+            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
+        else:
+            unittest_args.append("--locals")
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
@@ -1118,6 +1132,21 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
+    if sys.version_info >= (3, 9):
+        parser.add_argument(
+            "--showlocals",
+            action=argparse.BooleanOptionalAction,
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+    else:
+        parser.add_argument(
+            "--showlocals",
+            action="store_true",
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+            help="Show local variables in tracebacks (default: True)",
+        )
+        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1480,9 +1509,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(
-    file: str,
-) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> Dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):

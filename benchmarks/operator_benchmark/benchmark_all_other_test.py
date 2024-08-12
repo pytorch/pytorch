@@ -1,3 +1,4 @@
+import operator_benchmark as op_bench
 from pt import (  # noqa: F401
     add_test,
     ao_sparsifier_test,
@@ -28,8 +29,6 @@ from pt import (  # noqa: F401
     sum_test,
     tensor_to_test,
 )
-
-import operator_benchmark as op_bench
 
 
 if __name__ == "__main__":

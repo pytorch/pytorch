@@ -44,16 +44,15 @@ time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compi
 time python test/run_test.py --verbose -i distributed/test_device_mesh
 
 # DTensor/TP tests
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_ddp_2d_parallel
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_fsdp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_random_state
 
 # FSDP2 tests
 time python test/run_test.py --verbose -i distributed/_composable/fsdp/test_fully_shard_training -- -k test_2d_mlp_with_nd_mesh
 
-# Pipelining composability tests
-time python test/run_test.py --verbose -i distributed/pipelining/test_composability.py
+# ND composability tests
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_2d_composability
+time python test/run_test.py --verbose -i distributed/_composable/test_composability/test_pp_composability
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
