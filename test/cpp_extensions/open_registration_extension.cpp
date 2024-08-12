@@ -128,7 +128,7 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 }
 
 int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale){
+    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale, bool enable_gqa){
   auto backend = sdp::SDPBackend::overrideable;
   return static_cast<int64_t>(backend);
 }
@@ -418,38 +418,6 @@ at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result,
   return result;
 }
 
-// basic dummy functions related to pin_memory.
-std::vector<void*> custom_pinned_data_ptr;
-
-at::Tensor custom__pin_memory(const at::Tensor& self, std::optional<at::Device> device) {
-  TORCH_CHECK(
-      self.device().is_cpu(),
-      "cannot pin '",
-      self.toString(),
-      "' only dense CPU tensors can be pinned");
-
-  // record pinned data ptr
-  at::Tensor dump_pinned_tensor = self * 1.0;
-  custom_pinned_data_ptr.push_back(dump_pinned_tensor.storage().data_ptr().get());
-
-  return dump_pinned_tensor;
-}
-
-bool custom_is_pinned(const at::Tensor& self, std::optional<at::Device> device) {
-  // Only CPU tensors can be pinned
-  if (!self.is_cpu()) {
-    return false;
-  }
-
-  void* query_pinned_ptr = self.storage().data_ptr().get();
-  for (const auto& iter_ptr : custom_pinned_data_ptr) {
-    if (iter_ptr == query_pinned_ptr) {
-      return true;
-    }
-  }
-  return false;
-}
-
 const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
                           std::optional<at::MemoryFormat> optional_memory_format) {
   at::TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
@@ -478,7 +446,7 @@ custom_scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_bias,
+    const std::optional<at::Tensor> & attn_bias,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
@@ -545,8 +513,6 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("set_.source_Storage_storage_offset",&custom_set_source_Storage_storage_offset);
-  m.impl("_pin_memory", &custom__pin_memory);
-  m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
   m.impl("as_strided", at::native::as_strided_tensorimpl);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
@@ -612,6 +578,9 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
+// a global flag used for dummy pin_memory of custom device
+bool custom_pinned_flag = false;
+
 struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
 
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
@@ -620,6 +589,16 @@ struct FooHooksInterface : public at::PrivateUse1HooksInterface {
     const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) override {
       static auto device_gen = make_generator_privateuse1(device_index);
       return device_gen;
+    }
+    // this is a simple implementation, custom_pinned_flag will be set as true
+    // once tensor.pin_memory() is called. And then tensor.is_pinned()
+    // always return true no matter what tensor it's called on.
+    bool isPinnedPtr(const void* data) const override {
+      return custom_pinned_flag;
+    }
+    c10::Allocator* getPinnedMemoryAllocator() const override {
+      custom_pinned_flag = true;
+      return c10::GetCPUAllocator();
     }
 };
 
