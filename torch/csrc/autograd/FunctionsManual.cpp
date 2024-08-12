@@ -1405,8 +1405,8 @@ Tensor convolution_backward_jvp_grad_bias(
 // set, this function returns its strides or an empty array if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
 // there will be no backward pass. There has one special case, if input is
-// MKLDNN tensor and has requires_grad set, just return an empty array, the
-// reason is that MKLDNN tensor is a opaque tensor which has not stride info.
+// ONEDNN tensor and has requires_grad set, just return an empty array, the
+// reason is that ONEDNN tensor is a opaque tensor which has not stride info.
 //
 // This function only supports the case where `input` is the tensor whose
 // single derivative is being calculated.

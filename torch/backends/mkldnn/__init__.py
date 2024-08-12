@@ -8,7 +8,7 @@ from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModul
 
 
 def is_available():
-    r"""Return whether PyTorch is built with MKL-DNN support."""
+    r"""Return whether PyTorch is built with oneDNN support."""
     return torch._C._has_mkldnn
 
 
@@ -19,7 +19,7 @@ VERBOSE_ON_CREATION = 2
 
 class verbose:
     """
-    On-demand oneDNN (former MKL-DNN) verbosing functionality.
+    On-demand oneDNN (former oneDNN) verbosing functionality.
 
     To make it easier to debug performance issues, oneDNN can dump verbose
     messages containing information like kernel size, input data size and
@@ -56,7 +56,7 @@ class verbose:
         st = torch._C._verbose.mkldnn_set_verbose(self.level)
         assert (
             st
-        ), "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
+        ), "Failed to set ONEDNN into verbose mode. Please consider to disable this verbose scope."
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

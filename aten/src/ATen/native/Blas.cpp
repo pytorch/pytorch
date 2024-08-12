@@ -6,7 +6,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Config.h>
 
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/onednn/Matmul.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
@@ -177,7 +177,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
   }
 
   if (use_mkldnn_matmul(self, other, /*result=*/Tensor())){
-    // mkldnn matmul expect result have sizes info to create ideep tensor
+    // onednn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
     mkldnn_matmul(self, other, r, /*beta=*/0);
     return r;

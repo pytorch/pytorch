@@ -2010,7 +2010,7 @@ coverage_ignore_functions = [
     "no_fuser",
     "time_cpu",
     "time_cuda",
-    # torch.utils.mkldnn
+    # torch.utils.onednn
     "to_mkldnn",
     # torch.utils.mobile_optimizer
     "generate_mobile_module_lints",
@@ -3317,7 +3317,7 @@ coverage_ignore_classes = [
     # torch.utils.hooks
     "BackwardHook",
     "RemovableHandle",
-    # torch.utils.mkldnn
+    # torch.utils.onednn
     "MkldnnBatchNorm",
     "MkldnnConv1d",
     "MkldnnConv2d",

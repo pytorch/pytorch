@@ -4,7 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/onednn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
@@ -377,8 +377,8 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
       c10::IntArrayRef sizes(sizes_ptr, ndim);
       c10::IntArrayRef strides(strides_ptr, ndim);
       c10::Device device = c10_device(device_type, device_index);
-      // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
-      // which used by later mkldnn op.
+      // get a onednn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
+      // which used by later onednn op.
       *ret_new_tensor = new_tensor_handle(mkldnn_tensor_from_data_ptr(
           data,
           sizes,
