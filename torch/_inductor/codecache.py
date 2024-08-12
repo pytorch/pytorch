@@ -527,7 +527,7 @@ def _reduce_tensor(
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache
+        raise BypassFxGraphCache("Bypassing cache.  mkldnn tensors unpickleable.")
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -558,7 +558,7 @@ def _reduce_unsupported(s: Any) -> NoReturn:
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
     """
-    raise BypassFxGraphCache
+    raise BypassFxGraphCache("Bypassing cache.  Reduce unsupported.")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -596,7 +596,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 # Some configs options are callables, e.g., post_grad_custom_pre_pass,
                 # and may not pickle.
                 log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache from e
+                raise BypassFxGraphCache("Bypassing cache. Config options may be unpickleable.") from e
             return stream.getvalue()
 
     @classmethod
@@ -713,8 +713,8 @@ class BypassFxGraphCache(Exception):
     Exception to indicate that the FxGraphCache should be bypassed.
     """
 
-    pass
-
+    def __init__(self, message: str = ""):
+        super().__init__(message)
 
 class FxGraphHashDetails:
     """
@@ -1219,24 +1219,24 @@ class FxGraphCache:
         """
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache
+            raise BypassFxGraphCache("Bypassing cache. Freezing may introduce constants that aren't static across runs.")
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache
+            raise BypassFxGraphCache("Bypass cache. No shape env.")
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache
+                raise BypassFxGraphCache("Bypass cache. Can't cache HigherOrderOperators.")
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject
             ):
-                raise BypassFxGraphCache
+                raise BypassFxGraphCache("Bypass cache. Can't cache torchbind objects.")
 
     @staticmethod
     def load(  # type: ignore[no-untyped-def]
@@ -1307,7 +1307,8 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
             compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache:
+        except BypassFxGraphCache as e:
+            log.debug(e)
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
             if not compiled_graph:
