@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 import dataclasses
@@ -27,7 +28,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     ExportGraphSignature,
@@ -40,7 +40,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
@@ -108,7 +109,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
+    from torch.export._trace import _extract_fake_inputs, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
     from torch._utils_internal import export_api_rollout_check
     from torch._export.non_strict_utils import make_constraints
     from torch._subclasses.functional_tensor import FunctionalTensor
@@ -116,6 +117,9 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _combine_args
 
     capture_pre_autograd_graph_warning()
+
+    if sys.platform == "win32":
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
@@ -154,7 +158,7 @@ def capture_pre_autograd_graph(
                 **kwargs,
             )[0]
 
-            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+            _, _, fake_mode = _extract_fake_inputs(m, args, kwargs)
 
             m.meta["inline_constraints"] = {
                 k: v
@@ -204,112 +208,13 @@ def capture_pre_autograd_graph(
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
-    return module
 
-
-def save(
-    ep,
-    f: Union[str, os.PathLike, io.BytesIO],
-    *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    opset_version: Optional[Dict[str, int]] = None,
-) -> None:
-    from torch.export.exported_program import ExportedProgram
-    if not isinstance(ep, ExportedProgram):
-        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
-
-    from .serde.serialize import serialize, SerializedArtifact
-    from .serde.schema import SCHEMA_VERSION
-    artifact: SerializedArtifact = serialize(ep, opset_version)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    with zipfile.ZipFile(f, 'w') as zipf:
-        # Save every field in the SerializedArtifact to a file.
-        assert isinstance(artifact.exported_program, bytes)
-        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
-        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
-        zipf.writestr("serialized_constants.pt", artifact.constants)
-        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
-
-        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
-
-        # Add extra files if provided
-        if extra_files:
-            for extra_file_name, content in extra_files.items():
-                encoded_content = content.encode('utf-8')
-                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
-
-
-def load(
-    f: Union[str, os.PathLike, io.BytesIO],
-    *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    expected_opset_version: Optional[Dict[str, int]] = None,
-):
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    extra_files = extra_files or {}
-
-    with zipfile.ZipFile(f, 'r') as zipf:
-        # Check the version
-        version = zipf.read('version').decode().split('.')
-        from .serde.schema import SCHEMA_VERSION
-
-        assert len(version) == len(SCHEMA_VERSION)
-        if version[0] != str(SCHEMA_VERSION[0]):
-            raise RuntimeError(
-                f"Serialized version {version} does not match our current "
-                f"schema version {SCHEMA_VERSION}."
-            )
-
-        from .serde.serialize import deserialize, SerializedArtifact
-
-        # Load serialized_ep and serialized_state_dict from the zip file
-
-        serialized_exported_program: Optional[bytes] = None
-        serialized_state_dict: Optional[bytes] = None
-        serialized_constants: Optional[bytes] = None
-        serialized_example_inputs: Optional[bytes] = None
-
-        for file_info in zipf.infolist():
-            file_content = zipf.read(file_info.filename)
-
-            if file_info.filename == "serialized_exported_program.json":
-                serialized_exported_program = file_content
-            elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_state_dict.pt":
-                serialized_state_dict = file_content
-            elif file_info.filename == "serialized_constants.pt":
-                serialized_constants = file_content
-            elif file_info.filename == "serialized_example_inputs.pt":
-                serialized_example_inputs = file_content
-            elif file_info.filename.startswith("extra_files"):
-                filename = file_info.filename.split("/", 1)[1]
-                extra_files[filename] = file_content.decode('utf-8')
-
-        assert serialized_exported_program is not None
-        assert serialized_state_dict is not None
-        assert serialized_constants is not None
-        assert serialized_example_inputs is not None
-        artifact: SerializedArtifact = SerializedArtifact(
-            serialized_exported_program,
-            serialized_state_dict,
-            serialized_constants,
-            serialized_example_inputs,
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    if hasattr(module, "_buffers"):
+        torch._export.utils.remove_proxy_from_state_dict(
+            module._buffers, in_place=True
         )
-
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
-
-        return ep
+    return module
 
 
 def aot_compile(
@@ -406,6 +311,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
