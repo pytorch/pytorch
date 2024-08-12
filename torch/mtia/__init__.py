@@ -8,12 +8,12 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-
+from torch import device as _device, Tensor
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
-from .. import device as _device, Tensor
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
 from ._utils import _get_device_index
+
 
 _device_t = Union[_device, str, int, None]
 
@@ -22,9 +22,9 @@ Event = torch.Event
 Stream = torch.Stream
 
 _initialized = False
-_queued_calls: List[Tuple[Callable[[], None], List[str]]] = (
-    []
-)  # don't invoke these until initialization occurs
+_queued_calls: List[
+    Tuple[Callable[[], None], List[str]]
+] = []  # don't invoke these until initialization occurs
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()

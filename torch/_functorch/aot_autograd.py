@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.logging
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -20,6 +21,11 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
@@ -569,11 +575,9 @@ def _create_aot_dispatcher_function(
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                (
-                    maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-                    if isinstance(arg, FakeScriptObject)
-                    else arg
-                )
+                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                if isinstance(arg, FakeScriptObject)
+                else arg
                 for arg in fake_flat_args
             ]
 
@@ -972,11 +976,19 @@ def aot_module_simplified(
                 assert source not in seen_sources, source
                 seen_sources.add(source)
                 aot_autograd_arg_pos_to_source.append(source)
+                source_name = source.name() if source else str(source)
 
                 if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
                     "_dynamo_static_input_type", None
                 ):
+                    static_inputs_log.debug(
+                        "Adding static input pos %s for source %s", pos, source_name
+                    )
                     static_input_indices.append(pos)
+                else:
+                    static_inputs_log.debug(
+                        "Non-static input pos %s for source %s", pos, source_name
+                    )
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)

@@ -128,9 +128,9 @@ class BasicEvaluation:
                 EventKey(curr_event) not in self.metrics
             ), f"Duplicate id: {curr_event.id}, {curr_event.name}"
             self.metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
-            self.metrics[EventKey(curr_event)].duration_time_ns = (
-                curr_event.duration_time_ns
-            )
+            self.metrics[
+                EventKey(curr_event)
+            ].duration_time_ns = curr_event.duration_time_ns
 
     def compute_queue_depth(self):
         """
@@ -335,11 +335,11 @@ class BasicEvaluation:
 
         output += "\n".join(
             [
-                f"""{'-' * 80}
+                f"""{'-'*80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-' * 80}"""
+{'-'*80}"""
                 for event in event_list
             ]
         )

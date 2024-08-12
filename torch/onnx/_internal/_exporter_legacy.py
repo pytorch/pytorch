@@ -107,9 +107,9 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: dict[registration.OpName, list[registration.ONNXFunction]] = (
-            defaultdict(list)
-        )
+        self._registry: dict[
+            registration.OpName, list[registration.ONNXFunction]
+        ] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
             registration,
@@ -640,9 +640,10 @@ class ONNXProgram:
         fake_context: ONNXFakeContext | None = None,
         export_exception: Exception | None = None,
         model_signature: torch.export.ExportGraphSignature | None = None,
-        model_torch: (
-            torch.nn.Module | Callable | torch_export.ExportedProgram | None
-        ) = None,
+        model_torch: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
@@ -656,9 +657,10 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model_with_state_dict: (
-            torch.nn.Module | Callable | torch_export.ExportedProgram | None
-        ) = None,
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
         options: ONNXRuntimeOptions | None = None,
         **kwargs: Any,
     ) -> Any:
@@ -840,9 +842,10 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model_with_state_dict: (
-            torch.nn.Module | Callable | torch_export.ExportedProgram | None
-        ) = None,
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
         **model_kwargs,
     ) -> Sequence[torch.Tensor | int | float | bool | torch.dtype]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -912,9 +915,10 @@ class ONNXProgram:
     def adapt_torch_outputs_to_onnx(
         self,
         model_outputs: Any,
-        model_with_state_dict: (
-            torch.nn.Module | Callable | torch_export.ExportedProgram | None
-        ) = None,
+        model_with_state_dict: torch.nn.Module
+        | Callable
+        | torch_export.ExportedProgram
+        | None = None,
     ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 

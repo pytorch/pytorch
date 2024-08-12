@@ -473,7 +473,6 @@ class MinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
     """
-
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -683,7 +682,6 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
-
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -979,7 +977,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
     3. Compute the scale and zero point the same way as in the
         :class:`~torch.ao.quantization.MinMaxObserver`
     """
-
     histogram: torch.Tensor
     min_val: torch.Tensor
     max_val: torch.Tensor
@@ -1507,7 +1504,6 @@ class RecordingObserver(ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
-
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):

@@ -131,11 +131,9 @@ def create_mismatch_report(
     onnx_model_text = onnx.printer.to_text(onnx_model)
     input_shapes = repr(
         [
-            (
-                f"Tensor<{inp.shape}, dtype={inp.dtype}>"
-                if isinstance(inp, torch.Tensor)
-                else inp
-            )
+            f"Tensor<{inp.shape}, dtype={inp.dtype}>"
+            if isinstance(inp, torch.Tensor)
+            else inp
             for inp in inputs
         ]
     )

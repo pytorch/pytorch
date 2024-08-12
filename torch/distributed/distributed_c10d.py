@@ -680,10 +680,9 @@ class _World:
                     "pg_name": self.pg_names[pg],
                     "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
-                    # 'ranks' is an empty list when all ranks are involved in a pg
-                    "ranks": (
-                        list(ranks.keys()) if len(ranks) != default_pg_size else []
-                    ),
+                    "ranks": list(ranks.keys())
+                    if len(ranks) != default_pg_size
+                    else [],  # 'ranks' is an empty list when all ranks are involved in a pg
                     "group_size": len(ranks),
                     "group_count": self.group_count,
                 }
@@ -1287,6 +1286,33 @@ def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
         "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
         "assuming you are not running in a multi-device context and want the code to run locally instead."
     )
+
+
+def _add_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
+    """
+    This API adds an ephemeral timeout extension for all PGs locally
+    on one rank. The timeout gets reset when the first collective issued
+    after API called finished.
+    NOTE: We only support to set timeout for cuda backends for now.
+    NOTE: While this feature
+    provides flexibility in specific scenarios, it introduces statefulness
+    to timeout setting. Therefore, it is advisable to use this API sparingly
+    and consider alternative approaches, such as directly setting the timeout
+    or utilizing a barrier collective (one can set any timeout to the barrier),
+    whenever feasible.
+
+    Args:
+        timeout (timedelta): The delta of timeout to extend.
+
+    Returns:
+        None.
+    """
+    for pg in _world.pg_map.keys():
+        devices = pg._device_types
+        if torch.device("cuda") in devices:
+            backend = pg._get_backend(torch.device("cuda"))
+            if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+                backend._add_ephemeral_timeout(timeout)
 
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
@@ -3275,7 +3301,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
-        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        [tensor([0, 0], device='cuda:1'), tensor([0, 0], device='cuda:1')] # Rank 1
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
         tensor([1, 2], device='cuda:0') # Rank 0
@@ -4481,12 +4507,21 @@ def new_group(
     should be created in the same order in all processes.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
+        Safe concurrent usage:
+        When using multiple process groups with the ``NCCL`` backend, the user
+        must ensure a globally consistent execution order of collectives across
+        ranks.
+
+        If multiple threads within a process issue collectives, explicit
+        synchronization is necessary to ensure consistent ordering.
+
+        When using async variants of torch.distributed communication APIs,
+        a work object is returned and the communication kernel is
+        enqueued on a separate CUDA stream, allowing overlap of communication
+        and computation. Once one or more async ops have been issued on one process
+        group, they must be synchronized with other cuda streams by calling `work.wait()`
+        before using another process group.
+
         See `Using multiple NCCL communicators concurrently <https://docs.nvid
         ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
         -multiple-nccl-communicators-concurrently>`_ for more details.
@@ -4689,15 +4724,8 @@ def new_subgroups(
         pass in ``group_size`` correctly.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         group_size (int, optional): The size of each subgroup. If ``None``,
@@ -4800,15 +4828,8 @@ def new_subgroups_by_enumeration(
     if they are not going to be members of the group.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         ranks_per_subgroup_list (list[list[int]]): A nested list of ranks of

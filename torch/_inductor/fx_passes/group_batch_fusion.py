@@ -715,11 +715,9 @@ class BatchLayernormFusion(BatchFusion):
                 (
                     "batch_layernorm",
                     str(input.meta["example_value"].shape),
-                    (
-                        str(weight.meta["example_value"].shape)
-                        if weight is not None
-                        else ""
-                    ),
+                    str(weight.meta["example_value"].shape)
+                    if weight is not None
+                    else "",
                     str(bias.meta["example_value"].shape) if bias is not None else "",
                     str(get_arg_value(node, 1, "normalized_shape")),
                     str(get_arg_value(node, 4, "eps")),
@@ -918,20 +916,24 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                     args=(stack_inputs,),
                     kwargs={"inplace": subset[0].kwargs.get("inplace", False)},
                 )
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"],
+                    inplace=subset[0].kwargs.get("inplace", False),
+                )
             else:
                 batch_op = graph.call_function(
                     self.op,
                     args=(stack_inputs,),
                 )
-            if is_node_meta_valid(batch_op):
-                batch_op.meta["example_value"] = self.op(batch_op.meta["example_value"])
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"]
+                )
             unbind_op = graph.call_function(
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}
             )
-            if is_node_meta_valid(unbind_op):
-                unbind_op.meta["example_value"] = torch.unbind(
-                    unbind_op.meta["example_value"], dim=0
-                )
+            unbind_op.meta["example_value"] = torch.unbind(
+                batch_op.meta["example_value"], dim=0
+            )
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(unbind_op):
                     getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
