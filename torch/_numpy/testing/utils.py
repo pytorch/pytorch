@@ -4,7 +4,6 @@
 Utility function to facilitate testing.
 
 """
-
 import contextlib
 import gc
 import operator
@@ -1668,29 +1667,19 @@ def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
                 yield out, inp(), ufmt % (o, o, s, dtype, "out of place")
                 d = inp()
                 yield d, d, ufmt % (o, o, s, dtype, "in place")
-                yield (
-                    out[1:],
-                    inp()[:-1],
-                    ufmt
-                    % (
-                        o + 1,
-                        o,
-                        s - 1,
-                        dtype,
-                        "out of place",
-                    ),
+                yield out[1:], inp()[:-1], ufmt % (
+                    o + 1,
+                    o,
+                    s - 1,
+                    dtype,
+                    "out of place",
                 )
-                yield (
-                    out[:-1],
-                    inp()[1:],
-                    ufmt
-                    % (
-                        o,
-                        o + 1,
-                        s - 1,
-                        dtype,
-                        "out of place",
-                    ),
+                yield out[:-1], inp()[1:], ufmt % (
+                    o,
+                    o + 1,
+                    s - 1,
+                    dtype,
+                    "out of place",
                 )
                 yield inp()[:-1], inp()[1:], ufmt % (o, o + 1, s - 1, dtype, "aliased")
                 yield inp()[1:], inp()[:-1], ufmt % (o + 1, o, s - 1, dtype, "aliased")
@@ -1706,89 +1695,53 @@ def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
                 yield d, d, inp2(), bfmt % (o, o, o, s, dtype, "in place1")
                 d = inp2()
                 yield d, inp1(), d, bfmt % (o, o, o, s, dtype, "in place2")
-                yield (
-                    out[1:],
-                    inp1()[:-1],
-                    inp2()[:-1],
-                    bfmt
-                    % (
-                        o + 1,
-                        o,
-                        o,
-                        s - 1,
-                        dtype,
-                        "out of place",
-                    ),
+                yield out[1:], inp1()[:-1], inp2()[:-1], bfmt % (
+                    o + 1,
+                    o,
+                    o,
+                    s - 1,
+                    dtype,
+                    "out of place",
                 )
-                yield (
-                    out[:-1],
-                    inp1()[1:],
-                    inp2()[:-1],
-                    bfmt
-                    % (
-                        o,
-                        o + 1,
-                        o,
-                        s - 1,
-                        dtype,
-                        "out of place",
-                    ),
+                yield out[:-1], inp1()[1:], inp2()[:-1], bfmt % (
+                    o,
+                    o + 1,
+                    o,
+                    s - 1,
+                    dtype,
+                    "out of place",
                 )
-                yield (
-                    out[:-1],
-                    inp1()[:-1],
-                    inp2()[1:],
-                    bfmt
-                    % (
-                        o,
-                        o,
-                        o + 1,
-                        s - 1,
-                        dtype,
-                        "out of place",
-                    ),
+                yield out[:-1], inp1()[:-1], inp2()[1:], bfmt % (
+                    o,
+                    o,
+                    o + 1,
+                    s - 1,
+                    dtype,
+                    "out of place",
                 )
-                yield (
-                    inp1()[1:],
-                    inp1()[:-1],
-                    inp2()[:-1],
-                    bfmt
-                    % (
-                        o + 1,
-                        o,
-                        o,
-                        s - 1,
-                        dtype,
-                        "aliased",
-                    ),
+                yield inp1()[1:], inp1()[:-1], inp2()[:-1], bfmt % (
+                    o + 1,
+                    o,
+                    o,
+                    s - 1,
+                    dtype,
+                    "aliased",
                 )
-                yield (
-                    inp1()[:-1],
-                    inp1()[1:],
-                    inp2()[:-1],
-                    bfmt
-                    % (
-                        o,
-                        o + 1,
-                        o,
-                        s - 1,
-                        dtype,
-                        "aliased",
-                    ),
+                yield inp1()[:-1], inp1()[1:], inp2()[:-1], bfmt % (
+                    o,
+                    o + 1,
+                    o,
+                    s - 1,
+                    dtype,
+                    "aliased",
                 )
-                yield (
-                    inp1()[:-1],
-                    inp1()[:-1],
-                    inp2()[1:],
-                    bfmt
-                    % (
-                        o,
-                        o,
-                        o + 1,
-                        s - 1,
-                        dtype,
-                        "aliased",
-                    ),
+                yield inp1()[:-1], inp1()[:-1], inp2()[1:], bfmt % (
+                    o,
+                    o,
+                    o + 1,
+                    s - 1,
+                    dtype,
+                    "aliased",
                 )
 
 
@@ -2325,7 +2278,7 @@ def check_free_memory(free_bytes):
             )
 
         msg = (
-            f"{free_bytes / 1e9} GB memory required, but environment variable "
+            f"{free_bytes/1e9} GB memory required, but environment variable "
             f"NPY_AVAILABLE_MEM={env_value} set"
         )
     else:
@@ -2339,7 +2292,9 @@ def check_free_memory(free_bytes):
             )
             mem_free = -1
         else:
-            msg = f"{free_bytes / 1e9} GB memory required, but {mem_free / 1e9} GB available"
+            msg = (
+                f"{free_bytes/1e9} GB memory required, but {mem_free/1e9} GB available"
+            )
 
     return msg if mem_free < free_bytes else None
 

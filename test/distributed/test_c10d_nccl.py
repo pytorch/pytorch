@@ -578,6 +578,55 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("backend", [None, "nccl"])
+    def test_extend_nccl_pg_timeout(self, backend):
+        torch.cuda.set_device(self.rank)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        opts = dict(
+            backend=backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=123),
+        )
+        dist.init_process_group(**opts)
+        pg = dist.distributed_c10d._get_default_group()
+        bankend = pg._get_backend(torch.device(f"cuda:{self.rank}"))
+        w = pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=123)))
+        w.wait()
+        bankend._set_default_timeout(timedelta(seconds=3))
+        if self.rank == 0:
+            # Ideally we want to sleep for a very long time, but this is not
+            # feasible in unit test. So this is only a very tiny case.
+            time.sleep(5)
+            pg.allreduce(torch.rand(10).cuda(self.rank))
+            time.sleep(5)
+            pg.allreduce(torch.rand(5).cuda(self.rank))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=3)))
+            w.wait()
+        else:
+            dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                timedelta(seconds=10)
+            )
+            w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
+            w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w1, timedelta(seconds=13)))
+            self.assertTrue(bankend._verify_work_timeout(w2, timedelta(seconds=13)))
+            w1.wait()
+            dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                timedelta(seconds=5)
+            )
+            # Since we are not block wait so use a sync here to leave enough time
+            # for watchdog to reset first timeout extension.
+            torch.cuda.synchronize(torch.device(f"cuda:{self.rank}"))
+            w = pg.allreduce(torch.rand(10).cuda(self.rank))
+            self.assertTrue(bankend._verify_work_timeout(w, timedelta(seconds=8)))
+            w.wait()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_optimization(self):
@@ -2394,9 +2443,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertTrue(t.is_alive())
 
         if prev_nccl_async_error_handling is not None:
-            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
-                prev_nccl_async_error_handling
-            )
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
 
     def _test_nccl_errors_blocking(self, func):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2729,7 +2778,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         # Verify that IntraNodeComm is not used beyond 10MB
-        t = torch.full((10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16).cuda()
+        t = torch.full(
+            (10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16
+        ).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
@@ -3411,8 +3462,9 @@ class SparseCollective(MultiProcessTestCase):
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        # See 'timing_enabled' parametrized tests
-        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "0"
+        os.environ[
+            "TORCH_NCCL_ENABLE_TIMING"
+        ] = "0"  # see 'timing_enabled' parametrized tests
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         self.tempdir = tempfile.TemporaryDirectory()

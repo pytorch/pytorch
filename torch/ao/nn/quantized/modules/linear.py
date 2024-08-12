@@ -145,7 +145,6 @@ class Linear(WeightedQuantizedModule):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-
     _version = 3
     _FLOAT_MODULE = (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear)
 

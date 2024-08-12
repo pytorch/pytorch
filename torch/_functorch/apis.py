@@ -260,14 +260,12 @@ def chunk_vmap(
 
     def _get_chunk_flat_args(flat_args_, flat_in_dims_, chunks_):
         flat_args_chunks = tuple(
-            (
-                t.chunk(chunks_, dim=in_dim)
-                if in_dim is not None
-                else [
-                    t,
-                ]
-                * chunks_
-            )
+            t.chunk(chunks_, dim=in_dim)
+            if in_dim is not None
+            else [
+                t,
+            ]
+            * chunks_
             for t, in_dim in zip(flat_args_, flat_in_dims_)
         )
         # transpose chunk dim and flatten structure

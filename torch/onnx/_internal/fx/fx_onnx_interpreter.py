@@ -223,16 +223,12 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
 
 
 def _fill_tensor_shape_type(
-    onnxscript_values: (
-        onnxscript_graph_building.TorchScriptTensor
-        | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
-    ),
+    onnxscript_values: onnxscript_graph_building.TorchScriptTensor
+    | tuple[onnxscript_graph_building.TorchScriptTensor, ...],
     name: str,
-    expected_values: (
-        fx_type_utils.META_VALUE_TYPE
-        | list[fx_type_utils.META_VALUE_TYPE]
-        | tuple[fx_type_utils.META_VALUE_TYPE | None, ...]
-    ),
+    expected_values: fx_type_utils.META_VALUE_TYPE
+    | list[fx_type_utils.META_VALUE_TYPE]
+    | tuple[fx_type_utils.META_VALUE_TYPE | None, ...],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
@@ -479,9 +475,8 @@ class FxOnnxInterpreter:
         fx_graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         op_level_debug: bool,
-        parent_onnxscript_graph: (
-            onnxscript_graph_building.TorchScriptGraph | None
-        ) = None,
+        parent_onnxscript_graph: onnxscript_graph_building.TorchScriptGraph
+        | None = None,
     ) -> onnxscript_graph_building.TorchScriptGraph:
         """Analyze all FX nodes and trigger their ONNX translation.
 
@@ -665,10 +660,9 @@ class FxOnnxInterpreter:
             diagnostic_context=self.diagnostic_context,
         )
         with onnxscript.evaluator.default_as(onnxscript_tracer):
-            output: (
-                onnxscript_graph_building.TorchScriptTensor
-                | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
-            ) = symbolic_fn(*onnx_args, **onnx_kwargs)
+            output: onnxscript_graph_building.TorchScriptTensor | tuple[
+                onnxscript_graph_building.TorchScriptTensor, ...
+            ] = symbolic_fn(*onnx_args, **onnx_kwargs)
         assert (
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
@@ -785,10 +779,9 @@ class FxOnnxInterpreter:
         # be considered.
         unique_module_name = f"{sub_module._get_name()}_{node.target}"
 
-        outputs: (
-            onnxscript_graph_building.TorchScriptTensor
-            | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
-        ) = parent_onnxscript_graph.add_module_call(
+        outputs: onnxscript_graph_building.TorchScriptTensor | tuple[
+            onnxscript_graph_building.TorchScriptTensor, ...
+        ] = parent_onnxscript_graph.add_module_call(
             unique_module_name, sub_onnxscript_graph, onnx_args
         )
 
