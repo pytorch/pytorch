@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
+import copy
 import logging
 import random
 from typing import List, Optional
@@ -44,31 +45,32 @@ class CKGemmTemplate(CKTemplate):
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
 
-        constexpr auto M = {{M}};
-        constexpr auto N = {{N}};
-        constexpr auto K = {{K}};
-        constexpr auto StrideA = std::is_same_v<{{a_layout}}, Row> ? K : M;
-        constexpr auto StrideB = std::is_same_v<{{b_layout}}, Row> ? N : K;
-        constexpr auto StrideC = std::is_same_v<{{c_layout}}, Row> ? N : M;
-        constexpr auto KBatch = 1; // split k into batches
+        const ck::index_t M = {{M}};
+        const ck::index_t N = {{N}};
+        const ck::index_t K = {{K}};
+        const ck::index_t LDA = {{ld_a}};
+        const ck::index_t LDB = {{ld_b}};
+        const ck::index_t LDC = {{ld_c}};
+        constexpr auto LDD = ck::Number<{{ld_d}}>{};
 
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
+            std::array<const void*, {{1 if has_bias else 0}}>{ {{'Bias' if has_bias else ''}} },
             reinterpret_cast<{{c_element_dtype}}*>(Y),
             M,
             N,
             K,
-            StrideA,
-            StrideB,
-            StrideC,
-            KBatch,
-            {{a_elementwise_op}} {},
-            {{b_elementwise_op}} {},
-            {{c_elementwise_op}} {}
+            LDA,
+            LDB,
+            std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'LDD' if has_bias else ''}} },
+            LDC,
+            PassThrough {}, // a_elementwise_op
+            PassThrough {}, // b_elementwise_op
+            {{epilogue}} // c_elementwise_op
         );
         if (!gemm.IsSupportedArgument(argument)) {
-            // we do our best to statically avoid this case in `CKGemmTemplate.filter_op`
+            // we do our best to statically avoid this case in `filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
             argument.Print();
             return -23;
@@ -92,7 +94,7 @@ class CKGemmTemplate(CKTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         super().__init__(
             "ck_gemm_template",
             input_nodes=input_nodes,
@@ -108,7 +110,7 @@ class CKGemmTemplate(CKTemplate):
             """
                 // CK GEMM header(s)
 
-                #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
+                #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
             """
         )
         return res
@@ -138,9 +140,10 @@ class CKGemmTemplate(CKTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        X_meta, W_meta, Y_meta = (
-            T.get_layout() for T in [*self.input_nodes, self.output_node]
-        )
+        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        Y_meta = metas[-1]
         # disable the instance if dtypes don't match
         if op.a_element_dtype != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
             return None
@@ -221,7 +224,7 @@ class CKGemmTemplate(CKTemplate):
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
-        ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
+        ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
             {{template_params}}>;
 
 """
@@ -232,9 +235,12 @@ class CKGemmTemplate(CKTemplate):
         template_params = []
         for field_name, field_value in op.dict_items():
             if isinstance(field_value, tuple):
-                template_params.append(
-                    f"/* {field_name} */ S<{', '.join(map(str, iter(field_value)))}>"
-                )
+                tuple_elements = ", ".join(map(str, iter(field_value)))
+                if "ds" in field_name:  # element type and layout for bias
+                    arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
+                else:  # tile shape
+                    arg = f"/* {field_name} */ S<{tuple_elements}>"
+                template_params.append(arg)
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
@@ -252,10 +258,41 @@ class CKGemmTemplate(CKTemplate):
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        instance_definition, instance_type = self.emit_ck_instance(op)
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
-        Bias = None  # TBD support gemm_bias
+        Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
+
+        op = copy.deepcopy(op)
+
+        # This parameter is converted into tuple because of change
+        # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
+        # The first tuple element corresponds to matmul result...
+        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+        )
+
+        if Bias is not None:
+            op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
+            op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
+            op.c_elementwise_op = "Bilinear"
+            # c_shuffle_dtype is also used for adding bias to matmul result
+            # before converting down to the result dtype
+            op.c_shuffle_dtype = op.acc_dtype
+            # this parameter needs to be set accordingly to bias stride for correct accumulation
+            if op.ds_layouts[0] == "Row":
+                # bias has (N, ) shape
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+                    op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+                )
+            else:
+                # bias has (M, 1) shape
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
+            # ...and the second tuple element corresponds to the bias
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
+                bias_shuffle_block_transfer_scalar_per_vector_n_per_block
+            )
+
+        instance_definition, instance_type = self.emit_ck_instance(op)
 
         version_comment = rf"""/**
 * Generated code for CK inductor backend
@@ -283,16 +320,24 @@ class CKGemmTemplate(CKTemplate):
             M=kernel.size(X, -2),
             K=kernel.size(X, -1),
             N=kernel.size(W, -1),
-            a_elementwise_op=op.a_elementwise_op,
-            b_elementwise_op=op.b_elementwise_op,
-            c_elementwise_op=op.c_elementwise_op,
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            a_layout=op.a_layout,
-            b_layout=op.b_layout,
-            c_layout=op.c_layout,
-            null_checks="".join(kernel.check_not_null(node) for node in (X, W, Y)),
+            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
+            ld_a=kernel.leading_dimension(X),
+            ld_b=kernel.leading_dimension(W),
+            ld_c=kernel.leading_dimension(Y),
+            ld_d=kernel.leading_dimension(Bias),
+            alpha=self.alpha,
+            beta=self.beta,
+            epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
+            if Bias is not None
+            else "PassThrough {}",
+            has_bias=Bias is not None,
+            null_checks="".join(
+                kernel.check_not_null(node)
+                for node in (X, W, Y) + ((Bias,) if Bias is not None else ())
+            ),
             version_comment=version_comment,
         )
 
