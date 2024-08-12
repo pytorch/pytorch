@@ -252,6 +252,10 @@ def is_node_realized(node: torch.fx.Node) -> bool:
     return False
 
 
+# I can't get weakref.ReferenceType[torch.fx.Node] to work in python 3.8
+NodeRef = Any
+
+
 class AliasInfo:
     """Use this to best-effort keep track of aliases for a GraphModule.
 
@@ -266,9 +270,9 @@ class AliasInfo:
 
     def __init__(self, gm: torch.fx.GraphModule):
         self._data: weakref.WeakKeyDictionary[
-            torch.UntypedStorage, List[weakref.ReferenceType[torch.fx.Node]]
+            torch.UntypedStorage, List[NodeRef]
         ] = weakref.WeakKeyDictionary()
-        self._queue: List[weakref.ReferenceType[torch.fx.Node]] = []
+        self._queue: List[NodeRef] = []
         for node in gm.graph.nodes:
             self._update_aliases(node)
         # incrementally update aliases as new nodes get added.
@@ -278,9 +282,7 @@ class AliasInfo:
         # when find_aliases gets called.
         gm._register_create_node_hook(lambda n: self._queue.append(weakref.ref(n)))
 
-    def find_aliases(
-        self, node: torch.fx.Node
-    ) -> List[weakref.ReferenceType[torch.fx.Node]]:
+    def find_aliases(self, node: torch.fx.Node) -> List[NodeRef]:
         for ref in self._queue:
             nd = ref()
             if nd:
