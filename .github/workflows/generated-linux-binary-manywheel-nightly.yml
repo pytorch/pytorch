@@ -47,7 +47,7 @@ jobs:
         with:
           fetch-depth: 0
 
-       - uses: actions/github-script@v7
+      - uses: actions/github-script@v7
         id: get_pr_data
         with:
           script: |
@@ -56,7 +56,7 @@ jobs:
               const match = context.payload.compare.match(commitRegex);
               console.log(match);
               console.log(context);
-              console.log(context.payload.commits);
+              console.log(context.payload.commits[0]);
 
       - name: Get changed files
         id: changed-files
