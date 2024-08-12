@@ -1746,9 +1746,11 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
-        try:
-            result = None
-            called_always_called_hooks = set()
+        result = None
+        called_always_called_hooks = set()
+
+        def inner():
+            nonlocal result, args, kwargs
 
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
@@ -1826,6 +1828,13 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
+        if is_compiling():
+            return inner()
+
+        try:
+            return inner()
         except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
