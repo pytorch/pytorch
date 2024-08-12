@@ -806,10 +806,6 @@ See :func:`torch.special.gammaincc` and :func:`torch.special.gammaln` for relate
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
-
 """ + r"""
 Args:
     input (Tensor): the first non-negative input tensor
@@ -851,10 +847,6 @@ See :func:`torch.special.gammainc` and :func:`torch.special.gammaln` for related
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
-
-.. note::
-    The backward pass with respect to :attr:`input` is not yet supported.
-    Please open an issue on PyTorch's Github to request it.
 
 """ + r"""
 Args:
