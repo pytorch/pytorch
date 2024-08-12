@@ -166,7 +166,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
-  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
+  # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # Check XPU status before testing
@@ -392,7 +392,20 @@ test_inductor_cpp_wrapper_abi_compatible() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
-if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+pr_time_benchmarks() {
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  echo "benchmark results on current PR: "
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+
+}
+
+if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
+  pr_time_benchmarks
+  exit 0
+elif [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
