@@ -71,7 +71,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && "pytorch/manylinux-builder:cpu-main" || needs.calculate-manylinux-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-builder-cpu.outputs.docker-image }}
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
