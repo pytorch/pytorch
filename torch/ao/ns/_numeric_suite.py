@@ -186,7 +186,6 @@ class Logger(nn.Module):
         """
         """  # blank docblock to make autodoc happy
         # fmt: on
-        pass
 
 
 class ShadowLogger(Logger):

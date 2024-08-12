@@ -1543,7 +1543,6 @@ class VariableBuilder:
                 # One can not easily make nditer elements writable,
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
-                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)

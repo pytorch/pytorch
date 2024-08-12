@@ -416,7 +416,6 @@ main()
                 if is_bwd:
                     # should be boxed inputs
                     assert len(placeholders) == 1
-                    pass
                 else:
                     assert len(placeholders) > 1
 

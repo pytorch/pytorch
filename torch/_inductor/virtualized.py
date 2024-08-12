@@ -91,8 +91,6 @@ class NullHandler:
     NullHandler it won't fail until you try to access an attribute on it.
     """
 
-    pass
-
 
 class Virtualized(Generic[T]):
     """

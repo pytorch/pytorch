@@ -402,8 +402,6 @@ class FCN(_SimpleSegmentationModel):
         aux_classifier (nn.Module, optional): auxiliary classifier used during training
     """
 
-    pass
-
 
 class FCNHead(nn.Sequential):
     def __init__(self, in_channels, channels):

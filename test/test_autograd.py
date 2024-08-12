@@ -12515,7 +12515,6 @@ class TestAutogradInferenceMode(TestCase):
                 )
                 with self.assertRaisesRegex(RuntimeError, err_msg):
                     out.add_(2)
-                pass
             else:
                 out.add_(2)
 
@@ -12611,7 +12610,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and is being modified inplace"
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         fn(view_out)
-                    pass
                 else:
                     fn(view_out)
 
@@ -12632,7 +12630,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and its base or another view "
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         view_out.grad_fn
-                    pass
                 else:
                     view_out.grad_fn
 

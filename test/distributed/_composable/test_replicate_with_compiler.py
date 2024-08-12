@@ -76,8 +76,6 @@ class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
     to handle isolation of the inductor cache dir.
     """
 
-    pass
-
 
 class ReplicateTest(MultiProcessInductorTestCase):
     @property
