@@ -34,11 +34,9 @@ class TestAdaround(QuantizationTestCase):
     def run_adaround(self, model, img_data, wrapper=None):
         adaround_optimizer = AdaptiveRoundingOptimizer(
             model,
-            (
-                self.feedforawrd_callback
-                if wrapper is None
-                else self.feedforawrd_callback_with_wrapper
-            ),
+            self.feedforawrd_callback
+            if wrapper is None
+            else self.feedforawrd_callback_with_wrapper,
             forward_wrapper,
             img_data,
             max_iter=100,

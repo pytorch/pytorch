@@ -3,7 +3,6 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_adam in OptimizerTests)
 """
-
 import functools
 
 import torch

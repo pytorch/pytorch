@@ -14,6 +14,7 @@ import torch.utils.hooks as hooks
 from torch._C import _functions
 from torch._functorch.autograd_function import custom_function_call
 
+
 __all__ = [
     "FunctionCtx",
     "BackwardCFunction",
@@ -764,7 +765,6 @@ class NestedIOFunction(Function):
     This class is here only for backward compatibility reasons.
     Use :class:`Function` instead of this for any new use case.
     """
-
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
     # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 

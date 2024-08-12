@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 """This file contains utilities for initializing neural network parameters."""
-
 import math
 import warnings
 from typing import Optional as _Optional

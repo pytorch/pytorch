@@ -53,10 +53,11 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -127,7 +128,7 @@ DONT_WRAP_FILES = {
 
 
 def _debug_get_cache_entry_list(
-    code: Union[types.CodeType, Callable[..., Any]],
+    code: Union[types.CodeType, Callable[..., Any]]
 ) -> List[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
@@ -370,9 +371,9 @@ class _TorchDynamoContext:
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = (
-                weakref.ref(fn)
-            )
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -786,11 +787,9 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=(
-            backend.get_compiler_config()
-            if hasattr(backend, "get_compiler_config")
-            else None
-        ),
+        compiler_config=backend.get_compiler_config()
+        if hasattr(backend, "get_compiler_config")
+        else None,
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -904,11 +903,9 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                (
-                                    DimDynamic.DYNAMIC
-                                    if d in flat_args_dynamic_dims[i]
-                                    else DimDynamic.STATIC
-                                )
+                                DimDynamic.DYNAMIC
+                                if d in flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1075,6 +1072,22 @@ def rewrite_signature(
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
 
+    def check_optional_input_and_error(f_sig: inspect.Signature):
+        # Check if function has optional input.
+        for name, param in f_sig.parameters.items():
+            if param.default is not inspect.Parameter.empty:
+                from torch._dynamo.exc import Unsupported
+
+                log.error(
+                    "Parameter %s is optional with a default value of %s",
+                    name,
+                    param.default,
+                )
+                raise Unsupported(
+                    "Tracing through optional input is not supported yet",
+                    case_name="optional_input",
+                )
+
     def produce_matching(debug_type, sources, candidates):
         matched_elements_positions: List[Optional[int]] = []
         dict_of_source_vals = {}
@@ -1085,9 +1098,11 @@ def rewrite_signature(
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
+                if debug_type == "inputs":
+                    check_optional_input_and_error(f_sig)
                 raise AssertionError(
                     f"Unexpectedly found a {type(val)} in the {debug_type}.\n"
-                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"'
+                    'Please file an issue along with a paste of the logs from TORCH_LOGS="+export"',
                 )
             else:
                 matched_elements_positions.append(dict_of_source_vals[id(val)])
@@ -1520,9 +1535,7 @@ def export(
                 with torch.fx.traceback.preserve_node_meta():
                     return torch.fx.Interpreter(graph).run(*args)
 
-            with maybe_disable_fake_tensor_mode(), enable_python_dispatcher(), (
-                fake_mode
-            ):
+            with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
                     graph = make_fx(
                         graph_with_interpreter,

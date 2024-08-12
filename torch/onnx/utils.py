@@ -4,7 +4,6 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
-
 from __future__ import annotations
 
 import contextlib
@@ -173,12 +172,10 @@ def _get_torch_export_args(
 
 
 def export(
-    model: (
-        torch.nn.Module
-        | torch.jit.ScriptModule
-        | torch.jit.ScriptFunction
-        | torch.export.ExportedProgram
-    ),
+    model: torch.nn.Module
+    | torch.jit.ScriptModule
+    | torch.jit.ScriptFunction
+    | torch.export.ExportedProgram,
     args: tuple[Any, ...] | torch.Tensor,
     f: str | None = None,
     *,
@@ -191,9 +188,9 @@ def export(
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
     opset_version: int | None = None,
     do_constant_folding: bool = True,
-    dynamic_axes: (
-        Mapping[str, Mapping[int, str]] | Mapping[str, Sequence[int]] | None
-    ) = None,
+    dynamic_axes: Mapping[str, Mapping[int, str]]
+    | Mapping[str, Sequence[int]]
+    | None = None,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     keep_initializers_as_inputs: bool | None = None,
     custom_opsets: Mapping[str, int] | None = None,
@@ -873,9 +870,9 @@ def _decide_input_format(model, args):
 
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
-    dynamic_axes: (
-        Mapping[str, Mapping[int, str]] | Mapping[str, Sequence[int]] | None
-    ) = None,
+    dynamic_axes: Mapping[str, Mapping[int, str]]
+    | Mapping[str, Sequence[int]]
+    | None = None,
     input_names: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
     """
@@ -1916,11 +1913,9 @@ def _run_symbolic_function(
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
             opset_version,
-            (
-                symbolic_function_group.get_min_supported()
-                if symbolic_function_group
-                else None
-            ),
+            symbolic_function_group.get_min_supported()
+            if symbolic_function_group
+            else None,
         )
 
     except RuntimeError:

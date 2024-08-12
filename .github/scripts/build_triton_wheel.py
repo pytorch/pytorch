@@ -189,9 +189,9 @@ def main() -> None:
 
     build_triton(
         device=args.device,
-        commit_hash=(
-            args.commit_hash if args.commit_hash else read_triton_pin(args.device)
-        ),
+        commit_hash=args.commit_hash
+        if args.commit_hash
+        else read_triton_pin(args.device),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
