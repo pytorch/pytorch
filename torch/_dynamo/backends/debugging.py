@@ -2,6 +2,7 @@
 
 import dataclasses
 import functools
+import logging
 from importlib import import_module
 from typing import Any, List, Optional
 
@@ -15,18 +16,26 @@ from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
 
 
+log = logging.getLogger(__name__)
+
+
 """
 This file contains TorchDynamo backends intended for debugging uses.
 """
 
 
 @register_backend
-def eager(gm, fake_tensor_inputs):
+def eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager backend ignoring extra kwargs %s", kwargs)
     return gm.forward
 
 
 @register_backend
-def eager_noexcept(gm, fake_tensor_inputs):
+def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_noexcept backend ignoring extra kwargs %s", kwargs)
+
     # This backend is intended to check that dynamo-generated GraphModules
     # do not cause errors.
     def inner(*args):
@@ -41,7 +50,10 @@ def eager_noexcept(gm, fake_tensor_inputs):
 
 
 @register_backend
-def pre_dispatch_eager(gm, fake_tensor_inputs):
+def pre_dispatch_eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("pre_dispatch_eager backend ignoring extra kwargs %s", kwargs)
+
     from torch.fx.experimental.proxy_tensor import make_fx
 
     def runnable_gm(*args):
@@ -54,7 +66,10 @@ def pre_dispatch_eager(gm, fake_tensor_inputs):
 
 
 @register_backend
-def eager_debug(gm, fake_tensor_inputs):
+def eager_debug(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_debug backend ignoring extra kwargs %s", kwargs)
+
     from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     # We could add more debugging bits here.
@@ -102,7 +117,12 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(gm, fake_tensor_inputs):
+def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning(
+            "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
+        )
+
     with functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
@@ -210,7 +230,7 @@ class ExplainOutput:
 
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx + 1}:\n"
+            output += f"  Break Reason {idx+1}:\n"
             output += f"    Reason: {break_reason.reason}\n"
             output += "    User Stack:\n"
             for frame_summary in break_reason.user_stack:
@@ -219,14 +239,14 @@ class ExplainOutput:
         if self.ops_per_graph is not None:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
-                output += f"  Ops {idx + 1}:\n"
+                output += f"  Ops {idx+1}:\n"
                 for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
             output += "Out Guards:\n"
             for i, guard in enumerate(self.out_guards):
-                output += f"  Guard {i + 1}:\n"
+                output += f"  Guard {i+1}:\n"
                 output += f"    {str(guard)}"
 
         if self.compile_times is not None:

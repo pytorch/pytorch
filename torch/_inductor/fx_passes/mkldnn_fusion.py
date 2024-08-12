@@ -1164,11 +1164,9 @@ if torch._C._has_mkldnn:
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
-                    (
-                        batch_size.node.shape_env.size_hint(batch_size.node.expr)
-                        if has_free_symbols(batch_size)
-                        else batch_size
-                    ),
+                    batch_size.node.shape_env.size_hint(batch_size.node.expr)
+                    if has_free_symbols(batch_size)
+                    else batch_size,
                 )
                 # MKL packed matrix can't be copied to a different address because the internal implementation
                 # depends on the alignment of internally-stored metadata.

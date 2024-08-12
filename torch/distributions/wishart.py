@@ -63,7 +63,6 @@ class Wishart(ExponentialFamily):
     [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
-
     arg_constraints = {
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,
@@ -107,7 +106,7 @@ class Wishart(ExponentialFamily):
 
         if self.df.le(event_shape[-1] - 1).any():
             raise ValueError(
-                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1] - 1}."
+                f"Value of df={df} expected to be greater than ndim - 1 = {event_shape[-1]-1}."
             )
 
         if scale_tril is not None:

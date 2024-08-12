@@ -187,6 +187,13 @@ ROCM_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -504,17 +511,15 @@ def run_test(
     timeout = (
         None
         if not options.enable_timeout
-        else (
-            THRESHOLD * 6
-            if IS_SLOW
-            else (
-                THRESHOLD * 3
-                if should_retry
-                and isinstance(test_module, ShardedTest)
-                and test_module.time is not None
-                else THRESHOLD * 3 if is_cpp_test else None
-            )
-        )
+        else THRESHOLD * 6
+        if IS_SLOW
+        else THRESHOLD * 3
+        if should_retry
+        and isinstance(test_module, ShardedTest)
+        and test_module.time is not None
+        else THRESHOLD * 3
+        if is_cpp_test
+        else None
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
@@ -1504,9 +1509,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(
-    file: str,
-) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> Dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):

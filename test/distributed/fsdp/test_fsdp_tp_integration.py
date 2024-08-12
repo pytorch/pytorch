@@ -190,11 +190,9 @@ class TestTPFSDPIntegration(FSDPTest):
         local_grads_as_flattened = (
             torch.cat(
                 [
-                    (
-                        torch.flatten(param.grad)
-                        if param.grad is not None
-                        else torch.zeros_like(torch.flatten(param))
-                    )
+                    torch.flatten(param.grad)
+                    if param.grad is not None
+                    else torch.zeros_like(torch.flatten(param))
                     for param in model.parameters()
                 ]
             )

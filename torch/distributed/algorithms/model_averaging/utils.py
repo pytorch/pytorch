@@ -51,9 +51,7 @@ def average_parameters(
 
 
 def get_params_to_average(
-    params: Union[
-        Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]
-    ],
+    params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]
 ):
     """
     Return a list of parameters that need to average.

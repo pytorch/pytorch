@@ -119,11 +119,9 @@ def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
 
 def get_dequantize_per_tensor_activation_pattern(is_tensor_overload=False):
     dequantize_per_tensor_activation_pattern = CallFunction(
-        (
-            quantized_decomposed.dequantize_per_tensor.tensor
-            if is_tensor_overload
-            else quantized_decomposed.dequantize_per_tensor.default
-        ),
+        quantized_decomposed.dequantize_per_tensor.tensor
+        if is_tensor_overload
+        else quantized_decomposed.dequantize_per_tensor.default,
         KeywordArg("x"),
         KeywordArg("x_scale"),
         KeywordArg("x_zp"),
@@ -1930,11 +1928,9 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
     assert dtype in [torch.float32, torch.bfloat16]
     return (
         _generate_dequant_convolution_node_pattern(
-            (
-                dequantize_per_channel_weight_pattern
-                if dtype == torch.float32
-                else dequantize_per_channel_to_bf16_weight_pattern
-            ),
+            dequantize_per_channel_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_weight_pattern,
             dtype,
         ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
@@ -1942,11 +1938,9 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
         # Depend on some heuristics, it may or may not insert to(channel_last) node
         # between convolution and dequant_per_channel node
         _generate_dequant_convolution_node_pattern(
-            (
-                dequantize_per_channel_clone_weight_pattern
-                if dtype == torch.float32
-                else dequantize_per_channel_to_bf16_clone_weight_pattern
-            ),
+            dequantize_per_channel_clone_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_clone_weight_pattern,
             dtype,
         ),
     )
@@ -2483,8 +2477,9 @@ def _register_qlinear_weight_prepack():
         )
         _register_qlinear_weight_prepack_pass(
             bmm_pattern,
-            # if with_bias, there is an output add, so we should try to match it firstly
-            pass_number=(1 if with_bias else 2),
+            pass_number=1
+            if with_bias
+            else 2,  # if with_bias, there is an output add, so we should try to match it firstly
             dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
