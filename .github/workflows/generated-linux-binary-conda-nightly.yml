@@ -50,7 +50,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -71,7 +70,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -112,7 +110,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
@@ -135,7 +132,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -177,7 +173,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
@@ -200,7 +195,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -242,7 +236,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
@@ -265,7 +258,6 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -306,7 +298,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -327,7 +318,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -368,7 +358,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
@@ -391,7 +380,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -433,7 +421,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
@@ -456,7 +443,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -498,7 +484,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
@@ -521,7 +506,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -562,7 +546,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -583,7 +566,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -624,7 +606,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
@@ -647,7 +628,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -689,7 +669,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
@@ -712,7 +691,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -754,7 +732,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
@@ -777,7 +754,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -818,7 +794,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -839,7 +814,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -880,7 +854,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
@@ -903,7 +876,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -945,7 +917,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
@@ -968,7 +939,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1010,7 +980,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
       runs_on: linux.24xlarge
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
@@ -1033,7 +1002,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_4
       build_environment: linux-binary-conda
-      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

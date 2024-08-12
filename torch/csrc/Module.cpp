@@ -70,7 +70,6 @@
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
-#include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1699,7 +1698,6 @@ PyObject* initModule() {
 #endif
   torch::mtia::initModule(module);
   torch::cpu::initModule(module);
-  torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
