@@ -534,18 +534,18 @@ class FakeTensorConfig:
 class SymIntMemoDescriptor:
     _name: str
     _is_unbacked: bool
-    # This flag makes version counting optional. We use this for NJT, where
-    # memoization of the nested int on the fake offsets is important to do even
-    # during inference mode. We're okay with no version tracking for that case
-    # because we trust that offsets will not be mutated.
-    _opt_vc: bool
+    # This flag disables version counter. We use this for NJT, where
+    # memoization of the nested int on the fake offsets should not be
+    # invalidated even if the offsets is mutated. This is only true given that
+    # each nested int is unique and not shared across multiple tensors.
+    _no_vc: bool
 
     def __init__(
-        self, *, is_unbacked: Optional[bool] = None, opt_vc: bool = False
+        self, *, is_unbacked: Optional[bool] = None, no_vc: bool = False
     ) -> None:
         assert is_unbacked is not None
         self._is_unbacked = is_unbacked
-        self._opt_vc = opt_vc
+        self._no_vc = no_vc
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -571,7 +571,7 @@ class SymIntMemoDescriptor:
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            not (self._opt_vc and obj.is_inference())
+            not self._no_vc
             and getattr(obj, self._memo_vc(obj)) != obj._version
         ) or (
             self._is_unbacked
@@ -586,9 +586,9 @@ class SymIntMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not obj.is_inference() or self._opt_vc:
+        elif not obj.is_inference() or self._no_vc:
             setattr(obj, self._memo(obj), value)
-            if not obj.is_inference():
+            if not self._no_vc:
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
@@ -617,7 +617,7 @@ class FakeTensor(Tensor):
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
     # nested int.
-    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False, opt_vc=True)
+    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False, no_vc=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
