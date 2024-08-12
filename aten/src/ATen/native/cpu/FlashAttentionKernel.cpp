@@ -768,7 +768,7 @@ cpu_flash_attention(
                   /* ld_out */ packb_size,
                   /* dt_in */ lowp_dt,
                   /* dt_out */ lowp_dt,
-                  transpose_buffer,
+                  reinterpret_cast<const void*>(transpose_buffer),
                   key_reorder_ptr + i * num_head * eheadSize * rkvSize +
                       j * eheadSize * rkvSize + n * eheadSize + b * eheadSize);
             }
@@ -807,7 +807,7 @@ cpu_flash_attention(
                   packb_size,
                   lowp_dt,
                   lowp_dt,
-                  v_copy_buffer,
+                  reinterpret_cast<const void*>(v_copy_buffer),
                   value_reorder_ptr +
                       i * num_head * kv_padding_size * rHeadSize +
                       j * kv_padding_size * rHeadSize + n * rHeadSize +
