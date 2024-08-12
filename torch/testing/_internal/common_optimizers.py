@@ -41,6 +41,7 @@ from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     skipIfMps,
+    skipIfXpu,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
@@ -1967,6 +1968,9 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
+            ),
+            DecorateInfo(
+                skipIfXpu(msg="SparseAdam doesn't currently work on the XPU stack"),  # SparseAdam does not support XPU
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
