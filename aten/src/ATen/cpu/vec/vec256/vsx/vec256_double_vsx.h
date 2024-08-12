@@ -433,6 +433,42 @@ Vectorized<double> inline minimum(
     const Vectorized<double>& b) {
   return a.minimum(b);
 }
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator+(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator-(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator*(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator/(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_div(a.vec0(), b.vec0()), vec_div(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator&(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator|(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator^(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
 } // namespace
 } // namespace vec
 } // namespace at
