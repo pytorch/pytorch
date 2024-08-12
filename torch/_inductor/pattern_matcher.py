@@ -1612,6 +1612,10 @@ def is_mutation_op(node: torch.fx.Node) -> bool:
     elif node.op == "call_method":
         if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
+    if node.target is torch.ops.higher_order.auto_functionalized:
+        return False
+    # TODO: the following check is too conservative
+    # https://github.com/pytorch/pytorch/issues/132867
     return node.kwargs.get("out") is not None
 
 
@@ -1622,28 +1626,93 @@ def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
 
 
 def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
+    """Given a single node, compute a mutation region id for it.
+
+    Assumes that `compute_mutation_region_ids` was called on the graph in the past.
+    The node need not have been in the graph at that time (we'll update it).
+    """
     n = node
-    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
+    # Backtrack to the start of the the first mutation region
+    # that doesn't involve auto_functionalized (this will have an even mutation_region_id)
+    while (
+        "mutation_region_id" not in n.meta or n.meta["mutation_region_id"] % 2 != 0
+    ) and not is_start_of_fx_graph(graph, n):
         n = n.prev
-    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    num_mutation_ops = n.meta.get("mutation_region_id", 0) // 2
+    graph_meta = {
+        "alias_info": graph.owning_module.meta["alias_info"],
+        # We need the num_mutation_ops at this point in the graph so that
+        # the mutation region id can be computed correctly.
+        # NB: there's a pre-existing bug here that there is undefined behavior when there
+        # is a new mutation op. https://github.com/pytorch/pytorch/issues/132932
+        "num_mutation_ops": num_mutation_ops,
+        "num_auto_functionalized_ops": graph.owning_module.meta[
+            "num_auto_functionalized_ops"
+        ],
+    }
     while n is not node:
         n = n.next
-        if is_mutation_op(n):
-            mutation_region_id += 1
-        n.meta["mutation_region_id"] = mutation_region_id
-    return mutation_region_id
+        if "mutation_region_id" not in n.meta:
+            _update_mutation_region_id(graph_meta, n)
+    graph.owning_module.meta["num_auto_functionalized_ops"] = graph_meta[
+        "num_auto_functionalized_ops"
+    ]
+    return node.meta["mutation_region_id"]
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+    return (
+        "mutation_region_id" not in next(iter(graph.nodes)).meta
+        or "alias_info" not in graph.owning_module.meta
+    )
 
 
 def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
-    mutation_region_id = 0
+    """Given a graph, compute mutation region ids for each node."""
+    gm = graph.owning_module
+    from torch._inductor.fx_utils import AliasInfo
+
+    gm.meta["alias_info"] = AliasInfo(gm)
+    gm.meta["num_auto_functionalized_ops"] = 0
+    gm.meta["num_mutation_ops"] = 0
+
     for nd in graph.nodes:
-        if is_mutation_op(nd):
-            mutation_region_id += 1
-        nd.meta["mutation_region_id"] = mutation_region_id
+        _update_mutation_region_id(gm.meta, nd)
+
+
+def _update_mutation_region_id(graph_meta, node):
+    if node.target is torch.ops.higher_order.auto_functionalized:
+        graph_meta["num_auto_functionalized_ops"] += 1
+        # Get all nodes that are aliases of all reinplacing candidates
+        mutable_op = node.args[0]
+        mutable_args_names = (
+            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
+        )
+        aliased_nodes = []
+        for name in mutable_args_names:
+            aliased_nodes.extend(
+                graph_meta["alias_info"].find_aliases(node.kwargs[name])
+            )
+        assert len(aliased_nodes) >= 1, "must at least alias self"
+
+        region_id = _compute_region_id(graph_meta, is_auto_functionalized=True)
+
+        for node_ref in aliased_nodes:
+            actual_node = node_ref()
+            if actual_node is None:
+                continue
+            actual_node.meta["mutation_region_id"] = region_id
+
+    if is_mutation_op(node):
+        graph_meta["num_mutation_ops"] += 1
+    region_id = _compute_region_id(graph_meta, is_auto_functionalized=False)
+    node.meta["mutation_region_id"] = region_id
+
+
+def _compute_region_id(graph_meta, is_auto_functionalized):
+    if is_auto_functionalized:
+        return 2 * graph_meta["num_auto_functionalized_ops"] + 1
+    return 2 * graph_meta["num_mutation_ops"]
 
 
 class PatternMatcherPass:

@@ -152,6 +152,155 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(result, x.sin().sin().sin())
         self.assertEqual(num_reinplacing_failures(), 0)
 
+    def test_backward(self):
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = foo(x)
+                sin(x, out)
+                ctx.save_for_backward(out, x)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                saved, x = ctx.saved_tensors
+                out = foo(x)
+                out.diag().fill_(1)
+                sin(saved, out)
+                return out
+
+        @torch.compile
+        def f(x):
+            return MySin.apply(x)
+
+        x = torch.randn(3, 3, requires_grad=True, device=device)
+        y = f(x)
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+
+class TestMutationRegionId(InductorTestCase):
+    def test_alias_info(self):
+        def f(a):
+            b = a.cos()
+            c = a[0]
+            d = c.sin()
+            e = c.view(-1)
+            return b, c, d, e
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+
+        from torch._inductor.fx_utils import AliasInfo
+
+        alias_info = AliasInfo(gm)
+        a, cos, select, sin, view, output = gm.graph.nodes
+
+        # Basic tests
+        a_aliases = set(ref() for ref in alias_info.find_aliases(a))
+        self.assertEqual(a_aliases, {a, select, view})
+        cos_aliases = set(ref() for ref in alias_info.find_aliases(cos))
+        self.assertEqual(cos_aliases, {cos})
+
+        # Test incremental update
+        with gm.graph.inserting_after(view):
+            view2 = gm.graph.call_function(torch.ops.aten.view.default, args=(view, -1))
+            view2.meta["val"] = view.meta["val"].view(-1)
+
+        a_aliases = set(ref() for ref in alias_info.find_aliases(a))
+        self.assertEqual(a_aliases, {a, select, view, view2})
+
+    def test_mutations(self):
+        def f(a):
+            b = a.clone()
+            c = a.clone()
+            a.set_(b)
+            d = a.clone()
+            e = a.clone()
+            a.set_(b)
+            f = a.clone()
+            g = a.clone()
+            return g
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        from torch._inductor.pattern_matcher import compute_mutation_region_ids
+
+        compute_mutation_region_ids(gm.graph)
+        ids = [n.meta["mutation_region_id"] for n in gm.graph.nodes]
+        # Expect to see three groups
+        self.assertExpectedInline(str(ids), """[0, 0, 0, 2, 2, 2, 4, 4, 4, 4]""")
+
+    def test_auto_functionalized(self):
+        def f(a):
+            b = a.clone()
+            c = a.clone()
+            d = b.view(-1)
+            e = torch.ops.higher_order.auto_functionalized(sin._opoverload, x=c, out=b)
+            g = a.clone()
+            a.set_(b)
+            h = a.clone()
+            return h
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        from torch._inductor.pattern_matcher import compute_mutation_region_ids
+
+        compute_mutation_region_ids(gm.graph)
+        ids = [n.meta["mutation_region_id"] for n in gm.graph.nodes]
+        # b and d are marked with (3)
+        # Everything else before the set_ is marked with 0
+        # Everything after the set_ is marked with 2
+        self.assertExpectedInline(str(ids), """[0, 3, 0, 3, 0, 0, 0, 0, 2, 2, 2]""")
+
+    def test_auto_functionalized_incremental(self):
+        def f(a):
+            b = a.clone()
+            c = a.clone()
+            d = b.view(-1)
+            e = torch.ops.higher_order.auto_functionalized(sin._opoverload, x=c, out=b)
+            g = a.clone()
+            a.set_(b)
+            h = a.clone()
+            return h
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        from torch._inductor.pattern_matcher import (
+            compute_mutation_region_ids,
+            get_mutation_region_id,
+        )
+
+        compute_mutation_region_ids(gm.graph)
+        ids = [n.meta.get("mutation_region_id", None) for n in gm.graph.nodes]
+        self.assertExpectedInline(str(ids), """[0, 3, 0, 3, 0, 0, 0, 0, 2, 2, 2]""")
+
+        graph = gm.graph
+        nodes = list(graph.nodes)
+        a, b, c, d, *_ = nodes
+
+        with gm.graph.inserting_after(d):
+            k = gm.graph.call_function(torch.ops.aten.clone.default, args=(a,))
+            af = gm.graph.call_function(
+                torch.ops.higher_order.auto_functionalized,
+                args=(sin._opoverload,),
+                kwargs={"x": a, "out": c},
+            )
+            af.meta["val"] = None
+
+        get_mutation_region_id(gm.graph, af)
+        ids = [n.meta.get("mutation_region_id", None) for n in gm.graph.nodes]
+        self.assertExpectedInline(
+            str(ids), """[0, 3, 5, 3, 0, None, 0, 0, 0, 0, 2, 2, 2]"""
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:

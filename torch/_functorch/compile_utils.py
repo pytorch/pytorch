@@ -98,6 +98,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # check if a node has a substitute and can be eliminated
             hash_val_in_hash_env = hash_val in hash_env
             overwrite_due_to_mutation = False
+
             if hash_val_in_hash_env and token_map[hash_val] == token:
                 duplicate_n_prev = hash_env[hash_val]
                 if same_mutation_regions(n, duplicate_n_prev):
