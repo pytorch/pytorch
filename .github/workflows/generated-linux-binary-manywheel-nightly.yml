@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   calculate-manylinux-builder-cpu:
-  if: env.WITH_DOCKER_BUILD == 'true'
+  if: ${{ env.WITH_DOCKER_BUILD == 'true' }}
   runs-on: linux.9xlarge.ephemeral
   steps:
     - name: Checkout PyTorch
