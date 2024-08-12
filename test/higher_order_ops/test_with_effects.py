@@ -14,6 +14,7 @@ from functorch.compile import (
     aot_function,
     default_decompositions,
     min_cut_rematerialization_partition,
+    nop,
 )
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import with_effects
@@ -48,15 +49,34 @@ def get_fw_bw_graph(
 ):
     fw_graph_cell = [None]
     bw_graph_cell = [None]
-    aot_function(
+    requires_grad = False
+
+    def fn_req_grad(t):
+        nonlocal requires_grad
+        requires_grad = requires_grad or t.requires_grad
+        return t
+
+    torch.utils._pytree.tree_map_only(torch.Tensor, fn_req_grad, inps)
+
+    out = aot_function(
         f,
         fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
-        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell)
+        if requires_grad
+        else nop,
         partition_fn=partitioner,
         decompositions=default_decompositions,
         dynamic=dynamic,
-    )(*inps).sum().backward()
+    )(*inps)
+
+    if requires_grad:
+        out.sum().backward()
+
     return (fw_graph_cell[0], bw_graph_cell[0])
+
+
+def make_inputs_non_leaves(inps):
+    return torch.utils._pytree.tree_map_only(torch.Tensor, lambda t: t.add(1), inps)
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -495,7 +515,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 ref_out.sum().backward()
                 assert_counter(expected_fw_count_after_bw)
 
-                compiled_fn = torch.compile(fn, backend="aot_eager")
+                compiled_fn = torch.compile(fn, fullgraph=True)
 
                 ins = ins_fn_req_grad()
                 out = compiled_fn(*ins)
@@ -531,6 +551,99 @@ def forward(self, tangents_1, tangents_2):
     clone_1 = torch.ops.aten.clone.default(tangents_2)
     return (clone, clone_1, tangents_1, tangents_2)""",
             )
+
+    def test_effects_and_input_mutation_return(self):
+        def fn(a, b):
+            torch.ops.aten._print("effect")
+            return torch.sin(a, out=b)
+
+        inp = [torch.randn(3, 3), torch.ones(3, 3)]
+        ref_out = fn(*inp)
+        out = torch.compile(fn, fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
+
+        fw_graph, bw_graph = get_fw_bw_graph(fn, inp)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.aten._print.default, 'effect');  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    return (getitem, sin, sin)""",
+        )
+
+    def test_effects_and_input_output_view_simple(self):
+        def fn(a):
+            return a.view(-1)
+
+        inp = [torch.ones(2, 2, requires_grad=False).add(1)]
+        ref_out = fn(*inp)
+        out = torch.compile(fn, fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
+
+        inp = [torch.ones(2, 2, requires_grad=True).add(1)]
+        ref_out = fn(*inp)
+        out = torch.compile(fn, fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
+
+        fw_graph, bw_graph = get_fw_bw_graph(fn, inp)
+
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [-1]);  arg0_1 = None
+    return (view,)""",
+        )
+
+    def test_effects_and_aliased_outputs(self):
+        def fn(a):
+            b = a.mul(2)
+            torch.ops.aten._print("effect")
+            c = b.view(-1)
+            return b, c
+
+        f_compiled = aot_function(fn, nop)
+        for req_grad in [True, False]:
+            inp = torch.ones(3, requires_grad=req_grad)
+            out_ref = fn(inp)
+            out_test = f_compiled(inp)
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
+            # Try mutating one of the outputs, which is aliased.
+            out_ref[0].mul_(3)
+            out_test[0].mul_(3)
+            # Assert that the aliasing relationship was preserved
+            self.assertEqual(out_ref[0], out_test[0])
+            self.assertEqual(out_ref[1], out_test[1])
+
+    def test_effects_and_input_mutation_is_output(self):
+        def fn(a):
+            a.mul_(2)
+            torch.ops.aten._print("effect")
+            return a
+
+        inp = make_inputs_non_leaves([torch.ones(3, 3, requires_grad=True)])
+        ref_out = fn(*inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
+
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        ref_out = fn(*inp)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inp)
+        self.assertEqual(ref_out, out)
+
+        fw_graph, bw_graph = get_fw_bw_graph(fn, inp)
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.aten._print.default, 'effect');  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    return (getitem, mul, mul)""",
+        )
 
 
 if __name__ == "__main__":

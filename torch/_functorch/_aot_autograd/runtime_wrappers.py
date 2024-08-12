@@ -167,8 +167,7 @@ def _identity(x):
 
 class AliasOfInputHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
-        num_tokens = len(runtime_metadata.tokens)
-        self.base_idx = info.base_idx + num_tokens
+        self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
         self.functional_tensor = info.functional_tensor
@@ -187,8 +186,7 @@ class AliasOfInputHandler:
 
 class IsInputHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
-        num_tokens = len(runtime_metadata.tokens)
-        self.base_idx = info.base_idx + num_tokens
+        self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -663,7 +661,7 @@ class EffectTokensWrapper(CompilerWrapper):
             if num_tokens > 0:
                 # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
-                args = [[None] * num_tokens, *args]
+                args = [*([None] * num_tokens), *args]
                 old_args.clear()
 
             outs = compiled_fn(args)
@@ -1533,7 +1531,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
-                num_tokens = len(CompiledFunction.metadata.tokens)
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
                 # Partitioners must put symint arguments at the end separate from tensor arguments
@@ -1571,7 +1568,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
                         info = CompiledFunction.metadata.input_info[idx]
                         if info.mutates_metadata and not info.mutates_data:
-                            raw_return_idx = num_tokens + i
+                            raw_return_idx = i
                             raw_returns[raw_return_idx] = TensorAlias(
                                 raw_returns[raw_return_idx]
                             )
@@ -1589,7 +1586,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.metadata.num_unsafe_view_outputs > 0:
                     for idx in CompiledFunction.metadata.unsafe_view_out_indices:
-                        raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
+                        raw_return_idx = num_mutated_runtime_inps + idx
                         o = raw_returns[raw_return_idx]
                         raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(
                             o, o.shape
@@ -1597,14 +1594,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if num_outputs_aliased > 0:
                     for idx in CompiledFunction.metadata.aliased_out_indices:
-                        raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
+                        raw_return_idx = num_mutated_runtime_inps + idx
                         raw_returns[raw_return_idx] = TensorAlias(
                             raw_returns[raw_return_idx]
                         )
 
                     if config.debug_assert:
                         intermediates_raw = raw_returns[
-                            num_tokens + num_mutated_runtime_inps + num_outputs :
+                            num_mutated_runtime_inps + num_outputs :
                         ]
                         assert not any(
                             isinstance(x, TensorAlias) for x in intermediates_raw
@@ -1613,7 +1610,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # invariant: intermediate bases always require gradients, so we don't have to
                 # consider marking them as non-differentiable.
                 raw_returns_not_including_intermediate_bases = raw_returns[
-                    : num_mutated_runtime_inps + num_outputs + num_tokens
+                    : num_mutated_runtime_inps + num_outputs
                 ]
                 raw_returns_meta = [
                     x
@@ -1624,7 +1621,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 fw_outs_not_requiring_grad = [
                     x
                     for (i, x) in enumerate(
-                        raw_returns_not_including_intermediate_bases[num_tokens:]
+                        raw_returns_not_including_intermediate_bases
                     )
                     if isinstance(x, torch.Tensor)
                     and not raw_returns_meta[i].requires_grad
