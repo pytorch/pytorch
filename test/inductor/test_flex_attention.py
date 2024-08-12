@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -53,13 +52,23 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask):
-    return functools.partial(flex_attention, score_mod=score_mod, block_mask=block_mask)
+def create_attention(score_mod, block_mask, enable_gqa=False):
+    return functools.partial(
+        flex_attention,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=enable_gqa,
+    )
 
 
 def create_block_mask_test(score_mod, query, key):
     block_mask = create_block_mask(
-        score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
+        score_mod,
+        1,
+        1,
+        query.shape[-2],
+        key.shape[-2],
+        query.device,
     )
     return block_mask
 
@@ -276,7 +285,9 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         block_mask = None
-        sdpa_partial = create_attention(score_mod, block_mask)
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -541,6 +552,23 @@ class TestFlexAttention(InductorTestCase):
             B,
             H,
             S // 2,  # Seqlen of Q is different from seqlen of K/V
+            D,
+            B,
+            H,
+            S,
+            D,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_GQA(self, dtype: torch.dtype, score_mod: Callable):
+        self.run_test(
+            score_mod,
+            dtype,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
             D,
             B,
             H,
@@ -1167,6 +1195,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention)
 
     @supported_platform
+    def test_GQA_causal_mask(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S // 8, S // 8)
+        attention = functools.partial(
+            flex_attention, block_mask=block_mask, enable_gqa=True
+        )
+
+        self.run_test_with_call(
+            attention,
+            torch.float16,
+            B,
+            H * 4,  # Hq = 4*Hkv.
+            S // 8,
+            D,
+            B,
+            H,
+            S // 8,
+            D,
+        )
+
+    @supported_platform
     def test_custom_block_mask_generator(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -1200,55 +1251,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k)
-        kernel_options = {
-            "ROWS_GUARANTEED_SAFE": False,
-            "PRESCALE_QK": False,
-            "OUTPUT_LOGSUMEXP": True,
-        }
 
         @torch.compile
-        def sdpa_hop(q, k, v, score_mod, block_mask):
-            return flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask.as_tuple(),
-                1.0,
-                kernel_options,
-            )
+        def sdpa_hop(q, k, v, score_mod):
+            return flex_attention(q, k, v, score_mod, return_lse=True)
 
         @torch.compile(backend="aot_eager")
-        def eager_sdpa_hop(q, k, v, score_mod, block_mask):
-            """The main entrypoint for FlexAttention doesnt return LSE.
-            Besides dropping LSE it also ensures that the hop is compiled with aot-eager
-            backend. We need to replicate this.
-            """
-            return flex_attention_hop(
-                q, k, v, score_mod, block_mask.as_tuple(), 1.0, kernel_options
-            )
+        def eager_sdpa_hop(q, k, v, score_mod):
+            return flex_attention(q, k, v, score_mod, return_lse=True)
 
         ref_out, ref_lse = eager_sdpa_hop(
             q.to(torch.float64),
             k.to(torch.float64),
             v.to(torch.float64),
             score_mod,
-            block_mask,
         )
-        compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod, block_mask)
-
-        # Comparing LSE for the ref and the compiled version
-        # The compiled uses a change of base trick to more efficiently compute the LSE
-        # this means that the base for the LSE computed by ref is e while for the compiled
-        # version it is 2. To compare we use the change of base formula
-        # log_2(x_compiled) = log_e(x_ref) * log_2(e) where
-        # x_ref      = sum(_i e^(scores[i]))
-        # x_compiled = sum(_i 2^(log2(e) * scores[i]))
+        compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
 
         self.assertTrue(ref_lse.dtype == torch.float64)
         self.assertTrue(compiled_lse.dtype == torch.float32)
-        ref_lse = ref_lse * torch.log2(torch.tensor(torch.e))
 
         tolerance = Tolerances(atol=2e-2, rtol=2e-2)
         torch.testing.assert_close(
@@ -1274,65 +1295,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k)
-        kernel_options = {
-            "ROWS_GUARANTEED_SAFE": False,
-            "PRESCALE_QK": False,
-            "OUTPUT_LOGSUMEXP": True,
-        }
 
         @torch.compile
-        def func(q, k, v, score_mod, block_mask):
-            _, lse = flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask.as_tuple(),
-                1.0,
-                kernel_options,
-            )
+        def func(q, k, v, score_mod):
+            _, lse = flex_attention(q, k, v, score_mod, return_lse=True)
             lse_2 = lse * 2
             return lse_2
 
-        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
-        # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
-
-    @supported_platform
-    def test_logsumexp_is_not_fused(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (B, H, S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
+        _, code = run_and_get_code(func, q, k, v, _identity)
+        # Ensure that we're still generating the flexattention kernel
+        FileCheck().check_count(".run(primals_1, primals_2, primals_3", 1, True).run(
+            code[0]
         )
-        q, k, v = make_tensor(), make_tensor(), make_tensor()
-        block_mask = _create_empty_block_mask(q, k)
-        kernel_options = {
-            "ROWS_GUARANTEED_SAFE": False,
-            "PRESCALE_QK": False,
-            "OUTPUT_LOGSUMEXP": True,
-        }
-
-        @torch.compile
-        def func(q, k, v, score_mod, block_mask):
-            out, lse = flex_attention_hop(
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask.as_tuple(),
-                1.0,
-                kernel_options,
-            )
-            lse_2 = lse * 2
-            return out, lse_2
-
-        _, code = run_and_get_code(func, q, k, v, _identity, block_mask)
-        # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
     @common_utils.parametrize(
@@ -1354,6 +1328,64 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.autograd.gradcheck(
                 func, (query, key, value, score_mod), raise_exception=True
             )
+        )
+
+    @supported_platform
+    def test_differentiable_logsumexp_gradcheck(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 4),
+            device="cuda",
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        def flex_attention_lse_only(q, k, v):
+            return flex_attention(q, k, v, return_lse=True)[1]
+
+        func = torch.compile(
+            flex_attention_lse_only, backend="aot_eager", fullgraph=True
+        )
+
+        self.assertTrue(
+            torch.autograd.gradcheck(func, (query, key, value), raise_exception=True)
+        )
+
+    @supported_platform
+    def test_differentiable_logsumexp_compiled(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        lse_mask = torch.randn(2, 2, 128, device="cuda")
+
+        out, lse = flex_attention(q, k, v, return_lse=True)
+        (out.mean() + (lse * lse_mask).sum()).backward()
+        q_grad, k_grad, v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        out2, lse2 = torch.compile(flex_attention)(q, k, v, return_lse=True)
+        (out2.mean() + (lse2 * lse_mask).sum()).backward()
+        q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
+        tolerance = Tolerances(atol=1e-1, rtol=1e-1)
+
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(lse, lse2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(
+            q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            k_grad, k_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
     @supported_platform
@@ -1629,40 +1661,40 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f64[2, 2, 128, 4]", L_args_1_: "f64[2, 2, 128, 4]", L_args_2_: "f64[2, 2, 128, 4]", L_kwargs_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_kwargs_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_kwargs_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_kwargs_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_kwargs_block_mask_q_num_blocks: "i32[1, 1, 1]", L_kwargs_block_mask_q_indices: "i32[1, 1, 1, 1]", L_kwargs_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_kwargs_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
-        l_args_0_ = L_args_0_
-        l_args_1_ = L_args_1_
-        l_args_2_ = L_args_2_
-        l_kwargs_block_mask_kv_num_blocks = L_kwargs_block_mask_kv_num_blocks
-        l_kwargs_block_mask_kv_indices = L_kwargs_block_mask_kv_indices
-        l_kwargs_block_mask_full_kv_num_blocks = L_kwargs_block_mask_full_kv_num_blocks
-        l_kwargs_block_mask_full_kv_indices = L_kwargs_block_mask_full_kv_indices
-        l_kwargs_block_mask_q_num_blocks = L_kwargs_block_mask_q_num_blocks
-        l_kwargs_block_mask_q_indices = L_kwargs_block_mask_q_indices
-        l_kwargs_block_mask_full_q_num_blocks = L_kwargs_block_mask_full_q_num_blocks
-        l_kwargs_block_mask_full_q_indices = L_kwargs_block_mask_full_q_indices
+    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
+        l_query_ = L_query_
+        l_key_ = L_key_
+        l_value_ = L_value_
+        l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
+        l_block_mask_kv_indices = L_block_mask_kv_indices
+        l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
+        l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
+        l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
+        l_block_mask_q_indices = L_block_mask_q_indices
+        l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
+        l_block_mask_full_q_indices = L_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_1 = None
-        child_2: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_2 = None
-        child_3: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_3 = None
-        child_4: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_4 = None
-        child: "f64[]" = l_args_0_.new_empty([], requires_grad = True);  child = None
+        child_1: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_1 = None
+        child_2: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_2 = None
+        child_3: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_3 = None
+        child_4: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_4 = None
+        child: "f64[]" = l_query_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_5 = None
-        child_6: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_6 = None
-        child_7: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_7 = None
-        child_8: "i32[]" = l_args_0_.new_empty([], dtype = torch.int32);  child_8 = None
+        child_5: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_5 = None
+        child_6: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_6 = None
+        child_7: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_7 = None
+        child_8: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_args_0_, l_args_1_, l_args_2_, score_mod_0, (l_kwargs_block_mask_kv_num_blocks, l_kwargs_block_mask_kv_indices, l_kwargs_block_mask_full_kv_num_blocks, l_kwargs_block_mask_full_kv_indices, l_kwargs_block_mask_q_num_blocks, l_kwargs_block_mask_q_indices, l_kwargs_block_mask_full_q_num_blocks, l_kwargs_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_args_0_ = l_args_1_ = l_args_2_ = score_mod_0 = l_kwargs_block_mask_kv_num_blocks = l_kwargs_block_mask_kv_indices = l_kwargs_block_mask_full_kv_num_blocks = l_kwargs_block_mask_full_kv_indices = l_kwargs_block_mask_q_num_blocks = l_kwargs_block_mask_q_indices = l_kwargs_block_mask_full_q_num_blocks = l_kwargs_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
-    class GraphModule(torch.nn.Module):
+    class score_mod_0(torch.nn.Module):
         def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
             mul: "f64[]" = child * child;  child = None
             return mul
 
-    class GraphModule(torch.nn.Module):
+    class mask_fn_0(torch.nn.Module):
         def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
             ge: "b8[]" = child_7 >= child_8;  child_7 = child_8 = None
             return ge
@@ -1690,21 +1722,22 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return (getitem_4, getitem_5, getitem_6)
 
-    class <lambda>(torch.nn.Module):
+    class fw_graph(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
 
-    class <lambda>(torch.nn.Module):
+    class joint_graph(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
@@ -1712,7 +1745,7 @@ class GraphModule(torch.nn.Module):
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
 
-    class <lambda>(torch.nn.Module):
+    class mask_graph(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full
