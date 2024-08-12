@@ -732,9 +732,14 @@ inline Vectorized<float> Vectorized<float>::frac() const {
 
 //Added sleef Implementation for Maximum
 Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b)  {
+  if(!a.has_inf_nan() && !b.has_inf_nan()){
     return USE_SLEEF(
       Vectorized<float>(Sleef_fmaxf4(a.get_low(), b.get_low()),Sleef_fmaxf4(a.get_high(), b.get_high())),
       Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high())));
+  }
+  else{
+    return Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high()));
+  }
   }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
