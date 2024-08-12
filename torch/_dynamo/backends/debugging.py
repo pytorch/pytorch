@@ -2,17 +2,22 @@
 
 import dataclasses
 import functools
+import logging
 from importlib import import_module
 from typing import Any, List, Optional
 
 import torch
-
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
+
+
+log = logging.getLogger(__name__)
+
 
 """
 This file contains TorchDynamo backends intended for debugging uses.
@@ -20,12 +25,17 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 
 @register_backend
-def eager(gm, fake_tensor_inputs):
+def eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager backend ignoring extra kwargs %s", kwargs)
     return gm.forward
 
 
 @register_backend
-def eager_noexcept(gm, fake_tensor_inputs):
+def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_noexcept backend ignoring extra kwargs %s", kwargs)
+
     # This backend is intended to check that dynamo-generated GraphModules
     # do not cause errors.
     def inner(*args):
@@ -40,7 +50,10 @@ def eager_noexcept(gm, fake_tensor_inputs):
 
 
 @register_backend
-def pre_dispatch_eager(gm, fake_tensor_inputs):
+def pre_dispatch_eager(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("pre_dispatch_eager backend ignoring extra kwargs %s", kwargs)
+
     from torch.fx.experimental.proxy_tensor import make_fx
 
     def runnable_gm(*args):
@@ -53,7 +66,10 @@ def pre_dispatch_eager(gm, fake_tensor_inputs):
 
 
 @register_backend
-def eager_debug(gm, fake_tensor_inputs):
+def eager_debug(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning("eager_debug backend ignoring extra kwargs %s", kwargs)
+
     from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     # We could add more debugging bits here.
@@ -101,7 +117,12 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-def aot_eager_decomp_partition(gm, fake_tensor_inputs):
+def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
+    if kwargs:
+        log.warning(
+            "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
+        )
+
     with functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
@@ -202,7 +223,7 @@ class ExplainOutput:
     out_guards: Optional[List[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
-    def __str__(self):
+    def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
         output += f"Op Count: {self.op_count}\n"
@@ -288,7 +309,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend):
+    def __init__(self, backend) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)

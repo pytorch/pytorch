@@ -1429,6 +1429,7 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
                 xfail("t_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1566,6 +1567,7 @@ class TestOperators(TestCase):
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
                 xfail("t_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1789,6 +1791,9 @@ class TestOperators(TestCase):
                 ),  # NYI: forward-AD for soft_margin_loss_backward
                 xfail("nn.functional.ctc_loss", ""),  # NYI: forward-AD for _ctc_loss
                 xfail("nn.functional.pdist", ""),  # NYI: forward-AD with _pdist_forward
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # NYI: forward-AD for _safe_softmax
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail(
@@ -1977,6 +1982,9 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.ctc_loss"
                 ),  # ForwardAD not implemented and no decomposition
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # ForwardAD not implemented
                 xfail("nn.functional.dropout2d"),  # calls random op
                 xfail("nn.functional.dropout3d"),  # calls random op
                 xfail("nn.functional.dropout"),  # calls random op

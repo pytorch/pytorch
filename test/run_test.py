@@ -187,6 +187,13 @@ ROCM_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -1129,14 +1136,14 @@ def parse_args():
         parser.add_argument(
             "--showlocals",
             action=argparse.BooleanOptionalAction,
-            default=True,
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
             help="Show local variables in tracebacks (default: True)",
         )
     else:
         parser.add_argument(
             "--showlocals",
             action="store_true",
-            default=True,
+            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
             help="Show local variables in tracebacks (default: True)",
         )
         parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
@@ -1502,9 +1509,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(
-    file: str,
-) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> Dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):

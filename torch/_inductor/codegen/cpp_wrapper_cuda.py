@@ -29,7 +29,7 @@ class CppWrapperCuda(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.device = "cuda"
         super().__init__()
         self.grid_id = count()
@@ -154,7 +154,18 @@ class CppWrapperCuda(CppWrapperCpu):
                             var_name,
                         )
                     else:
-                        self.writeline(f"{ctype} {var_name} = {arg}.item<{ctype}>();")
+                        from torch import bfloat16, float16
+
+                        if arg_type in (float16, bfloat16):
+                            var_name_tmp = f"{var_name}_tmp"
+                            self.writeline(
+                                f"{ctype} {var_name_tmp} = {arg}.item<{ctype}>();"
+                            )
+                            self.writeline(f"float {var_name} = float({var_name_tmp});")
+                        else:
+                            self.writeline(
+                                f"{ctype} {var_name} = {arg}.item<{ctype}>();"
+                            )
                 else:
                     if config.abi_compatible:
                         self.writeline(
