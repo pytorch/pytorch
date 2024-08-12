@@ -8,6 +8,20 @@
 
 namespace at::vec {
 
+template <typename scalar_t, int N>
+inline VectorizedN<scalar_t, N> div_floor_floating_vec(
+    const VectorizedN<scalar_t, N>& a,
+    const VectorizedN<scalar_t, N>& b) {
+    VectorizedN<scalar_t, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = div_floor_floating_vec(a[i], b[i]);
+    }
+    return result;
+}
+
 template <typename scalar_t>
 inline Vectorized<scalar_t> div_floor_floating_vec(
     const Vectorized<scalar_t>& a,

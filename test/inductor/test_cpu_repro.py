@@ -2124,6 +2124,7 @@ class CPUReproTests(TestCase):
             torch.bfloat16,
             torch.float16,
             torch.float32,
+            torch.float64,
         ]:
             if is_float_dtype(dtype):
                 x = torch.randn(64, dtype=dtype)
