@@ -4,6 +4,15 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
+from torch._inductor.autoheuristic.autoheuristic_utils import (
+    AHContext,
+    context_add_strides,
+    context_add_using_tf32,
+    get_mixedmm_precondition,
+    mixed_mm_operations,
+    mm_operations,
+)
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 
@@ -12,7 +21,7 @@ from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
-from ..ir import FlexibleLayout
+from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -31,6 +40,7 @@ from ..utils import (
 )
 from .mm_common import (
     addmm_epilogue,
+    extra_mm_configs,
     int8_mm_configs,
     mixed_mm_configs,
     mm_args,
@@ -143,6 +153,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    name = "mm"
 
     aten_layout = layout
     if not use_max_autotune():
@@ -163,11 +174,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if use_ck_template(layout, m, n, k):
+    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -176,6 +186,31 @@ def tuned_mm(mat1, mat2, *, layout=None):
             layout,
             [mat1, mat2],
         )
+
+    input_nodes = [mat1, mat2]
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and torch._inductor.config.run_autoheuristic(name)
+        and is_triton(mat1)
+    ):
+        num_choices_before_extra_configs = len(choices)
+        for config in extra_mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
+            )
+        choice = mm_autoheuristic(
+            mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
+        )
+        if not torch._inductor.config.collect_autoheuristic(name):
+            # if we are collecting data, we do not want to modify choices
+            if choice is not None:
+                choices.insert(0, choice)
+            else:
+                choices = choices[:num_choices_before_extra_configs]
 
     if (
         len(choices) == 0
@@ -186,7 +221,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
     try:
-        return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+        return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
         if not inductor_config.autotune_fallback_to_aten:
             raise
@@ -341,6 +376,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
+    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+        )
+
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
         CppPackedGemmTemplate.add_choices(
             choices,
@@ -410,7 +454,15 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     return props.major <= 7
 
 
+def dims_are_int(dims):
+    return all(isinstance(dim, int) for dim in dims)
+
+
 def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
+    m, n, k = get_size_hints(mat1, mat2, m, n, k)
+    if not dims_are_int([m, n, k]):
+        return None
+
     if mat1.dtype != torch.float16:
         return None
 
@@ -452,6 +504,64 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     return None
 
 
+def mm_autoheuristic(
+    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition
+):
+    m, n, k = get_size_hints(mat1, mat2, m, n, k)
+    if not dims_are_int([m, n, k]):
+        return None
+
+    def get_context(m, k, n, mat1, mat2):
+        context = AHContext()
+        context.add_feature("m", m)
+        context.add_feature("k", k)
+        context.add_feature("n", n)
+        context.add_feature("mat1_dtype", mat1.layout.dtype, is_categorical=True)
+        context.add_feature("mat2_dtype", mat2.layout.dtype, is_categorical=True)
+        context_add_strides(context, "mat1", mat1.layout.stride)
+        context_add_strides(context, "mat2", mat2.layout.stride)
+        context.add_feature(
+            "mat1_iscontig", mat1.layout.is_contiguous(), is_categorical=True
+        )
+        context.add_feature(
+            "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
+        )
+        if name == "mm":
+            # for mixed_mm, we only consider fp16
+            context_add_using_tf32(context, mat1.layout.dtype)
+        return context
+
+    def fallback():
+        return None
+
+    context = get_context(m, k, n, mat1, mat2)
+    autoheuristic = AutoHeuristicSelectAlgorithm(
+        fallback=fallback,
+        choices=choices,
+        input_nodes=input_nodes,
+        context=context,
+        name=name,
+        augment_context=ops,
+        precondition=precondition,
+    )
+    return autoheuristic.get_choice_caller()
+
+
+def get_size_hints(mat1, mat2, m, n, k):
+    if not isinstance(m, int) or not isinstance(k, int):
+        (m, k) = V.graph.sizevars.size_hints(
+            mat1.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+
+    if not isinstance(n, int) or not isinstance(k, int):
+        (k, n) = V.graph.sizevars.size_hints(
+            mat2.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+    return m, n, k
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
@@ -469,6 +579,9 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         or _is_sm7x_or_older_gpu(layout.device.index)
         or inductor_config.mixed_mm_choice == "aten"
         or not V.graph.has_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        or (
+            mat1.layout.dtype == torch.float32 and torch.backends.cuda.matmul.allow_tf32
+        )
     )
 
     if inductor_config.mixed_mm_choice == "triton":
@@ -504,7 +617,29 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     if skip_triton and not choices:
         choices = [fallback]
-    return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+
+    name = "mixed_mm"
+    input_nodes = [mat1, mat2]
+    if torch._inductor.config.run_autoheuristic(name):
+        choice = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mixed_mm_operations(),
+            get_mixedmm_precondition,
+        )
+        if (
+            not skip_triton
+            and inductor_config.mixed_mm_choice == "heuristic"
+            and choice is not None
+        ):
+            choices.insert(0, choice)
+    return autotune_select_algorithm(name, choices, input_nodes, layout)
 
 
 # This op is a special case of the int_mm op which we use based on the pattern
