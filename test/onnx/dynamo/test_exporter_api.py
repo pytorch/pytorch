@@ -6,14 +6,13 @@ import onnx
 
 import torch
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
-from torch.onnx._internal import exporter
-from torch.onnx._internal.exporter import (
+from torch.onnx._internal import _exporter_legacy
+from torch.onnx._internal._exporter_legacy import (
     LargeProtobufONNXProgramSerializer,
     ONNXProgramSerializer,
     ProtobufONNXProgramSerializer,
     ResolvedExportOptions,
 )
-
 from torch.testing._internal import common_utils
 
 
@@ -37,7 +36,7 @@ class SampleModelForDynamicShapes(torch.nn.Module):
 
 
 class _LargeModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(2**28))  # 1GB
         self.param2 = torch.nn.Parameter(torch.randn(2**28))  # 1GB
@@ -145,7 +144,9 @@ class TestDynamoExportAPI(common_utils.TestCase):
 
         with self.assertRaises(RuntimeError):
             dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
-        self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+        self.assertTrue(
+            os.path.exists(_exporter_legacy._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH)
+        )
 
     def test_onnx_program_accessible_from_exception_when_export_failed(self):
         class ModelWithExportError(torch.nn.Module):
@@ -263,7 +264,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
-            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}, {}),
+            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}),
             dynamo=True,
         )
         self.assertEqual(
@@ -298,7 +299,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "x": {0: "customx_dim_0", 1: "customx_dim_1", 2: "customx_dim_2"},
                 "b": {0: "customb_dim_0", 1: "customb_dim_1", 2: "customb_dim_2"},
@@ -337,7 +338,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "x": [0, 1, 2],
                 "b": [0, 1, 2],
@@ -372,7 +373,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelForDynamicShapes(),
-            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
             dynamic_axes={
                 "b": [0, 1, 2],
             },
@@ -382,37 +383,6 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
             onnx_program_from_new_exporter.model_proto,
             onnx_program_from_old_exporter.model_proto,
         )
-
-    def test_raises_unrelated_parameters_warning(self):
-        message = (
-            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
-            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
-            "autograd_inlining are not supported for dynamo export at the moment."
-        )
-
-        with self.assertWarnsOnceRegex(UserWarning, message):
-            _ = torch.onnx.export(
-                SampleModel(),
-                (torch.randn(1, 1, 2),),
-                dynamo=True,
-            )
-
-    def test_input_names_are_not_yet_supported_in_dynamic_axes(self):
-        with self.assertRaisesRegex(
-            ValueError,
-            "Assinging new input names is not supported yet. Please use model forward signature "
-            "to specify input names in dynamix_axes.",
-        ):
-            _ = torch.onnx.export(
-                SampleModelForDynamicShapes(),
-                (
-                    torch.randn(2, 2, 3),
-                    torch.randn(2, 2, 3),
-                ),
-                input_names=["input"],
-                dynamic_axes={"input": [0, 1]},
-                dynamo=True,
-            )
 
     def test_dynamic_shapes_hit_constraints_in_dynamo(self):
         # SampleModelTwoInputs has constraints becuse of add of two inputs,

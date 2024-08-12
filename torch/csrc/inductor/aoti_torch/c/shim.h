@@ -51,6 +51,10 @@
 #endif // _WIN32
 #endif // __GNUC__
 
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <c10/util/complex.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -117,6 +121,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float64(AtenTensorHandle tensor, double* ret_value);
@@ -138,6 +144,11 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_item_complex64(
+    AtenTensorHandle tensor,
+    c10::complex<float>* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
@@ -172,6 +183,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int64(
     AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
+    c10::complex<float> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -195,6 +209,9 @@ aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
@@ -380,6 +397,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm_v2(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle bias,
+    AtenTensorHandle scale_result,
+    int32_t* out_dtype,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
@@ -449,6 +477,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d);
+
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -498,7 +533,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle values,
+    const AtenTensorHandle& values,
     bool accumulate);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
@@ -606,6 +641,7 @@ struct Half;
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
 DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
+DEFINE_DTYPE_SPECIALIZATION(c10::complex<float>, complex64)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)
 DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)

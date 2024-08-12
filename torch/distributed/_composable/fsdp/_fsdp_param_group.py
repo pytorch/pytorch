@@ -131,6 +131,9 @@ class FSDPParamGroup:
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
         self._module_fqn: Optional[str] = None  # prefixed from root module
+        # Only consider resetting sharded parameters once in lazy init since it
+        # can incur nontrivial overhead to reset them
+        self._reset_sharded_params: bool = False
 
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
@@ -149,6 +152,9 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
+        # Optional custom reduce-scatter reduce op (e.g. to divide by a
+        # factor other than the shard world size)
+        self.reduce_scatter_reduce_op: Optional[dist.ReduceOp] = None
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -164,22 +170,6 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
-
-        # TODO: remove this hook and hook register once 2D state dict is supported.
-        def _raise_not_implemented_if_2d(*args: Any, **kwargs: Any) -> None:
-            raise NotImplementedError(
-                "2D state_dict is under development. Please check "
-                "https://github.com/pytorch/pytorch/issues/129627 for more details."
-            )
-
-        modules_with_2d_params: Set[nn.Module] = set()
-        for fsdp_param in self.fsdp_params:
-            module = fsdp_param._module_info.module
-            if len(fsdp_param._spmd_placements) > 1:
-                modules_with_2d_params.add(module)
-        for module in modules_with_2d_params:
-            module.register_state_dict_pre_hook(_raise_not_implemented_if_2d)
-            module._register_load_state_dict_pre_hook(_raise_not_implemented_if_2d)
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -204,6 +194,13 @@ class FSDPParamGroup:
 
     def lazy_init(self):
         # Lazy init should be idempotent
+        # Users may change or register parameters after construction time.
+        # For example, DoRA (https://arxiv.org/abs/2402.09353) initializes linear magnitudes based on
+        # other parameters (e.g. loaded from the state dict).
+        if self.is_sharded and not self._reset_sharded_params:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.reset_sharded_param()
+            self._reset_sharded_params = True
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -385,6 +382,7 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
+                self.reduce_scatter_reduce_op,
                 self._all_reduce_process_group if self._is_hsdp else None,
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
@@ -567,6 +565,9 @@ class FSDPParamGroup:
         if self._module_fqn:
             return f"{label} ({self._module_fqn})"
         return label
+
+    def __repr__(self):
+        return f"FSDPParamGroup(fqn={self._module_fqn})"
 
 
 def _get_param_module_infos(

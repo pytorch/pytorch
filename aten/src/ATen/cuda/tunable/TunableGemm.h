@@ -187,22 +187,30 @@ static void AddRocblasValidator() {
     getTuningContext()->GetTuningResultsValidator().RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
-        [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
+        [rocblas_version](auto&& k) {
+          TUNABLE_LOG1("ROCBLAS_VERSION validation: expect ", k, " to match ", rocblas_version);
+          return rocblas_version == k ? OK : FAIL;
+        });
   }
 }
 
 static void AddHipblasltValidator() {
   auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
   if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-    std::string hipblaslt_version = c10::str(
-        XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
-        XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
-        XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
-        XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
+    int version;
+    std::string revision(128, '\0');
+    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, revision.data());
+    std::string hipblaslt_version =
+        c10::str(version, "-", revision.c_str());
     getTuningContext()->GetTuningResultsValidator().RegisterValidator(
         "HIPBLASLT_VERSION",
         [hipblaslt_version]() { return hipblaslt_version; },
-        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+        [hipblaslt_version](auto&& k) {
+          TUNABLE_LOG1("HIPBLASLT_VERSION validation: expect ", k, " to match ", hipblaslt_version);
+          return hipblaslt_version == k ? OK : FAIL;
+        });
   }
 }
 
@@ -213,7 +221,10 @@ static void AddRocmValidator() {
     getTuningContext()->GetTuningResultsValidator().RegisterValidator(
         "ROCM_VERSION",
         [rocm_version]() { return rocm_version; },
-        [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
+        [rocm_version](auto&& k) {
+          TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
+          return rocm_version == k ? OK : FAIL;
+        });
   }
 
   if (validators.find("GCN_ARCH_NAME") == validators.end()) {
@@ -221,7 +232,10 @@ static void AddRocmValidator() {
     getTuningContext()->GetTuningResultsValidator().RegisterValidator(
         "GCN_ARCH_NAME",
         [gcn_arch_name]() { return gcn_arch_name; },
-        [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+        [gcn_arch_name](auto&& k) {
+          TUNABLE_LOG1("GCN_ARCH_NAME validation: expect ", k, " to match ", gcn_arch_name);
+          return gcn_arch_name == k ? OK : FAIL;
+        });
   }
 }
 #endif
@@ -317,8 +331,6 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
  public:
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
-
-    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 
 #if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
