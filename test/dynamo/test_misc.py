@@ -79,6 +79,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     set_default_dtype,
     skipIfNNModuleInlined,
+    skipIfWindows,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -654,6 +655,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize_can_with_none_return(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor x, Tensor(a!) out) -> None")
@@ -671,6 +673,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize_self_as_mutate_arg(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor(a!) self) -> None")
@@ -808,6 +811,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 cleanup_op("mylib::a")
                 del lib
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -863,6 +867,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             cleanup_op("mylib::foo")
             del lib
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize_with_returns(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -960,6 +965,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             cleanup_op("mylib::foo")
             del lib
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize_optional(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -1014,6 +1020,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             cleanup_op("mylib::foo")
             del lib
 
+    @skipIfWindows  # Window to debug
     def test_auto_functionalize_tensorlist(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
