@@ -2584,7 +2584,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn1d",
@@ -2596,7 +2596,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn2d",
@@ -2608,7 +2608,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn3d",
@@ -2621,7 +2621,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure],
                 name="mkldnn1d_transposed",
@@ -2633,7 +2633,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure],
                 name="mkldnn2d_transposed",
@@ -2645,7 +2645,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch._mkldnn,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure],
                 name="mkldnn3d_transposed",
@@ -2657,7 +2657,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     True,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn1d_cpu_input",
@@ -2669,7 +2669,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     True,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn2d_cpu_input",
@@ -2681,7 +2681,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     True,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Mkldnn,
+                    torch._C._ConvBackend.Onednn,
                 ),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn],
                 name="mkldnn3d_cpu_input",
@@ -2850,7 +2850,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             bias = _make_noncontiguous(bias)
 
         if layout is torch._mkldnn:
-            x = x.to_mkldnn()
+            x = x.to_onednn()
             # Note that weight and bias are not supported as onednn tensors during training.
 
         stride = (2,) * dim if strided else (1,) * dim
@@ -2880,7 +2880,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         if not contiguous:
             grad_output = _make_noncontiguous(grad_output)
         if layout is torch._mkldnn:
-            grad_output = grad_output.to_mkldnn()
+            grad_output = grad_output.to_onednn()
         output.backward(grad_output)
 
         # onednn doesn't support gradcheck :(

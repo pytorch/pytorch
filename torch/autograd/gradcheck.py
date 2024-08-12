@@ -432,7 +432,7 @@ def _prepare_input(
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
         # Convert back to onednn
         if maybe_perturbed_input is not None:
-            return maybe_perturbed_input.to_mkldnn()
+            return maybe_perturbed_input.to_onednn()
         else:
             return input
     elif _is_sparse_any_tensor(input):

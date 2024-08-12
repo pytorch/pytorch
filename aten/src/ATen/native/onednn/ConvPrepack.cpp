@@ -94,7 +94,7 @@ ContextConv create(
       attr};
 }
 
-static void _mkldnn_convolution_out(
+static void _onednn_convolution_out(
     const ideep::tensor& x,
     ideep::tensor& y,
     const ideep::tensor& w,
@@ -143,7 +143,7 @@ static void _mkldnn_convolution_out(
   }
 }
 
-static void mkldnn_convolution_out(
+static void onednn_convolution_out(
     const Tensor& input,
     ideep::tensor& mkldnn_output,
     const ideep::tensor& mkldnn_weight,
@@ -165,7 +165,7 @@ static void mkldnn_convolution_out(
     mkldnn_bias = itensor_from_tensor(bias);
   }
 
-  _mkldnn_convolution_out(
+  _onednn_convolution_out(
       mkldnn_input,
       mkldnn_output,
       mkldnn_weight,
@@ -206,7 +206,7 @@ Tensor run(ContextConv& context, const Tensor& input) {
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
 
   if (is_channels_last) {
-    mkldnn_convolution_out(
+    onednn_convolution_out(
         input,
         mkldnn_output,
         context.weight_packed_,
@@ -218,7 +218,7 @@ Tensor run(ContextConv& context, const Tensor& input) {
         context.groups_,
         context.attr_);
   } else {
-    mkldnn_convolution_out(
+    onednn_convolution_out(
         input,
         y,
         context.weight_packed_,
@@ -247,7 +247,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
   ideep::tensor mkldnn_output = {o_desc, output};
 
   if (is_channels_last) {
-    mkldnn_convolution_out(
+    onednn_convolution_out(
         input,
         mkldnn_output,
         context.weight_packed_,
@@ -259,7 +259,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
         context.groups_,
         context.attr_);
   } else {
-    mkldnn_convolution_out(
+    onednn_convolution_out(
         input,
         y,
         context.weight_packed_,

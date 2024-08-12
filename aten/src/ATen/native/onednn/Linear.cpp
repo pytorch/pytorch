@@ -71,10 +71,10 @@ Tensor onednn_linear(
   TORCH_CHECK(self.is_onednn(),
       "onednn_linear: input needs to be onednn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
+    TORCH_CHECK(onednn_bf16_device_check(),
         "onednn_linear: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
   } else if (self.scalar_type() == ScalarType::Half) {
-    TORCH_CHECK(mkldnn_fp16_device_check(),
+    TORCH_CHECK(onednn_fp16_device_check(),
         "onednn_linear: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
@@ -159,10 +159,10 @@ std::tuple<Tensor, Tensor> onednn_linear_backward_weights(
   }
 
   return std::tuple<Tensor, Tensor>{
-    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
+    onednn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
                     optTypeMetaToScalarType(weight.options().dtype_opt()),
                     weight.options().device_opt())),
-    mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
+    onednn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
                     optTypeMetaToScalarType(weight.options().dtype_opt()),
                     weight.options().device_opt()))};
 }

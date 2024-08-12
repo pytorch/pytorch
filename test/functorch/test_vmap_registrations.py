@@ -218,7 +218,7 @@ xfail_not_implemented = {
     "aten::thnn_conv2d",
     "aten::to_dense",
     "aten::to_dense_backward",
-    "aten::to_mkldnn_backward",
+    "aten::to_onednn_backward",
     "aten::trace_backward",
     "aten::triplet_margin_loss",
     "aten::unflatten_dense_tensors",

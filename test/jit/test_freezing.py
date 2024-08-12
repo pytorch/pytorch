@@ -2750,15 +2750,15 @@ class TestFrozenOptimizations(JitTestCase):
     )
     def test_freeze_mkdlnn(self):
         conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
-        convmkl = mkldnn_utils.to_mkldnn(conv)
+        convmkl = mkldnn_utils.to_onednn(conv)
         out = torch.jit.freeze(torch.jit.script(convmkl.eval()))
         inp = torch.rand([4, 3, 4, 4]).float()
-        self.assertEqual(out(inp.to_mkldnn()).to_dense(), conv(inp))
+        self.assertEqual(out(inp.to_onednn()).to_dense(), conv(inp))
 
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available(), "oneDNN build is disabled"
     )
-    def test_conv_to_mkldnn(self):
+    def test_conv_to_onednn(self):
         with set_default_dtype(torch.float):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
                 mod = module(3, 32, kernel_size=3, stride=2).eval()
@@ -2780,11 +2780,11 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check("conv").run(scripted_mod.graph)
                 # successfully no-ops with non-const inputs
                 self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
-                FileCheck().check_not("to_mkldnn").run(scripted_mod.graph)
+                FileCheck().check_not("to_onednn").run(scripted_mod.graph)
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
-                FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
+                FileCheck().check("to_onednn").check("prim::onednn_convolution").check(
                     "to_dense"
                 ).run(scripted_mod.graph)
 
@@ -2865,10 +2865,10 @@ class TestFrozenOptimizations(JitTestCase):
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
-            FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
-                "prim::mkldnn_convolution"
+            FileCheck().check("to_onednn").check("prim::onednn_convolution").check(
+                "prim::onednn_convolution"
             ).check("to_dense").run(scripted_mod.graph)
-            FileCheck().check_count("to_mkldnn", 1, exactly=True).run(
+            FileCheck().check_count("to_onednn", 1, exactly=True).run(
                 scripted_mod.graph
             )
 
@@ -2905,8 +2905,8 @@ class TestFrozenOptimizations(JitTestCase):
                 # so we can remove the op if it ever gets supported
                 with self.assertRaisesRegex(RuntimeError, ""):
                     (
-                        torch.rand([1, 8, 8, 8]).to_mkldnn()
-                        + torch.rand(add_inp).to_mkldnn()
+                        torch.rand([1, 8, 8, 8]).to_onednn()
+                        + torch.rand(add_inp).to_onednn()
                     )
 
     @unittest.skipIf(
@@ -2927,7 +2927,7 @@ class TestFrozenOptimizations(JitTestCase):
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_onednn", scripted_mod.graph)
             # add gets uninplaced and reinplaced
-            FileCheck().check("aten::to_mkldnn").check("aten::add_").check(
+            FileCheck().check("aten::to_onednn").check("aten::add_").check(
                 "aten::div_"
             ).run(scripted_mod.graph)
             inp = torch.rand([1, 8, 8, 8])
@@ -2963,7 +2963,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod(inp), sub_model(inp))
 
     @unittest.skipIf(torch.backends.mkldnn.is_available(), "Testing no mkldnn")
-    def test_conv_to_mkldnn_no_mkldnn(self):
+    def test_conv_to_onednn_no_mkldnn(self):
         # test no error when onednn not available
         with set_default_dtype(torch.float):
             mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
@@ -3297,7 +3297,7 @@ class TestFrozenOptimizations(JitTestCase):
                         inplace_tgt = "%34" if inplace else "%35"
                         graph_str = f"""graph(%input.1 : Tensor):
                             %33 : None = prim::Constant()
-                            %34 : Tensor = aten::to_mkldnn(%input.1, %33)
+                            %34 : Tensor = aten::to_onednn(%input.1, %33)
                             %35 : Tensor = {mkldnn_opname}{inplace_str}(%34)
                             return ({inplace_tgt})
                         """
@@ -3388,7 +3388,7 @@ class TestMKLDNNReinplacing(JitTestCase):
 
         mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
-        FileCheck().check("mkldnn_convolution").check_next(
+        FileCheck().check("onednn_convolution").check_next(
             "prim::ONEDNNHardSwish_"
         ).check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)

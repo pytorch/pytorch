@@ -225,7 +225,7 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
          setReturnstoDeviceRule(DeviceType::CPU)},
         {"aten::cuda(Tensor self) -> Tensor",
          setReturnstoDeviceRule(DeviceType::CUDA)},
-        {"aten::to_mkldnn(Tensor self, ScalarType? dtype) -> Tensor",
+        {"aten::to_onednn(Tensor self, ScalarType? dtype) -> Tensor",
          setReturnstoDeviceRule(DeviceType::MKLDNN)},
         {"aten::reshape_as(Tensor self, Tensor other) -> Tensor",
          returnFirstArgDeviceRule},

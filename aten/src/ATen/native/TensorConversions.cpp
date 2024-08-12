@@ -41,7 +41,7 @@
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/to_dense_backward_native.h>
 #include <ATen/ops/to_dense_native.h>
-#include <ATen/ops/to_mkldnn_backward_native.h>
+#include <ATen/ops/to_onednn_backward_native.h>
 #include <ATen/ops/to_native.h>
 #include <ATen/ops/to_sparse_bsc_native.h>
 #include <ATen/ops/to_sparse_bsr_native.h>
@@ -586,14 +586,14 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, std::optional
       }
     }
     case kMkldnn:
-      return grad.to_mkldnn(input_.scalar_type());
+      return grad.to_onednn(input_.scalar_type());
     default:
       AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
       return Tensor{};
   }
 }
 
-Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
+Tensor to_onednn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
   return grad.to_dense(input_.scalar_type());
 }
