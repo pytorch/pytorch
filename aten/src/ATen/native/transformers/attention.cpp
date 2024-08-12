@@ -19,7 +19,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
-#include <type_traits>
 #include <limits>
 #include <utility>
 
@@ -70,6 +69,9 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/_safe_softmax.h>
+#include <ATen/ops/_safe_softmax_native.h>
+#include <ATen/ops/all.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -529,7 +531,6 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    // TODO Use the max type of the input and output
     return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
@@ -641,6 +642,15 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
 
 } // namespace
 
+Tensor _safe_softmax(
+    const Tensor& self,
+    int64_t dim,
+    std::optional<ScalarType> dtype) {
+  auto out = at::softmax(self, dim, dtype);
+  const auto masked = self.eq(-std::numeric_limits<float>::infinity());
+  const auto masked_rows = all(masked, dim, true);
+  return at::where(masked_rows, at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device())), out);
+}
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -815,6 +825,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
     attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
+
 
     // MQA/GQA handling
     auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key_acc, value_acc, enable_gqa);

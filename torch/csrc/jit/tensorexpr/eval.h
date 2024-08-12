@@ -42,12 +42,10 @@ class InterpValue {
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, VALUE_CTOR);
 #undef VALUE_CTOR
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InterpValue(c10::quint8 v) : dtype_(kQUInt8) {
     QUInt8values.emplace_back(v.val_);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InterpValue(c10::qint8 v) : dtype_(kQInt8) {
     QInt8values.emplace_back(v.val_);
   }
@@ -226,7 +224,6 @@ class ExprEval {
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
         call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
@@ -238,7 +235,6 @@ class ExprEval {
   }
 
   void call_raw(const std::vector<void*>& args) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<void*> args_extended = args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                    \
@@ -253,7 +249,6 @@ class ExprEval {
       TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
       case ScalarType::Bool: {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
         args_extended.push_back(ret_val_arg.data());
         codegen_->call_raw(args_extended);

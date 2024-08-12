@@ -29,7 +29,7 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_BIG_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -277,12 +277,19 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        # examples that should not be selected by heuristic
+        # examples that should not be selected by handwritten heuristic
         mat1_dtype = torch.float16
         dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
         torch._dynamo.mark_dynamic(dyn_tensor, 0)
@@ -330,13 +337,20 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
         mat1_dtype = torch.float16
-        # examples that should be selected by heuristic
+        # examples that should be selected by handwritten heuristic
         args_list = [
             (
                 torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),

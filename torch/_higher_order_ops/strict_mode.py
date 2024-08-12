@@ -45,10 +45,7 @@ strict_mode_op.py_impl(DispatchKey.Autograd)(
 
 @strict_mode_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, callable, operands):
-    if mode.enable_tracing:
-        return trace_strict_mode(mode, strict_mode_op, callable, operands)
-    else:
-        return strict_mode_op(callable, operands)
+    return trace_strict_mode(mode, strict_mode_op, callable, operands)
 
 
 def trace_strict_mode(mode, strict_mode_op, callable, operands):

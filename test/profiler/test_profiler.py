@@ -1166,6 +1166,17 @@ class TestProfiler(TestCase):
         # saving an empty trace
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
+            if use_kineto:
+                with open(fname) as f:
+                    contents = json.load(f)
+                    # Some builds may not have logger observer
+                    # so skip if not
+                    if "WARNING" in contents:
+                        found_empty_warning = False
+                        for warning in contents["WARNING"]:
+                            if "No Valid Trace Events" in warning:
+                                found_empty_warning = True
+                        self.assertTrue(found_empty_warning)
 
         # Same test but for cuda.
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -1830,11 +1841,16 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         "profiling out of range",
                     )
 
-    def _schedule_helper(self, warmup, active, repeat):
+    def _schedule_helper(self, warmup, active, repeat, acc_events=True):
         with profile(
             schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
-            )
+                skip_first=0,
+                wait=0,
+                warmup=warmup,
+                active=active,
+                repeat=repeat,
+            ),
+            acc_events=acc_events,
         ) as prof:
             for i in range(100):
                 torch.add(1, 2)
@@ -1852,6 +1868,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
         self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
         self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
+        self.assertEqual(
+            self._schedule_helper(warmup=0, active=5, repeat=0, acc_events=False), 0
+        )
+        self.assertEqual(
+            self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
+        )
 
     def _step_helper_func(self, prof):
         time.sleep(0.1)

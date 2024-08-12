@@ -40,8 +40,8 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
-from .runtime.runtime_utils import do_bench
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
@@ -78,7 +78,7 @@ class PartialRender:
     of replacements after the initial render.
     """
 
-    def __init__(self, code, replacement_hooks):
+    def __init__(self, code, replacement_hooks) -> None:
         super().__init__()
         self.code = code
         self.replacement_hooks = replacement_hooks
@@ -134,7 +134,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         *,
         index_dtype,
-    ):
+    ) -> None:
         super().__init__(
             sympy_product(output_node.get_size()),
             sympy.Integer(1),
@@ -592,7 +592,7 @@ class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: Dict[str, "TritonTemplate"] = {}
 
-    def __init__(self, name: str, grid: Any, source: str, debug=False):
+    def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
         self.grid = grid
         self.template = self._template_from_string(source)
@@ -790,7 +790,7 @@ class ExternKernelChoice:
         op_overload=None,
         use_fallback_kernel=False,
         kernel_creator=None,
-    ):
+    ) -> None:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
@@ -849,7 +849,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
-    ):
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
@@ -875,7 +875,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
@@ -930,13 +930,13 @@ class ExternKernelCaller(ChoiceCaller):
         kwargs=None,
         *,
         has_out_variant=True,
-    ):
+    ) -> None:
         super().__init__(choice.name, input_nodes, layout)
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
@@ -952,7 +952,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(algo, args, {})
+            return benchmarker.benchmark(algo, args, {})
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1037,7 +1037,7 @@ def append_to_log(filename, data):
 
 
 class DataProcessorChoiceCallerWrapper:
-    def __init__(self, wrapped, preprocessor, postprocessor):
+    def __init__(self, wrapped, preprocessor, postprocessor) -> None:
         self._wrapped = wrapped
         if preprocessor is not None:
             self._preprocessor = preprocessor
@@ -1084,7 +1084,7 @@ class DataProcessorTemplateWrapper:
         preprocessor,
         postprocessor,
         **kwargs,
-    ):
+    ) -> None:
         if preprocessor is not None:
             self._preprocessor = preprocessor
         else:
@@ -1117,7 +1117,7 @@ class DataProcessorTemplateWrapper:
 
 
 class ErrorFromChoice(RuntimeError):
-    def __init__(self, msg, choice: ChoiceCaller, inputs_str):
+    def __init__(self, msg, choice: ChoiceCaller, inputs_str) -> None:
         msg += f"\nFrom choice {choice}\n{inputs_str}"
         super().__init__(msg)
         self.choice = choice
@@ -1152,7 +1152,7 @@ def create_precompile_key(
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # the autotuning will get occur in the scheduler, so there is
