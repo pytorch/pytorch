@@ -87,8 +87,8 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert mta_called == (
-                expect_fastpath and (not zero_size)
+            assert (
+                mta_called == (expect_fastpath and (not zero_size))
             ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
         else:
             actual = self.func(*inputs, **kwargs)
@@ -99,7 +99,9 @@ class ForeachFuncWrapper:
 
 class InplaceForeachVersionBumpCheck:
     def __init__(
-        self, testcase: TestCase, tensorlist: "List[torch.Tensor]"  # noqa: F821
+        self,
+        testcase: TestCase,
+        tensorlist: "List[torch.Tensor]",  # noqa: F821
     ) -> None:
         self._testcase = testcase
         self._tensorlist = tensorlist
@@ -255,11 +257,9 @@ class TestForeach(TestCase):
             else inputs
         )
         try:
-            with (
-                InplaceForeachVersionBumpCheck(self, inputs[0])
-                if op.is_inplace
-                else nullcontext()
-            ):
+            with InplaceForeachVersionBumpCheck(
+                self, inputs[0]
+            ) if op.is_inplace else nullcontext():
                 actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e).splitlines()[0])):
@@ -280,11 +280,9 @@ class TestForeach(TestCase):
             try:
                 op_kwargs = {}
                 op_kwargs.update(kwargs)
-                with (
-                    InplaceForeachVersionBumpCheck(self, inputs[0])
-                    if op.is_inplace
-                    else nullcontext()
-                ):
+                with InplaceForeachVersionBumpCheck(
+                    self, inputs[0]
+                ) if op.is_inplace else nullcontext():
                     actual = op(inputs, self.is_cuda, is_fastpath, **op_kwargs)
             except RuntimeError as e:
                 with self.assertRaisesRegex(type(e), re.escape(str(e).splitlines()[0])):

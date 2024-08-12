@@ -841,8 +841,10 @@ def forward(self, primals_1):
 
         a = torch.ones(4, requires_grad=True)
         a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
         aa = TwoTensor(a, a2)
-        aa2 = aa.clone().detach().requires_grad_()
+        aa2 = TwoTensor(a3, a4)
         aaaa = TwoTensor(aa, aa2)
         out = f(aaaa)
         self.assertTrue(isinstance(out, TwoTensor))
@@ -2495,9 +2497,8 @@ def forward(self, primals_1, primals_2):
         def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return torch.ops._test._clone_create_graph(x, x1)
 
-        inp_x, inp_x1 = (
-            torch.randn(3, requires_grad=True),
-            torch.randn(3, requires_grad=True),
+        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
+            3, requires_grad=True
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()

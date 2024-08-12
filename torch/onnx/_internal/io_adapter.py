@@ -40,7 +40,8 @@ class InputAdaptStep(Protocol):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> tuple[Sequence[Any], Mapping[str, Any]]: ...
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
+        ...
 
 
 class InputAdapter:
@@ -97,7 +98,8 @@ class OutputAdaptStep(Protocol):
         self,
         model_outputs: Any,
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> Any: ...
+    ) -> Any:
+        ...
 
 
 class OutputAdapter:
@@ -291,11 +293,9 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         """
         return (
             tuple(
-                (
-                    torch.view_as_real(arg.resolve_conj())
-                    if isinstance(arg, torch.Tensor) and arg.is_complex()
-                    else arg
-                )
+                torch.view_as_real(arg.resolve_conj())
+                if isinstance(arg, torch.Tensor) and arg.is_complex()
+                else arg
                 for arg in model_args
             ),
             model_kwargs,
@@ -499,11 +499,9 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
             A tuple of the model output.
         """
         return [
-            (
-                torch.view_as_real(output.resolve_conj())
-                if isinstance(output, torch.Tensor) and torch.is_complex(output)
-                else output
-            )
+            torch.view_as_real(output.resolve_conj())
+            if isinstance(output, torch.Tensor) and torch.is_complex(output)
+            else output
             for output in model_outputs
         ]
 
@@ -632,11 +630,9 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
             model, torch_export.ExportedProgram
         ), "'model' must be torch_export.ExportedProgram"
         ordered_buffers = tuple(
-            (
-                model.state_dict[name]
-                if name in model.state_dict
-                else model.constants[name]
-            )
+            model.state_dict[name]
+            if name in model.state_dict
+            else model.constants[name]
             for name in model.graph_signature.buffers_to_mutate.values()
         )
 

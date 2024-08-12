@@ -73,8 +73,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -259,11 +259,13 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
+    ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
+    ...
 
 
 def ir_node_to_tensor(
@@ -1096,7 +1098,9 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val) if dst_dtype.is_floating_point else int(val)
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
                 )
 
             rtypes_to_inits = {
@@ -3623,11 +3627,9 @@ class ComputedBuffer(OperationBuffer):
             )
             reads = self.get_read_writes().reads
             reads_bufs = [
-                (
-                    V.graph.name_to_buffer[r.name]
-                    if r.name in V.graph.name_to_buffer.keys()
-                    else None
-                )
+                V.graph.name_to_buffer[r.name]
+                if r.name in V.graph.name_to_buffer.keys()
+                else None
                 for r in reads
             ]
             # only consider reads to buffer of same size
@@ -3949,7 +3951,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(algo, args, {"out": out})
+        return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -4396,6 +4398,9 @@ class ExternKernel(InputsKernel):
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):
         self.cpp_kernel_name = cpp_kernel_name
+        self.cpp_kernel_overload_name = None
+        self.cpp_kernel_key = None
+        self.cpp_op_schema = None
         if not V.graph.cpp_wrapper or not isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
@@ -4469,7 +4474,9 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
+    def process_kernel(
+        cls, kernel, *args, **kwargs
+    ) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -4696,13 +4703,11 @@ class ExternKernel(InputsKernel):
                     x,
                     freeze=True,
                     want_contiguous=False,
-                    stride_order=(
-                        get_stride_order(
-                            V.graph.sizevars.size_hints(x.get_layout().stride)
-                        )
-                        if is_stride_order_storage_and_layout(x, order)
-                        else order
-                    ),
+                    stride_order=get_stride_order(
+                        V.graph.sizevars.size_hints(x.get_layout().stride)
+                    )
+                    if is_stride_order_storage_and_layout(x, order)
+                    else order,
                     allow_padding=allow_padding,
                 )
                 return x
@@ -4761,16 +4766,33 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
-    def codegen_const_args(self):
+    def codegen_const_args(self, names: Optional[List[str]] = None):
         if V.graph.cpp_wrapper:
             result = []
+            # Aten ops follow the convention that tensor args are before non-tensor args,
+            # in which case the following 'len(self.inputs) + i' logic works. But this
+            # may not be true for other ops, and if that is the case, caller needs to
+            # pass in a list of const arg names for arg_properties lookup.
+            name_to_arg_properties = None
+            if names and self.arg_properties:
+                assert len(self.constant_args) == len(
+                    names
+                ), "names passed to codegen_const_args does not match self.constant_args"
+                name_to_arg_properties = {
+                    arg.get("name"): arg for arg in self.arg_properties
+                }
+
             for i, x in enumerate(self.constant_args):
-                idx = len(self.inputs) + i
-                type_ = (
-                    self.arg_properties[idx].get("type")
-                    if self.arg_properties and idx < len(self.arg_properties)
-                    else None
-                )
+                if name_to_arg_properties is not None:
+                    prop = name_to_arg_properties.get(names[i])  # type: ignore[index]
+                    type_ = prop.get("type") if prop else None
+                else:
+                    idx = len(self.inputs) + i
+                    type_ = (
+                        self.arg_properties[idx].get("type")
+                        if self.arg_properties and idx < len(self.arg_properties)
+                        else None
+                    )
                 result.append(
                     V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
                 )
@@ -4985,11 +5007,9 @@ class RandomSeeds(ExternKernelOut):
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
-            cpp_kernel_name=(
-                "at::_ops::randint_low_out::call"
-                if config.abi_compatible
-                else "at::randint_out"
-            ),
+            cpp_kernel_name="at::_ops::randint_low_out::call"
+            if config.abi_compatible
+            else "at::randint_out",
             op_overload=aten.randint.low_out,
         )
 
@@ -5202,9 +5222,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
-        )
+        wrapper.codegen_device_copy(src, dst)
 
     def should_allocate(self):
         return False

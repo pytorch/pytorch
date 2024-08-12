@@ -6,7 +6,6 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
-
 import builtins
 import collections
 import pprint
@@ -296,10 +295,11 @@ def _create_runtime_wrapper(
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
         if keep_input_mutations:
-            for i in runtime_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                arg = args[i]
-                if not arg.is_inference():  # inference tensors have no VC
-                    torch.autograd.graph.increment_version(arg)
+            mutated_args = (
+                args[i]
+                for i in runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+            )
+            torch.autograd.graph.increment_version(mutated_args)
 
         if trace_joint:
             args_ = list(args)

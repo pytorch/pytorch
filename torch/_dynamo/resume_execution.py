@@ -275,11 +275,9 @@ class ReenterWith:
                 exn_tab_1_target,  # PUSH_EXC_INFO
                 create_instruction("WITH_EXCEPT_START"),
                 create_instruction(
-                    (
-                        "POP_JUMP_FORWARD_IF_TRUE"
-                        if sys.version_info < (3, 12)
-                        else "POP_JUMP_IF_TRUE"
-                    ),
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if sys.version_info < (3, 12)
+                    else "POP_JUMP_IF_TRUE",
                     target=pop_top_after_with_except_start,
                 ),
                 exn_tab_2_end,  # RERAISE 2
@@ -411,9 +409,9 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             freevars = tuple(sorted(freevars))
-            code_options["co_name"] = (
-                f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
-            )
+            code_options[
+                "co_name"
+            ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
             if is_py311_plus:
                 qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
                 if len(qualified_path) == 1:
@@ -421,9 +419,9 @@ class ContinueExecutionCache:
                 else:
                     assert len(qualified_path) == 2
                     module_name, co_name = qualified_path
-                    code_options["co_qualname"] = (
-                        f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
-                    )
+                    code_options[
+                        "co_qualname"
+                    ] = f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = ()
             code_options["co_freevars"] = freevars

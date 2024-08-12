@@ -11,10 +11,10 @@ from torch.distributed._tensor import (
     distribute_module,
     distribute_tensor,
     DTensor,
-    Placement,
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.placement_types import Placement
 
 
 __all__ = [
@@ -36,7 +36,8 @@ class ParallelStyle(ABC):
     """
 
     @abstractmethod
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module: ...
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        ...
 
 
 class ColwiseParallel(ParallelStyle):

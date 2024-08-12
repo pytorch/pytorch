@@ -2178,9 +2178,9 @@ def prepare(
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
         input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-        output_quantized_idxs: List[int] = (
-            prepare_custom_config.output_quantized_indexes
-        )
+        output_quantized_idxs: List[
+            int
+        ] = prepare_custom_config.output_quantized_indexes
         observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
         # inplace modification
         observed_graph_module_attrs.is_observed_standalone_module = True

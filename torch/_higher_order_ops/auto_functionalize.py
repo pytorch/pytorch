@@ -140,11 +140,9 @@ def auto_functionalized_dense(
             new_kwargs[name] = (
                 [clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else (
-                    clone_preserve_strides(kwargs[name])
-                    if kwargs[name] is not None
-                    else None
-                )
+                else clone_preserve_strides(kwargs[name])
+                if kwargs[name] is not None
+                else None
             )
         result.append(new_kwargs[name])
     out = _mutable_op(**new_kwargs)
@@ -172,9 +170,6 @@ def auto_functionalized_proxy(
     _mutable_op: OpOverload,
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    if not mode.enable_tracing:
-        return auto_functionalized(_mutable_op, **kwargs)
-
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 

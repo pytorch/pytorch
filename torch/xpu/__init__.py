@@ -6,7 +6,6 @@ Intel GPU optimization.
 This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
-
 import threading
 import traceback
 from functools import lru_cache
@@ -24,8 +23,9 @@ from .streams import Event, Stream
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-# don't invoke these until initialization occurs
-_queued_calls: List[Tuple[Callable[[], None], List[str]]] = []
+_queued_calls: List[
+    Tuple[Callable[[], None], List[str]]
+] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
@@ -284,7 +284,6 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
-
     cur_stream: Optional["torch.xpu.Stream"]
 
     def __init__(self, stream: Optional["torch.xpu.Stream"]):

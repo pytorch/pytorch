@@ -110,10 +110,12 @@ class Sequential(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     @overload
-    def __init__(self, *args: Module) -> None: ...
+    def __init__(self, *args: Module) -> None:
+        ...
 
     @overload
-    def __init__(self, arg: "OrderedDict[str, Module]") -> None: ...
+    def __init__(self, arg: "OrderedDict[str, Module]") -> None:
+        ...
 
     def __init__(self, *args):
         super().__init__()
@@ -315,6 +317,14 @@ class ModuleList(Module):
         if idx < 0:
             idx += len(self)
         return str(idx)
+
+    @overload
+    def __getitem__(self, idx: slice) -> "ModuleList":
+        ...
+
+    @overload
+    def __getitem__(self, idx: int) -> Module:
+        ...
 
     @_copy_to_script_wrapper
     def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
@@ -622,10 +632,12 @@ class ParameterList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: int) -> Any: ...
+    def __getitem__(self, idx: int) -> Any:
+        ...
 
     @overload
-    def __getitem__(self: T, idx: slice) -> T: ...
+    def __getitem__(self: T, idx: slice) -> T:
+        ...
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):

@@ -22,7 +22,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-
 from __future__ import annotations
 
 import keyword
@@ -30,8 +29,7 @@ import warnings
 from typing import Collection, List, Mapping, Optional, Set, Tuple, Union
 
 
-# NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
-_ellipsis: str = "\u2026"
+_ellipsis: str = "\u2026"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 
 
 class AnonymousAxis:
@@ -298,10 +296,8 @@ def comma_separate(collection: Collection[Union[str, Collection[str]]]) -> str:
         '(d0,), (), (d1,), (d2,), (d3, d4)'
     """
     return ", ".join(
-        (
-            item
-            if isinstance(item, str)
-            else f"({comma_separate(item)}{',' if len(item) == 1 else ''})"
-        )
+        item
+        if isinstance(item, str)
+        else f"({comma_separate(item)}{',' if len(item) == 1 else ''})"
         for item in collection
     )
