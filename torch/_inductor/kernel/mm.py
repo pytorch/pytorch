@@ -579,6 +579,9 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         or _is_sm7x_or_older_gpu(layout.device.index)
         or inductor_config.mixed_mm_choice == "aten"
         or not V.graph.has_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        or (
+            mat1.layout.dtype == torch.float32 and torch.backends.cuda.matmul.allow_tf32
+        )
     )
 
     if inductor_config.mixed_mm_choice == "triton":
