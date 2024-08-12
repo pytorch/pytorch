@@ -1123,7 +1123,12 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
+<<<<<<< HEAD
         "sympy",
+=======
+        'sympy==1.12.1 ; python_version == "3.8"',
+        'sympy==1.13.1 ; python_version >= "3.9"',
+>>>>>>> 4f0d5f6551e (Pin sympy to 1.13.1 (#133235))
         "networkx",
         "jinja2",
         "fsspec",
