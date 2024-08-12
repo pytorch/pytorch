@@ -4136,7 +4136,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
     @parametrize('weights_only', (True, False))
     def test_serialization_byte_literal(self, byte_literals, weights_only):
-        """ Tests that by literal can be serialized.
+        """ Tests that byte literal can be serialized.
         See: https://github.com/pytorch/pytorch/issues/133163"""
         with tempfile.NamedTemporaryFile() as f:
             torch.save(byte_literals, f)
