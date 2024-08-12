@@ -333,6 +333,10 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_inductor_cache()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "This test is using fp8 which is only supported on H100+ and MI300+ machines",
+    )
     def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
         if scatter_dim >= A_dims:
             return
