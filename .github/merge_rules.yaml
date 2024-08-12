@@ -383,7 +383,7 @@
 - name: CPU frontend
   patterns:
   - torch/cpu/**
-  - torch/utils/mkldnn.py
+  - torch/utils/onednn.py
   - test/test_mkldnn.py
   approved_by:
   - leslie-fang-intel

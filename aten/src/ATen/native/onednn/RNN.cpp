@@ -128,7 +128,7 @@ struct RNNParams {
     }
   }
 
-  // mkldnn memory descriptors
+  // onednn memory descriptors
   using format = ideep::format_tag;
   using desc = ideep::tensor::desc;
   using dtype = ideep::tensor::data_type;
@@ -248,7 +248,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto weight_ih = _shuffle_weight(w0, rnn.mode);
   auto weight_hh = _shuffle_weight(w1, rnn.mode);
 
-  // Packed weight will be mkldnn layout while bias won't be packed
+  // Packed weight will be onednn layout while bias won't be packed
   auto bias = has_biases
       ? _shuffle_bias(w2, w3, rnn.mode)
       : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options().layout(at::Layout::Strided));
@@ -437,14 +437,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 
 // ONEDNN RNN integration notes:
 // I. Memory Formats
-//   a. mkldnn will use plain formats for input, hx/cx, output, hy/cy
+//   a. onednn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
-//   b. All mkldnn memorys are created (in plain format) as views on ATen tensor,
-//      the weight reorder(if any) is handed automatically inside ideep (mkldnn bridge)
+//   b. All onednn memorys are created (in plain format) as views on ATen tensor,
+//      the weight reorder(if any) is handed automatically inside ideep (onednn bridge)
 //
 // II. ONEDNN Primitive Mapping
-//   a. mkldnn rnn primitive doesn't support training with dropout or padded input sequence.
-//   b. here break a single RNN module into { num_layers * num_directions } mkldnn rnn primitives
+//   a. onednn rnn primitive doesn't support training with dropout or padded input sequence.
+//   b. here break a single RNN module into { num_layers * num_directions } onednn rnn primitives
 //      for future need to cover these feature gaps.
 //
 //TODO: a. training with dropout

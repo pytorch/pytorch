@@ -118,7 +118,7 @@ if(USE_SYSTEM_ONNX)
 endif()
 
 if(USE_ONEDNN)
-  target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
+  target_link_libraries(test_jit PRIVATE caffe2::onednn)
 endif()
 
 set(JIT_TEST_DEPENDENCIES torch gtest jitbackend_test backend_with_compiler)

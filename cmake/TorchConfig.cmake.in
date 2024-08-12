@@ -110,7 +110,7 @@ else()
   endif()
 
   if(@USE_ONEDNN@)
-    append_torchlib_if_found(dnnl mkldnn)
+    append_torchlib_if_found(dnnl onednn)
   endif()
 
   append_torchlib_if_found(sleef asmjit)

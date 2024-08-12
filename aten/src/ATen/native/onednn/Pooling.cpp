@@ -445,7 +445,7 @@ Tensor& mkldnn_avg_pool2d_out(const Tensor& input,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d_out: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d_out: in-place onednn operations are not supported yet");
 }
 
 Tensor mkldnn_avg_pool3d(
@@ -481,7 +481,7 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& input,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d_out: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d_out: in-place onednn operations are not supported yet");
 }
 
 Tensor mkldnn_adaptive_avg_pool2d(
@@ -517,7 +517,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: in-place onednn operations are not supported yet");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
@@ -602,7 +602,7 @@ Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor & grad_input) {
-  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: in-place onednn operations are not supported yet");
 }
 
 Tensor mkldnn_avg_pool3d_backward(
@@ -636,7 +636,7 @@ Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
     bool count_include_pad,
     std::optional<int64_t> divisor_override,
     Tensor & grad_input) {
-  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: in-place mkldnn operations are not supported yet");
+  TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: in-place onednn operations are not supported yet");
 }
 
 Tensor mkldnn_adaptive_avg_pool2d_backward(

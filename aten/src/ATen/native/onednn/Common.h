@@ -9,7 +9,7 @@
 
 namespace at {
 namespace native {
-namespace mkldnn {
+namespace onednn {
 
 struct ContextConv final {
   ideep::tensor weight_packed_;
@@ -39,7 +39,7 @@ struct ContextConv final {
         attr_(attr) {}
 };
 
-} // namespace mkldnn
+} // namespace onednn
 } // namespace native
 } // namespace at
 

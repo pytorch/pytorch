@@ -41,7 +41,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
+              "onednn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte || mkldnn_tensor.scalar_type() == ScalarType::Char) {
     // For int8, uint8 input, we should not change the data type.
     TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
@@ -101,7 +101,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 mkldnn tensor")
+              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 onednn tensor")
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
@@ -133,7 +133,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
 }
 
 // Mkldnn tensor has special non-public format for conv2d weights
-// (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
+// (dense_to_mkldnn only converts dense tensor to onednn tensor with
 // public format). Ideep conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
@@ -163,7 +163,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
-  // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
+  // Legacy onednn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
@@ -538,24 +538,24 @@ static Tensor get_mkldnn_serialized_md(const Tensor& self) {
   return res;
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_weight"),
       TORCH_FN(mkldnn_reorder_conv_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_mkldnn_rnn_layer_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_mkldnn_rnn_layer_weight"),
       TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, OnednnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_get_mkldnn_serialized_md"),
+      TORCH_SELECTIVE_NAME("onednn::_get_mkldnn_serialized_md"),
       TORCH_FN(get_mkldnn_serialized_md ));
 }
 

@@ -4915,7 +4915,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS: _reshape_alias
-    # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
+    # We don't need to support onednn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
@@ -12930,7 +12930,7 @@
 # multiply with the input; this is very memory inefficient!  However,
 # occasionally, we really don't have anything better, so it's helpful
 # to have these fallbacks when there is no more optimized implementation
-# in cudnn or mkldnn, etc.  Both thnn_ and slow_ convolutions fall
+# in cudnn or onednn, etc.  Both thnn_ and slow_ convolutions fall
 # into this bucket.
 #
 # The difference between these two designations, is that thnn_ refers

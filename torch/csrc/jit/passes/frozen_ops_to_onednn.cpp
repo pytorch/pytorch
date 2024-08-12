@@ -326,7 +326,7 @@ Operation BroadOp(const Node* node) {
       auto exp_a = a;
       auto exp_b = b;
       int stacked = 0;
-      // mkldnn tensors only support reshape, not expand or view operators
+      // onednn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
         ++stacked;
@@ -598,7 +598,7 @@ jit::RegisterOperators reg_fut_ops({
 
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
-// TODO: make mkldnn tensor serialize...
+// TODO: make onednn tensor serialize...
 const RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantMKLDNNTensor,
@@ -676,7 +676,7 @@ void moveConvWeightsToMKLDNN(Node* conv) {
 }
 
 void moveWeightsToMKLDNN(Node* n) {
-  // conv goes through special pathway so we can call mkldnn reorder conv
+  // conv goes through special pathway so we can call onednn reorder conv
   // primitive
   if (n->kind() == aten::conv2d || n->kind() == aten::conv3d) {
     moveConvWeightsToMKLDNN(n);
@@ -848,7 +848,7 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
-  // mkldnn does not support conv1d
+  // onednn does not support conv1d
   // _convolution is rewritten before this pass is invoked
   if (n->kind() != aten::conv2d && n->kind() != aten::conv3d) {
     return false;
@@ -858,7 +858,7 @@ bool frozenMkldnnCompatibleConvNode(Node* n) {
   return supportedMKLDNNWeight(weight);
 }
 
-// [mkldnn perf strategy]
+// [onednn perf strategy]
 // Certain ops - aten::linear, aten::conv2d, aten::conv3d - provide a huge speed
 // up just by converting the constant weights to ONEDNN AOT, and then at runtime
 // converting the non-constant input to_mkldnn before the op, and then back to
@@ -938,7 +938,7 @@ class MKLDNNSubgraphSlicer {
     if (node->kind() == prim::MKLDNNGroup) {
       return true;
     }
-    // see [mkldnn perf strategy]
+    // see [onednn perf strategy]
     return frozenMkldnnCompatibleConvNode(node);
   }
 
@@ -965,7 +965,7 @@ class MKLDNNSubgraphSlicer {
     return false;
   }
 
-  // We include ops here which are roughly perf-equivalent in mkldnn as with
+  // We include ops here which are roughly perf-equivalent in onednn as with
   // aten (single & multithreaded) and whose inputs & outputs are float32.
   bool computableInMKLDNN(Node* n) {
     for (Value* v : n->inputs()) {
@@ -985,7 +985,7 @@ class MKLDNNSubgraphSlicer {
     }
 
     // unary ops we dont need to prove anything else than
-    // the input is mkldnn supported
+    // the input is onednn supported
     switch (n->kind()) {
       case aten::relu:
       case aten::relu6:
@@ -1020,7 +1020,7 @@ class MKLDNNSubgraphSlicer {
     }
 
     if (n->kind() == aten::add) {
-      // mkldnn doesn't currently support Tensor-Scalar add
+      // onednn doesn't currently support Tensor-Scalar add
       for (const auto i : c10::irange(2)) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
           return false;
@@ -1135,13 +1135,13 @@ bool containsMKLDNNGroup(Block* b) {
 } // namespace
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
+  GRAPH_DUMP("Before convert frozen ops to onednn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
   if (containsMKLDNNGroup(graph->block())) {
     // Only remove tensor mutation if we know we're going to create speedups
-    // with mkldnn. Only supporting functional ops simplifies this pass bc
-    // running an op in mkldnn removes the aliasing relationships that
+    // with onednn. Only supporting functional ops simplifies this pass bc
+    // running an op in onednn removes the aliasing relationships that
     // previously existed between input and output.
     RemoveTensorMutation(graph, [](Node* node_to_functionalize) {
       static std::unordered_set<Symbol> mkldnn_ops = {
@@ -1164,9 +1164,9 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     AliasDb db(graph);
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
-    GRAPH_DUMP("After convert frozen ops to mkldnn", graph);
+    GRAPH_DUMP("After convert frozen ops to onednn", graph);
   } else {
-    GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
+    GRAPH_DUMP("No onednn compatible frozen nodes", graph);
   }
 }
 

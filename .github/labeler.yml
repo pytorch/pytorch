@@ -45,7 +45,7 @@
 - aten/src/ATen/native/Convolution*.cpp
 - aten/src/ATen/native/onednn/**
 - torch/cpu/**
-- torch/utils/mkldnn.py
+- torch/utils/onednn.py
 - torch/utils/_sympy/**
 - test/test_mkldnn.py
 
