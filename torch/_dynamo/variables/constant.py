@@ -101,7 +101,7 @@ class ConstantVariable(VariableTracker):
         """
         return self.unpack_var_sequence(tx=None)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )

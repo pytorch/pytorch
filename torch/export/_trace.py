@@ -49,7 +49,6 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export._remove_effect_tokens_pass import _is_impure_node
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -652,7 +651,6 @@ def _export_to_aten_ir(
     _maybe_fixup_gm_and_output_node_meta(mod, gm)
 
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
-    from torch._guards import detect_fake_mode
 
     # Run produce guards before we handle runtime asserts.
     # This means we run the export solver before the runtime asserts pass.
@@ -669,7 +667,8 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = detect_fake_mode(flat_fake_args)
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -692,7 +691,7 @@ def _export_to_aten_ir(
     graph_signature.user_outputs = _graph_output_names(gm)
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 
@@ -772,6 +771,9 @@ def _export_to_aten_ir(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     if pre_dispatch:
+        from torch._export.passes.replace_autocast_with_hop_pass import (
+            replace_autocast_with_hop_pass,
+        )
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
@@ -782,6 +784,10 @@ def _export_to_aten_ir(
         # and the constant_tensor is passed as input of the set grad hop, the placeholder's
         # meta["val"] will be None and fails our verifier for placeholder.
         gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
+
+        gm, export_graph_signature = replace_autocast_with_hop_pass(
             gm, export_graph_signature
         )
 
@@ -1524,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                 record_module_stack=True,
                 pre_dispatch=True,
             )(*flat_args)
-            gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
+            gm.graph.eliminate_dead_code()
 
         return gm, None
 
@@ -1644,8 +1650,6 @@ def _export_to_aten_ir_make_fx(
             produce_guards_callback(gm)
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
-
-    from torch._guards import detect_fake_mode
 
     fake_mode = detect_fake_mode(flat_args)
 
@@ -2066,6 +2070,9 @@ def _export(
     _verify_stack_trace(gm)
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
 
     from torch._export.verifier import Verifier
 
