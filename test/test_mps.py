@@ -659,8 +659,6 @@ def mps_ops_modifier(ops):
     UNIMPLEMENTED_XFAILLIST = {
         # Failures due to lack of op implementation on MPS backend
         'login': None,
-        'log_sigmoid': None,
-        'log_sigmoid_forward': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
         'put': None,
