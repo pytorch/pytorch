@@ -953,7 +953,7 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=@.*(dynamo_timed|preserve_rng_state|clear_frame)',
+    '--pattern=@.*(dynamo_timed|preserve_rng_state|clear_frame|with_fresh_cache_if_config|use_lazy_graph_module|_disable_current_modes)',
     '--linter-name=CONTEXT_DECORATOR',
     '--error-name=avoid context decorator',
     """--error-description=\
@@ -1248,7 +1248,6 @@ exclude_patterns = [
     'torch/fx/experimental/normalize.py',
     'torch/fx/experimental/optimization.py',
     'torch/fx/experimental/partitioner_utils.py',
-    'torch/fx/experimental/proxy_tensor.py',
     'torch/fx/experimental/refinement_types.py',
     'torch/fx/experimental/rewriter.py',
     'torch/fx/experimental/schema_type_annotation.py',
