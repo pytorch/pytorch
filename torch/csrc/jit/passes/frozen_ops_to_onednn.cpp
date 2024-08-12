@@ -38,7 +38,7 @@
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
 #include <ATen/native/onednn/Utils.h>
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ideep.hpp>
 #endif
 

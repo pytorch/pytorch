@@ -318,7 +318,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   USE_ONEDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_ONEDNN AND CPU_AARCH64" OFF)
-set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_ONEDNN})
+set(ONEDNN_ENABLE_CONCURRENT_EXEC ${USE_ONEDNN})
 cmake_dependent_option(USE_ONEDNN_CBLAS "Use CBLAS in ONEDNN" OFF "USE_ONEDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
