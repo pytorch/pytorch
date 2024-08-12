@@ -3,7 +3,6 @@
 import functools
 import inspect
 import logging
-
 import math
 import re
 from typing import Dict, List, TYPE_CHECKING
@@ -13,13 +12,10 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+from torch._guards import TracingContext
 from torch._logging import warning_once
-
 from torch._streambase import _StreamBase
-from ..._guards import TracingContext
+
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
@@ -50,6 +46,7 @@ from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -59,6 +56,11 @@ try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +114,7 @@ constant_fold_functions = [
     torch.nn.functional._Reduction.get_enum,  # type: ignore[attr-defined]
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
+    torch.autograd._is_checkpoint_valid,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.extend(
@@ -152,7 +155,7 @@ class BaseTorchVariable(VariableTracker):
             source=source,
         )
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -188,7 +191,7 @@ class BaseTorchVariable(VariableTracker):
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
@@ -329,7 +332,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TorchInGraphFunctionVariable({self.value})"
 
     def get_function(self):
@@ -353,6 +356,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return _register
 
         from torch.backends.cuda import SDPAParams
+
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,
@@ -998,7 +1002,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return result
 
     @staticmethod
-    def _nn_param_via_prefix_insert(tx, data, requires_grad):
+    def _nn_param_via_prefix_insert(tx: "InstructionTranslator", data, requires_grad):
         # Alternate version if we have a .source
         from .builder import VariableBuilder
 

@@ -73,7 +73,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
-  CUDAPluggableAllocator& operator==(CUDAPluggableAllocator& other) = delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator& other) = delete;
 
   void set_init_fn(std::function<void(int)> init_fn);
 

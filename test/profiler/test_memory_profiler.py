@@ -66,7 +66,7 @@ class LazyLinear(torch.nn.Module):
 
 
 class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
-    def __init__(self):
+    def __init__(self) -> None:
         self.results = []
 
     def mark_region(self, name: str):
