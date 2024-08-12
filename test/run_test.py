@@ -1834,12 +1834,12 @@ def main():
     try:
         # Actually run the tests
         start_time = time.time()
-        elapsed_time = time.time() - start_time
-        print_to_stderr(
-            f"Starting test batch '{test_batch.name}' {round(elapsed_time, 2)} seconds after initiating testing"
-        )
         run_tests(
             test_batch.sharded_tests, test_directory, options, test_batch.failures
+        )
+        elapsed_time = time.time() - start_time
+        print_to_stderr(
+            f"Running test batch '{test_batch.name}' cost {round(elapsed_time, 2)} seconds"
         )
 
     finally:
