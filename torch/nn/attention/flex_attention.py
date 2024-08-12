@@ -133,7 +133,7 @@ def noop_mask(
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
 
 
-def _ordered_to_dense(num_blocks_in_row, col_indices):
+def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     num_rows = col_indices.shape[-2]
     num_cols = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
@@ -173,7 +173,7 @@ def _dense_to_ordered(dense_mask) -> Tuple:
     )
 
 
-def _transpose_ordered(num_blocks_in_row, col_indices):
+def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
 
@@ -324,6 +324,7 @@ class BlockMask:
         # Generate q_num_blocks and q_indices
         q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
         if full_kv_num_blocks is not None:
+            assert full_kv_indices is not None
             full_q_num_blocks, full_q_indices = _transpose_ordered(
                 full_kv_num_blocks, full_kv_indices
             )
@@ -437,6 +438,7 @@ class BlockMask:
         """Returns a dense block that is equivalent to the block mask."""
         partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
         if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
             return partial_dense | _ordered_to_dense(
                 self.full_kv_num_blocks, self.full_kv_indices
             )
