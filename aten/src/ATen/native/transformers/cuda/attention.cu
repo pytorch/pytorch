@@ -1102,10 +1102,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::empty({}, at::dtype(at::kLong).device(device));
     } else {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+#ifdef USE_ROCM
+      seed_t = at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
+#else
       seed_t = at::scalar_tensor(
           at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
       offset_t = at::scalar_tensor(
           at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+#endif
     }
   } else {
     // Not using dropout
