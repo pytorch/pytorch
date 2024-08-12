@@ -5,7 +5,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
-#ifdef USE_FBGEMM
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 
@@ -420,7 +420,6 @@ inline bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
-#ifdef USE_FBGEMM
 // When qengine is x86, use this util func to check if onednn kernel
 // is preferred than fbgemm's to get better performance.
 inline bool should_use_onednn_quant(
@@ -434,6 +433,9 @@ inline bool should_use_onednn_quant(
   // TODO Support more OSs.
 #if !defined(__linux__)
   return false;
+#elif defined(__s390x__) || defined(__powerpc__)
+  // Return true since these platforms do not support FBGEMM
+  return true;
 #else
   bool vnni_available = cpuinfo_has_x86_avx512vnni();
   bool w_sym_quant =
@@ -443,7 +445,6 @@ inline bool should_use_onednn_quant(
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
 #endif
 }
-#endif
 
 } // onednn_utils
 
