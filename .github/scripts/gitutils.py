@@ -18,9 +18,12 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 
 T = TypeVar("T")
+P = ParamSpec("P")
+F = Callable[P, T]
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
 
@@ -432,12 +435,10 @@ def are_ghstack_branches_in_sync(
     return orig_diff_sha == head_diff_sha
 
 
-def retries_decorator(
-    rc: Any = None, num_retries: int = 3
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    def decorator(f: Callable[..., T]) -> Callable[..., T]:
+def retries_decorator(rc: Any = None, num_retries: int = 3) -> Callable[[F], F]:
+    def decorator(f: F) -> F:
         @wraps(f)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             for idx in range(num_retries):
                 try:
                     return f(*args, **kwargs)
