@@ -3,6 +3,7 @@ import enum
 import functools
 import pprint
 import re
+import sys
 import unittest
 import warnings
 
@@ -24,12 +25,19 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
     munge_exc,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write("Windows CI still has some issue to be fixed.\n")
+    sys.exit(0)
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")

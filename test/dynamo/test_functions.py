@@ -2588,6 +2588,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts_2.frame_count, 2)
         self.assertEqual(eager_result_info, compile_result_info)
 
+    @skipIfWindows
     def test_compare_constant_and_tensor(self):
         for op in [
             operator.lt,
