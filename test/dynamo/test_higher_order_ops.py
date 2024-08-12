@@ -22,8 +22,8 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
-from torch._higher_order_ops.wrap import wrap
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_utils import (
     munge_exc,
     TEST_WITH_TORCHDYNAMO,
@@ -2512,17 +2512,17 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         def fn_with_hints(x, y):
             x = x + y
 
-            def inner_body_fn(x, y, hints):
+            def inner_body_fn(x, y):
                 x = torch.relu(x)
                 x = x + y
                 return x
 
-            def outer_body_fn(x, y, hints):
-                x = hints_wrapper(inner_body_fn, x, y, hints={"inner_body": True})
+            def outer_body_fn(x, y):
+                x = hints_wrapper(inner_body_fn, (x, y), {}, hints={"inner_body": True})
                 x = torch.abs(x)
                 return x
 
-            res = hints_wrapper(outer_body_fn, x, y, hints={"outer_body": True})
+            res = hints_wrapper(outer_body_fn, (x, y), {}, hints={"outer_body": True})
             return res
 
         backend = EagerAndRecordGraphs()
@@ -2531,13 +2531,16 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
+        aot_eager_res = torch.compile(fn_with_hints, backend="aot_eager")(x, y)
         compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
         ref_res = ref_fn(x, y)
         self.assertEqual(compiled_res, ref_res)
+        self.assertEqual(aot_eager_res, ref_res)
         self.assertEqual(len(cnt.graphs), 1)
         graph = backend.graphs[0]
-        self.assertExpectedInline(normalize_gm(graph.print_readable(print_output=False)),
-"""\
+        self.assertExpectedInline(
+            normalize_gm(graph.print_readable(print_output=False)),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 4]", L_y_: "f32[4]"):
         l_x_ = L_x_
@@ -2545,27 +2548,28 @@ class GraphModule(torch.nn.Module):
 
         x: "f32[2, 4]" = l_x_ + l_y_;  l_x_ = None
 
-        wrap_body_1 = self.wrap_body_1
-        hints_wrapper = torch.ops.higher_order.hints_wrapper(wrap_body_1, x, l_y_, hints = {'outer_body': True});  wrap_body_1 = x = l_y_ = None
+        hints_wrapper_body_1 = self.hints_wrapper_body_1
+        hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
         res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
         return (res,)
 
-    class GraphModule(torch.nn.Module):
+    class hints_wrapper_body_1(torch.nn.Module):
         def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
-            wrap_body_0 = self.wrap_body_0
-            hints_wrapper = torch.ops.higher_order.hints_wrapper(wrap_body_0, x, l_y_, hints = {'inner_body': True});  wrap_body_0 = x = l_y_ = None
-            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            hints_wrapper_body_0 = self.hints_wrapper_body_0
+            hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
+            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
 
-            abs_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
-            return (abs_1,)
+            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
+            return (x_2,)
 
-        class GraphModule(torch.nn.Module):
+        class hints_wrapper_body_0(torch.nn.Module):
             def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
-                relu: "f32[2, 4]" = torch.relu(x);  x = None
+                x_1: "f32[2, 4]" = torch.relu(x);  x = None
 
-                add: "f32[2, 4]" = relu + l_y_;  relu = l_y_ = None
-                return (add,)
-""")
+                x_2: "f32[2, 4]" = x_1 + l_y_;  x_1 = l_y_ = None
+                return (x_2,)
+""",
+        )
 
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
