@@ -1138,7 +1138,7 @@ def main():
         "filelock",
         "typing-extensions>=4.8.0",
         'sympy==1.12.1 ; python_version == "3.8"',
-        'sympy>=1.13.0 ; python_version >= "3.9"',
+        'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
         "fsspec",
