@@ -3652,9 +3652,9 @@ class CppKernelProxy(CppKernel):
             )
             assert len(tiling_factors) == len(tiling_indices)
             # <TODO> This should be removed after full support for vectorization is implemented.
+            could_vec = True
+            could_masked_vec = True
             if tiling_factors and tiling_indices:
-                could_vec = True
-                could_masked_vec = True
                 tiling_factor = tiling_factors[0]
                 assert all(
                     _tiling_factor == tiling_factor for _tiling_factor in tiling_factors
