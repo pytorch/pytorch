@@ -5,7 +5,7 @@
 #endif
 
 #if AT_ONEDNN_ENABLED()
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #endif
 #include <ATen/native/verbose_wrapper.h>
 

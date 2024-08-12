@@ -187,7 +187,7 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_mkldnn_cpp",
+    name = "aten_native_onednn_cpp",
     srcs = glob(["aten/src/ATen/native/onednn/*.cpp"]),
 )
 
@@ -345,7 +345,7 @@ cc_library(
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
-        ":aten_native_mkldnn_cpp",
+        ":aten_native_onednn_cpp",
         ":aten_native_nested_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
