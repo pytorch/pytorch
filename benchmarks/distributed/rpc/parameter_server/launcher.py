@@ -169,7 +169,7 @@ def call_trainers(args, extra_args, train_data, server_rrefs):
         server_rrefs (dict): a dictionary containing server RRefs
     """
     futs = []
-    for trainer_rank in range(0, args.ntrainer + args.ncudatrainer):
+    for trainer_rank in range(args.ntrainer + args.ncudatrainer):
         trainer_name = get_name(trainer_rank, args)
         server_rref = None
         if server_rrefs:

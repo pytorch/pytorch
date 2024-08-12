@@ -76,7 +76,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         )
 
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
-    for i in range(0, uf):
+    for i in range(uf):
         j = 8 * i
         code.append("      __m256 vop" + str(j) + " = _mm256_setzero_ps();")
 
@@ -164,7 +164,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         "&input[idx_pref_T0 * fused_block_size];".format(InType)
     )
 
-    for i in range(0, uf):
+    for i in range(uf):
         j = 8 * i
         cachelinesize = 64
         byteoffset = sizeof[InType] * j
@@ -176,7 +176,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         code.append("      if (!normalize_by_lengths || length == 0) {")
     else:
         code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
-    for i in range(0, uf):
+    for i in range(uf):
         j = 8 * i
         code.append("        _mm256_storeu_ps(&op[" + str(j) + "], vop" + str(j) + ");")
     code.append("      } else {")
@@ -185,7 +185,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);")
     else:
         code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
-    for i in range(0, uf):
+    for i in range(uf):
         j = 8 * i
         code.append(
             "        _mm256_storeu_ps(&op["
