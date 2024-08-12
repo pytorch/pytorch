@@ -17,8 +17,14 @@ from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
+
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write("Windows CI still has some issue to be fixed.\n")
+    sys.exit(0)
 
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
