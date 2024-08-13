@@ -158,6 +158,7 @@ from user code:
     test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
+    @skipIfWindows
     @make_logging_test()
     def test_inductor_error(self, records):
         exitstack = contextlib.ExitStack()
@@ -284,6 +285,7 @@ LoweringException: AssertionError:
                 )
 
     @make_logging_test(graph_breaks=True)
+    @skipIfWindows
     def test_graph_breaks(self, records):
         @torch._dynamo.optimize("inductor")
         def fn(x):
@@ -310,6 +312,7 @@ LoweringException: AssertionError:
         )
 
     @make_logging_test(dynamo=logging.INFO)
+    @skipIfWindows
     def test_custom_format_exc(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)
         try:
@@ -329,6 +332,7 @@ LoweringException: AssertionError:
         self.assertIn("Traceback", handler.format(records[1]))
         self.assertIn("Stack", handler.format(records[2]))
 
+    @skipIfWindows
     @make_logging_test(dynamo=logging.INFO)
     def test_custom_format(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)
@@ -348,6 +352,7 @@ LoweringException: AssertionError:
         self.assertEqual("custom format", handler.format(records[1]))
 
     @make_logging_test(dynamo=logging.INFO)
+    @skipIfWindows
     def test_multiline_format(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)
         dynamo_log.info("test\ndynamo")
@@ -424,6 +429,7 @@ LoweringException: AssertionError:
         self.assertTrue(found_x4)
 
     @make_logging_test(trace_source=True)
+    @skipIfWindows
     def test_trace_source_cond(self, records):
         from functorch.experimental.control_flow import cond
 
@@ -483,6 +489,7 @@ LoweringException: AssertionError:
             torch._logging.set_logs(aot_graphs=5)
 
     @requires_distributed()
+    @skipIfWindows
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
@@ -667,6 +674,7 @@ print("arf")
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    @skipIfWindows
     def test_logs_out(self):
         import tempfile
 

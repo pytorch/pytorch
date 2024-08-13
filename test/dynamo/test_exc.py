@@ -87,6 +87,7 @@ from user code:
 ==========""",
         )
 
+    @skipIfWindows
     @make_logging_test()
     def test_not_implemented_error(self, records):
         def fn001(x):

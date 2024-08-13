@@ -3822,6 +3822,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
+    @skipIfWindows  # debug compile
     def test_randint_out_dynamic(self):
         def randint_fn(high, size, out):
             return torch.randint(high, size, out=out)
