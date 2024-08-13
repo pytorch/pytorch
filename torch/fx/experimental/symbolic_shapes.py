@@ -2541,9 +2541,11 @@ class ShapeEnv:
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.lazy_replacements: Dict[sympy.Symbol, sympy.Expr] = {}
         self.unbacked_renamings: Dict[sympy.Symbol, sympy.Symbol] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
+
         # Set that holds "size-like" symbols.  When we perform
         # "size-oblivious" tests, these can be assumed to be >= 2.
         self.size_like: Set[sympy.Symbol] = set()
@@ -4540,6 +4542,9 @@ class ShapeEnv:
         else:
             var_ranges = dict(var_to_range)
 
+        if not unbacked_only:
+            expr = expr.xreplace(self.lazy_replacements)
+
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -4994,9 +4999,6 @@ class ShapeEnv:
         free = list(expr.free_symbols)
 
         assert len(free) > 0, f"The expression should not be static by this point: {expr}"
-        # In case of really gnarly expression, we don't blow up
-        if len(free) > 5:
-            return
 
         # Prioritize unbacked symints for solving by ordering them last.
         # Prefer to simplify out lexicographically higher symbols (i.e. simplify out s4 over s3).
@@ -5044,29 +5046,37 @@ class ShapeEnv:
                 # dependencies for substitutions, so ban it entirely.
                 def trivial_solve(lhs, rhs):
                     if isinstance(lhs, sympy.Symbol):
-                        if free_unbacked_symbols(lhs) and not free_unbacked_symbols(rhs):
-                            return True
-                        if symbol_is_type(lhs, SymT.FLOAT):
-                            return True
+                        rhs = self._find(rhs)
+                        ok = len(free_unbacked_symbols(rhs)) == 0
+                        if ok:
+                            self._set_replacement(lhs, rhs, "trivial_lhs")
+                        else:
+                            self.lazy_replacements[lhs] = rhs
+                        return True
                         # TODO: Maybe trivial solutions for int should also be
                         # done?
                     return False
 
                 # short-circuit when no solving is needed
                 if trivial_solve(lhs, rhs):
-                    self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
+                    pass
                 elif trivial_solve(rhs, lhs):
-                    self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
-                else:
+                    pass
+                elif len(free) < 5:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                         new_var = self._find(r[1])
                         ok = len(free_unbacked_symbols(new_var)) == 0
+                        s0 = cast(sympy.Symbol, free[0])
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, "solve")
+                            self.log.debug("solve %s %s", s0, new_var)
+                            self._set_replacement(s0, new_var, "solve")
+                        else:
+                            self.log.info("lazy_replacements %s = %s", s0, new_var)
+                            self.lazy_replacements[s0] = new_var
             except NotImplementedError:
                 pass
-        if expr.has(Mod):
+        if expr.has(Mod) and len(free) < 5:
             mod_expr = next(iter(expr.atoms(Mod)))
             try:
                 r = try_solve(expr, mod_expr, floordiv_inequality=False)

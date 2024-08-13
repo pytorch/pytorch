@@ -618,6 +618,21 @@ def forward(self, x_1):
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
+    def test_unbacked_sum_relation(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        u2 = shape_env.create_unbacked_symint()
+        usum = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        torch._check_is_size(u1)
+        torch._check_is_size(u2)
+        expect_true(u0 + u1 + u2 == usum)
+        self.assertTrue(statically_known_true(u0 <= usum))
+        self.assertTrue(statically_known_true(u0 + u1 <= usum))
+        self.assertTrue(statically_known_true(u0 + u1 + u2 <= usum))
+        self.assertTrue(statically_known_true(u1 + u2 <= usum))
+
     def test_data_dependent_guard_propagate_real_tensors(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
