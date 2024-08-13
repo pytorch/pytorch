@@ -59,10 +59,14 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
-    const XPUStream stream(s);
     const auto old_stream = getCurrentXPUStream(s.device().index());
-    setCurrentXPUStream(stream);
+    setStream(s);
     return old_stream.unwrap();
+  }
+
+  void setStream(Stream s) const override {
+    const XPUStream stream(s);
+    setCurrentXPUStream(stream);
   }
 
   DeviceIndex deviceCount() const noexcept override {
@@ -161,6 +165,14 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
           c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
     }
     xpu_event->wait_and_throw();
+  }
+
+  void syncStreamsOnDevice(const c10::DeviceIndex device_index) const override {
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+    }
+    c10::xpu::syncStreamsOnDevice(device_index);
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
