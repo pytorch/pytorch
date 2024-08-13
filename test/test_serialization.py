@@ -387,7 +387,7 @@ class SerializationMixin:
                 with self.assertRaisesRegex(
                         RuntimeError,
                         "size is inconsistent with indices"):
-                    y = torch.load(f)
+                    y = torch.load(f, weights_only=weights_only)
 
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
