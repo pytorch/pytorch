@@ -9,8 +9,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -338,5 +337,4 @@ void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After LowerSimpleTuples: ", graph);
   EliminateDeadCode(graph);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

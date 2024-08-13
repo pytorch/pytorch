@@ -1,9 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
+
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
@@ -12,6 +13,7 @@ from .optimizer import (
     ParamsT,
     TensorListList,
 )
+
 
 __all__ = ["Adafactor", "adafactor"]
 
@@ -409,17 +411,19 @@ def _single_tensor_adafactor(
 
 def _group_tensors_by_device_dtype_and_is_multidim(
     tensorlists: TensorListList,
-) -> Dict[Tuple[torch.device, torch.dtype, bool], List[List[Optional[Tensor]]]]:
+) -> Dict[
+    Tuple[Optional[torch.device], Optional[torch.dtype], bool],
+    List[List[Optional[Tensor]]],
+]:
     """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
     has multiple dims or just one dim (is a vector). This allows the foreach impl of
     Adafactor to assume that every group of params will either be factored or not."""
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(tensorlists)
     ultra_grouped_tensors: Dict[
-        Tuple[torch.device, torch.dtype, bool], List[List[Optional[Tensor]]]
+        Tuple[Optional[torch.device], Optional[torch.dtype], bool],
+        List[List[Optional[Tensor]]],
     ] = {}
     for (device, dtype), (tensorlists, _) in grouped_tensors.items():
-        assert device, f"device should not be None, but is {device}"
-        assert dtype, f"dtype should not be None, but is {dtype}"
         matrix_key = (device, dtype, True)
         vector_key = (device, dtype, False)
 
@@ -474,22 +478,28 @@ def _multi_tensor_adafactor(
     )
     for (_, dtype, is_multidim), (
         (
-            device_params,
-            device_grads,
-            device_row_vars,
-            device_col_vars,
-            device_variances,
-            device_state_steps,
+            device_params_,
+            device_grads_,
+            device_row_vars_,
+            device_col_vars_,
+            device_variances_,
+            device_state_steps_,
         )
     ) in grouped_tensors.items():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
         if eps1 is None:
+            assert (
+                dtype is not None
+            ), "dtype is needed to compute eps1 when eps1 is unset"
             eps1 = torch.finfo(dtype).eps
 
         if TYPE_CHECKING:
             assert device_state_steps[0] is not None
 
         if maximize:
-            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment,arg-type]
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
@@ -497,29 +507,31 @@ def _multi_tensor_adafactor(
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
-                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0  # type: ignore[arg-type]
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
         else:
-            torch._foreach_add_(device_state_steps, 1)  # type: ignore[arg-type]
+            torch._foreach_add_(device_state_steps, 1)
 
         one_minus_beta2_ts = []
         beta2_ts = []
         rho_ts = []
         for s in device_state_steps:
-            one_minus_beta2_ts.append(s.item() ** beta2_decay)  # type: ignore[union-attr]
-            beta2_ts.append(1 - s.item() ** beta2_decay)  # type: ignore[union-attr]
-            rho_ts.append(min(lr, 1 / (s.item() ** 0.5)))  # type: ignore[union-attr]
+            one_minus_beta2_ts.append(s.item() ** beta2_decay)
+            beta2_ts.append(1 - s.item() ** beta2_decay)
+            rho_ts.append(min(lr, 1 / (s.item() ** 0.5)))
 
         alphas = [
-            max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r  # type: ignore[union-attr]
+            max(eps2, p.norm(2).item() / (p.numel() ** 0.5)) * r
             for p, r in zip(device_params, rho_ts)
         ]
 
         # Perform stepweight decay
         if weight_decay != 0:
-            torch._foreach_mul_(device_params, 1 - lr * weight_decay)  # type: ignore[arg-type]
+            torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
         if is_multidim:
+            device_row_vars = cast(List[Tensor], device_row_vars_)
+            device_col_vars = cast(List[Tensor], device_col_vars_)
             assert (
                 device_row_vars[0] is not None and device_col_vars[0] is not None
             ), "row_var and col_var should be defined when grad is multidimensional"
@@ -528,10 +540,10 @@ def _multi_tensor_adafactor(
                 torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
             ]
             torch._foreach_mul_(row_means, row_means)
-            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])  # type: ignore[union-attr]
-            torch._foreach_mul_(device_row_vars, beta2_ts)  # type: ignore[arg-type]
+            torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
+            torch._foreach_mul_(device_row_vars, beta2_ts)
             torch._foreach_mul_(row_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_row_vars, row_means)  # type: ignore[arg-type]
+            torch._foreach_add_(device_row_vars, row_means)
             del row_means
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
@@ -539,41 +551,42 @@ def _multi_tensor_adafactor(
                 torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
             ]
             torch._foreach_mul_(col_means, col_means)
-            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])  # type: ignore[union-attr]
-            torch._foreach_mul_(device_col_vars, beta2_ts)  # type: ignore[arg-type]
+            torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
+            torch._foreach_mul_(device_col_vars, beta2_ts)
             torch._foreach_mul_(col_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_col_vars, col_means)  # type: ignore[arg-type]
+            torch._foreach_add_(device_col_vars, col_means)
             del col_means
 
             var_estimates = [
-                row_var @ col_var  # type: ignore[operator]
+                row_var @ col_var
                 for row_var, col_var in zip(device_row_vars, device_col_vars)
             ]
             row_var_means = [
-                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars  # type: ignore[union-attr]
+                row_var.mean(dim=-2, keepdim=True) for row_var in device_row_vars
             ]
             torch._foreach_clamp_min_(row_var_means, eps1)
             torch._foreach_div_(var_estimates, row_var_means)
             del row_var_means
         else:
+            device_variances = cast(List[Tensor], device_variances_)
             assert (
                 device_variances[0] is not None
             ), "variance should be defined when grad is a vector"
 
-            grads_squared = torch._foreach_mul(device_grads, device_grads)  # type: ignore[arg-type]
-            torch._foreach_mul_(device_variances, beta2_ts)  # type: ignore[arg-type]
+            grads_squared = torch._foreach_mul(device_grads, device_grads)
+            torch._foreach_mul_(device_variances, beta2_ts)
             torch._foreach_mul_(grads_squared, one_minus_beta2_ts)
-            torch._foreach_add_(device_variances, grads_squared)  # type: ignore[arg-type]
+            torch._foreach_add_(device_variances, grads_squared)
             del grads_squared
 
             # avoid writing into variance during update
-            var_estimates = [v.clone() for v in device_variances]  # type: ignore[union-attr]
+            var_estimates = [v.clone() for v in device_variances]
 
         # square the eps1 as we sqrt after to keep eps1's magnitude
         torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
         torch._foreach_sqrt_(var_estimates)
         torch._foreach_reciprocal_(var_estimates)
-        torch._foreach_mul_(var_estimates, device_grads)  # type: ignore[arg-type]
+        torch._foreach_mul_(var_estimates, device_grads)
         updates = var_estimates
 
         alphas = [
@@ -581,7 +594,7 @@ def _multi_tensor_adafactor(
             for a, update in zip(alphas, updates)
         ]
         torch._foreach_mul_(updates, alphas)
-        torch._foreach_add_(device_params, updates)  # type: ignore[arg-type]
+        torch._foreach_add_(device_params, updates)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adafactor)

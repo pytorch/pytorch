@@ -595,11 +595,11 @@ class TestOptimRenewed(TestCase):
                 # we break apart a tensor into its real and imaginary parts, which would be 2x(M,N).
                 # For other pointwise optimizers, this distinction is trivial, but for LBFGS where
                 # there are reductions across all parameters (and all the grads get flattened into
-                # one long Tensor), this ordering matters. Why? Reductions (like sum) are NOT
-                # commutative, i.e., a + b + c != a + c + b in computers. Thus, we add a seed here
-                # to control the discrepancy that will happen with LBFGS. Note that in test_complex
-                # above, there is no need for a seed nor for increased tolerance, because results
-                # should be bitwise equivalent.
+                # one long Tensor), this ordering matters. Why? Reductions are not deterministic
+                # because addition between floating point numbers is not associative, i.e.,
+                # a + b + c != a + c + b. Thus, we add a seed here to control the discrepancy that
+                # will happen with LBFGS. Note that in test_complex above, there is no need for a seed
+                # nor for increased tolerance, because results should be bitwise equivalent.
                 torch.manual_seed(2024)
 
             a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
@@ -1099,14 +1099,7 @@ class TestOptimRenewed(TestCase):
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
         optim_cls = optim_info.optim_cls
         opt_name = optim_cls.__name__
-        if (
-            opt_name
-            in (
-                "SGD",
-                "Adagrad",
-            )
-            and impl == "capturable"
-        ):
+        if opt_name in ("SGD", "Adagrad") and impl == "capturable":
             # Capturable SGD/Adagrad does not exist
             self.skipTest("SGD does not currently support capturable")
         if _get_device_type(device) == "cpu":
