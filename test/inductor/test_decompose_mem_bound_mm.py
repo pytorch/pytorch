@@ -336,8 +336,12 @@ class TestDecomposeMemMM(TestCase):
 
         out, code = run_and_get_code(foo, input1, input2)
 
-        # two kernels generated
-        FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
+        if GPU_TYPE == "xpu":
+            # only 1 kernel generated on the XPU stack
+            FileCheck().check_count(".run(", 1, exactly=True).run(code[0])
+        else:
+            # two kernels generated
+            FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
 
 
 if __name__ == "__main__":
