@@ -278,6 +278,8 @@ def do_auto_functionalize(
     all_aliased_addresses = set()
 
     for arg in mutable_args_names:
+        if normalized_kwargs[arg] is None: 
+            continue 
         ls = list(storage_to_aliases[normalized_kwargs[arg]._typed_storage()._cdata])
 
         # remove self from aliases.
@@ -290,6 +292,8 @@ def do_auto_functionalize(
 
     # take the union of all the aliased items.
     for arg in mutable_args_names:
+        if normalized_kwargs[arg] is None: 
+            continue 
         all_aliased_addresses.discard(normalized_kwargs[arg]._cdata)
 
     all_aliased_original = [tensors_look_up[item] for item in all_aliased_addresses]
