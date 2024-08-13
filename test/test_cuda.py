@@ -4997,7 +4997,7 @@ class TestMemPool(TestCase):
         extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return (void*)123; }
-          C10_EXPORT void dummy_free(void* ptr) { }
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -5036,6 +5036,10 @@ class TestMemPool(TestCase):
         # pool's use count should now be 0, since release() calls releasePool
         # twice based on the use_count()
         self.assertEqual(pool.use_count(), 0)
+
+        # pool should have 2 segments since we made two allocations above in
+        # in the same pool
+        self.assertEqual(len(pool.snapshot()), 2)
 
 
     def test_mempool_context(self):
