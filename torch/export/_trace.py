@@ -37,7 +37,11 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes, _get_shape_env_from_gm
+from torch._export.utils import (
+    _get_shape_env_from_gm,
+    placeholder_naming_pass,
+    placeholder_prefixes,
+)
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (

@@ -11,10 +11,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TYPE_CHECKI
 import torch
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor
+
+
 if TYPE_CHECKING:
+    from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
-    from torch._export.passes.lift_constants_pass import ConstantAttrMap
+
 from torch.export.graph_signature import InputKind, OutputKind
 from torch.utils._pytree import (
     _register_pytree_node,
@@ -42,11 +45,12 @@ placeholder_prefixes = {
 }
 
 
-def _collect_constant_attrs(graph_signature, constants, mod) -> 'ConstantAttrMap':
+def _collect_constant_attrs(graph_signature, constants, mod) -> "ConstantAttrMap":
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
     # and overwrite the new graph signature using the previous program.
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
+
     constant_attrs = ConstantAttrMap()
     non_persistent_buffers = {
         spec.target
@@ -294,7 +298,7 @@ def register_dataclass_as_pytree_node(
     )
 
 
-def is_param(program: 'ExportedProgram', node: torch.fx.Node) -> bool:
+def is_param(program: "ExportedProgram", node: torch.fx.Node) -> bool:
     """
     Checks if the given node is a parameter within the exported program
     """
@@ -303,7 +307,7 @@ def is_param(program: 'ExportedProgram', node: torch.fx.Node) -> bool:
 
 
 def get_param(
-    program: 'ExportedProgram',
+    program: "ExportedProgram",
     node: torch.fx.Node,
 ) -> Optional[torch.nn.Parameter]:
     """
@@ -318,7 +322,7 @@ def get_param(
     return None
 
 
-def is_buffer(program: 'ExportedProgram', node: torch.fx.Node) -> bool:
+def is_buffer(program: "ExportedProgram", node: torch.fx.Node) -> bool:
     """
     Checks if the given node is a buffer within the exported program
     """
@@ -327,7 +331,7 @@ def is_buffer(program: 'ExportedProgram', node: torch.fx.Node) -> bool:
 
 
 def get_buffer(
-    program: 'ExportedProgram',
+    program: "ExportedProgram",
     node: torch.fx.Node,
 ) -> Optional[torch.Tensor]:
     """
@@ -346,7 +350,7 @@ def get_buffer(
 
 
 def is_lifted_tensor_constant(
-    program: 'ExportedProgram',
+    program: "ExportedProgram",
     node: torch.fx.Node,
 ) -> bool:
     """
@@ -357,7 +361,7 @@ def is_lifted_tensor_constant(
 
 
 def get_lifted_tensor_constant(
-    program: 'ExportedProgram',
+    program: "ExportedProgram",
     node: torch.fx.Node,
 ) -> Optional[torch.Tensor]:
     """
@@ -596,7 +600,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
 
 def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
-    export_graph_signature: 'ExportGraphSignature',
+    export_graph_signature: "ExportGraphSignature",
     mod: torch.nn.Module,
     fake_args,
     fake_kwargs,

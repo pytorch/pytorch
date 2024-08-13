@@ -1,4 +1,3 @@
-
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
@@ -39,12 +38,18 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch._export.utils import _get_shape_env_from_gm, _detect_fake_mode_from_gm, _collect_constant_attrs
+from torch._export.utils import (
+    _collect_constant_attrs,
+    _detect_fake_mode_from_gm,
+    _get_shape_env_from_gm,
+)
 from torch._export.verifier import Verifier
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.export._remove_unneccessary_copy_op_pass import (
+    _remove_unneccessary_copy_op_pass,
+)
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
-from torch.export._remove_unneccessary_copy_op_pass import _remove_unneccessary_copy_op_pass
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -318,9 +323,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if arg.op == "get_attr":
                     for entry in torch.fx.proxy._COPY_META_FIELDS:
                         if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[
-                                entry
-                            ]
+                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
         _preserve_ops,
