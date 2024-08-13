@@ -312,8 +312,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
-        import pdb
-        pdb.set_trace()
         model, example_inputs = benchmark.get_module()
         if model_name in [
             "basic_gnn_edgecnn",
@@ -362,8 +360,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
         self.validate_model(model, example_inputs)
-        # import pdb
-        # pdb.set_trace()
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
