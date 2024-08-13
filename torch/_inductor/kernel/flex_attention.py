@@ -2,6 +2,7 @@
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
+import math
 from typing import Any, List, Tuple
 
 import sympy
@@ -1232,6 +1233,7 @@ def flex_attention_backward(*args, **kwargs):
         out,
         logsumexp,
         grad_out,
+        grad_logsumexp,
         fw_graph,
         joint_graph,
         block_mask,
@@ -1319,8 +1321,10 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     # Create delta which will is needed for the bwd's kernel
+    grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
     mul_delta = lowerings[aten.mul](out, grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
+    delta = lowerings[aten.sub](delta, grad_lse_exp2)
     delta = ExternKernel.require_contiguous(delta)
 
     # see NOTE:[TritonTemplates with multiple outputs]

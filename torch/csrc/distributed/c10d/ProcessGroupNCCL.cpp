@@ -1327,7 +1327,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               << logPrefix()
               << "Failed to get exception dump flag from the global store."
               << e.what();
-          break;
+          // We give up for now assuming TCPStore has been torn down.
+          return;
         }
 
         if (checkExceptionDump) {
