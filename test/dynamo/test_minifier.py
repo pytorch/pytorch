@@ -3,7 +3,7 @@ import unittest
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import skipIfNNModuleInlined
+from torch.testing._internal.common_utils import skipIfNNModuleInlined, skipIfWindows
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
@@ -26,16 +26,19 @@ inner(torch.randn(20, 20).to("{device}"))
 """
         self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
 
+    @skipIfWindows
     def test_after_dynamo_cpu_compile_error(self):
         self._test_after_dynamo(
             "cpu", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_cpu_runtime_error(self):
         self._test_after_dynamo(
             "cpu", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_cpu_accuracy_error(self):
         self._test_after_dynamo(
             "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
@@ -59,6 +62,7 @@ inner(torch.randn(20, 20).to("{device}"))
             "cuda", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_non_leaf_compile_error(self):
         run_code = """\
 @torch._dynamo.optimize("non_leaf_compile_error_TESTING_ONLY")
@@ -183,6 +187,7 @@ class Repro(torch.nn.Module):
         )
 
     # Test if we can actually get a minified graph
+    @skipIfWindows
     def test_if_graph_minified(self):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
