@@ -377,11 +377,12 @@ class SerializationMixin:
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
-            f.seek(0)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "size is inconsistent with indices"):
-                y = torch.load(f)
+            for weights_only in (False, True):
+                f.seek(0)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "size is inconsistent with indices"):
+                    y = torch.load(f)
 
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
