@@ -47,11 +47,14 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import onlyCPU, onlyCUDA
 from torch.testing._internal.common_utils import (
     find_library_location,
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    parametrize,
     run_tests,
+    skipIfWindows,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -181,6 +184,7 @@ def is_training_ir_test(test_name):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
+    @skipIfWindows
     def test_export_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -228,6 +232,7 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfWindows
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -247,6 +252,7 @@ class TestDynamismExpression(TestCase):
         ):
             ep.module()(torch.tensor([3]))
 
+    @skipIfWindows
     def test_export_assume_static_by_default(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):
