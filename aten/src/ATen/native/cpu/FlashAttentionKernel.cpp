@@ -725,8 +725,12 @@ cpu_flash_attention(
   at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
         int64_t i = 0, j = 0, l = 0, n = 0;
         at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
-        scalar_t transpose_buffer[eheadSize * packb_size];
-        scalar_t v_copy_buffer[ekvSplitSize * packb_size];
+        std::unique_ptr<unsigned short[]> transpose_buffer =
+            std::make_unique<unsigned short[]>(eheadSize * packb_size);
+        scalar_t* transpose_buffer_ptr = reinterpret_cast<scalar_t*>(transpose_buffer.get());
+        std::unique_ptr<unsigned short[]> v_copy_buffer =
+            std::make_unique<unsigned short[]>(ekvSplitSize * packb_size);
+        scalar_t* v_copy_buffer_ptr = reinterpret_cast<scalar_t*>(v_copy_buffer.get());
         for (const auto z : c10::irange(begin, end)) {
           (void)z; // Suppress unused variable
           n = l * kvSplitSize;
@@ -748,12 +752,12 @@ cpu_flash_attention(
                       k_data + i * kStrideB + j * kStrideH + n * kStrideN +
                       b * kStrideN),
                   /* ld_src */ kStrideN,
-                  /* dst */ reinterpret_cast<uint16_t*>(transpose_buffer),
+                  /* dst */ reinterpret_cast<uint16_t*>(transpose_buffer_ptr),
                   /* ld_dst */ packb_size);
               // padding [headSize, x] -> [eheadSize, x]
               if (!headSize_even) {
                 pad_remain_row_col_zero<scalar_t>(
-                    transpose_buffer,
+                    transpose_buffer_ptr,
                     headSize,
                     kvBlockSize - b,
                     eheadSize,
@@ -768,7 +772,7 @@ cpu_flash_attention(
                   /* ld_out */ packb_size,
                   /* dt_in */ lowp_dt,
                   /* dt_out */ lowp_dt,
-                  reinterpret_cast<const void*>(transpose_buffer),
+                  reinterpret_cast<const void*>(transpose_buffer_ptr),
                   key_reorder_ptr + i * num_head * eheadSize * rkvSize +
                       j * eheadSize * rkvSize + n * eheadSize + b * eheadSize);
             }
@@ -794,7 +798,7 @@ cpu_flash_attention(
               // TODO: remove the copy when pack supports input_ld >= N
               copy_value_with_pad<scalar_t>(
                   v_data + i * vStrideB + j * vStrideH + n * vStrideN + b,
-                  v_copy_buffer,
+                  v_copy_buffer_ptr,
                   kvBlockSize,
                   (headSize - b < packb_size) ? headSize - b : packb_size,
                   ekvBlockSize,
@@ -807,7 +811,7 @@ cpu_flash_attention(
                   packb_size,
                   lowp_dt,
                   lowp_dt,
-                  reinterpret_cast<const void*>(v_copy_buffer),
+                  reinterpret_cast<const void*>(v_copy_buffer_ptr),
                   value_reorder_ptr +
                       i * num_head * kv_padding_size * rHeadSize +
                       j * kv_padding_size * rHeadSize + n * rHeadSize +
