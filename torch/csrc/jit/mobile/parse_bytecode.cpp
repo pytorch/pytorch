@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/custom_class_detail.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 OpCode parseOpCode(const char* str);
 using c10::IValue;
 
@@ -156,8 +155,8 @@ void parseInstructions(
         "There should be three parts in an instruction. The function name is ",
         function_name);
     OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
-    int X = ins_item[1].toInt();
-    int N = ins_item[2].toInt();
+    auto X = ins_item[1].toInt();
+    auto N = ins_item[2].toInt();
 
     if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
@@ -195,5 +194,4 @@ void parseRegisterSize(size_t rsize, mobile::Function* function) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

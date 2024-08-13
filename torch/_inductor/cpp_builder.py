@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -56,6 +57,7 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
 
@@ -116,9 +118,25 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
+@functools.lru_cache(None)
+def check_compiler_exist_windows(compiler: str) -> None:
+    """
+    Check if compiler is ready, in case end user not activate MSVC environment.
+    """
+    try:
+        output_msg = (
+            subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+
+
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc()
@@ -150,6 +168,24 @@ def _is_gcc(cpp_compiler: str) -> bool:
 
 
 @functools.lru_cache(None)
+def _is_msvc_cl(cpp_compiler: str) -> bool:
+    if not _IS_WINDOWS:
+        return False
+
+    try:
+        output_msg = (
+            subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+        return "Microsoft" in output_msg.splitlines()[0]
+    except FileNotFoundError as exc:
+        return False
+
+    return False
+
+
+@functools.lru_cache(None)
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
@@ -164,8 +200,12 @@ def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
+@functools.lru_cache(None)
+def is_msvc_cl() -> bool:
+    return _is_msvc_cl(get_cpp_compiler())
+
+
 def get_compiler_version_info(compiler: str) -> str:
-    SUBPROCESS_DECODE_ARGS = ("oem",) if _IS_WINDOWS else ()
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
     try:
@@ -222,7 +262,7 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def run_command_line(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
     cmd = shlex.split(cmd_line)
     try:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
@@ -242,6 +282,11 @@ def run_command_line(cmd_line: str, cwd: str) -> bytes:
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
     return status
+
+
+def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+    with dynamo_timed("compile_file"):
+        return _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -977,7 +1022,9 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
 
 
 def get_cpp_torch_cuda_options(
-    cuda: bool, aot_mode: bool = False
+    cuda: bool,
+    aot_mode: bool = False,
+    compile_only: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
     definations: List[str] = []
     include_dirs: List[str] = []
@@ -1033,7 +1080,7 @@ def get_cpp_torch_cuda_options(
         else:
             include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
-    if aot_mode and cuda and config.is_fbcode():
+    if aot_mode and cuda and config.is_fbcode() and not compile_only:
         if torch.version.hip is None:
             # TODO: make static link better on Linux.
             passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
@@ -1094,7 +1141,9 @@ class CppTorchCudaOptions(CppTorchOptions):
             cuda_libraries_dirs,
             cuda_libraries,
             cuda_passthough_args,
-        ) = get_cpp_torch_cuda_options(cuda=cuda, aot_mode=aot_mode)
+        ) = get_cpp_torch_cuda_options(
+            cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
+        )
 
         if compile_only:
             cuda_libraries_dirs = []
@@ -1323,7 +1372,7 @@ class CppBuilder:
 
         build_cmd = self.get_command_line()
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+        status = run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
