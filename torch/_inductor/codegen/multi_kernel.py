@@ -326,6 +326,7 @@ class MultiKernelCall:
             [wrap_fn(kernel) for kernel in self.kernels],
             rep=40,
             fast_flush=True,
+            ranking=True,
         )
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper

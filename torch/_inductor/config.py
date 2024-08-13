@@ -1178,6 +1178,13 @@ class benchmarking:
         local_version: Optional[int] = get_feature_local_version(
             "inductor_grouped_benchmarker"
         )
+    
+    class inductor_grouped_benchmarker_ranking:
+        env_val: Optional[str] = os.environ.get(
+            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER_RANKING"
+        )
+        oss_default: bool = False
+        local_version: Optional[int] = get_feature_local_version("inductor_grouped_benchmarker_ranking")
 
 
 _save_config_ignore = [
