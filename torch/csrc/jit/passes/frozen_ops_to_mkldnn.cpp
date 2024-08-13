@@ -37,8 +37,8 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
-#include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/Utils.h>
+#include <ATen/native/onednn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
 
