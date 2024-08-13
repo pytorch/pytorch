@@ -42,10 +42,6 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // no-op
     return Stream(Stream::DEFAULT, Device(DeviceType::Vulkan, -1));
   }
-  void setStream(Stream s) const override {
-    (void)s;
-    // no-op
-  }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
   }
