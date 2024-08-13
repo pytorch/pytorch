@@ -9,6 +9,7 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
+    "enable",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
