@@ -397,6 +397,14 @@
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
 
+- name: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
+  dispatch:
+    Default:
+      # the default case will use the CompositeImplicitAutograd
+      self: not_implemented("chunk")
+    AutogradNestedTensor:
+      self: chunk_backward_nested(grads, self, chunks, dim)
+
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
   L: cholesky_jvp(self_t, L, upper)
@@ -2834,7 +2842,10 @@
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
   self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
 
-# Transformers
+# Transformer
+- name:  _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  self: _softmax_backward_data(grad, result, dim, self.scalar_type())
+
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   output_differentiability: [True, False, False, False]
   query, key, value, attn_bias: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, attn_bias, output, log_sumexp, philox_seed, philox_offset, dropout_p, grad_input_mask, is_causal, scale)
