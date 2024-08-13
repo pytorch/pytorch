@@ -3548,7 +3548,7 @@ class TestMPS(TestCaseMPS):
     def test_slice_view_api(self, torch_type: torch.dtype):
 
         def helper(x_tensor, y_func, z_func, r_func=None):
-            x_mps = x_tensor.detach().clone.to("mps")
+            x_mps = x_tensor.detach().clone().to("mps")
 
             y = y_func(x_tensor)
             y_mps = y_func(x_mps)
