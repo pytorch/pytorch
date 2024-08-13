@@ -392,10 +392,6 @@ inline void {{kernel_name}}_kernel(
     Vectorized va;
     at::vec::VectorizedN<{{compute_t}}, COLS> vb;
     at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
-    {%- if input2_dtype == torch.int8 %}
-    // Load up to max_num_weight_registers registers of B at a time for int32 -> fp32 conversion.
-    constexpr int max_num_weight_registers = 64 / VLEN;
-    {%- endif %}
 
     auto loadc = [&](auto i) {
         if constexpr (accum) {
@@ -407,6 +403,22 @@ inline void {{kernel_name}}_kernel(
         }
     };
     c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+    auto loadb = [&, COLS, VLEN](int k) {
+        {{kernel.unroll_pragma(4)}}
+        for (int col = 0; col < COLS; col++) {
+            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
+            vb[col] = at::vec::convert<{{compute_t}}>(b);
+            {%- elif input2_dtype == torch.int8 %}
+            // Convert 16 int8 elements to int32, and then fp32
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
+            {%- else %}
+            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
+            {%- endif %}
+        }
+    };
 
     auto compute = [&, COLS](auto i, int k) {
         constexpr int row = i / COLS;
@@ -420,36 +432,12 @@ inline void {{kernel_name}}_kernel(
             {%- endif %}
         }
 
-        if constexpr (row == 0) {
-            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
-            vb[col] = at::vec::convert<{{compute_t}}>(b);
-            {%- elif input2_dtype == torch.int8 %}
-            if constexpr (col % max_num_weight_registers == 0) {
-                // Load up to 64 int8 elements from one or two cache-lines, as the address might not be 64-bytes-aligned.
-                // In practice, with the block-sizes in GemmConfigs that are currently being used, COLS will range from 1 to 3.
-                // So, we wouldn't be using too many registers, but we may want to change this if we increase BLOCK_N / VLEN.
-                // With COLS == 3, up to 24/48 bytes (int8 elements) would be read, depending upon vectorization ISA support.
-                // Convert them into VLEN FP32 elements each in up to max_num_weight_registers vector registers.
-                constexpr auto remaining = std::min<int>(max_num_weight_registers, COLS - col);
-                {{kernel.unroll_pragma(4)}}
-                for (int idx = 0; idx < remaining; idx++) {
-                    // Convert VLEN int8 elements to int32, and then fp32
-                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * VLEN);
-                    vb[col + idx] = at::vec::convert<float>(b32);
-                }
-            }
-            {%- else %}
-            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
-            {%- endif %}
-        }
-
         constexpr int idx = row * COLS + col;
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < K; ++k) {
+        loadb(k);
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
 
