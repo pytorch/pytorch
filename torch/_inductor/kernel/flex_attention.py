@@ -438,11 +438,8 @@ def fwd_compute_block_mn(
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     if is_last_block:
         # Applying mod to index for last block for non divisible seqlen.
-        m = offs_m[:, None] % Q_LEN
-        n = offs_n[None, :] % KV_LEN
-    else:
-        m = offs_m[:, None]
-        n = offs_n[None, :]
+        offs_m = offs_m % Q_LEN
+        offs_m = offs_n % KV_LEN
     # TODO: Add load mask in modification when M/N Boundary is not safe
     {{ modification(
         subgraph_number=0,
@@ -450,8 +447,8 @@ def fwd_compute_block_mn(
         score="qk",
         b="off_z",
         h="off_h",
-        m="m",
-        n="n",
+        m="offs_m",
+        n="offs_n",
         out="qk"
     ) | indent_except_first(1) }}
 
@@ -466,12 +463,12 @@ def fwd_compute_block_mn(
             score="qk",
             b="off_z",
             h="off_h",
-            m="m",
-            n="n",
+            m="offs_m",
+            n="offs_n",
         ) | indent_except_first(2) }}
 
         if is_last_block:
-            mask_mod_output = tl.where(offs_n[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, float("-inf"))
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
@@ -913,7 +910,7 @@ flex_attention_backward_template = TritonTemplate(
     off_hkv = off_hz % HKV # kv head idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
-    SPARSE_H = {{size("KV_NUM_BLKS", 1)}}
+    SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
 
@@ -941,8 +938,8 @@ flex_attention_backward_template = TritonTemplate(
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
         stride_kv_idx_m = {{stride("KV_IDX", 2)}}
 
-        sparse_idx_hq2 = off_hq2 % SM_HQ
-        sparse_hz_offset = sparse_idx_z * SM_HQ + sparse_idx_hq2
+        sparse_idx_hq2 = off_hq2 % SPARSE_HQ
+        sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq2
 
         sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + off_pid_mask
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
@@ -1057,8 +1054,8 @@ flex_attention_backward_template = TritonTemplate(
             LSE1 = LSE + off_chz1
             DELTA1 = DELTA + off_chz1
 
-            sparse_idx_hq1 = off_hq1 % SM_HQ
-            sparse_hz_offset = sparse_idx_z * SM_HQ + sparse_idx_hq1
+            sparse_idx_hq1 = off_hq1 % SPARSE_HQ
+            sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq1
 
             sparse_q_num_blks_offset = sparse_hz_offset * stride_q_num_blks_h + pid_mask
             sparse_q_idx_offset = sparse_hz_offset * stride_q_idx_h + pid_mask * stride_q_idx_n  # noqa: B950
@@ -1142,7 +1139,7 @@ def bwd_dq_inner(
             for start_n in range(0, hi - 1):
                 dq = bwd_dq_compute_block_mn(
                     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-                    off_z, off_h, offs_m2, offs_n2,
+                    off_z, off_hq, offs_m2, offs_n2,
                     stride_kn, stride_kd, stride_vn, stride_vd,
                     kv_indices, sparse_kv_num_blocks,
                     MATMUL_PRECISION, RCP_LN2,
@@ -1162,7 +1159,7 @@ def bwd_dq_inner(
 
             dq = bwd_dq_compute_block_mn(
                 dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-                off_z, off_h, offs_m2, offs_n2,
+                off_z, off_hq, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
@@ -1172,7 +1169,7 @@ def bwd_dq_inner(
         for start_n in range(0, hi):
             dq = bwd_dq_compute_block_mn(
                 dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-                off_z, off_h, offs_m2, offs_n2,
+                off_z, off_hq, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
@@ -1196,7 +1193,7 @@ def bwd_dq_inner(
 @triton.jit
 def bwd_dq_compute_block_mn(
     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
-    off_z, off_h, offs_m2, offs_n2,
+    off_z, off_hq, offs_m2, offs_n2,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
@@ -1221,7 +1218,7 @@ def bwd_dq_compute_block_mn(
         output_name="post_mod_scores",
         score="qk",
         b="off_z",
-        h="off_h",
+        h="off_hq",
         m="m",
         n="n",
         out="qk"
@@ -1237,7 +1234,7 @@ def bwd_dq_compute_block_mn(
             output_name="mask_mod_output",
             score="qk",
             b="off_z",
-            h="off_h",
+            h="off_hq",
             m="m",
             n="n",
         ) | indent_except_first(2) }}
@@ -1260,7 +1257,7 @@ def bwd_dq_compute_block_mn(
         output_name = "grad_scores",
         score="pre_mod_scores",
         b="off_z",
-        h="off_h",
+        h="off_hq",
         m="m",
         n="n",
         grad_score_mod="ds"
@@ -1312,7 +1309,7 @@ def bwd_dkdv_inner(
             for start_m in range(0, hi - 1):
                 dk, dv = bwd_dkdv_compute_block_mn(
                     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-                    off_z, off_h, offs_n1, offs_m1,
+                    off_z, off_hq, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION, RCP_LN2,
@@ -1331,7 +1328,7 @@ def bwd_dkdv_inner(
 
             dk, dv = bwd_dkdv_compute_block_mn(
                 dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-                off_z, off_h, offs_n1, offs_m1,
+                off_z, off_hq, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
@@ -1341,7 +1338,7 @@ def bwd_dkdv_inner(
         for start_m in range(0, hi):
             dk, dv = bwd_dkdv_compute_block_mn(
                 dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-                off_z, off_h, offs_n1, offs_m1,
+                off_z, off_hq, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
@@ -1364,7 +1361,7 @@ def bwd_dkdv_inner(
 @triton.jit
 def bwd_dkdv_compute_block_mn(
     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-    off_z, off_h, offs_n1, offs_m1,
+    off_z, off_hq, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
@@ -1391,7 +1388,7 @@ def bwd_dkdv_compute_block_mn(
         output_name="post_mod_scores",
         score="qkT",
         b="off_z",
-        h="off_h",
+        h="off_hq",
         m="m",
         n="n",
         out="qkT"
@@ -1407,7 +1404,7 @@ def bwd_dkdv_compute_block_mn(
             output_name="mask_mod_output",
             score="qkT",
             b="off_z",
-            h="off_h",
+            h="off_hq",
             m="m",
             n="n",
         ) | indent_except_first(2) }}
@@ -1433,7 +1430,7 @@ def bwd_dkdv_compute_block_mn(
         output_name = "grad_scores",
         score="pre_mod_scores",
         b="off_z",
-        h="off_h",
+        h="off_hq",
         m="m",
         n="n",
         grad_score_mod="dsT"
