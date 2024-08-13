@@ -413,6 +413,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         memory_warmup_iters: int = 100,
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
+        ranking: bool = False,
         **kwargs: Any,
     ) -> List[float]:
         """Benchmark many GPU callables using a custom benchmarking implementation.
@@ -432,6 +433,13 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         the values of `memory_warmup_iters` and `benchmark_iters`, along with the
         estimated runtime of `_callable` and various other factors, and we then
         shrink `benchmark_iters` to fit in the alloted maximum duration.
+        - ranking: If true, exit benchmarking early and return the estimated
+        runtimes for each of the callables. This mode is preferred when accurate
+        timings are not required (i.e. when we will not be cross-comparing
+        benchmarking results, such as in the case of fusion benchmarking), and
+        when we only care about an accurate ranking of the callables' performance,
+        (i.e. when we are autotuning to one config for Triton templates.) Ranking
+        is significantly faster than the complete benchmarking cycle.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
