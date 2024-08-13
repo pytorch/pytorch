@@ -411,7 +411,7 @@ inline void {{kernel_name}}_kernel(
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
             {%- elif input2_dtype == torch.int8 %}
-            // Convert 16 int8 elements to int32, and then fp32
+            // Convert VLEN int8 elements to int32, and then fp32
             auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
             vb[col] = at::vec::convert<float>(b32);
             {%- else %}
