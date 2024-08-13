@@ -507,9 +507,9 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
+  bool use_onednn(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_ONEDNN_ENABLED()
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (transposed && is_output_padding_big()) {
@@ -1234,7 +1234,7 @@ ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_onednn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {

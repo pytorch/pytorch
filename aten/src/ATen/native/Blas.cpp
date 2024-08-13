@@ -81,8 +81,8 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
     if (result.numel() != 0) {
 
       NoNamesGuard guard;
-      if (use_mkldnn_matmul(mat, vec, /*result=*/Tensor())){
-        mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
+      if (use_onednn_matmul(mat, vec, /*result=*/Tensor())){
+        onednn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
         return;
       }
 
@@ -176,10 +176,10 @@ Tensor dot(const Tensor &self, const Tensor &other){
     return at::_efficientzerotensor({}, self.options());
   }
 
-  if (use_mkldnn_matmul(self, other, /*result=*/Tensor())){
+  if (use_onednn_matmul(self, other, /*result=*/Tensor())){
     // mkldnn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
-    mkldnn_matmul(self, other, r, /*beta=*/0);
+    onednn_matmul(self, other, r, /*beta=*/0);
     return r;
   }
 

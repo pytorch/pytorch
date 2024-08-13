@@ -34,7 +34,7 @@ std::string get_mkl_version() {
   return version;
 }
 
-std::string get_mkldnn_version() {
+std::string get_onednn_version() {
   std::ostringstream ss;
   #if AT_ONEDNN_ENABLED()
     // Cribbed from mkl-dnn/src/common/verbose.cpp
@@ -47,7 +47,7 @@ std::string get_mkldnn_version() {
          << " (Git Hash " << ver->hash << ")";
     }
   #else
-    ss << "MKLDNN not found";
+    ss << "ONEDNN not found";
   #endif
   return ss.str();
 }
@@ -163,7 +163,7 @@ std::string show_config() {
 #endif
 
 #if AT_ONEDNN_ENABLED()
-  ss << "  - " << get_mkldnn_version() << "\n";
+  ss << "  - " << get_onednn_version() << "\n";
 #endif
 
 #ifdef _OPENMP

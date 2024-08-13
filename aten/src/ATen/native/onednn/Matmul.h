@@ -7,7 +7,7 @@
 namespace at { namespace native {
 
 // result = beta * result + alpha * gemm(mat1, mat2)
-TORCH_API void mkldnn_matmul(
+TORCH_API void onednn_matmul(
         const Tensor &mat1,
         const Tensor &mat2,
         const Tensor &result,
@@ -62,7 +62,7 @@ bool mkldnn_bf32_gemm(
     float beta,
     float *c, int64_t ldc);
 
-bool use_mkldnn_matmul(
+bool use_onednn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result);
