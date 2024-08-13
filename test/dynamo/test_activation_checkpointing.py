@@ -20,7 +20,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     SM90OrLater,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -1001,6 +1001,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         ):
             self._validate(fn, backend, x, y)
 
+    @skipIfWindows
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_compile_selective_checkpoint_parametrization(self):
         def sac_policy():

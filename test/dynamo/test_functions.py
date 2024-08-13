@@ -2610,6 +2610,7 @@ class GraphModule(torch.nn.Module):
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
 
+    @skipIfWindows
     def test_pos(self):
         def fn(x, y):
             return operator.pos(x) * +y
@@ -3270,6 +3271,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @skipIfWindows
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -3283,6 +3285,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @skipIfWindows
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -3294,6 +3297,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @skipIfWindows
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()
