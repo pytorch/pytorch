@@ -55,9 +55,6 @@ class AHTrainDecisionTreeMM(AHTrainDecisionTree):
     def ranking_always_included_choices(self):
         return ["extern_mm"]
 
-    def ranking_num_choices(self):
-        return 10
-
 
 if __name__ == "__main__":
     train = AHTrainDecisionTreeMM()
