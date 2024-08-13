@@ -1974,14 +1974,14 @@ class CppVecKernel(CppKernel):
         self,
         args,
         num_threads,
-        tiling_factor=0,
-        tiling_idx=-1,
+        tiling_factor,
+        tiling_idx,
         tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
-        assert tiling_factor != 0, "Expect pass in Non-Zero tiling_factor explicitly"
+        assert tiling_factor > 0, "Expect pass in Non-Zero tiling_factor explicitly"
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         self.tail_size = tail_size
@@ -3128,15 +3128,17 @@ class CppVecKernelChecker(CppVecKernel):
         return self
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody):
+def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
+    """
+    Returns the low precision float data type (torch.float16/torch.bfloat16) if all the
+    nodes can codegen with this data type. Otherwise returns None.
+    """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
     _lowp_fp_type: Optional[torch.dtype] = None
 
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
-            # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
-            # the data type as well.
             if _node.op == "placeholder" or _node.target in (
                 "get_index",
                 "index_expr",
@@ -3207,7 +3209,7 @@ class TilingSelect:
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
         if _lowp_fp_dtype and all(
             (get_loop_body_lowp_fp(loop_body) == _lowp_fp_dtype)
-            for loop_body in loop_bodies
+            for loop_body in loop_bodies[1:]
         ):
             dtype = _lowp_fp_dtype
 
