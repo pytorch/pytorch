@@ -33,6 +33,13 @@ class HintsWrapper(HigherOrderOperator):
         if not isinstance(hints, dict):
             raise RuntimeError(f"hints must be a dict, got {type(hints)}")
 
+        for k, v in hints.items():
+            if not isinstance(v, (int, float, bool, str)):
+                raise RuntimeError(
+                    "hints must be a dict containing int, float, bool or str "
+                    f"value, got value {v} for key {k}."
+                )
+
         return super().__call__(body_fn, args, kwargs, hints)
 
 

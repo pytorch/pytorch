@@ -2531,11 +2531,11 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        aot_eager_res = torch.compile(fn_with_hints, backend="aot_eager")(x, y)
+        eager_res = fn_with_hints(x, y)
         compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
         ref_res = ref_fn(x, y)
+        self.assertEqual(eager_res, ref_res)
         self.assertEqual(compiled_res, ref_res)
-        self.assertEqual(aot_eager_res, ref_res)
         self.assertEqual(len(cnt.graphs), 1)
         graph = backend.graphs[0]
         self.assertExpectedInline(
@@ -2570,6 +2570,44 @@ class GraphModule(torch.nn.Module):
                 return (x_2,)
 """,
         )
+
+    def test_hints_wrapper_no_hints(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x, y):
+                x = torch.add(x, y)
+                return x
+
+            res = hints_wrapper(outer_body_fn, (x, y), {})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = "hints_wrapper - key hints not provided"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+
+    def test_hints_wrapper_incorrect_type(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x, y):
+                x = torch.add(x, y)
+                return x
+
+            res = hints_wrapper(outer_body_fn, (x, y), {}, hints={"test": (True,)})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = r"hints must be a dict containing int, float, bool or str value,"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
 
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):

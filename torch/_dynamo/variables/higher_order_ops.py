@@ -24,7 +24,12 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from .. import variables
-from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
+from ..exc import (
+    IncorrectUsage,
+    UncapturedHigherOrderOpError,
+    unimplemented,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
