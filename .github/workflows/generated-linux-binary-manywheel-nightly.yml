@@ -11,6 +11,7 @@ on:
       - '.ci/docker/manywheel/*'
       - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
+      - .github/workflows/generated-linux-binary-manywheel-nightly.yml
   push:
     branches:
       - nightly
