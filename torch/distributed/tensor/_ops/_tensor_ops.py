@@ -16,9 +16,9 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor.ops._common_rules import pointwise_rule
-from torch.distributed.tensor.ops._embedding_ops import _MaskPartial
-from torch.distributed.tensor.ops.utils import (
+from torch.distributed.tensor._ops._common_rules import pointwise_rule
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     is_tensor_dim_sharded,
     is_tensor_evenly_shardable,

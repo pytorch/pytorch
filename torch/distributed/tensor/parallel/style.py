@@ -11,10 +11,10 @@ from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
     DTensor,
-    Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_types import Placement
 
 
 __all__ = [

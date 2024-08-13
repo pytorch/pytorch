@@ -34,7 +34,6 @@ from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
-from torch.distributed._tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
@@ -46,6 +45,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,

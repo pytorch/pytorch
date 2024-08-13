@@ -8,7 +8,7 @@ from torch.distributed.tensor._op_schema import (
     PlacementStrategy,
     StrategyType,
 )
-from torch.distributed.tensor.ops.utils import is_tensor_partial, register_op_strategy
+from torch.distributed.tensor._ops.utils import is_tensor_partial, register_op_strategy
 
 
 aten = torch.ops.aten

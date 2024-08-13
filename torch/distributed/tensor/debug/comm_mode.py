@@ -21,6 +21,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
 
+__all__ = ["CommDebugMode"]
+
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
 funcol_autograd = torch.ops._c10d_functional_autograd
@@ -67,7 +69,7 @@ trivial_ops = {
 }
 
 
-class CommModeModuleTracker(mod_tracker.ModTracker):
+class _CommModeModuleTracker(mod_tracker.ModTracker):
     """
     Inherits ModuleTracker and expands on its functionality to track the
     parameters and sharding information of a model at a module-level
@@ -248,7 +250,7 @@ class CommDebugMode(TorchDispatchMode):
             self.comm_registry.add(py_op)
 
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
-        self.advanced_module_tracker = CommModeModuleTracker()
+        self.advanced_module_tracker = _CommModeModuleTracker()
 
     def generate_json_dump(self, file_name="comm_mode_log.json", noise_level=3):
         """

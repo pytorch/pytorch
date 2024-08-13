@@ -8,8 +8,8 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OutputSharding,
 )
+from torch.distributed.tensor._ops.utils import prod
 from torch.distributed.tensor._utils import compute_local_shape
-from torch.distributed.tensor.ops.utils import prod
 from torch.distributed.tensor.placement_types import DTensorSpec, TensorMeta
 
 

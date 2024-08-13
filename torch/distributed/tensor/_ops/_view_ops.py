@@ -25,15 +25,19 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed.tensor.api import Shard
-from torch.distributed.tensor.ops.utils import (
+from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import DTensorSpec, Placement, Replicate
+from torch.distributed.tensor.placement_types import (
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten

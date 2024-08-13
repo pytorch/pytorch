@@ -9,8 +9,8 @@ from torch.distributed.tensor._op_schema import (
     PlacementStrategy,
     StrategyType,
 )
+from torch.distributed.tensor._ops.utils import register_op_strategy
 from torch.distributed.tensor.device_mesh import DeviceMesh
-from torch.distributed.tensor.ops.utils import register_op_strategy
 from torch.distributed.tensor.placement_types import DTensorSpec, Replicate
 
 

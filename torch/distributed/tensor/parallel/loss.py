@@ -10,8 +10,8 @@ import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
-from torch.distributed.tensor.ops._embedding_ops import _MaskPartial
-from torch.distributed.tensor.ops._math_ops import (
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,

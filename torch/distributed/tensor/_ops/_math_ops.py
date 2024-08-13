@@ -16,16 +16,16 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor.ops.utils import (
+from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
     normalize_dim,
     normalize_dims,
-    normalize_to_torch_size,
     register_op_strategy,
 )
+from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
     DTensorSpec,
     Partial,

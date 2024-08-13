@@ -5,7 +5,7 @@ from typing import List
 
 import torch
 from torch.distributed.tensor._op_schema import OpSchema, OutputSharding
-from torch.distributed.tensor.ops.utils import register_prop_rule
+from torch.distributed.tensor._ops.utils import register_prop_rule
 from torch.distributed.tensor.placement_types import DTensorSpec, TensorMeta
 
 

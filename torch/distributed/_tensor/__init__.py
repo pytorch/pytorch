@@ -18,9 +18,7 @@ def _populate():  # type: ignore[no-untyped-def]
         "api",
         "debug",
         "device_mesh",
-        "examples",
         "experimental",
-        "ops",
         "placement_types",
         "random",
     ):
@@ -29,7 +27,12 @@ def _populate():  # type: ignore[no-untyped-def]
                 f"torch.distributed._tensor.{name}"
             ] = importlib.import_module(f"torch.distributed.tensor.{name}")
         except ImportError as e:
-            pass
+            import traceback
+
+            traceback.print_exc()
+            raise ImportError(
+                f"Failed to import torch.distributed.tensor.{name} due to {e}"
+            ) from e
 
     for name, val in torch.distributed.tensor.__dict__.items():
         # Skip private names and tensor parallel package

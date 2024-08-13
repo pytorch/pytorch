@@ -207,7 +207,7 @@ class RedistributeTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
-        from torch.distributed._tensor._redistribute import Redistribute
+        from torch.distributed.tensor._redistribute import Redistribute
 
         comm_mode = CommDebugMode()
 

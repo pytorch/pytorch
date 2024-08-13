@@ -11,6 +11,13 @@ from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor.placement_types import DTensorSpec, Shard
 
 
+__all__ = [
+    "is_rng_supported_mesh",
+    "manual_seed",
+    "OffsetBasedRNGTracker",
+    "TensorParallelRNGTracker",
+]
+
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
 
@@ -283,7 +290,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                     return_offset=False,
                 )[0]
 
-        from torch.distributed.tensor.ops.utils import prod
+        from torch.distributed.tensor._ops.utils import prod
 
         local_size = prod(local_size_on_rank_0)
 
@@ -310,7 +317,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         """
         dtensor_shape = spec.shape
 
-        from torch.distributed.tensor.ops.utils import prod
+        from torch.distributed.tensor._ops.utils import prod
 
         numel = prod(dtensor_shape)
         # pytorch: offset must be multiple of 4
