@@ -6,7 +6,6 @@ from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
-
 from torch._dynamo.utils import counters
 from torch._inductor.config import benchmarking as benchmarking_config, is_fbcode
 
@@ -253,8 +252,9 @@ def maybe_fallback(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         if not is_feature_enabled(self.feature_name):
             fallback_fn = getattr(super(self.__class__, self), fn.__name__)
+            counters["inductor"]["benchmarking." + self.feature_name + ".disabled"] += 1
             logger.debug(
-                "Feature `%s` is disable, `benchmarking.%s.%s` will fallback to `benchmarking.%s.%s`.",
+                "Feature `%s` is disabled, `benchmarking.%s.%s` will fallback to `benchmarking.%s.%s`.",
                 self.feature_name,
                 self.__class__.__name__,
                 fn.__name__,
