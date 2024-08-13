@@ -151,6 +151,24 @@ mm_kernel_configs = (
     ]
 )
 
+# these are only used in tuned_mm when AutoHeuristic is enabled
+# the idea is that when AutoHeuristic collects data to learn a heuristic, more configs are autotuned
+# when the learned heuristic is used, the learned heuristic reduces the number of configs down to 10
+# which saves compilation time (since less configs are autotuned) and potentially increase performance
+# because the learned heuristic might predict a config that is not part mm_configs
+extra_mm_kernel_configs = [
+    {"config": (16, 32, 16, 3, 2), "cond": True},
+    {"config": (16, 32, 32, 4, 2), "cond": True},
+    {"config": (16, 32, 32, 5, 2), "cond": True},
+    {"config": (64, 64, 128, 3, 4), "cond": True},
+    {"config": (128, 64, 32, 2, 2), "cond": True},
+    {"config": (128, 64, 64, 3, 8), "cond": True},
+    {"config": (128, 64, 128, 4, 8), "cond": True},
+    {"config": (128, 128, 32, 4, 4), "cond": True},
+    {"config": (128, 128, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 64, 5, 4), "cond": True},
+]
+
 int8_mm_kernel_configs = [
     {"config": (64, 64, 32, 2, 4), "cond": True},
     {"config": (64, 128, 32, 3, 4), "cond": True},
@@ -180,12 +198,116 @@ mixed_mm_kernel_configs = (
     else mm_kernel_configs
 )
 
+scaled_mm_kernel_configs = [
+    {"config": (128, 256, 32, 3, 8), "cond": True},
+    {"config": (256, 128, 32, 3, 8), "cond": True},
+    {"config": (256, 64, 32, 4, 4), "cond": True},
+    {"config": (64, 256, 32, 4, 4), "cond": True},
+    {"config": (128, 128, 32, 4, 4), "cond": True},
+    {"config": (128, 64, 32, 4, 4), "cond": True},
+    {"config": (64, 128, 32, 4, 4), "cond": True},
+    {"config": (128, 32, 32, 4, 4), "cond": True},
+    {"config": (64, 32, 32, 5, 2), "cond": True},
+    {"config": (256, 128, 128, 3, 8), "cond": True},
+    {"config": (256, 64, 128, 4, 4), "cond": True},
+    {"config": (64, 256, 128, 4, 4), "cond": True},
+    {"config": (128, 128, 128, 4, 4), "cond": True},
+    {"config": (128, 64, 64, 4, 4), "cond": True},
+    {"config": (64, 128, 64, 4, 4), "cond": True},
+    {"config": (128, 32, 64, 4, 4), "cond": True},
+    {"config": (64, 32, 64, 5, 2), "cond": True},
+    {"config": (16, 32, 32, 2, 2), "cond": True},
+    {"config": (16, 64, 32, 2, 2), "cond": True},
+    {"config": (16, 128, 32, 2, 4), "cond": True},
+    {"config": (16, 256, 32, 2, 4), "cond": True},
+    {"config": (16, 32, 64, 2, 2), "cond": True},
+    {"config": (16, 64, 64, 2, 2), "cond": True},
+    {"config": (16, 128, 64, 2, 4), "cond": True},
+    {"config": (16, 256, 64, 2, 4), "cond": True},
+    {"config": (32, 32, 32, 2, 2), "cond": True},
+    {"config": (32, 64, 32, 2, 2), "cond": True},
+    {"config": (32, 128, 32, 2, 4), "cond": True},
+    {"config": (32, 256, 32, 2, 4), "cond": True},
+    {"config": (32, 32, 64, 2, 2), "cond": True},
+    {"config": (32, 64, 64, 2, 2), "cond": True},
+    {"config": (32, 128, 64, 2, 4), "cond": True},
+    {"config": (32, 256, 64, 2, 4), "cond": True},
+    {"config": (16, 32, 32, 3, 2), "cond": True},
+    {"config": (16, 64, 32, 3, 2), "cond": True},
+    {"config": (16, 128, 32, 3, 4), "cond": True},
+    {"config": (16, 256, 32, 3, 4), "cond": True},
+    {"config": (16, 32, 64, 3, 2), "cond": True},
+    {"config": (16, 64, 64, 3, 2), "cond": True},
+    {"config": (16, 128, 64, 3, 4), "cond": True},
+    {"config": (16, 256, 64, 3, 4), "cond": True},
+    {"config": (32, 32, 32, 3, 2), "cond": True},
+    {"config": (32, 64, 32, 3, 2), "cond": True},
+    {"config": (32, 128, 32, 3, 4), "cond": True},
+    {"config": (32, 256, 32, 3, 4), "cond": True},
+    {"config": (32, 32, 64, 3, 2), "cond": True},
+    {"config": (32, 64, 64, 3, 2), "cond": True},
+    {"config": (32, 128, 64, 3, 4), "cond": True},
+    {"config": (32, 256, 64, 3, 4), "cond": True},
+    {"config": (16, 32, 32, 4, 2), "cond": True},
+    {"config": (16, 64, 32, 4, 2), "cond": True},
+    {"config": (16, 128, 32, 4, 4), "cond": True},
+    {"config": (16, 256, 32, 4, 4), "cond": True},
+    {"config": (16, 32, 64, 4, 2), "cond": True},
+    {"config": (16, 64, 64, 4, 2), "cond": True},
+    {"config": (16, 128, 64, 4, 4), "cond": True},
+    {"config": (16, 256, 64, 4, 4), "cond": True},
+    {"config": (32, 32, 32, 4, 2), "cond": True},
+    {"config": (32, 64, 32, 4, 2), "cond": True},
+    {"config": (32, 128, 32, 4, 4), "cond": True},
+    {"config": (32, 256, 32, 4, 4), "cond": True},
+    {"config": (32, 32, 64, 4, 2), "cond": True},
+    {"config": (32, 64, 64, 4, 2), "cond": True},
+    {"config": (32, 128, 64, 4, 4), "cond": True},
+    {"config": (32, 256, 64, 4, 4), "cond": True},
+    {"config": (16, 32, 32, 5, 2), "cond": True},
+    {"config": (16, 64, 32, 5, 2), "cond": True},
+    {"config": (16, 128, 32, 5, 4), "cond": True},
+    {"config": (16, 256, 32, 5, 4), "cond": True},
+    {"config": (16, 32, 64, 5, 2), "cond": True},
+    {"config": (16, 64, 64, 5, 2), "cond": True},
+    {"config": (16, 128, 64, 5, 4), "cond": True},
+    {"config": (16, 256, 64, 5, 4), "cond": True},
+    {"config": (32, 32, 32, 5, 2), "cond": True},
+    {"config": (32, 64, 32, 5, 2), "cond": True},
+    {"config": (32, 128, 32, 5, 4), "cond": True},
+    {"config": (32, 256, 32, 5, 4), "cond": True},
+    {"config": (32, 32, 64, 5, 2), "cond": True},
+    {"config": (32, 64, 64, 5, 2), "cond": True},
+    {"config": (32, 128, 64, 5, 4), "cond": True},
+    {"config": (32, 256, 64, 5, 4), "cond": True},
+    {"config": (16, 32, 32, 6, 2), "cond": True},
+    {"config": (16, 64, 32, 6, 2), "cond": True},
+    {"config": (16, 128, 32, 6, 4), "cond": True},
+    {"config": (16, 256, 32, 6, 4), "cond": True},
+    {"config": (16, 32, 64, 6, 2), "cond": True},
+    {"config": (16, 64, 64, 6, 2), "cond": True},
+    {"config": (16, 128, 64, 6, 4), "cond": True},
+    {"config": (16, 256, 64, 6, 4), "cond": True},
+    {"config": (32, 32, 32, 6, 2), "cond": True},
+    {"config": (32, 64, 32, 6, 2), "cond": True},
+    {"config": (32, 128, 32, 6, 4), "cond": True},
+    {"config": (32, 256, 32, 6, 4), "cond": True},
+    {"config": (32, 32, 64, 6, 2), "cond": True},
+    {"config": (32, 64, 64, 6, 2), "cond": True},
+    {"config": (32, 128, 64, 6, 4), "cond": True},
+    {"config": (32, 256, 64, 6, 4), "cond": True},
+]
+
+
 # Create filtered list of configs based on cond evaluation
-
-
 mm_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
+    if config["cond"]
+)
+extra_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in extra_mm_kernel_configs
     if config["cond"]
 )
 int8_platform_configs = tuple(
@@ -198,12 +320,21 @@ mixed_mm_platform_configs = tuple(
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
+scaled_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in scaled_mm_kernel_configs
+    if config["cond"]
+)
 
 # On ROCm convert num_stages to 0 to enable software pipelining
 if torch.version.hip:
     mm_platform_configs = tuple(
         (config[0], config[1], config[2], 0, config[4])
         for config in mm_platform_configs
+    )
+    extra_mm_platform_configs = tuple(
+        (config[0], config[1], config[2], 0, config[4])
+        for config in extra_mm_platform_configs
     )
     int8_platform_configs = tuple(
         (config[0], config[1], config[2], 0, config[4])
@@ -213,10 +344,19 @@ if torch.version.hip:
         (config[0], config[1], config[2], 0, config[4])
         for config in mixed_mm_platform_configs
     )
+    scaled_mm_platform_configs = tuple(
+        (config[0], config[1], config[2], 0, config[4])
+        for config in scaled_mm_platform_configs
+    )
 
 mm_configs = functools.partial(
     filtered_configs,
     configs=mm_platform_configs,
+)
+
+extra_mm_configs = functools.partial(
+    filtered_configs,
+    configs=extra_mm_platform_configs,
 )
 
 int8_mm_configs = functools.partial(
@@ -227,6 +367,11 @@ int8_mm_configs = functools.partial(
 mixed_mm_configs = functools.partial(
     filtered_configs,
     configs=mixed_mm_platform_configs,
+)
+
+scaled_mm_configs = functools.partial(
+    filtered_configs,
+    configs=scaled_mm_platform_configs,
 )
 
 
