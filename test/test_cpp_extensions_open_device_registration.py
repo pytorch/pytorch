@@ -540,7 +540,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # call _fused_adamw_ with undefined tensor.
         self.module.fallback_with_undefined_tensor()
 
-    # @unittest.skipIf(np.__version__ < '1.25.0', "np.dtypes was intr")
     def test_open_device_numpy_serialization_map_location(self):
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()

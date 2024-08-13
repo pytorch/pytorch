@@ -194,7 +194,7 @@ def test_forward_backward(unit_test_class, test_params):
             backward_grad_dict_file_path,
         )
         cpp_output = torch.load(forward_output_file_path)
-        # weights_only: weird these are plain tensors but need GLOBAL torch.jit._pickle.restore_type_tag
+        # weights_only: need GLOBAL torch.jit._pickle.restore_type_tag
         with torch.serialization.safe_globals([restore_type_tag]):
             cpp_grad_dict = torch.load(backward_grad_dict_file_path)
 

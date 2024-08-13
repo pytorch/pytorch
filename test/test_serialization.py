@@ -294,7 +294,7 @@ class SerializationMixin:
             torch.save(x, f)
             f.seek(0)
             with self.assertRaisesRegex(RuntimeError, "rumpelstiltskin"):
-                # # weights_only=False as True does not support custom pickle module
+                # weights_only=False as True does not support custom pickle module
                 torch.load(f, pickle_module=ThrowingModule, weights_only=False)
             f.seek(0)
             z = torch.load(f)
@@ -382,11 +382,12 @@ class SerializationMixin:
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
-            f.seek(0)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "size is inconsistent with indices"):
-                y = torch.load(f)
+            for weights_only in (False, True):
+                f.seek(0)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "size is inconsistent with indices"):
+                    y = torch.load(f)
 
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
@@ -893,8 +894,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
                     self.assertEqual(len(w), 0)
-                    # self.assertEqual(w[0].category, FutureWarning)
-                    # self.assertTrue("You are using `torch.load` with `weights_only=False`" in str(w[0].message))
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -908,8 +907,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 if can_retrieve_source:
                     self.assertEqual(len(w), 1)
                     self.assertEqual(w[0].category, SourceChangeWarning)
-                    # self.assertEqual(w[0].category, FutureWarning)
-                    # self.assertEqual(w[1].category, SourceChangeWarning)
 
     def test_serialization_container(self):
         self._test_serialization_container('file', tempfile.NamedTemporaryFile)

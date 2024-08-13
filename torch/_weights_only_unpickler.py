@@ -145,6 +145,8 @@ def _tensor_rebuild_functions():
         torch._utils._rebuild_nested_tensor,
         torch._utils._rebuild_wrapper_subclass,
         # Allowlisting this, but not allowlisting the numpy functions by default
+        # Reasoning is that we don't have control over the numpy functions, but
+        # this utility is provided by pytorch
         torch._utils._rebuild_device_tensor_from_numpy,
     }
 
