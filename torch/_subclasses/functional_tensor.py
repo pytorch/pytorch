@@ -342,11 +342,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                self.storage_to_aliases[arg.untyped_storage()._cdata].add(arg._cdata)
-                self.tensors_look_up[arg._cdata] = arg
-
         unrecognized_types = [
             t
             for t in types
@@ -358,6 +353,18 @@ class FunctionalTensorMode(TorchDispatchMode):
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
+
+        def add_to_storage_table(tensor):
+            self.storage_to_aliases[tensor.untyped_storage()._cdata].add(tensor._cdata)
+            self.tensors_look_up[tensor._cdata] = tensor
+
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                add_to_storage_table(arg)
+            if isinstance(arg, list):
+                for elem in arg:
+                    if isinstance(elem, torch.Tensor):
+                        add_to_storage_table(elem)
 
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832

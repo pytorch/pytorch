@@ -428,6 +428,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return all(is_meta_only_user(u) for u in node.users)
             return node.target in META_ONLY_OPS
 
+        # I feel a backward live analysis might make this cleaner.
         for view in shared_view_nodes:
             for user in view.users:
                 user_loc = node_order[user]

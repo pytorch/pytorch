@@ -125,12 +125,12 @@ def auto_functionalized_dense(
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     _all_aliased = kwargs.pop("_all_aliased", [])
-    
+
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     _arg_to_aliased = {}
     for name in _mutable_args_names:
         _arg_to_aliased[name] = kwargs.pop("_{}_aliases".format(name))
-        
+
     new_kwargs = dict(**kwargs)
     result = []
     for name in _mutable_args_names:
@@ -152,29 +152,54 @@ def auto_functionalized_dense(
         result.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
-    latest_value_for = {}
+    
+    # Map every argument to the addresses of its aliases.
+    def transform(input):
+        if isinstance(input, list):
+            return [item._cdata for item in input]
+        else:
+            return input._cdata
+    _arg_to_aliased_addresses = {
+        arg: [transform(t) for t in entries] for (arg, entries) in _arg_to_aliased.items()
+    }
+
+
+    def observe_mutation(alias, mutation_source):
+        return alias.as_strided_scatter(
+                    mutation_source,
+                    mutation_source.size(),
+                    mutation_source.stride(),
+                    mutation_source.storage_offset())
+
     for alias in _all_aliased:
-        # Do i need to wrap this like what happen in clone_preserve_strides in some dispatch things idk what they are?
-        # item should see the effects of all of the mutated args that it is an alias for
         alias_with_effects = alias
         for name in _mutable_args_names:
+            arg = kwargs[name]
+            if arg is None:
+                continue
+
             if (
                 _only_clone_these_tensors is not None
                 and name not in _only_clone_these_tensors
             ):
                 # if the argument is mutated in place, item would have already observed the effect.
-                pass
-            if alias._cdata not in[t._cdata for t in _arg_to_aliased[name]]:
                 continue
+
+            if(isinstance(arg, list)):
+                for (i, elem) in enumerate(arg):
+                    aliased_addresses = _arg_to_aliased_addresses[name][i]
+                    if alias._cdata not in _arg_to_aliased_addresses[name]:
+                        continue
+                    mutation_source = new_kwargs[name][i]
+                    alias_with_effects = observe_mutation(alias_with_effects, mutation_source)
+        
             else:
-                # observe the effect that happened on `name`
+                aliased_addresses = _arg_to_aliased_addresses[name]
+                if alias._cdata not in _arg_to_aliased_addresses[name]:
+                    continue
                 mutation_source = new_kwargs[name]
-                alias_with_effects = alias_with_effects.as_strided_scatter(
-                    mutation_source,
-                    mutation_source.size(),
-                    mutation_source.stride(),
-                    mutation_source.storage_offset(),
-                )
+                alias_with_effects = observe_mutation(alias_with_effects, mutation_source)
+        
         result.append(alias_with_effects)
 
     if isinstance(out, tuple):
@@ -277,32 +302,57 @@ def do_auto_functionalize(
     arg_to_aliased = {}
     all_aliased_addresses = set()
 
-    for arg in mutable_args_names:
-        if normalized_kwargs[arg] is None: 
-            continue 
-        ls = list(storage_to_aliases[normalized_kwargs[arg]._typed_storage()._cdata])
+    def get_all_aliases(tensor):
+        addresses_ls = list(storage_to_aliases[tensor._typed_storage()._cdata])
+        addresses_ls.remove(tensor._cdata)
+        tensors_ls = ctx.unwrap_tensors(
+            [tensors_look_up[item] for item in addresses_ls]
+        )
+        return (tensors_ls, addresses_ls)
 
-        # remove self from aliases.
-        ls.remove(normalized_kwargs[arg]._cdata)
+    def map_addresses_to_tensors(ls):
+        return
 
-        all_aliased_addresses |= set(ls)
+    for arg_name in mutable_args_names:
+        arg = normalized_kwargs[arg_name]
+        arg_to_aliased[arg_name] = []
+        if arg is None:
+            continue
 
-        # get tensors from tensors addresses.
-        arg_to_aliased[arg] = ctx.unwrap_tensors([tensors_look_up[item] for item in ls])
+        if isinstance(arg, list):
+            for tensor in arg:
+                if tensor is None:
+                    continue
+                (tensors_ls, addresses_ls) = get_all_aliases(tensor)
+                arg_to_aliased[arg_name].append(tensors_ls)
+                all_aliased_addresses |= set(addresses_ls)
+        else:
+            # Get addressed of all aliasing tensors.
+            (tensors_ls, addresses_ls) = get_all_aliases(arg)
 
-    # take the union of all the aliased items.
-    for arg in mutable_args_names:
-        if normalized_kwargs[arg] is None: 
-            continue 
-        all_aliased_addresses.discard(normalized_kwargs[arg]._cdata)
+            arg_to_aliased[arg] = tensors_ls
+            all_aliased_addresses |= set(addresses_ls)
+
+    # remove any alias in all_aliased_addresses that is also an argument.
+    for arg_name in mutable_args_names:
+        arg = normalized_kwargs[arg_name]
+        if arg is None:
+            continue
+        if isinstance(arg, list):
+            for tensor in arg:
+                if tensor is None:
+                    continue
+                all_aliased_addresses.discard(tensor._cdata)
+        else:
+            all_aliased_addresses.discard(arg._cdata)
 
     all_aliased_original = [tensors_look_up[item] for item in all_aliased_addresses]
     all_aliased_unwrapped = ctx.unwrap_tensors(all_aliased_original)
 
     with ctx.redispatch_to_next():
-       
+
         for arg in mutable_args_names:
-            unwrapped_kwargs["_{}_aliases".format(arg)] = arg_to_aliased.get(arg,[])
+            unwrapped_kwargs["_{}_aliases".format(arg)] = arg_to_aliased.get(arg, [])
 
         unwrapped_outs = auto_functionalized(
             op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped)  # type: ignore[arg-type]
