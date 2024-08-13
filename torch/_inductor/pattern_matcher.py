@@ -1747,9 +1747,12 @@ def _update_mutation_region_id(
         )
         aliased_nodes = []
         for name in mutable_args_names:
-            aliased_nodes.extend(
-                graph_meta["alias_info"].find_aliases(node.kwargs[name])
-            )
+            arg = node.kwargs[name]
+            if isinstance(arg, list):
+                for a in arg:
+                    aliased_nodes.extend(graph_meta["alias_info"].find_aliases(a))
+            else:
+                aliased_nodes.extend(graph_meta["alias_info"].find_aliases(arg))
         assert len(aliased_nodes) >= 1, "must at least alias self"
 
         for node_ref in aliased_nodes:
