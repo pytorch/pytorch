@@ -13443,6 +13443,25 @@ Example::
 
 
 add_docstr(
+    torch.has_accelerator,
+    r"""
+has_accelerator(device_type=None) -> bool
+
+Check if the desired device type of accelerator is available.
+
+Arguments:
+    device_type (str, optional): the desired device type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+
+Returns:
+    bool: A boolean indicating if the desired device type of accelerator is available.
+
+Example::
+
+    >>> assert torch.has_accelerator() "No available accelerator detected."
+""",
+)
+
+add_docstr(
     torch.Generator,
     r"""
 Generator(device='cpu') -> Generator
