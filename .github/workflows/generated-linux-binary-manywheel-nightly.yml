@@ -50,6 +50,7 @@ concurrency:
 jobs:
   build-docker-images:
     if: ${{ github.event_name == 'pull' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Build Docker Images
         uses: ./.github/workflows/build-manywheel-images.yml
