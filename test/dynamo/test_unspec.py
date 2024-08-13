@@ -11,6 +11,7 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -286,6 +287,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
 
+    @skipIfWindows
     def test_mark_static_inside(self):
         def fn(x):
             torch._dynamo.mark_static(x, 0)
@@ -346,6 +348,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(1, 1, 249)
         opt_func(x)  # crashes
 
+    @skipIfWindows
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_propagate_dynamic_dim(self):
         x = torch.randn(20)
@@ -361,6 +364,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         z = fn(x)
         self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
 
+    @skipIfWindows
     def test_rshift_dynamic(self):
         def shift_right(tensor: torch.Tensor) -> torch.Tensor:
             return (tensor >> 2).to(torch.long)
@@ -392,6 +396,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    @skipIfWindows
     def test_to_tensor(self):
         def f1():
             a = np.random.uniform(low=-1, high=1, size=(20, 1))
@@ -616,6 +621,7 @@ def forward(self):
         self.assertTrue(f(torch.empty(8)).item())
         self.assertFalse(f(torch.empty(13)).item())
 
+    @skipIfWindows
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked(self):
         class TestModel(torch.nn.Module):
@@ -643,6 +649,7 @@ def forward(self):
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
 
+    @skipIfWindows
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_hint_consistency(self):
         from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -659,6 +666,7 @@ def forward(self):
 
         self.assertEqual(f(x), x + 3)
 
+    @skipIfWindows
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_channels_last(self):
         class TestModel(torch.nn.Module):
