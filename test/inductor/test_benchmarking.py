@@ -21,19 +21,17 @@ class TestBenchmarker(TestCase):
         torch.manual_seed(12345)
         counters.clear()
 
-    def counter_value(self, benchmarker_cls, fn_name):
+    @staticmethod
+    def get_counter_value(benchmarker_cls, fn_name):
         return counters["inductor"][
             f"benchmarking.{benchmarker_cls.__name__}.{fn_name}"
         ]
 
-    def make_sum(self, device, size=100):
-        fn, args, kwargs = torch.sum, (torch.randn(size, device=device),), {}
-        _callable = lambda: fn(*args, **kwargs)  # noqa: E731
-        return (fn, args, kwargs), _callable
-
-    @property
-    def benchmarker(self):
-        return Benchmarker()
+    @staticmethod
+    def make_params(device, size=100):
+        fn, fn_args, fn_kwargs = torch.sum, (torch.randn(size, device=device),), {}
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        return (fn, fn_args, fn_kwargs), _callable
 
     @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @decorateIf(
@@ -43,13 +41,14 @@ class TestBenchmarker(TestCase):
     )
     @parametrize("benchmarker_cls", (Benchmarker,))
     @parametrize("device", (GPU_TYPE, "cpu"))
-    def test_benchmark(self, benchmarker_cls, device):
+    def test_benchmark_smoke(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
-        (fn, args, kwargs), _ = self.make_sum(device)
-        _ = benchmarker.benchmark(fn, args, kwargs)
-        self.assertEqual(self.counter_value(benchmarker_cls, "benchmark"), 1)
+        (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+        timing = benchmarker.benchmark(fn, fn_args, fn_kwargs)
+        self.assertGreater(timing, 0)
+        self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark"), 1)
         self.assertEqual(
-            self.counter_value(
+            self.get_counter_value(
                 benchmarker_cls, "benchmark_cpu" if device == "cpu" else "benchmark_gpu"
             ),
             1,
@@ -59,9 +58,10 @@ class TestBenchmarker(TestCase):
     @parametrize("benchmarker_cls", (Benchmarker,))
     def test_benchmark_cpu(self, benchmarker_cls, device="cpu"):
         benchmarker = benchmarker_cls()
-        _, _callable = self.make_sum(device)
-        _ = benchmarker.benchmark_cpu(_callable)
-        self.assertEqual(self.counter_value(benchmarker_cls, "benchmark_cpu"), 1)
+        _, _callable = self.make_params(device)
+        timing = benchmarker.benchmark_cpu(_callable)
+        self.assertGreater(timing, 0)
+        self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_cpu"), 1)
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @decorateIf(
@@ -71,9 +71,32 @@ class TestBenchmarker(TestCase):
     @parametrize("benchmarker_cls", (Benchmarker,))
     def test_benchmark_gpu(self, benchmarker_cls, device=GPU_TYPE):
         benchmarker = benchmarker_cls()
-        _, _callable = self.make_sum(device)
-        _ = benchmarker.benchmark_gpu(_callable)
-        self.assertEqual(self.counter_value(benchmarker_cls, "benchmark_gpu"), 1)
+        _, _callable = self.make_params(device)
+        timing = benchmarker.benchmark_gpu(_callable)
+        self.assertGreater(timing, 0)
+        self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
+
+    @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
+    @unittest.expectedFailure
+    @parametrize("benchmarker_cls", (Benchmarker,))
+    def test_benchmark_safely_infers_device_no_devices(
+        self, benchmarker_cls, device="cpu" if HAS_CPU else GPU_TYPE
+    ):
+        benchmarker = benchmarker_cls()
+        (fn, _, _), _ = self.make_params(device)
+        benchmarker.benchmark(fn, (), {})
+
+    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
+    @unittest.expectedFailure
+    @parametrize("benchmarker_cls", (Benchmarker,))
+    def test_benchmark_safely_infers_device_many_devices(self, benchmarker_cls):
+        benchmarker = benchmarker_cls()
+        (fn, cpu_args, cpu_kwargs), _ = self.make_sum("cpu")
+        (_, gpu_args, gpu_kwargs), _ = self.make_sum(GPU_TYPE)
+        many_devices_args = cpu_args + gpu_args
+        many_devices_kwargs = cpu_kwargs
+        many_devices_kwargs.update(gpu_kwargs)
+        benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
 
 
 if __name__ == "__main__":
