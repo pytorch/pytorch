@@ -2189,8 +2189,8 @@ class AOTInductorTestsTemplate:
         if dynamic:
             dim0_xy = Dim("s0", min=2, max=1024)
             dynamic_shapes = {
-                "x": {0: dim0_xy, 1: None},
-                "y": {0: dim0_xy, 1: None},
+                "x": {0: dim0_xy},
+                "y": {0: dim0_xy},
             }
         example_inputs = (
             torch.randn(2, device=self.device),

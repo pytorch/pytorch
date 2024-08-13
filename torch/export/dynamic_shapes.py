@@ -802,6 +802,7 @@ def _process_dynamic_shapes(
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     _is_torch_jit_trace=False,
+    assume_static_by_default=False,
 ) -> Optional[List[Constraint]]:
     from torch._dynamo.exc import UserError, UserErrorType
 
@@ -912,14 +913,22 @@ def _process_dynamic_shapes(
             bounds[dim.__name__] = (dim.min, dim.max)
 
     def update_symbols(path, tensor, shape):
+        """
+        This needs to consider assume_static_by_default
+        - for _dynamo.export(), probably keep same behavior with static=True
+        - for export.export(), static=False -> create all these static constraints
+        """
         def _create_static_dim(tensor, i, value):
             return _StaticDim(str(value), (int,), {"value": value})
+        def _marked_dynamic(tensor, i):
+            return i in getattr(tensor, "_dynamo_dynamic_indices", set())
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if dim == True:
+                if dim == True or _marked_dynamic(tensor, i):
                     continue
                 if isinstance(dim, (int, _Dim)) or dim is None:
+                    breakpoint()
                     if dim is None:
                         dim = _create_static_dim(tensor, i, tensor.shape[i])
                     elif isinstance(dim, int):
@@ -937,14 +946,14 @@ def _process_dynamic_shapes(
                     )
             # create static dim for those unspecified in dictionary
             for i, val in enumerate(tensor.shape):
-                if i not in shape:
+                if i not in shape and _marked_dynamic(tensor, i):
                     dim = _create_static_dim(tensor, i, val)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if dim == True:
+                if dim == True or _marked_dynamic(tensor, i):
                     continue
                 if isinstance(dim, (int, _Dim)) or dim is None:
                     if dim is None:
@@ -965,6 +974,8 @@ def _process_dynamic_shapes(
                         )
         elif shape is None:
             for i, val in enumerate(tensor.shape):
+                if _marked_dynamic(tensor, i):
+                    continue
                 dim = _create_static_dim(tensor, i, val)
                 check_same_bounds(dim)
                 constraint = to_constraint(dim, tensor, i)

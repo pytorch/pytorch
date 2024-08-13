@@ -561,7 +561,7 @@ def _export_to_torch_ir(
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
                     _log_export_usage=_log_export_usage,
                     same_signature=same_signature,
-                    automatic_dynamic_shapes=True,
+                    # automatic_dynamic_shapes=True,
                 )(
                     *args,
                     **kwargs,
