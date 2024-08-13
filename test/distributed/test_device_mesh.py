@@ -5,7 +5,7 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
+from torch.distributed.tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
     unpad_tensor,
