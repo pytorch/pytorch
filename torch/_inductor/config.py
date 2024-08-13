@@ -681,6 +681,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
+    # simdlen=1
     min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -799,6 +800,10 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
+    # Prefer higher dimensional tilings. This simplifies indexing expressions, making
+    # it easier to identify block pointers.
+    prefer_nd_tiling: bool = False
+
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
@@ -883,6 +888,15 @@ class aot_inductor:
     debug_dump_consts_bin: bool = (
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
+
+    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
+    # for debugging purpose
+    debug_intermediate_value_printer = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    )
+
+    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
