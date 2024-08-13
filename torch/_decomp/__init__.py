@@ -12,6 +12,7 @@ from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch.utils import _pytree as pytree
 
+
 __all__ = [
     "decomposition_table",
     "pre_autograd_decomposition_table",
@@ -407,6 +408,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.rrelu_with_noise,
             aten.rrelu_with_noise_,
             aten.rsub,
+            aten._safe_softmax,
             aten._scaled_dot_product_flash_attention_for_cpu.default,
             aten.select_backward,
             aten.select_scatter,

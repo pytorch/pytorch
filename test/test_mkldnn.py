@@ -1469,10 +1469,10 @@ class TestMkldnn(TestCase):
         params_list = list(params_dict.values())
         return params_list
 
-    def _cast_dtype(self, input, bf16, fp16):
-        if bf16:
+    def _cast_dtype(self, input, dtype):
+        if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             input = input.to(torch.bfloat16)
-        elif fp16:
+        elif dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported():
             input = input.to(torch.half)
         return input
 
@@ -1482,8 +1482,8 @@ class TestMkldnn(TestCase):
 
         params_list = self._lstm_params_list()
         for dtype in types:
-            bf16 = True if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported() else False
-            fp16 = True if dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported() else False
+            bf16 = dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            fp16 = dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()
             rtol = 1.3e-6
             atol = 1e-5
             lowp_dtype = torch.bfloat16
@@ -1506,6 +1506,7 @@ class TestMkldnn(TestCase):
                 h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
                 c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
                 if fp16:
+                    # TODO add traing support when oneDNN support lstm FP16 training
                     training = False
                 model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
                                       bias=bias, dropout=dropout, batch_first=batch_first).float()
@@ -1525,11 +1526,11 @@ class TestMkldnn(TestCase):
                 ), (torch.no_grad() if not training else nullcontext()):
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
-                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16, fp16)(
-                            self._cast_dtype(input1, bf16, fp16),
+                        output1, (hn1, cn1) = self._cast_dtype(model1, dtype)(
+                            self._cast_dtype(input1, dtype),
                             (
-                                self._cast_dtype(h1, bf16, fp16),
-                                self._cast_dtype(c1, bf16, fp16),
+                                self._cast_dtype(h1, dtype),
+                                self._cast_dtype(c1, dtype),
                             ),
                         )
 
@@ -1549,11 +1550,11 @@ class TestMkldnn(TestCase):
 
                         self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
                         for name, para in model1.named_parameters():
-                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16, fp16))
+                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), dtype))
                             self.assertEqual(
                                 para.grad,
                                 self._cast_dtype(
-                                    getattr(model2, name).grad, bf16, fp16
+                                    getattr(model2, name).grad, dtype
                                 ),
                                 rtol=rtol,
                                 atol=atol,

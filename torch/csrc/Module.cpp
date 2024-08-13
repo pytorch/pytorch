@@ -70,6 +70,7 @@
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
+#include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1551,6 +1552,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -1697,6 +1699,7 @@ PyObject* initModule() {
 #endif
   torch::mtia::initModule(module);
   torch::cpu::initModule(module);
+  torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
@@ -1708,6 +1711,7 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+  THCPMemPool_init(module);
 #endif
 
 #ifdef USE_XPU
@@ -1985,6 +1989,13 @@ Call this whenever a new thread is created in order to propagate values from
       .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
+  py_module.def("_is_flash_attention_available", []() {
+#ifdef USE_CUDA
+    return sdp::is_flash_attention_available();
+#else
+    return false;
+#endif
+  });
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
