@@ -353,10 +353,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         return self._skip["all"]
 
     @property
-    def skip_models_for_cpu(self):
-        return self._skip["device"]["cpu"]
-
-    @property
     def fp32_only_models(self):
         return self._config["only_fp32"]
 
@@ -505,7 +501,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 return 4e-3, cosine
             if (
                 current_device == "cpu"
-                and name in self._config["tolerance"]["higher_inference"]
+                and name in self._config["tolerance"]["higher_inference_cpu"]
             ):
                 return 4e-3, cosine
         return 1e-3, cosine

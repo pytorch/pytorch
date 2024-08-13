@@ -10,11 +10,6 @@ skip:
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
 
-  device:
-    cpu:
-      # OOMs
-      - OPTForCausalLM
-
   control_flow:
     - AllenaiLongformerBase
 
@@ -71,6 +66,7 @@ batch_size:
     TrOCRForCausalLM: 2
     XGLMForCausalLM: 4
     XLNetLMHeadModel: 2
+    YituTechConvBert: 2
 
 
 tolerance:
