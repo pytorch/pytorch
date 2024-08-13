@@ -10,7 +10,7 @@ class DecisionTreeNode:
         threshold=None,
         left=None,
         right=None,
-        value=None,
+        class_probs=None,
         num_samples=None,
         node_id=0,
     ):
@@ -18,7 +18,7 @@ class DecisionTreeNode:
         self.threshold = threshold
         self.left = left
         self.right = right
-        self.value = value
+        self.class_probs = class_probs
         self.num_samples = num_samples
         self.id = node_id
 
@@ -27,13 +27,19 @@ class DecisionTreeNode:
 
 
 class DecisionTree:
+    """
+    Custom decision tree implementation that mimics some of the sklearn API.
+    The purpose of this class it to be able to perform transformations, such as custom pruning, which
+    does not seem to be easy with sklearn.
+    """
+
     def __init__(self, sklearn_tree, feature_names):
         self.feature_names = feature_names
         self.root = self._convert_sklearn_tree(sklearn_tree.tree_)
         self.classes_ = sklearn_tree.classes_
 
     def _convert_sklearn_tree(self, sklearn_tree, node_id=0):
-        value = sklearn_tree.value[node_id][0]
+        class_probs = sklearn_tree.value[node_id][0]
         num_samples = sklearn_tree.n_node_samples[node_id]
         if sklearn_tree.feature[node_id] != _tree.TREE_UNDEFINED:
             feature_index = sklearn_tree.feature[node_id]
@@ -49,13 +55,13 @@ class DecisionTree:
                 threshold=sklearn_tree.threshold[node_id],
                 left=left,
                 right=right,
-                value=value,
+                class_probs=class_probs,
                 num_samples=num_samples,
                 node_id=node_id,
             )
         else:
             return DecisionTreeNode(
-                value=value, num_samples=num_samples, node_id=node_id
+                class_probs=class_probs, num_samples=num_samples, node_id=node_id
             )
 
     def prune(self, df, target_col, k):
@@ -68,11 +74,14 @@ class DecisionTree:
         left_df = df[df[node.feature] <= node.threshold]
         right_df = df[df[node.feature] > node.threshold]
 
+        # number of unique classes in the left and right subtrees
         left_counts = left_df[target_col].nunique()
         right_counts = right_df[target_col].nunique()
 
+        # for ranking, we want to ensure that we return at least k classes, so if we have less than k classes in the
+        # left or right subtree, we remove the split and make this node a leaf node
         if left_counts < k or right_counts < k:
-            return DecisionTreeNode(value=node.value)
+            return DecisionTreeNode(class_probs=node.class_probs)
 
         node.left = self._prune_tree(node.left, left_df, target_col, k)
         node.right = self._prune_tree(node.right, right_df, target_col, k)
@@ -93,15 +102,17 @@ class DecisionTree:
 
         node_id = id(node)
 
-        # Format value array with line breaks
-        value_str = self._format_value_array(node.value, node.num_samples)
+        # Format class_probs array with line breaks
+        class_probs_str = self._format_class_probs_array(
+            node.class_probs, node.num_samples
+        )
 
         if node.is_leaf():
-            label = value_str
+            label = class_probs_str
             shape = "box"
         else:
             feature_name = f"{node.feature}"
-            label = f"{feature_name} <= {node.threshold:.2f}\\n{value_str}"
+            label = f"{feature_name} <= {node.threshold:.2f}\\n{class_probs_str}"
             shape = "oval"
 
         dot = f'    {node_id} [label="{label}", shape={shape}];\n'
@@ -115,14 +126,15 @@ class DecisionTree:
 
         return dot
 
-    def _format_value(self, num):
+    def _format_class_prob(self, num):
         if num == 0:
             return "0"
         return f"{num:.2f}"
 
-    def _format_value_array(self, value, num_samples, max_per_line=5):
-        flat_value = value.flatten()
-        formatted = [self._format_value(v) for v in flat_value]
+    def _format_class_probs_array(self, class_probs, num_samples, max_per_line=5):
+        # add line breaks to avoid very long lines
+        flat_class_probs = class_probs.flatten()
+        formatted = [self._format_class_prob(v) for v in flat_class_probs]
         lines = [
             formatted[i : i + max_per_line]
             for i in range(0, len(formatted), max_per_line)
@@ -150,11 +162,11 @@ class DecisionTree:
     def _predict_single(self, x):
         node = self._get_leaf(x)
         # map index to class name
-        return self.classes_[np.argmax(node.value)]
+        return self.classes_[np.argmax(node.class_probs)]
 
     def _predict_proba_single(self, x):
         node = self._get_leaf(x)
-        return node.value
+        return node.class_probs
 
     def apply(self, X):
         ids = [self._apply_single(x) for _, x in X.iterrows()]
@@ -165,6 +177,7 @@ class DecisionTree:
         return node.id
 
     def codegen(self, dummy_col_2_col_val, lines, unsafe_leaves):
+        # generates python code for the decision tree
         def codegen_node(node, depth):
             indent = "    " * (depth + 1)
             if node.is_leaf():
@@ -194,7 +207,7 @@ class DecisionTree:
             """
             if node.id in unsafe_leaves:
                 return f"{indent}return None"
-            class_probas = node.value
+            class_probas = node.class_probs
             return f"{indent}return {best_probas_and_indices(class_probas)}"
 
         def best_probas_and_indices(class_probas):
