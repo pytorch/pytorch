@@ -337,7 +337,7 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
-  - cmake/Modules/FindMKLDNN.cmake
+  - cmake/Modules/FindONEDNN.cmake
   - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
@@ -367,7 +367,7 @@
   - aten/src/ATen/native/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
-  - aten/src/ATen/native/mkldnn/**
+  - aten/src/ATen/native/onednn/**
   - test/test_mkl*.py
   approved_by:
   - mingfeima
@@ -395,9 +395,9 @@
 
 - name: CPU inductor
   patterns:
-  - torch/_inductor/mkldnn_ir.py
-  - torch/_inductor/mkldnn_lowerings.py
-  - torch/_inductor/fx_passes/mkldnn_fusion.py
+  - torch/_inductor/onednn_ir.py
+  - torch/_inductor/onednn_lowerings.py
+  - torch/_inductor/fx_passes/onednn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
   - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
