@@ -1482,6 +1482,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
+            _lazy_backward_info = lazy_backward_info
 
             @staticmethod
             def _compiled_autograd_key(ctx):
