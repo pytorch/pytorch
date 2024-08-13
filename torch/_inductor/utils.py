@@ -1521,6 +1521,10 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def is_windows():
+    return sys.platform == "win32"
+
+
 def has_free_symbols(itr: Iterable[Any]):
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
@@ -1848,9 +1852,11 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    return statically_known_true(
+        (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % GPU_ALIGN_BYTES == 0
+    )
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
