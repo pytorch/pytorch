@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+from unittest.mock import patch
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -10,7 +12,6 @@ from torch._C import (
 )
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
-from unittest.mock import patch
 
 
 class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
@@ -97,8 +98,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.ones(2, 2)
 
-        with patch("torch._dynamo.variables.torch_function.IGNORED_MODES", {IgnoredMode}):
-
+        with patch(
+            "torch._dynamo.variables.torch_function.IGNORED_MODES", {IgnoredMode}
+        ):
             # initial compile
             fn(inp)
 
@@ -130,7 +132,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(cnt.frame_count, 3)
 
-
         # This is tricky, basically the ignored modes are baked into the guard
         # IgnoredMode will be ignored forever by that guard.
         # This is okay since we don't expect to be modifying IGNORED_MODES
@@ -141,7 +142,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             fn(inp)
 
         self.assertEqual(cnt.frame_count, 4)
-
 
     @torch._dynamo.config.patch("enable_cpp_guard_manager", False)
     def test_torch_function_mode_guards_ignored_types_py(self):
