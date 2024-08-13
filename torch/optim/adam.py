@@ -4,11 +4,11 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
+    _device_dtype_check_for_fused,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
@@ -122,17 +122,8 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
-        fused_supported_devices = _get_fused_kernels_supported_devices()
         for p in group["params"]:
             if p.grad is not None:
-                if group["fused"] and not (
-                    p.device.type in fused_supported_devices
-                    and torch.is_floating_point(p)
-                ):
-                    raise RuntimeError(
-                        "`fused=True` requires all the params to be floating point Tensors of "
-                        f"supported devices: {fused_supported_devices}."
-                    )
                 has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
@@ -144,6 +135,8 @@ class Adam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
+                    if group["fused"]:
+                        _device_dtype_check_for_fused(p)
                     # note(crcrpar): [special device hosting for step]
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.

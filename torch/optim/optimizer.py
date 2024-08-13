@@ -192,6 +192,15 @@ def _default_to_fused_or_foreach(
     return fused, foreach
 
 
+def _device_dtype_check_for_fused(p: torch.Tensor) -> None:
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    if not (p.device.type in fused_supported_devices and torch.is_floating_point(p)):
+        raise RuntimeError(
+            "`fused=True` requires all the params to be floating point Tensors of "
+            f"supported devices: {fused_supported_devices}."
+        )
+
+
 def _view_as_real(params, *state_and_grads):
     for i, p in enumerate(params):
         if torch.is_complex(p):
