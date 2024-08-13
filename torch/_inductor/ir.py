@@ -3493,6 +3493,10 @@ class InputBuffer(Buffer):
     pass
 
 
+class DonatedBuffer(InputBuffer):
+    pass
+
+
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 

@@ -1866,7 +1866,7 @@ class WrapperCodeGen(CodeGen):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
-            or name in V.graph.graph_inputs
+            or (name in V.graph.graph_inputs) and not isinstance(V.graph.graph_inputs[name].data.data, ir.DonatedBuffer)
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers

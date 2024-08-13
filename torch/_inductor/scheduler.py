@@ -68,6 +68,17 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 @dataclasses.dataclass
+class SchedulerDonatedBuffer:
+    scheduler: Scheduler
+    node: ir.DonatedBuffer
+    users: List[NodeUser]
+    defining_op=None
+
+    def get_name(self) -> str:
+        return self.node.get_name()
+
+
+@dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
     node: ir.Buffer
@@ -398,9 +409,13 @@ class BaseSchedulerNode:
                 continue
 
             for read in ordered_reads:
-                input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
-                    read.name
-                )
+                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                if read.name in self.scheduler.name_to_donated_buffer:
+                    input_buf = self.scheduler.name_to_donated_buffer[read.name]
+                else:
+                    input_buf = self.scheduler.name_to_buf.get(
+                        read.name
+                    )
                 if (
                     input_buf
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
@@ -425,7 +440,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
+                            input_buf.defining_op
+                            and isinstance(
                                 input_buf.defining_op.node,
                                 (ir.FallbackKernel, ir.MultiOutput),
                             )
@@ -1623,6 +1639,19 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
+    def get_donated_buffer(self) -> Dict[str, SchedulerDonatedBuffer]:
+        name_to_donated_buf = {}
+        for node in self.nodes:
+            for read in node.read_writes.reads:
+                if read.name in V.graph.graph_inputs and isinstance(V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer):
+                    assert read.name not in name_to_donated_buf, f"donated buffer {read.name} should only be read once"
+                    name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
+                        self,
+                        V.graph.graph_inputs[read.name].data.data,
+                        [NodeUser(node, can_inplace=True, is_weak=False)]
+                    )
+        return name_to_donated_buf
+
     def _init(self, nodes: List[ir.Operation]) -> None:
         super().__init__()
         self.__dep_size_hint_cache = {}
@@ -1646,6 +1675,7 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
+        self.name_to_donated_buffer: Dict[str, SchedulerDonatedBuffer] = self.get_donated_buffer()
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }

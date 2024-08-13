@@ -70,6 +70,7 @@ from .exc import (
 )
 from .ir import (
     Constant,
+    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -316,6 +317,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
+        is_backward: bool = False,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -326,6 +328,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
+        self.is_backward = is_backward
         self.is_const_graph = is_const_graph
         self.const_code = const_code
         self.const_module = const_module
@@ -768,6 +771,7 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def run(self, *args: Any) -> Any:
+        self.placeholder_idx = 0
         with dynamo_timed("GraphLowering.run"):
             return super().run(*args)
 
@@ -942,12 +946,29 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
         # TODO(jansel): handle input aliasing
         target = self.qualify_name(target)
-        tensor = TensorBox.create(
-            InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+
+        tracing_context = torch._guards.TracingContext.try_get()
+        if self.is_backward and tracing_context and tracing_context.fw_metadata and tracing_context.fw_metadata.bw_donated_idxs and self.placeholder_idx in tracing_context.fw_metadata.bw_donated_idxs:
+            print(f"bw_donated_idx:{tracing_context.fw_metadata.bw_donated_idxs}")
+
+
+
+
+            # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+            #   in the bw output order.
+            tensor = TensorBox.create(
+                DonatedBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides),
+                )
             )
-        )
+        else:
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.add_device_info(example.device)
@@ -967,6 +988,8 @@ class GraphLowering(torch.fx.Interpreter):
         with maybe_get_suppress_shape_guards_ctx():
             if should_assume_input_aligned(example):
                 self.aligned_inputs.add(target)
+
+        self.placeholder_idx += 1
         return tensor
 
     def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg]
