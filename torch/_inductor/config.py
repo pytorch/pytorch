@@ -1121,6 +1121,10 @@ class trace:
 
 
 def get_feature_local_version(feature_name: str) -> Optional[int]:
+    """Get the local version of a benchmarking feature. A feature's local version
+    is hardcoded like `torch._inductor.fb.FEATURE_FOO_VERSION`, where `feature_foo`
+    is the feature name.
+    """
     try:
         from torch._inductor.fb import benchmarking
     except ImportError:
@@ -1129,14 +1133,33 @@ def get_feature_local_version(feature_name: str) -> Optional[int]:
 
 
 class benchmarking:
-    # feature enablement:
-    # 1. `env_val`` takes priority, if `env_val=1` we force enable, if `env_val=0` we
-    # force disable
-    # 2a. [OSS] If `env_val` is unset, default to `oss_default` value
-    # 2b. [Internal] JK-based, if `local_version` is greater than or equal to the JK
-    # version the feature is enabled, otherwise default to disablement
+    """Class containing all configurations relating to benchmarking, specifically
+    the various features of benchmarking. Feature enablement is controlled differently
+    depending on whether we are running in OSS or fbcode, and adheres to the following
+    formula:
+
+    [OSS]
+        1. Check if the corresponding environment variable, which follows the format
+        `TORCHINDUCTOR_BENCHMARKING_FEATURE_FOO=...`, where `feature_foo` is the feature,
+        is set; this value is stored in `benchmarking.feature_foo.env_val`. If the environment
+        variable is set and `env_val == "1"`, the feature is force-enabled; if the environment
+        variable is set and `env_val == "0"`, the feature is force-disabled.
+        2. If the corresponding environment variable is un-set, we return the OSS default; the
+        OSS default is stored in `benchmarking.feature_foo.oss_default`.
+    
+    [fbcode]
+        1. Same as [OSS #1].
+        2. We compare the feature's local version, see `get_feature_local_version(...)`, with
+        the fetched JK version of the same name, like `"pytorch/benchmarking:FEATURE_FOO_VERSION"`.
+        If the feature's local version is greater than or equal to the JK version we consider the
+        feature to be enabled; if the feature's local version is less than the JK version we consider
+        the feature to be disabled. Intuitively, one can reason about this by taking the JK version,
+        let's call this X, and saying "this feature works at and after version X". If, for whatever
+        reason, we are unable to get a feature's local version we will automatically default to
+        disabling the feature.
+    """
+
     class inductor_benchmarker:
-        # Flags to control enablement of experimental inductor benchmarker feature
         env_val: Optional[str] = os.environ.get(
             "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_BENCHMARKER"
         )
