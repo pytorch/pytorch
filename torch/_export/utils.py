@@ -117,16 +117,23 @@ def _check_input_constraints_for_graph(
                             # such checks can affect the shape env.
                             pass
                         else:
-                            solution = try_solve(
-                                sympy.Eq(node_dim.node.expr, arg_dim), symbol
-                            )
-                            if solution is None:
-                                raise RuntimeError(  # noqa: B904
-                                    f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
-                                    f"of the form {node_dim.node.expr}, where {symbol} is an integer"
-                                )
+                            if isinstance(node_dim.node.expr, sympy.Symbol):
+                                # Short cut for try_solve below. Also useful in cases where
+                                # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
+                                # purely because symbol is constrained to be size-like,
+                                # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
+                                unification_map[symbol] = int(arg_dim)
                             else:
-                                unification_map[symbol] = int(solution[1])
+                                solution = try_solve(
+                                    sympy.Eq(node_dim.node.expr, arg_dim), symbol
+                                )
+                                if solution is None:
+                                    raise RuntimeError(  # noqa: B904
+                                        f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
+                                        f"of the form {node_dim.node.expr}, where {symbol} is an integer"
+                                    )
+                                else:
+                                    unification_map[symbol] = int(solution[1])
 
                     if node_dim.node.expr in range_constraints:
                         min_val, max_val = _convert_range_to_int(
@@ -403,10 +410,9 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                 new_output.users.clear()
                 node_replace_(call_mod_node, new_output)
             elif isinstance(new_output, (list, tuple)):
-                # Clear the users of the output node and set
-                # the users to be the users of original call_module node.
+                # Pop subgraph output node from users.
                 for node in new_output:
-                    node.users.clear()
+                    node.users.pop(output[0])
 
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
