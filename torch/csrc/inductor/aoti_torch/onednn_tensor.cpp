@@ -1,14 +1,14 @@
 #include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/onednn_tensor.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ideep.hpp>
 #endif
 
 namespace torch::aot_inductor {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
   return reinterpret_cast<void*>(

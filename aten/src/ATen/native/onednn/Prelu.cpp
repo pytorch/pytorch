@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
@@ -17,7 +17,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
@@ -69,4 +69,4 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
 }
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

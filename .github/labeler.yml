@@ -53,7 +53,7 @@
 - third_party/ideep
 - caffe2/ideep/**
 - caffe2/python/ideep/**
-- cmake/Modules/FindMKLDNN.cmake
+- cmake/Modules/FindONEDNN.cmake
 - third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**
 - test/test_jit_llga_fuser.py
@@ -63,7 +63,7 @@
 - third_party/ideep
 - caffe2/ideep/**
 - caffe2/python/ideep/**
-- cmake/Modules/FindMKLDNN.cmake
+- cmake/Modules/FindONEDNN.cmake
 - third_party/mkl-dnn.BUILD
 - torch/csrc/jit/codegen/onednn/**
 - test/test_jit_llga_fuser.py

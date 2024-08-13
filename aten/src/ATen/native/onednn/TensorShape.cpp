@@ -13,7 +13,7 @@
 #include <ATen/ops/view_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -41,7 +41,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
@@ -98,4 +98,4 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -3,7 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <torch/library.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <ideep.hpp>
 
@@ -211,4 +211,4 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 
 }}
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

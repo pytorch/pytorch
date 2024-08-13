@@ -10,7 +10,7 @@
 #include <ATen/ops/gelu_backward_native.h>
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
@@ -24,7 +24,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 
 }}
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
@@ -61,4 +61,4 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

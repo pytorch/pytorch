@@ -117,7 +117,7 @@ if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
 
-if(USE_MKLDNN)
+if(USE_ONEDNN)
   target_link_libraries(test_jit PRIVATE caffe2::mkldnn)
 endif()
 

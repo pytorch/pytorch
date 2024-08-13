@@ -5,7 +5,7 @@
 #include <mkl.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <dnnl.hpp>
 #include <ideep.hpp>
 #endif
@@ -36,7 +36,7 @@ std::string get_mkl_version() {
 
 std::string get_mkldnn_version() {
   std::ostringstream ss;
-  #if AT_MKLDNN_ENABLED()
+  #if AT_ONEDNN_ENABLED()
     // Cribbed from mkl-dnn/src/common/verbose.cpp
     // Too bad: can't get ISA info conveniently :(
     // Apparently no way to get ideep version?
@@ -162,7 +162,7 @@ std::string show_config() {
   ss << "  - " << get_mkl_version() << "\n";
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   ss << "  - " << get_mkldnn_version() << "\n";
 #endif
 

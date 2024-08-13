@@ -10,9 +10,9 @@
 #endif
 #include <vector>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ideep/tensor.hpp>
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
@@ -70,7 +70,7 @@ inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
   return input;
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 using AttrFunction = std::function<ideep::attr_t(
     torch::List<std::optional<at::Scalar>>,
@@ -82,7 +82,7 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 };
 
 #if defined(__aarch64__)
@@ -95,7 +95,7 @@ constexpr bool mkldnn_bf16_device_check_arm() {
 }
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.

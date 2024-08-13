@@ -693,12 +693,12 @@ only interested in a specific component.
   `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
+variables `DEBUG`, `USE_DISTRIBUTED`, `USE_ONEDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
 - `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
-- `USE_MKLDNN=0` will disable using MKL-DNN.
+- `USE_ONEDNN=0` will disable using MKL-DNN.
 - `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
 - `BUILD_TEST=0` will disable building C++ test binaries.
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
@@ -710,7 +710,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTEN
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_ONEDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build

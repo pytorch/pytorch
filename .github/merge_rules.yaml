@@ -337,7 +337,7 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
-  - cmake/Modules/FindMKLDNN.cmake
+  - cmake/Modules/FindONEDNN.cmake
   - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper

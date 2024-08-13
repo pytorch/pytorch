@@ -4,7 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/native/onednn/Common.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -96,4 +96,4 @@ class MkldnnConvOpContext final : public ConvOpContext {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

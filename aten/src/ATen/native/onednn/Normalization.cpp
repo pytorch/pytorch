@@ -16,7 +16,7 @@
 #endif
 #include <ATen/native/onednn/Utils.h>
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -79,7 +79,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/layer_norm.h>
@@ -282,4 +282,4 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

@@ -26,7 +26,7 @@
 #include <nnpack.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/Utils.h>
 #endif
 
@@ -508,7 +508,7 @@ struct ConvParams {
            ;
   }
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
     }
@@ -782,7 +782,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -1579,7 +1579,7 @@ at::Tensor _convolution(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       break;
     case ConvBackend::Mkldnn:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1594,7 +1594,7 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::MkldnnTranspose:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1609,7 +1609,7 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       output = empty_mkldnn(
           calc_output_size(input, weight, params), optTypeMetaToScalarType(input.options().dtype_opt()),
           input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
@@ -2123,7 +2123,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       }
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       if (output_mask[0]) {
         if (input.is_mkldnn()) {
           backend_grad_input = empty_mkldnn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),

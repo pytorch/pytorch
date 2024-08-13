@@ -24,7 +24,7 @@
 
 namespace at { namespace native {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
@@ -589,9 +589,9 @@ Tensor mkldnn_reorder_conv3d_weight(
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
-#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#if AT_MKL_ENABLED() && AT_ONEDNN_ENABLED()
 #include <mkl.h>
 
 static Tensor mkl_reorder_linear_weight(
@@ -635,6 +635,6 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
     TORCH_FN(mkl_reorder_linear_weight));
 }
 
-#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+#endif // AT_MKL_ENABLED && AT_ONEDNN_ENABLED
 
 }}
