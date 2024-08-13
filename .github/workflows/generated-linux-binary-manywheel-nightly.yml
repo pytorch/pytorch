@@ -45,7 +45,7 @@ concurrency:
   group: linux-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-
+jobs:
   build-docker-images:
     if: ${{ github.event_name == 'pull' }}
     steps:
