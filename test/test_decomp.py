@@ -506,12 +506,6 @@ core_backward_failures = {
     skip("unfold_copy"),  # slow: fails with --timeout=360 secs
     skip("xlogy"),  # slow: fails with --timeout=360 secs
     xfail("zero_"),
-    # for max_unpool2d, we require idential values at the inputs where the
-    # indices are the same. However with the core_backward test, the inputs are
-    # calculated using a numerical jacobian and the values become slightly different.
-    # Implementations are free to assume that the values are idential and
-    # therefore the decomposition and eager results are slightly different.
-    skip("nn.functional.max_unpool2d"),
 }
 if not TEST_WITH_SLOW:
     core_backward_failures.update(
