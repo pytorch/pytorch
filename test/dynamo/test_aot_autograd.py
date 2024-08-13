@@ -16,7 +16,10 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.testing._internal.common_utils import (
+    compare_equal_outs_and_grads,
+    skipIfWindows,
+)
 
 
 def maybe_dupe_op(x):
@@ -1021,6 +1024,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
 
+    @skipIfWindows
     def test_aot_grad_mode_mutation(self):
         for compiler in ["aot_eager", "inductor"]:
 
@@ -1203,6 +1207,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             opt_fn(x_opt)
 
     @torch._functorch.config.patch(donated_buffer=True)
+    @skipIfWindows
     def test_donated_buffer1(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 

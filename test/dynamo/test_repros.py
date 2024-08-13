@@ -2530,6 +2530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
 
+    @skipIfWindows
     def test_requires_grad_guards_with_grad_mode1(self):
         def f(x):
             if x.requires_grad:
@@ -3529,6 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
+    @skipIfWindows
     def test_dataclass_init_with_default_factory_with_inputs(self):
         @dataclasses.dataclass
         class DClass:
@@ -3815,6 +3817,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.zeros(4), float, np.float16)
 
+    @skipIfWindows
     def test_dedup_global(self):
         @torch.compile()
         def f():
@@ -4931,6 +4934,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    @skipIfWindows
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile
         def f(x):

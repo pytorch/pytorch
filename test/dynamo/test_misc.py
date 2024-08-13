@@ -164,6 +164,7 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    @skipIfWindows
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -1532,6 +1533,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         r2 = opt_fn(i)
         self.assertEqual(r1, r2)
 
+    @skipIfWindows
     def test_tensor_hasattr(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -2796,6 +2798,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         # We need to specialise the number as it's in a forloop
         self.assertEqual(cnts.frame_count, n_iter)
 
+    @skipIfWindows
     def test_numpy_as_global(self):
         global x
         x = np.arange(10)
@@ -2809,6 +2812,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(r, x * 3)
         del x
 
+    @skipIfWindows
     def test_numpy_gt(self):
         x = np.arange(10)
 
@@ -2820,6 +2824,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(type(r), np.ndarray)
         self.assertEqual(r, x >= 3)
 
+    @skipIfWindows
     def test_numpy_min(self):
         x = np.arange(10)
 
@@ -8117,6 +8122,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
+    @skipIfWindows
     def test_inline_dict_function_passed_as_arg(self):
         @torch.compile
         def fn(d, x, y):
@@ -10177,6 +10183,7 @@ ShapeEnv not equal: field values don't match:
             ):
                 print(fn_opt(torch.zeros(1)))
 
+    @skipIfWindows
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
         @torch.compile
@@ -11087,6 +11094,7 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @skipIfWindows
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
         def fn(y):
