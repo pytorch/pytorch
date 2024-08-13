@@ -252,14 +252,7 @@ class HigherOrderOperator(OperatorBase):
         self.__name__ = name
         _higher_order_ops[name] = self
         self._ns = "higher_order"
-
-        # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
-        # torch._ops.higher_order.
-        # For an instance of subclass of HigherOrderOperator (e.g. customized higher order op),
-        # the __module__ attribute will be kept unchanged.
-        if self.__class__ is HigherOrderOperator:
-            self_name_space = "." + self.namespace if self.namespace else ""
-            self.__module__ = self.__module__ + self_name_space
+        self.__module__ = "torch.ops.higher_order"
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
