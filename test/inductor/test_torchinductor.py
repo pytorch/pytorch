@@ -2534,6 +2534,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfWindows  # debug compile
     def test_builtins_round(self):
         def fn(x, i):
             return x[: round(i / 2 + 1)] + round(i / 2)
