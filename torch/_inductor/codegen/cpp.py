@@ -9,7 +9,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -1974,14 +1974,14 @@ class CppVecKernel(CppKernel):
         self,
         args,
         num_threads,
-        tiling_factor=0,
-        tiling_idx=-1,
+        tiling_factor,
+        tiling_idx,
         tail_size=None,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = cpu_vec_isa.pick_vec_isa()
         assert self.vec_isa
-        assert tiling_factor != 0, "Expect pass in Non-Zero tiling_factor explicitly"
+        assert tiling_factor > 0, "Expect pass in Non-Zero tiling_factor explicitly"
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         self.tail_size = tail_size
@@ -3074,15 +3074,17 @@ class CppVecKernelChecker(CppVecKernel):
         return self
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody):
+def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
+    """
+    Returns the low precision float data type (torch.float16/torch.bfloat16) if all the
+    nodes can codegen with this data type. Otherwise returns None.
+    """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
     _lowp_fp_type: Optional[torch.dtype] = None
 
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
-            # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
-            # the data type as well.
             if _node.op == "placeholder" or _node.target in (
                 "get_index",
                 "index_expr",
@@ -3153,7 +3155,7 @@ class TilingSelect:
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
         if _lowp_fp_dtype and all(
             (get_loop_body_lowp_fp(loop_body) == _lowp_fp_dtype)
-            for loop_body in loop_bodies
+            for loop_body in loop_bodies[1:]
         ):
             dtype = _lowp_fp_dtype
 
@@ -3215,52 +3217,44 @@ class TilingSelect:
                     itervars[reduction_depth:],
                 )
                 op_counter: Dict[str, int] = {}
-                # ops may not cause overhead with vectorization, like non-contiguous
+                # ops may cause overhead with vectorization, like non-contiguous
                 # index_expr, load, store
                 non_contig_indexing_op_counter: Dict[str, int] = {}
-
+                # op_name to the idx of index parameter
+                op_name_to_index_arg_idx: Dict[str, int] = {
+                    "index_expr": -2,
+                    "load": -1,
+                    "store": 2,
+                }
+                # op_name to func checking if contiguous index
+                op_name_to_stride_func: Dict[str, Callable] = {
+                    "index_expr": lambda stride: not (
+                        stride == 0 or stride is not None
+                    ),
+                    "load": lambda stride: stride not in [0, 1],
+                    "store": lambda stride: stride != 1,
+                }
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target == "index_expr":
+                            if _node.target in ["index_expr", "load", "store"]:
                                 # Get the index and replace prefix from z to x
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
-                                )[_node.args[-2].args[0]]
+                                )[
+                                    _node.args[
+                                        op_name_to_index_arg_idx[_node.target]
+                                    ].args[0]
+                                ]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
                                     )
-                                    if not (stride == 0 or stride is not None):
+                                    if op_name_to_stride_func[_node.target](stride):
                                         _update_negative_op_count(
                                             _node.target, non_contig_indexing_op_counter
                                         )
-                            elif _node.target == "load":
-                                index = sub_block.body.indexing_from_args(
-                                    (vars, reduction_vars)
-                                )[_node.args[-1].args[0]]
-                                if _is_valid_indices(itervars, tiling_indices):
-                                    stride = _try_get_stride(
-                                        index, itervars, tiling_factor, tiling_indices
-                                    )
-                                    if stride not in [0, 1]:
-                                        _update_negative_op_count(
-                                            _node.target, non_contig_indexing_op_counter
-                                        )
-                            elif _node.target == "store":
-                                index = sub_block.body.indexing_from_args(
-                                    (vars, reduction_vars)
-                                )[_node.args[2].args[0]]
-                                if _is_valid_indices(itervars, tiling_indices):
-                                    stride = _try_get_stride(
-                                        index, itervars, tiling_factor, tiling_indices
-                                    )
-                                    if stride != 1:
-                                        _update_negative_op_count(
-                                            _node.target, non_contig_indexing_op_counter
-                                        )
-
                             if isinstance(_node.target, str) and not (
                                 _node.target.startswith("masked_subblock")
                                 or _node.target
