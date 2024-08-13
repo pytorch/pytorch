@@ -7,6 +7,7 @@ import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 log = logging.getLogger(__name__)
@@ -20,11 +21,13 @@ class TestBench(TestCase):
         w = torch.rand(512, 10).cuda().half()
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
+    @skipIfWindows
     def test_benchmarker(self):
         res = benchmarker.benchmark(self._bench_fn, (), {})
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 
+    @skipIfWindows
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
         log.warning("do_bench_using_profiling result: %s", res)

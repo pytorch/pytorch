@@ -44,18 +44,21 @@ inner(torch.randn(20, 20).to("{device}"))
             "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
+    @skipIfWindows
     @requires_cuda
     def test_after_dynamo_cuda_compile_error(self):
         self._test_after_dynamo(
             "cuda", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
+    @skipIfWindows
     @requires_cuda
     def test_after_dynamo_cuda_runtime_error(self):
         self._test_after_dynamo(
             "cuda", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
+    @skipIfWindows
     @requires_cuda
     def test_after_dynamo_cuda_accuracy_error(self):
         self._test_after_dynamo(
