@@ -1,8 +1,8 @@
 import time
 from functools import cached_property, wraps
 from statistics import median
-from typing import Any, Callable, Concatenate, Dict, List, Tuple
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Any, Callable, Dict, List, Tuple
+from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
 
