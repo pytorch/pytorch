@@ -2463,8 +2463,6 @@ class BenchmarkRunner:
         return copy.deepcopy(model)
 
     def cast_based_on_args(self, model, example_inputs):
-        import pdb
-        pdb.set_trace()
         if self.args.float32 or self.args.only in self.fp32_only_models:
             if not self.args.float32:
                 log.warning("Model %s supports float32 only", self.args.only)
@@ -4035,8 +4033,6 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
-    import pdb
-    pdb.set_trace()
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
