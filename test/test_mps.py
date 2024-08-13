@@ -3544,102 +3544,60 @@ class TestMPS(TestCaseMPS):
         mps_slice4 = mps_x[1, :].to('cpu')
         self.assertEqual(cpu_slice4, mps_slice4)
 
-    def test_slice_reshape_view_api_test_1(self):
-        x = torch.randn(4, 4)
-        x_mps = x.detach().clone().to("mps")
+    @parametrize("torch_type", arg_values=get_all_dtypes())
+    def test_slice_view_api(self, torch_type: torch.dtype):
 
-        y = x[1]
-        y_mps = x_mps[1]
-        self.assertEqual(y, y_mps)
+        def helper(x_tensor, y_func, z_func, r_func=None):
+            x_mps = x_tensor.detach().clone.to("mps")
 
-        z = y.reshape(2, 2)
-        z_mps = y_mps.reshape(2, 2)
-        self.assertEqual(z, z_mps)
-        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
+            y = y_func(x_tensor)
+            y_mps = y_func(x_mps)
+            self.assertEqual(y, y_mps)
 
-        r = z + 1
-        r_mps = z_mps + 1
-        self.assertEqual(r, r_mps)
+            z = z_func(y)
+            z_mps = z_func(y_mps)
+            self.assertEqual(z, z_mps)
+            self.assertEqual(z.storage_offset(), z_mps.storage_offset())
 
-    def test_slice_reshape_view_api_test_2(self):
-        x = torch.randn(2, 4)
-        x_mps = x.detach().clone().to("mps")
-        ones = torch.ones(4)
-        ones_mps = torch.ones(4, device="mps")
+            if r_func:
+                r = r_func(z)
+                r_mps = r_func(z_mps)
+                self.assertEqual(r, r_mps)
 
-        print(x_mps)
-        y = x[1]
-        y_mps = x_mps[1]
-
-        self.assertEqual(y, y_mps)
-
-        r = y + ones
-        r_mps = y_mps + ones_mps
-        self.assertEqual(r, r_mps)
-
-    def test_slice_reshape_view_api_test_3(self):
-        x = torch.randn(4, 6)
-        x_mps = x.detach().clone().to("mps")
-
-        y = x[1]
-        y_mps = x_mps[1]
-        self.assertEqual(y, y_mps)
-        print(y.shape)
-        print(y_mps.shape)
-
-        z = y.reshape(3, 2).t()
-        z_mps = y_mps.reshape(3, 2).t()
-
-        self.assertEqual(z, z_mps)
-        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
-
-        r = z + 1
-        r_mps = z_mps + 1
-        self.assertEqual(r, r_mps)
-
-    def test_slice_reshape_view_api_test_4(self):
-        x = torch.arange(4).resize(1, 2, 2)
-        x_mps = x.detach().clone().to("mps")
-
-        z = x.permute(2, 0, 1)
-        z_mps = x_mps.permute(2, 0, 1)  # -> 3, 4, 3
-
-        self.assertEqual(z, z_mps)
-        self.assertEqual(z.storage_offset(), z_mps.storage_offset())
-
-        r = z + 1
-        r_mps = z_mps + 1
-        self.assertEqual(r, r_mps)
-
-    def test_slice_reshape_view_api_test_5(self):
-        x = torch.randn(4, 8)
-        x_mps = x.detach().clone().to("mps")
-
-        x = x.transpose(0, 1).reshape(-1)
-        x_mps = x_mps.transpose(0, 1).reshape(-1)
-
-        y = x[:2]
-        y_mps = x_mps[:2]
-        self.assertEqual(y, y_mps)
-
-        r = y + 1
-        r_mps = y_mps + 1
-        self.assertEqual(r, r_mps)
-
-    def test_slice_reshape_view_api_test_6(self):
-        x = torch.randn(1)
-        x_mps = x.detach().clone().to("mps")
-
-        x = x.expand(2, 3)
-        x_mps = x_mps.expand(2, 3)
-
-        ones_tensor = torch.ones(2, 3)
-        ones_tensor_mps = torch.ones(2, 3, device="mps")
-        self.assertEqual(x, x_mps)
-        x = x + ones_tensor
-        x_mps = x_mps + ones_tensor_mps
-
-        self.assertEqual(x, x_mps)
+        # Tests for previously encountered MPS bugs
+        helper(
+            torch.randn(4, 4, dtype=torch_type),
+            lambda x: x[1],
+            lambda y: y.reshape(2, 2),
+            lambda z: z + 1
+        )
+        helper(
+            torch.randn(2, 4, dtype=torch_type),
+            lambda x: x[1],
+            lambda y: y + torch.ones(4, device=y.device)
+        )
+        helper(
+            torch.randn(4, 6, dtype=torch_type),
+            lambda x: x[1],
+            lambda y: y.reshape(3, 2).t(),
+            lambda z: z + 1
+        )
+        helper(
+            torch.arange(4, dtype=torch_type).resize(1, 2, 2),
+            lambda x: x.permute(2, 0, 1),
+            lambda y: y + 1
+        )
+        helper(
+            torch.randn(4, 8, dtype=torch_type),
+            lambda x: x.transpose(0, 1).reshape(-1),
+            lambda y: y[:2],
+            lambda z: z + 1
+        )
+        helper(
+            torch.randn(1, dtype=torch_type),
+            lambda x: x.expand(2, 3),
+            lambda y: y + torch.ones(2, 3, device=y.device)
+        )
 
     def test_slice_reshape_contiguous(self):
         x = torch.randn(4, 4)
