@@ -56,7 +56,7 @@ jobs:
         uses: ./.github/workflows/build-manywheel-images.yml
 
   manywheel-py3_9-cpu-build:
-    if: ${{ always() && github.repository_owner == 'pytorch' }}
+    if: ${{ always() }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: build-docker-images
     with:
