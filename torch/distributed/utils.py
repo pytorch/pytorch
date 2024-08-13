@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import itertools
 import traceback
 from typing import (
     Any,
@@ -12,6 +13,7 @@ from typing import (
     overload,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
@@ -24,6 +26,9 @@ from torch.nn.utils.rnn import PackedSequence
 
 
 __all__ = []  # type: ignore[var-annotated]
+
+if TYPE_CHECKING:
+    from torch.distributed._tensor import DeviceMesh
 
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
@@ -328,6 +333,79 @@ def _sync_params_and_buffers(
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
         )
+
+
+def _sync_module_states_with_mesh(module: nn.Module, mesh: "DeviceMesh") -> None:
+    """
+    Broadcast from the module states of the first rank of ``mesh`` to other ranks
+    within the same ``mesh``.
+
+    This API is similar to ``_sync_module_states`` but is designed for DeviceMesh.
+    Instead of extending ``_sync_module_states``, creating a new API makes the
+    samentic simpler. The meaning of ``src`` is different for PG and DeviceMesh
+    because DeviceMesh has the local rank context but PG does not. So ``src`` for
+    ``_sync_module_states`` is the global rank of the source. But with DeviceMesh,
+    it is more straitforward to specify ``src`` as the local rank of the source.
+    """
+    module_states: List[torch.Tensor] = []
+    if mesh.ndim != 1:
+        raise ValueError("Mesh must be a 1D mesh.")
+
+    # Lazy import to avoid circular dependency
+    from torch.distributed._tensor import DTensor
+    from torch.distributed._tensor.device_mesh import _mesh_resources
+
+    root_mesh = _mesh_resources.get_root_mesh(mesh)
+
+    with torch.no_grad():
+        for state in itertools.chain(module.parameters(), module.buffers()):
+            if not isinstance(state, DTensor):
+                module_states.append(state)
+                continue
+
+            tensor_mesh = state.device_mesh
+            tensor_placements = state.placements
+            tensor_root_mesh = _mesh_resources.get_root_mesh(tensor_mesh)
+            if tensor_root_mesh != root_mesh:
+                # Ignore DTensors that do not belong to the same root mesh.
+                # It is not safe to broadcast these tensors.
+                continue
+
+            if tensor_mesh == mesh:
+                if not tensor_placements[0].is_replicate():
+                    continue
+            else:
+                # ``mesh`` is a submesh and has the same root mesh as
+                # tensor_mesh, so tensor_mesh must have mesh_dim_names.
+                assert (
+                    root_mesh.mesh_dim_names
+                ), "A slice-able mesh must have mesh_dim_names."
+                name = None
+                submesh_idx = -1
+                for idx, mesh_name in enumerate(root_mesh.mesh_dim_names):
+                    if root_mesh[mesh_name] == mesh:
+                        name = mesh_name
+                        submesh_idx = idx
+                        break
+                assert name is not None, "Cannot find the mesh name from the root mesh."
+                if not tensor_placements[idx].is_replicate():
+                    continue
+
+            # We have verified that the tensor is replicated on the given mesh
+            # dimension, so it is safe to do broadcast the local tensor along
+            # the mesh.
+            module_states.append(state.to_local())
+
+        pg = mesh.get_group()
+        src = dist.get_process_group_ranks(pg)[0]
+        _verify_param_shape_across_processes(pg, module_states)
+
+        for state in module_states:
+            # `dist._broadcast_coalesced` will increase the peak memory usage due to
+            # recordStream. We can implement the broadcast coalescing to speed up.
+
+            # We cannot call functional collective as we need to do inplace broadcast.
+            dist.broadcast(state, src, group=pg)
 
 
 def _replace_by_prefix(
