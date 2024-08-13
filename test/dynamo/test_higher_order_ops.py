@@ -2537,6 +2537,11 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         self.assertEqual(eager_res, ref_res)
         self.assertEqual(compiled_res, ref_res)
         self.assertEqual(len(cnt.graphs), 1)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
         graph = backend.graphs[0]
         self.assertExpectedInline(
             normalize_gm(graph.print_readable(print_output=False)),
@@ -2608,6 +2613,25 @@ class GraphModule(torch.nn.Module):
         msg = r"hints must be a dict containing int, float, bool or str value,"
         with self.assertRaisesRegex(RuntimeError, msg):
             compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+
+    def test_hints_wrapper_pytree_inputs(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x):
+                res = torch.add(x[0], x[1]["test"])
+                return res
+
+            res = hints_wrapper(outer_body_fn, ((x, {"test" : y}),), {}, hints={"test": True})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = r"args must be a tuple of tensors, ints, floats, or bools,"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn_with_hints(x, y)
 
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
