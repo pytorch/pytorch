@@ -807,6 +807,7 @@ def distribute_module(
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
         return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
+
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")

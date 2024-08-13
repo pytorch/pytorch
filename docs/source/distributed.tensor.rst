@@ -16,7 +16,7 @@ PyTorch DTensor is a tensor sharding primitive
 
 .. currentmodule:: torch.distributed.tensor
 
-.. autoclass:: torch.distributed.tensor.DTensor
+.. autoclass:: DTensor
     :members:
 
 .. autofunction::  distribute_tensor
@@ -25,23 +25,21 @@ PyTorch DTensor is a tensor sharding primitive
 
 DTensor supports the following placement types:
 
-.. autoclass:: torch.distributed.tensor.Shard
+.. autoclass:: Shard
   :members:
   :undoc-members:
 
-.. autoclass:: torch.distributed.tensor.Replicate
+.. autoclass:: Replicate
   :members:
   :undoc-members:
 
-.. autoclass:: torch.distributed.tensor.Partial
+.. autoclass:: Partial
   :members:
   :undoc-members:
 
 DTensor provides dedicated tensor factory functions to allow creating :class:`DTensor` directly
 using torch.Tensor like factory function APIs (i.e. torch.ones, torch.empty, etc), by additionally
 specifying the :class:`DeviceMesh` and :class:`Placement` for the :class:`DTensor` created:
-
-.. automodule:: torch.distributed.tensor
 
 .. currentmodule:: torch.distributed.tensor
 
