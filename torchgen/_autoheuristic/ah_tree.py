@@ -1,19 +1,20 @@
-# mypy: ignore-errors
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
-from sklearn.tree import _tree
+from sklearn.tree import _tree  # type: ignore[import-untyped]
 
 
 class DecisionTreeNode:
     def __init__(
         self,
-        feature=None,
-        threshold=None,
-        left=None,
-        right=None,
-        class_probs=None,
-        num_samples=None,
-        node_id=0,
-    ):
+        feature: Optional[str] = None,
+        threshold: Optional[float] = None,
+        left: Optional["DecisionTreeNode"] = None,
+        right: Optional["DecisionTreeNode"] = None,
+        class_probs: Any = None,
+        num_samples: int = 0,
+        node_id: int = 0,
+    ) -> None:
         self.feature = feature
         self.threshold = threshold
         self.left = left
@@ -22,8 +23,8 @@ class DecisionTreeNode:
         self.num_samples = num_samples
         self.id = node_id
 
-    def is_leaf(self):
-        return self.left is None and self.right is None
+    def is_leaf(self) -> bool:
+        return self.left is None or self.right is None
 
 
 class DecisionTree:
@@ -33,12 +34,14 @@ class DecisionTree:
     does not seem to be easy with sklearn.
     """
 
-    def __init__(self, sklearn_tree, feature_names):
+    def __init__(self, sklearn_tree: Any, feature_names: List[str]) -> None:
         self.feature_names = feature_names
         self.root = self._convert_sklearn_tree(sklearn_tree.tree_)
-        self.classes_ = sklearn_tree.classes_
+        self.classes_: List[str] = sklearn_tree.classes_
 
-    def _convert_sklearn_tree(self, sklearn_tree, node_id=0):
+    def _convert_sklearn_tree(
+        self, sklearn_tree: Any, node_id: int = 0
+    ) -> DecisionTreeNode:
         class_probs = sklearn_tree.value[node_id][0]
         num_samples = sklearn_tree.n_node_samples[node_id]
         if sklearn_tree.feature[node_id] != _tree.TREE_UNDEFINED:
@@ -64,10 +67,12 @@ class DecisionTree:
                 class_probs=class_probs, num_samples=num_samples, node_id=node_id
             )
 
-    def prune(self, df, target_col, k):
+    def prune(self, df: Any, target_col: str, k: int) -> None:
         self.root = self._prune_tree(self.root, df, target_col, k)
 
-    def _prune_tree(self, node, df, target_col, k):
+    def _prune_tree(
+        self, node: DecisionTreeNode, df: Any, target_col: str, k: int
+    ) -> DecisionTreeNode:
         if node.is_leaf():
             return node
 
@@ -83,12 +88,14 @@ class DecisionTree:
         if left_counts < k or right_counts < k:
             return DecisionTreeNode(class_probs=node.class_probs)
 
+        assert node.left is not None, "expected left child to exist"
         node.left = self._prune_tree(node.left, left_df, target_col, k)
+        assert node.right is not None, "expected right child to exist"
         node.right = self._prune_tree(node.right, right_df, target_col, k)
 
         return node
 
-    def to_dot(self):
+    def to_dot(self) -> str:
         dot = "digraph DecisionTree {\n"
         dot += '    node [fontname="helvetica"];\n'
         dot += '    edge [fontname="helvetica"];\n'
@@ -96,7 +103,9 @@ class DecisionTree:
         dot += "}"
         return dot
 
-    def _node_to_dot(self, node, parent_id=0, edge_label=""):
+    def _node_to_dot(
+        self, node: DecisionTreeNode, parent_id: int = 0, edge_label: str = ""
+    ) -> str:
         if node is None:
             return ""
 
@@ -121,17 +130,21 @@ class DecisionTree:
             dot += f'    {parent_id} -> {node_id} [label="{edge_label}"];\n'
 
         if not node.is_leaf():
+            assert node.left is not None, "expected left child to exist"
             dot += self._node_to_dot(node.left, node_id, "<=")
+            assert node.right is not None, "expected right child to exist"
             dot += self._node_to_dot(node.right, node_id, ">")
 
         return dot
 
-    def _format_class_prob(self, num):
+    def _format_class_prob(self, num: float) -> str:
         if num == 0:
             return "0"
         return f"{num:.2f}"
 
-    def _format_class_probs_array(self, class_probs, num_samples, max_per_line=5):
+    def _format_class_probs_array(
+        self, class_probs: Any, num_samples: int, max_per_line: int = 5
+    ) -> str:
         # add line breaks to avoid very long lines
         flat_class_probs = class_probs.flatten()
         formatted = [self._format_class_prob(v) for v in flat_class_probs]
@@ -143,42 +156,49 @@ class DecisionTree:
             [", ".join(line) for line in lines]
         )
 
-    def predict(self, X):
+    def predict(self, X: Any) -> Any:
         predictions = [self._predict_single(x) for _, x in X.iterrows()]
         return np.array(predictions)
 
-    def predict_proba(self, X):
+    def predict_proba(self, X: Any) -> Any:
         return np.array([self._predict_proba_single(x) for _, x in X.iterrows()])
 
-    def _get_leaf(self, X):
+    def _get_leaf(self, X: Any) -> DecisionTreeNode:
         node = self.root
         while not node.is_leaf():
             if X[node.feature] <= node.threshold:
+                assert node.left is not None, "expected left child to exist"
                 node = node.left
             else:
+                assert node.right is not None, "expected right child to exist"
                 node = node.right
         return node
 
-    def _predict_single(self, x):
+    def _predict_single(self, x: Any) -> str:
         node = self._get_leaf(x)
         # map index to class name
         return self.classes_[np.argmax(node.class_probs)]
 
-    def _predict_proba_single(self, x):
+    def _predict_proba_single(self, x: Any) -> Any:
         node = self._get_leaf(x)
         return node.class_probs
 
-    def apply(self, X):
+    def apply(self, X: Any) -> Any:
         ids = [self._apply_single(x) for _, x in X.iterrows()]
         return np.array(ids)
 
-    def _apply_single(self, x):
+    def _apply_single(self, x: Any) -> int:
         node = self._get_leaf(x)
         return node.id
 
-    def codegen(self, dummy_col_2_col_val, lines, unsafe_leaves):
+    def codegen(
+        self,
+        dummy_col_2_col_val: Dict[str, Tuple[str, Any]],
+        lines: List[str],
+        unsafe_leaves: List[int],
+    ) -> None:
         # generates python code for the decision tree
-        def codegen_node(node, depth):
+        def codegen_node(node: DecisionTreeNode, depth: int) -> None:
             indent = "    " * (depth + 1)
             if node.is_leaf():
                 lines.append(handle_leaf(node, indent, unsafe_leaves))
@@ -196,11 +216,15 @@ class DecisionTree:
                         f"{indent}if context.get_value('{name}') <= {threshold}:"
                     )
                 lines.append(predicate)
+                assert node.left is not None, "expected left child to exist"
                 codegen_node(node.left, depth + 1)
                 lines.append(f"{indent}else:")
+                assert node.right is not None, "expected right child to exist"
                 codegen_node(node.right, depth + 1)
 
-        def handle_leaf(node, indent, unsafe_leaves):
+        def handle_leaf(
+            node: DecisionTreeNode, indent: str, unsafe_leaves: List[int]
+        ) -> str:
             """
             This generates the code for a leaf node in the decision tree. If the leaf is unsafe, the learned heuristic
             will return "unsure" (i.e. None).
@@ -210,7 +234,7 @@ class DecisionTree:
             class_probas = node.class_probs
             return f"{indent}return {best_probas_and_indices(class_probas)}"
 
-        def best_probas_and_indices(class_probas):
+        def best_probas_and_indices(class_probas: Any) -> str:
             """
             Given a list of tuples (proba, idx), this function returns a string in which the tuples are
             sorted by proba in descending order. E.g.:
@@ -235,4 +259,4 @@ class DecisionTree:
             )
             return f"[{probas_indices_sorted_str}]"
 
-        return codegen_node(self.root, 1)
+        codegen_node(self.root, 1)
