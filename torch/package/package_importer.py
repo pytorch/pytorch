@@ -446,7 +446,6 @@ class PackageImporter(Importer):
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
     def _do_find_and_load(self, name):
-        path = None
         parent = name.rpartition(".")[0]
         module_name_no_parent = name.rpartition(".")[-1]
         if parent:

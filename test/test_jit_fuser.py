@@ -506,7 +506,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
-    @torch._jit_internal._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
