@@ -799,6 +799,46 @@ graph():
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
+    def test_hoo_inline_users_issue(self):
+        # This came from an issue where replace_with_hop passes would inline subgraphs,
+        # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
+        # below, since it's used in both set_grad_enabled HOO modules).
+        # This checks that node.users and node.args are in correspondence.
+        def check_users_for_graph(graph):
+            def _tuple_contains(_tuple, val):
+                # check nested, since output node args have format ((x, y, ...),)
+                return any(
+                    _tuple_contains(x, val) if isinstance(x, tuple) else x == val
+                    for x in _tuple
+                )
+
+            for node in graph.nodes:
+                # check node.users
+                for user in node.users.keys():
+                    assert _tuple_contains(user.args, node)
+                # check node.args
+                for arg in node.args:
+                    if isinstance(arg, torch.fx.Node):
+                        assert _tuple_contains(arg.users, node)
+
+        # check set grad enabled
+        class SetGradCase(torch.nn.Module):
+            def forward(self, x):
+                _x = x.shape[0] + 2
+                _xx = _x + 2
+                with torch.no_grad():
+                    y = _x * 4
+                return _xx, y
+
+        ep = export(
+            SetGradCase(),
+            (torch.randn(6),),
+            dynamic_shapes={"x": (Dim("dx"),)},
+            strict=False,
+        )
+        check_users_for_graph(ep.graph)
+
     def test_export_predispatch_custom_ops_warnings(self):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1868,6 +1908,118 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    def test_mismatched_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x["k"]["k"][0] + x["k"]["k"][1]
+
+        inputs = ({"k": {"k": [torch.rand(4), torch.rand(4)]}},)
+        dim = torch.export.Dim("dim")
+
+        dynamic_shapes = {
+            "k": {"k": [dim, dim]}
+        }  # ValueError: Node keys mismatch; missing key(s): {'x'}; extra key(s): {'k'}.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "When `dynamic_shapes` is specified as a dict, its top-level keys "
+                "must be the arg names ['x'] of `inputs`, but here they are ['k']. "
+                "Since here `inputs` is a list/tuple enclosing a single dict, "
+                "maybe you just forgot to enclose `dynamic_shapes` in a list/tuple?"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": [dim, dim]}},
+        )  # torch._dynamo.exc.UserError: Unexpected dynamic_shape .*dim.* of Tensor, try None instead
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Unexpected input tensor shape .*dim.* "
+            + re.escape(
+                "specified at `dynamic_shapes[0]['k']['k'][0]` "
+                "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
+                " where each dimension is None, an int, or a Dim)"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": (dim, dim)}},
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got <class 'tuple'>.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is a <class 'tuple'>"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = ({"k": {"k": [(dim,), (dim,)]}},)  # ok
+        export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": dim}},
+        )  # ValueError: Node type mismatch; expected <class 'list'>, but got .*_Dim.*.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` is a <class 'list'>, but `dynamic_shapes[0]['k']['k']` is not"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = {
+            "x": {"k": [(dim,), (dim,)]},
+            "k": {"k": [(dim,), (dim,)]},
+        }  # ValueError: Node arity mismatch; expected 1, but got 2.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "When `dynamic_shapes` is specified as a dict, its top-level keys "
+                "must be the arg names ['x'] of `inputs`, but here they are ['x', 'k']. "
+                "Alternatively, you could also ignore arg names entirely "
+                "and specify `dynamic_shapes` as a list/tuple matching `inputs`."
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"k": [(dim,), (dim,), (dim,)]}},
+        )  # ValueError: Node arity mismatch; expected 2, but got 3.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']['k']` has 2 elements, but `dynamic_shapes[0]['k']['k']` has 3 elements"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        dynamic_shapes = (
+            {"k": {"K": [(dim,), (dim,), (dim,)]}},
+        )  # ValueError: Node keys mismatch; missing key(s): {'k'}; extra key(s): {'K'}.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: "
+                "`inputs[0]['k']` has keys ['k'], but `dynamic_shapes[0]['k']` has keys ['K']"
+            ),
+        ):
+            export(M(), inputs, dynamic_shapes=dynamic_shapes)
+
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x["k"]["k1"][0] + x["k"]["k2"][0]
+
+        inputs = ({"k": {"k1": [torch.rand(4)], "k2": [torch.rand(4)]}},)
+        dim = torch.export.Dim("dim")
+
+        dynamic_shapes = ({"k": {"k2": [(dim,)], "k1": [(dim,)]}},)  # ok
+        export(N(), inputs, dynamic_shapes=dynamic_shapes)
+
     def test_torch_check_eq_commutativity(self):
         class M1(torch.nn.Module):
             def forward(self, x1, x2, x3, y):
@@ -2041,8 +2193,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # and asserting the applied fix was suggested in the previous try.
             # Using this API avoids the need to define multiple versions of the same test
             # module, as in `test_suggested_fixes_for_data_dependent_errors_basic` above.
-            import re
-
             def code(snippets):
                 return f"[{', '.join(snippets)}]"
 

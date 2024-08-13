@@ -4133,6 +4133,17 @@ class TestSerialization(TestCase, SerializationMixin):
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
 
+    @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
+    @parametrize('weights_only', (True, False))
+    def test_serialization_byte_literal(self, byte_literals, weights_only):
+        """ Tests that byte literal can be serialized.
+        See: https://github.com/pytorch/pytorch/issues/133163"""
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(byte_literals, f)
+            f.seek(0)
+            y = torch.load(f, weights_only=weights_only)
+            self.assertEqual(y, byte_literals)
+
     @parametrize('filename', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
