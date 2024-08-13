@@ -35,31 +35,6 @@ struct VecMaskLoad<
   }
 };
 
-// template <typename T, typename mask_t>
-// struct VecMaskLoad<
-//     T,
-//     1,
-//     mask_t,
-//     2,
-//     typename std::enable_if_t<
-//         std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-//             std::is_same_v<T, uint32_t>,
-//         void>> {
-//   static inline VectorizedN<T, 1> apply(
-//       const T* ptr,
-//       const VecMask<mask_t, 2>& vec_mask) {
-//     at::vec::Vectorized<T> zero_vec(0);
-//     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-//     auto int_mask = vec_mask.template cast<int, 1>()[0];
-//     auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
-//     if constexpr (std::is_same_v<T, float>) {
-//       return Vectorized<T>(_mm512_mask_loadu_ps(zero_vec, mmask, ptr));
-//     } else {
-//       return Vectorized<T>(_mm512_mask_loadu_epi32(zero_vec, mmask, ptr));
-//     }
-//   }
-// };
-
 template <typename T, typename mask_t, int mask_n>
 struct VecMaskLoad<
     T,
@@ -90,36 +65,6 @@ struct VecMaskLoad<
     return result;
   }
 };
-
-// template <typename T, typename mask_t>
-// struct VecMaskLoad<
-//     T,
-//     2,
-//     mask_t,
-//     4,
-//     typename std::enable_if_t<
-//         std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-//             std::is_same_v<T, uint32_t>,
-//         void>> {
-//   static inline VectorizedN<T, 2> apply(
-//       const T* ptr,
-//       const VecMask<mask_t, 4>& vec_mask) {
-//     at::vec::Vectorized<T> zero_vec(0);
-//     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-//     auto int_mask = vec_mask.template cast<int, 2>();
-//     auto mmask0 = _mm512_cmp_epi32_mask(int_mask[0], all_ones, _MM_CMPINT_EQ);
-//     auto mmask1 = _mm512_cmp_epi32_mask(int_mask[1], all_ones, _MM_CMPINT_EQ);
-//     auto result = at::vec::VectorizedN<T, 2>();
-//     if constexpr (std::is_same_v<T, float>) {
-//       result[0] = _mm512_mask_loadu_ps(zero_vec, mmask0, ptr);
-//       result[1] = _mm512_mask_loadu_ps(zero_vec, mmask1, ptr);
-//     } else {
-//       result[0] = _mm512_mask_loadu_epi32(zero_vec, mmask0, ptr);
-//       result[1] = _mm512_mask_loadu_epi32(zero_vec, mmask1, ptr);
-//     }
-//     return result;
-//   }
-// };
 
 template <typename data_t, typename mask_t>
 struct VecMaskLoad<
@@ -202,16 +147,16 @@ struct VecMaskLoad<
       const data_t* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    auto zero = _mm512_set1_epi64(0);
+    at::vec::Vectorized<data_t> zero_vec(0);
     auto int_mask = vec_mask.template cast<int, 1>()[0];
     auto mmask = _mm512_cmp_epi32_mask(int_mask, all_ones, _MM_CMPINT_EQ);
-    at::vec::VectorizedN<int64_t, 2> result;
+    at::vec::VectorizedN<data_t, 2> result;
     if constexpr (std::is_same_v<data_t, double>) {
-      result[0] = _mm512_mask_loadu_pd(zero, (__mmask8)mmask, ptr);
-      result[1] = _mm512_mask_loadu_pd(zero, (__mmask8)(mmask >> 8), ptr + 8);
+      result[0] = _mm512_mask_loadu_pd(zero_vec, (__mmask8)mmask, ptr);
+      result[1] = _mm512_mask_loadu_pd(zero_vec, (__mmask8)(mmask >> 8), ptr + 8);
     } else {
-      result[0] = _mm512_mask_loadu_epi64(zero, (__mmask8)mmask, ptr);
-      result[1] = _mm512_mask_loadu_epi64(zero, (__mmask8)(mmask >> 8), ptr + 8);
+      result[0] = _mm512_mask_loadu_epi64(zero_vec, (__mmask8)mmask, ptr);
+      result[1] = _mm512_mask_loadu_epi64(zero_vec, (__mmask8)(mmask >> 8), ptr + 8);
     }
     return result;
   }
