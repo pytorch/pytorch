@@ -3108,7 +3108,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     train = False
     # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
-    # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
+    # Same as aten/src/ATen/native/onednn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
     inp = inp.contiguous()
     hx = hx.contiguous()
     cx = cx.contiguous()
