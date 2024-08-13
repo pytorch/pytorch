@@ -76,7 +76,7 @@ CMake files where oneDNN Graph submodule are included:
 
 ```bash
 third_party/ideep/mkl-dnn
-cmake/public/mkldnn.cmake
+cmake/public/onednn.cmake
 cmake/Modules/FindONEDNN.cmake
 cmake/Dependencies.cmake
 ```

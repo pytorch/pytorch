@@ -78,13 +78,13 @@ file(GLOB miopen_h "miopen/*.h")
 file(GLOB miopen_cpp "miopen/*.cpp")
 
 file(GLOB mkl_cpp "mkl/*.cpp")
-file(GLOB mkldnn_cpp "onednn/*.cpp")
+file(GLOB onednn_cpp "onednn/*.cpp")
 
-file(GLOB mkldnn_xpu_cpp "native/onednn/xpu/*.cpp" "native/onednn/xpu/detail/*.cpp")
+file(GLOB onednn_xpu_cpp "native/onednn/xpu/*.cpp" "native/onednn/xpu/detail/*.cpp")
 
 file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp "native/onednn/*.cpp")
+file(GLOB native_onednn_cpp "native/onednn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
@@ -213,7 +213,7 @@ else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
     ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
-    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    ${native_quantized_cpp} ${native_mkl_cpp} ${native_onednn_cpp}
     ${native_transformers_cpp}
     ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
     ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
@@ -227,7 +227,7 @@ if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
 if(AT_ONEDNN_ENABLED)
-  set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
+  set(all_cpu_cpp ${all_cpu_cpp} ${onednn_cpp})
 endif()
 if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
@@ -236,8 +236,8 @@ else()
 endif()
 
 if(USE_XPU)
-  list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
+  list(APPEND ATen_XPU_SRCS ${onednn_xpu_cpp})
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_onednn)
 
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/onednn/xpu)

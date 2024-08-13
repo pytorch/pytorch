@@ -45,7 +45,7 @@ IF(NOT ONEDNN_FOUND)
     if(LINUX)
       set(ABI_NEUTRAL_FLAGS -fpreview-breaking-changes)
     endif()
-    ExternalProject_Add(xpu_mkldnn_proj
+    ExternalProject_Add(xpu_onednn_proj
       SOURCE_DIR ${ONEDNN_ROOT}
       PREFIX ${XPU_ONEDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
@@ -61,21 +61,21 @@ IF(NOT ONEDNN_FOUND)
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
       BUILD_COMMAND ${DNNL_MAKE_COMMAND}
-      BUILD_BYPRODUCTS "xpu_mkldnn_proj-prefix/src/xpu_mkldnn_proj-build/src/${DNNL_LIB_NAME}"
+      BUILD_BYPRODUCTS "xpu_onednn_proj-prefix/src/xpu_onednn_proj-build/src/${DNNL_LIB_NAME}"
       INSTALL_COMMAND ""
     )
 
-    ExternalProject_Get_Property(xpu_mkldnn_proj BINARY_DIR)
+    ExternalProject_Get_Property(xpu_onednn_proj BINARY_DIR)
     set(__XPU_ONEDNN_BUILD_DIR ${BINARY_DIR})
     set(XPU_ONEDNN_LIBRARIES ${__XPU_ONEDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
     set(XPU_ONEDNN_INCLUDE ${__XPU_ONEDNN_BUILD_DIR}/include)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
-    add_library(xpu_mkldnn INTERFACE)
-    add_dependencies(xpu_mkldnn xpu_mkldnn_proj)
-    target_link_libraries(xpu_mkldnn INTERFACE ${__XPU_ONeDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
-    target_include_directories(xpu_mkldnn INTERFACE ${XPU_ONEDNN_INCLUDE})
+    add_library(xpu_onednn INTERFACE)
+    add_dependencies(xpu_onednn xpu_onednn_proj)
+    target_link_libraries(xpu_onednn INTERFACE ${__XPU_ONeDNN_BUILD_DIR}/src/${DNNL_LIB_NAME})
+    target_include_directories(xpu_onednn INTERFACE ${XPU_ONEDNN_INCLUDE})
   endif()
 
   IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
