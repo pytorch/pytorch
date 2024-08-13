@@ -4,7 +4,7 @@ import unittest
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor.runtime.benchmarking import Benchmarker
+from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -16,6 +16,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 ALL_BENCHMARKER_CLASSES = (
     Benchmarker,
+    TritonBenchmarker,
 )
 
 
@@ -80,6 +81,8 @@ class TestBenchmarker(TestCase):
         timing = benchmarker.benchmark_gpu(_callable)
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
+        if benchmarker_cls is TritonBenchmarker:
+            self.assertEqual(self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1)
 
     @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
     @unittest.expectedFailure
