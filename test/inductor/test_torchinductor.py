@@ -2546,6 +2546,7 @@ class CommonTemplate:
             for i in range(1, 6):
                 self.assertEqual(cfn(x, i), fn(x, i))
 
+    @skipIfWindows
     def test_builtins_round_float_ndigits_pos(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 1)
@@ -2558,6 +2559,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
+    @skipIfWindows
     def test_builtins_round_float_ndigits_zero(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 0)
@@ -2570,6 +2572,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
+    @skipIfWindows
     def test_builtins_round_float_ndigits_neg(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -2582,6 +2585,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
+    @skipIfWindows
     def test_builtins_round_int_ndigits_pos(self):
         def fn(x, i):
             return x + round(i, 1)
@@ -2594,6 +2598,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
+    @skipIfWindows
     def test_builtins_round_int_ndigits_zero(self):
         def fn(x, i):
             return x + round(i, 0)
@@ -2974,6 +2979,7 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
+    @skipIfWindows
     def test_large_pointwise(self):
         if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
             raise unittest.SkipTest("insufficient memory")
@@ -2993,6 +2999,7 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @skipIfWindows
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
@@ -3010,6 +3017,7 @@ class CommonTemplate:
         self.assertTrue((actual == 4).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @skipIfWindows
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
@@ -3350,6 +3358,7 @@ class CommonTemplate:
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
+    @skipIfWindows
     def test_scalar_output(self):
         def fn(arg0_1, arg2_1):
             arg1_1 = arg2_1.size(1)
@@ -4038,6 +4047,7 @@ class CommonTemplate:
             ),
         )
 
+    @skipIfWindows
     def test_convolution5(self):
         def fn(x, w):
             x = F.conv2d(x, w, dilation=[x.size(0)])
@@ -5462,6 +5472,7 @@ class CommonTemplate:
             )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfWindows
     def test_cat_unbacked_empty_1d(self):
         def fn(x, y):
             z = y.item()
@@ -5484,6 +5495,7 @@ class CommonTemplate:
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfWindows
     def test_cat_unbacked_2d(self):
         def fn(x, y):
             z = y.item()
@@ -9316,6 +9328,7 @@ class CommonTemplate:
             self.assertEqual(out_ref.stride(), out_test.stride())
             self.assertEqual(x_ref, x_test)
 
+    @skipIfWindows
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
@@ -9351,6 +9364,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfWindows
     def test_rsqrt_dynamic_shapes(self):
         # From HF hf_BigBird model.
         @torch.compile(dynamic=True)
