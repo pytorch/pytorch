@@ -1341,15 +1341,6 @@ def _disable_emit_hooks():
         torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
-    def __enter__(self) -> None:
-        self.hooks = torch._C._jit_get_emit_hooks()
-        torch._C._jit_set_emit_hooks(None, None)
-
-    def __exit__(self, *args) -> None:
-        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
-
-
 def _is_exception(obj) -> bool:
     if not inspect.isclass(obj):
         return False
