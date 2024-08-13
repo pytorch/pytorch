@@ -533,19 +533,16 @@ class FakeTensorConfig:
 # which is required for testing version counter and epoch validity
 class SymIntMemoDescriptor:
     _name: str
-    _is_unbacked: bool
-    # This flag disables version counting. We use this for NJT, where
-    # memo of the nested int on the fake offsets should not be invalidated
-    # even if the offsets is mutated. This is true given that each nested
-    # is not shared across multiple distinct tensors.
-    _no_vc: bool
 
-    def __init__(
-        self, *, is_unbacked: Optional[bool] = None, no_vc: bool = False
-    ) -> None:
-        assert is_unbacked is not None
-        self._is_unbacked = is_unbacked
-        self._no_vc = no_vc
+    # By default, SymInts in this memo are invalidated across versions/epochs.
+    # nested_ints however are preserved across epochs and across versions.
+    # Preserving across versions is okay for nested int since the association
+    # of a nested int is agnostic to the underlying data and nested ints are not
+    # shared across multiple distinct tensors.
+    _is_nested_int: bool
+
+    def __init__(self, *, is_nested_int: bool = False) -> None:
+        self._is_nested_int = is_nested_int
 
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
@@ -571,10 +568,9 @@ class SymIntMemoDescriptor:
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            not self._no_vc
-            and getattr(obj, self._memo_vc(obj)) != obj._version
+            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
         ) or (
-            self._is_unbacked
+            not self._is_nested_int
             and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
@@ -586,9 +582,9 @@ class SymIntMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not obj.is_inference() or self._no_vc:
+        elif not obj.is_inference() or self._is_nested_int:
             setattr(obj, self._memo(obj), value)
-            if not self._no_vc:
+            if not self._is_nested_int:
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
@@ -610,14 +606,14 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymIntMemoDescriptor(is_unbacked=True)
-    item_memo = SymIntMemoDescriptor(is_unbacked=True)
-    unique_memo = SymIntMemoDescriptor(is_unbacked=True)
+    nonzero_memo = SymIntMemoDescriptor()
+    item_memo = SymIntMemoDescriptor()
+    unique_memo = SymIntMemoDescriptor()
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
     # nested int.
-    nested_int_memo = SymIntMemoDescriptor(is_unbacked=False, no_vc=True)
+    nested_int_memo = SymIntMemoDescriptor(is_nested_int=True)
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
