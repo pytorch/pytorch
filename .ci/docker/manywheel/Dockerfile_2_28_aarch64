@@ -1,0 +1,57 @@
+FROM quay.io/pypa/manylinux_2_28_aarch64 as base
+
+# Graviton needs GCC 10 or above for the build. GCC12 is the default version in almalinux-8.
+ARG GCCTOOLSET_VERSION=11
+
+# Language variabes
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US.UTF-8
+
+# Installed needed OS packages. This is to support all
+# the binary builds (torch, vision, audio, text, data)
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
+  autoconf \
+  automake \
+  bison \
+  bzip2 \
+  curl \
+  diffutils \
+  file \
+  git \
+  less \
+  libffi-devel \
+  libgomp \
+  make \
+  openssl-devel \
+  patch \
+  perl \
+  unzip \
+  util-linux \
+  wget \
+  which \
+  xz \
+  yasm \
+  zstd \
+  sudo \
+  gcc-toolset-${GCCTOOLSET_VERSION}-toolchain
+
+# Ensure the expected devtoolset is used
+ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
+# git236+ would refuse to run git commands in repos owned by other users
+# Which causes version check to fail, as pytorch repo is bind-mounted into the image
+# Override this behaviour by treating every folder as safe
+# For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
+RUN git config --global --add safe.directory "*"
+
+FROM base as final
+
+# remove unncessary python versions
+RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
+RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
+RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
+RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6

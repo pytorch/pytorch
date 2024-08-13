@@ -3,7 +3,6 @@ import itertools
 
 import torch
 import torch._dynamo.testing
-
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -244,9 +243,9 @@ class CondTests(TestCase):
                     index < self.threshold and index >= 0, true_fn, false_fn, (x,)
                 )
 
-        main_model = TestModel().cuda()
-        x1 = torch.rand(2, 512, 128, 72).cuda()
-        x2 = torch.rand(2, 512, 96, 96).cuda()
+        main_model = TestModel().to(GPU_TYPE)
+        x1 = torch.rand(2, 512, 128, 72).to(GPU_TYPE)
+        x2 = torch.rand(2, 512, 96, 96).to(GPU_TYPE)
 
         opt_model = torch.compile(main_model)
         out1 = main_model(x1, 1)

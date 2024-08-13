@@ -1220,7 +1220,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   }
   const auto& var = THPVariable_Unpack(self);
   if (names == Py_None) {
-    at::internal_set_names_inplace(var, at::nullopt);
+    at::internal_set_names_inplace(var, std::nullopt);
   } else {
     TORCH_CHECK(
         THPUtils_checkDimnameList(names),

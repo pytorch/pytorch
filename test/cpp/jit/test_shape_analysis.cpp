@@ -296,7 +296,7 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 
 namespace {
 
-std::optional<int64_t> sym_dim = c10::nullopt;
+std::optional<int64_t> sym_dim = std::nullopt;
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 void assertShapeEqual(c10::SymbolicShape& a, c10::SymbolicShape& e) {

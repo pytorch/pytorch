@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 
 import unittest
-
 from typing import Mapping
 
 import torch
