@@ -353,7 +353,7 @@ class ViewAndMutationMeta:
 
     # Tokens, that were not used in backward are not added as joint outputs to avoid partitioner failures.
     # Filled after tracing joint function.
-    num_bw_out_tokens: Optional[int] = None
+    num_backward_out_tokens: Optional[int] = None
 
     # In case when some effect tokens were not used in forward (len(tokens) == 0
     # But were used in backward.
@@ -575,6 +575,9 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_discovered_tokens
+            == other.num_backward_discovered_tokens
+            and self.num_backward_out_tokens == other.num_backward_out_tokens
         )
 
 

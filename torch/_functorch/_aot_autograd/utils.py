@@ -243,7 +243,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
-    num_bw_out_tokens = fw_metadata.num_bw_out_tokens
+    num_backward_out_tokens = fw_metadata.num_backward_out_tokens
 
     def rewrite_with_effects_input_token(module, node):
         with module.graph.inserting_before(node):
@@ -323,7 +323,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             )
         do(fw_module)
 
-    if bw_module is not None and num_bw_out_tokens > 0:
+    if bw_module is not None and num_backward_out_tokens > 0:
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
@@ -346,7 +346,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
     fw_metadata.tokens = {}
-    fw_metadata.num_bw_out_tokens = 0
+    fw_metadata.num_backward_out_tokens = 0
 
 
 def root_module_when_exporting_non_strict(flat_fn):
