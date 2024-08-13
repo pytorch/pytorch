@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 
 import copy
-from typing import Type
+from typing import Set, Type
 
 import torch
 import torch.fx

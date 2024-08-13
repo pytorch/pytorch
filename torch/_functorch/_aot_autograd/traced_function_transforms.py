@@ -710,7 +710,7 @@ def handle_effect_tokens_fn(
             f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
             f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens_used_in_bw]
 
-            meta.num_bw_out_tokens = len(bwd_out_tokens_used_in_bw)
+            meta.num_backward_out_tokens = len(bwd_out_tokens_used_in_bw)
             return ((*f_fwd_out_tokens, *outs[0]), (*outs[1], *f_bwd_out_tokens))
 
         out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]

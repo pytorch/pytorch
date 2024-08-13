@@ -1713,6 +1713,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 num_flat_bw_args_with_grads = len(flat_bw_args_with_grads)
 
+                effect_tokens_discovered_in_backward = [
+                    None
+                ] * CompiledFunction.metadata.num_backward_discovered_tokens
+
                 # sanity asserts
                 # metadata_only_inps = [
                 #     x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
@@ -1735,14 +1739,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *ctx.symints,
                     *ctx.saved_tensors,
                     *flat_bw_args_with_grads,
+                    *effect_tokens_discovered_in_backward,
                     *rng_args,
                 ]
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (
-                    len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
+                    len(all_args)
+                    - num_flat_bw_args_with_grads
+                    - len(rng_args)
+                    - len(effect_tokens_discovered_in_backward)
                 )
-                tangents_end_idx = len(all_args) - len(rng_args)
+                tangents_end_idx = (
+                    len(all_args)
+                    - len(rng_args)
+                    - len(effect_tokens_discovered_in_backward)
+                )
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1770,8 +1782,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
                 )
+
+                roffset = len(rng_args) + len(effect_tokens_discovered_in_backward)
                 grad_output_types = [
-                    type(x) for x in all_args[-num_flat_bw_args_with_grads:]
+                    type(x)
+                    for x in all_args[
+                        -num_flat_bw_args_with_grads - roffset : -roffset
+                        if roffset > 0
+                        else len(all_args)
+                    ]
                 ]
                 # In general, we can add more asserts/guards here for when we partitioned
                 # with incorrect assumptions about the grad_outputs.
@@ -1969,7 +1988,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Toss out the backward output tokens
-                    num_tokens = CompiledFunction.metadata.num_bw_out_tokens
+                    num_tokens = CompiledFunction.metadata.num_backward_out_tokens
                     assert isinstance(num_tokens, int)
                     if num_tokens > 0:
                         out = out[:-num_tokens]
