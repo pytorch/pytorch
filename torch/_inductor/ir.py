@@ -4733,10 +4733,10 @@ class ExternKernel(InputsKernel):
                     exact_strides=exact_strides,
                 )
                 return x
-            # @TODO: do we need to check `x.get_layout().is_stride_ordered(order)`?
-            elif isinstance(x.get_layout(), FixedLayout) and list(
-                x.get_layout().stride
-            ) == list(exact_strides):
+            elif isinstance(x.get_layout(), FixedLayout) and (
+                list(x.get_layout().stride) == list(exact_strides)
+                or x.get_layout().is_stride_ordered(order)
+            ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
