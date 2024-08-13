@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -378,7 +378,6 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         def is_fusion_enabled(self):
             return self.fusion_enabled
 
-    counters["inductor"]["conv_bn_folding"] = 0
     conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
         conv_bn_to_fuse.clear()
@@ -577,11 +576,13 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 
                 bn_nodes_to_fuse.append(node)
 
-        updated_conv_weights: Dict[str, Any] = {}
+        # Dict[conv_weight_node.target, conv_bias_node]
+        updated_conv_weights: Dict[str, torch.fx.Node] = {}
         for node in bn_nodes_to_fuse:
             counters["inductor"]["conv_bn_folding"] += 1
             conv_node = node.args[0]
             if conv_node.args[1].target in updated_conv_weights:
+                # conv weights have been updated
                 if conv_node.args[2] is None:
                     conv_node.update_arg(
                         2, updated_conv_weights[conv_node.args[1].target]
@@ -611,6 +612,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_weight,
                     bn_bias,
                 )
+                # update conv weights
                 setattr(gm, conv_node.args[1].target, new_conv_weight)
                 if conv_node.args[2]:
                     setattr(gm, conv_node.args[2].target, new_conv_bias)
@@ -624,6 +626,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                             "get_attr", conv_bias_name, (), {}
                         )
                     conv_node.update_arg(2, conv_bias_node)
+                # record the updated conv weights
                 updated_conv_weights[conv_node.args[1].target] = conv_node.args[2]
                 node.replace_all_uses_with(node.args[0])
                 node.graph.erase_node(node)

@@ -453,6 +453,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
             x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
 
+            torch._dynamo.reset()
+            counters.clear()
+
             @torch.compile()
             def foo(mod, x):
                 return mod(x)
@@ -496,6 +499,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod(x)
                 return mod(x)
 
+            torch._dynamo.reset()
+            counters.clear()
+
             with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
@@ -536,6 +542,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod(x)
                 return mod(x)
 
+            torch._dynamo.reset()
+            counters.clear()
+
             with torch.no_grad():
                 out_eager = foo(mod, x)
                 out_optimized_for_infernece, _ = run_and_get_code(
@@ -566,6 +575,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
             def foo(mod, x):
                 return mod(x)
+
+            torch._dynamo.reset()
+            counters.clear()
 
             with torch.no_grad():
                 out_eager = foo(mod, x)
@@ -607,6 +619,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
             def foo(mod, x):
                 return mod(x)
+
+            torch._dynamo.reset()
+            counters.clear()
 
             with torch.no_grad():
                 out_eager = foo(mod, x)
