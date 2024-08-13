@@ -378,8 +378,8 @@ class InductorBenchmarker(TritonBenchmarker):
         # footprint metrics in OSS Inductor performance benchmarks
         del buffer
 
-        # return the minimum of estimated_timing and benchmarked_timing, since
-        # we just want the minimum timing overall we might check both
+        # return the minimum of `estimated_timing` and `benchmarked_timing`,
+        # we just want the minimum timing overall so we might as well check both
         return min(estimated_timing, benchmarked_timing)
 
 
