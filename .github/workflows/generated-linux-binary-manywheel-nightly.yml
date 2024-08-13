@@ -42,14 +42,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  calculate-manylinux-builder-cpu:
+  calculate-manylinux-images:
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
     uses: ./.github/workflows/build-manywheel-images.yml
 
   manywheel-py3_9-cpu-build:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: calculate-manylinux-builder-cpu
+    needs: calculate-manylinux-images
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
