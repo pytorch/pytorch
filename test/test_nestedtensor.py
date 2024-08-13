@@ -7020,6 +7020,8 @@ FORWARD_FAILURES = {
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
     "nanmean",
+    # masked_select requires torch._dynamo.config.capture_dynamic_output_shape_ops = True
+    "masked_select",
 }
 
 BACKWARD_FAILURES = {

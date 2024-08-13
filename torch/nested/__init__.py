@@ -422,8 +422,8 @@ def _aten_nested_get_jagged_dummy(x: Tensor) -> Tensor:
 def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     r"""
     Constructs a nested tensor given a strided tensor input and a strided mask, the resulting jagged layout nested tensor
-    will have values equivalent to running :func:`masked_select` with the provided tensor and mask. The offsets will be
-    generated from the contiguous True values in the mask.
+    will have values retain values where the mask is equal to True. The dimensionality of the mask is preserved and is 
+    represented with the offsets, this is unlike :func:`masked_select` where the output is collapsed to a 1D tensor.
 
     Args:
     tensor (:class:`torch.Tensor`): a strided tensor from which the jagged layout nested tensor is constructed from.
