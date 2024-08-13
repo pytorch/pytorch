@@ -8,6 +8,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd.graph import GradientEdge
+from torch.distributed.pipelining import pipe_split, SplitPoint
+
+# MLP Layer
+class MLPModule(torch.nn.Module):
+    def __init__(self, d_hid: int):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        return x
+
+
+# Multi-MLP model
+class MultiMLP(torch.nn.Module):
+    def __init__(self, d_hid: int, n_layers: int = 2):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([MLPModule(d_hid) for _ in range(n_layers)])
+        # For testing purpose only, this should be defined by user
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 def _get_grad_fn_or_grad_acc(t):
@@ -108,70 +139,6 @@ def get_param_groups(inputs, params):
     assert union_params == set(params)
 
     return unique_param_groups
-
-
-def compute_grads_only_inputs2(roots, inps, weights):
-    root_grad_fns = list(map(_get_grad_fn_or_grad_acc, roots))
-    inp_grad_fns = list(map(_get_grad_fn_or_grad_acc, inps))
-    weight_grad_fns = list(map(_get_grad_fn_or_grad_acc, weights))
-
-    reverse_graph_refs = construct_reverse_graph(root_grad_fns)
-    param_groups = get_param_groups(inp_grad_fns, weight_grad_fns)
-    del reverse_graph_refs
-
-    for param_group in param_groups:
-        for i, intermediate in enumerate(param_group["intermediates"]):
-
-            def get_hook(param_group, i):
-                def hook(grad_inputs):
-                    if param_group.get("grads", None) is None:
-                        param_group["grads"] = [None] * len(
-                            param_group["intermediates"]
-                        )
-                    param_group["grads"][i] = grad_inputs
-
-                return hook
-
-            # These are always "split" nodes that we need to recompute, so
-            # save their inputs.
-            intermediate.register_prehook(get_hook(param_group, i))
-
-    dinputs = torch.autograd.grad(
-        (out,),
-        inputs=tuple(inps),
-        grad_outputs=(torch.ones_like(out),),
-        retain_graph=True,
-    )
-    return dinputs, param_groups
-
-
-def compute_grads_only_weights2(user_weights, param_groups):
-    all_dweights = dict()
-    for param_group in param_groups:
-        # TODO: Handle case where intermediate can have multiple outputs
-        intermediate_edges = tuple(
-            GradientEdge(i, 0) for i in param_group["intermediates"]
-        )
-        weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
-
-        assert all(len(g) == 1 for g in param_group["grads"])
-        # [NEW!] Able to pass a GradientEdge to autograd.grad as output
-        # We do not need to retain_graph because... guarantee no overlap?
-        print("trying to execute: ", intermediate_edges, weights_edges)
-        dweights = torch.autograd.grad(
-            intermediate_edges,
-            weights_edges,
-            grad_outputs=sum(param_group["grads"], tuple()),
-        )
-        for w, dw in zip(param_group["params"], dweights):
-            all_dweights[w] = dw
-    # return grads in the original order weights were provided in
-    out = []
-    for w in user_weights:
-        grad_acc = _get_grad_fn_or_grad_acc(w)
-        out.append(all_dweights[grad_acc])
-    return tuple(out)
-
 
 def stage_backward_input(
     stage_outputs,

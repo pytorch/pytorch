@@ -114,8 +114,9 @@ def get_param_groups(
             seen_ids.add(id(param_group))
             unique_param_groups.append(param_group)
             union_params = union_params.union(param_group["params"])
-    # assert union_params == set(params)
 
+    print(f"{union_params=}, {params=}")
+    assert union_params == set(params)
     return unique_param_groups
 
 
@@ -197,14 +198,11 @@ def stage_backward_weight(
         for w, dw in zip(param_group["params"], dweights):
             all_dweights[w] = dw
     # return grads in the original order weights were provided in
+    out = []
     for w in weights:
         grad_acc = _get_grad_fn_or_grad_acc(w)
-        if grad_acc in all_dweights:
-            if w.grad is None:
-                w.grad = all_dweights[grad_acc]
-            else:
-                w.grad += all_dweights[grad_acc]
-
+        out.append(all_dweights[grad_acc])
+    return out
 
 def stage_backward(
     stage_output,
