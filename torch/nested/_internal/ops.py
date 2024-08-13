@@ -1590,7 +1590,6 @@ def masked_select_default(func, *args, **kwargs):
         raise RuntimeError(
             f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
         )
-
     res_values = inp._values.masked_select(mask_values)
     mask_cumsum = F.pad(mask_values.cumsum(dim=0), (1, 0))
     res_offsets = mask_cumsum[inp._offsets]

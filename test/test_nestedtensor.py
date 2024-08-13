@@ -7161,6 +7161,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqual(grads, grads_ref)
 
     @withXFails(COMPILE_FORWARD_FAILURES)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
@@ -7168,7 +7169,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
             op_fn = op.op
 
-            @torch._dynamo.config.patch(dynamic_shapes=op.dynamic_shapes)
             def f(*args, **kwargs):
                 return op_fn(*args, **kwargs)
 

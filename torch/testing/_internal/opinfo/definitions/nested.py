@@ -270,15 +270,11 @@ njt_sample_inputs = {
     "masked_select": sample_inputs_masked_select,
 }
 
-REQUIRES_DYNAMIC_SHAPES_OUTPUT = ["masked_select"]
-
 
 # Translates an OpInfo entry to one that operates on NJTs.
 def translate_opinfo(op):
     new_op = copy(op)
     new_op.supports_njt = True
-    new_op.dynamic_shapes = op.full_name in REQUIRES_DYNAMIC_SHAPES_OUTPUT
-
     if op.full_name in njt_sample_inputs:
         new_op.sample_inputs_func = njt_sample_inputs[op.full_name]
         # TODO: make the reference customizeable
