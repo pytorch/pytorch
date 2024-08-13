@@ -6,12 +6,6 @@ name: linux-binary-manywheel
 
 
 on:
-  pull_request:
-    paths:
-      - '.ci/docker/manywheel/*'
-      - '.ci/docker/common/*'
-      - .github/workflows/build-manywheel-images.yml
-      - .github/workflows/generated-linux-binary-manywheel-nightly.yml
   push:
     branches:
       - nightly
@@ -22,7 +16,6 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
-
 
 env:
   # Needed for conda builds
@@ -38,27 +31,32 @@ env:
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
-  DOCKER_REGISTRY: "308535385114.dkr.ecr.us-east-1.amazonaws.com"
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
   DOCKER_ID: ${{ secrets.DOCKER_ID }}
   DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-  WITH_DOCKER_BUILD: ${{ github.event_name == 'pull' }}
+  WITH_DOCKER_BUILD: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
 
 concurrency:
   group: linux-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  build-docker-images:
-    if: ${{ github.event_name == 'pull' }}
-    runs-on: ubuntu-latest
+  calculate-manylinux-builder-cpu:
+    runs-on:  ubuntu-latest
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
       - name: Build Docker Images
         uses: ./.github/workflows/build-manywheel-images.yml
 
   manywheel-py3_9-cpu-build:
-    if: ${{ always() }}
+    if: ${{ always() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: build-docker-images
+    needs: calculate-manylinux-builder-cpu
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -68,7 +66,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
-      # ${{ needs.build-docker-images.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || join('308535385114.dkr.ecr.us-east-1.amazonaws.com', 'pytorch/manylinux-builder-cpu:', github.event.pull_request.head.sha) }}
+      # ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-builder-cpu.outputs.docker-image }}
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
