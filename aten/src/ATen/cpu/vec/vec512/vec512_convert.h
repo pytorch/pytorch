@@ -117,6 +117,49 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
   }
 };
 
+template <>
+struct VecConvert<int32_t, 1, float, 1> {
+  static inline VectorizedN<int32_t, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    return  Vectorized<int32_t>(_mm512_cvttps_epi32(src[0]));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, int32_t, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<int32_t, 1>& src) {
+    return  Vectorized<float>(_mm512_cvtepi32_ps(src[0]));
+  }
+};
+
+template <>
+struct VecConvert<int16_t, 1, uint8_t, 1> {
+  static inline VectorizedN<int16_t, 1> apply(
+      const VectorizedN<uint8_t, 1>& src) {
+    auto src256 = _mm512_castsi512_si256(src[0]);
+    return Vectorized<int16_t>(_mm512_cvtepu8_epi16(src256));
+  }
+};
+
+template <>
+struct VecConvert<int8_t, 1, int32_t, 1> {
+  static inline VectorizedN<int8_t, 1> apply(
+      const VectorizedN<int32_t, 1>& src) {
+    auto src128 = _mm512_cvtepi32_epi8(src[0]);
+    return Vectorized<int8_t>(_mm512_castsi128_si512(src128));
+  }
+};
+
+template <>
+struct VecConvert<int8_t, 1, int16_t, 1> {
+  static inline VectorizedN<int8_t, 1> apply(
+      const VectorizedN<int16_t, 1>& src) {
+    auto src256 = _mm512_cvtepi16_epi8(src[0]);
+    return Vectorized<int8_t>(_mm512_castsi256_si512(src256));
+  }
+};
+
 template <typename dst_t, typename src_t>
 struct VecConvert<
     dst_t,

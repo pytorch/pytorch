@@ -15,6 +15,7 @@ from torch.distributed._tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed._tensor._utils import normalize_to_torch_size
 from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -22,7 +23,6 @@ from torch.distributed._tensor.ops.utils import (
     is_tensor_evenly_shardable,
     normalize_dim,
     normalize_dims,
-    normalize_to_torch_size,
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
@@ -415,10 +415,24 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     return TupleStrategy(output_tuple_strategy_childs)
 
 
-@register_op_strategy([aten._linalg_svd.default], schema_info=RuntimeSchemaInfo(1))
-def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    # Since we do not have a simple way to compute a sharded SVD, always fall
-    # back to replicate
+@register_op_strategy(
+    [
+        aten._linalg_svd.default,
+        aten.linalg_qr.default,
+        # TODO: The diagonal ops can have an improved sharding strategy for
+        # shard placements that does not require redistributing to replicate.
+        aten.diagonal_copy.default,
+        aten.diag_embed.default,
+        aten.diag.default,
+        aten.diagonal.default,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    """
+    Since we do not have a simple way to compute some linear algebra operations
+    like SVD or QR decomposition, always fall back to replicate.
+    """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
@@ -443,10 +457,11 @@ def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy, softmax_dim, _ = op_schema.args_schema
+    input_strategy, softmax_dim, *_ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)

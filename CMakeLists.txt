@@ -538,8 +538,14 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
-  set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
+
+  set(ENV_LDFLAGS "$ENV{LDFLAGS}")
+  string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
+  # Do not append linker flags passed via env var if they already there
+  if(NOT ${CMAKE_SHARED_LINKER_FLAGS} MATCHES "${ENV_LDFLAGS}")
+     set(CMAKE_SHARED_LINKER_FLAGS
+         "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
+  endif()
 endif()
 
 if(MSVC)
@@ -1028,7 +1034,6 @@ if(NOT MSVC)
     endif()
   endif()
 
-  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"

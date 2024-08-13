@@ -13,10 +13,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import torch
 import torch._dynamo
 import torch.fx
-
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.db.logging import (
+    exportdb_error_message,
+    get_class_if_classified_error,
+)
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
@@ -40,15 +43,12 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
-
 from torch._functorch._aot_autograd.utils import create_tree_flattened_fn
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
-
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export._remove_effect_tokens_pass import _is_impure_node
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -66,7 +66,6 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
-
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -84,6 +83,7 @@ from .graph_signature import (
     TensorArgument,
     TokenArgument,
 )
+
 
 log = logging.getLogger(__name__)
 
@@ -592,6 +592,7 @@ def _export_to_aten_ir(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
+    _check_autograd_state=True,
     _is_torch_jit_trace=False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
@@ -599,8 +600,12 @@ def _export_to_aten_ir(
     # mode, we don't care. At predispatch level, we don't care about the state change.
     is_grad_enabled = torch._C.is_grad_enabled()
     grad_safe_guard = nullcontext()
-    if not pre_dispatch and is_grad_enabled:
-        grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
+    # export_to_aten_ir is called when we decompose the ep into inference IR
+    # In that setting, we actually shouldn't check the state change as at this point,
+    # because the intention is specalizing to inference.
+    if _check_autograd_state:
+        if not pre_dispatch and is_grad_enabled:
+            grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
     @contextmanager
     def _compiling_state_context():
@@ -646,7 +651,6 @@ def _export_to_aten_ir(
     _maybe_fixup_gm_and_output_node_meta(mod, gm)
 
     from torch._functorch._aot_autograd.input_output_analysis import _graph_output_names
-    from torch._guards import detect_fake_mode
 
     # Run produce guards before we handle runtime asserts.
     # This means we run the export solver before the runtime asserts pass.
@@ -663,7 +667,8 @@ def _export_to_aten_ir(
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    fake_mode = detect_fake_mode(flat_fake_args)
+    fake_mode = torch._export.utils._detect_fake_mode_from_gm(gm)
+    assert fake_mode is not None, "Cannot detect fake mode from graph"
 
     if not torch._dynamo.config.do_not_emit_runtime_asserts:
         stack_trace = (
@@ -673,19 +678,20 @@ def _export_to_aten_ir(
         with _set_node_metadata_hook(
             gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
         ):
-            insert_deferred_runtime_asserts(
-                gm,
-                fake_mode.shape_env,
-                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                export=True,
-            )
+            if fake_mode:
+                insert_deferred_runtime_asserts(
+                    gm,
+                    fake_mode.shape_env,
+                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                    export=True,
+                )
 
     # update output specs
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 
@@ -765,6 +771,9 @@ def _export_to_aten_ir(
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     if pre_dispatch:
+        from torch._export.passes.replace_autocast_with_hop_pass import (
+            replace_autocast_with_hop_pass,
+        )
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
@@ -775,6 +784,10 @@ def _export_to_aten_ir(
         # and the constant_tensor is passed as input of the set grad hop, the placeholder's
         # meta["val"] will be None and fails our verifier for placeholder.
         gm, export_graph_signature = replace_set_grad_with_hop_pass(
+            gm, export_graph_signature
+        )
+
+        gm, export_graph_signature = replace_autocast_with_hop_pass(
             gm, export_graph_signature
         )
 
@@ -1020,20 +1033,6 @@ _EXPORT_FLAGS: Optional[Set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[Dict[str, str]] = None
 
 
-def _get_class_if_classified_error(e):
-    from torch._dynamo.exc import TorchRuntimeError, Unsupported, UserError
-
-    _ALLOW_LIST = {
-        Unsupported,
-        UserError,
-        TorchRuntimeError,
-    }
-    case_name = getattr(e, "case_name", None)
-    if type(e) in _ALLOW_LIST and case_name is not None:
-        return case_name
-    return None
-
-
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1051,10 +1050,9 @@ def _log_export_wrapper(fn):
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
-            case_name = _get_class_if_classified_error(e)
+            case_name = get_class_if_classified_error(e)
             if case_name is not None:
-                # TODO (shangdiy): detect whether case_name is really registered in exportdb after we set up exportdb registration.
-                log.error("See %s in exportdb for unsupported case.", case_name)
+                log.error(exportdb_error_message(case_name))
                 log_export_usage(
                     event="export.error.classified",
                     type=error_type,
@@ -1532,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                 record_module_stack=True,
                 pre_dispatch=True,
             )(*flat_args)
-            gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
+            gm.graph.eliminate_dead_code()
 
         return gm, None
 
@@ -1652,8 +1650,6 @@ def _export_to_aten_ir_make_fx(
             produce_guards_callback(gm)
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
-
-    from torch._guards import detect_fake_mode
 
     fake_mode = detect_fake_mode(flat_args)
 
@@ -2074,6 +2070,9 @@ def _export(
     _verify_stack_trace(gm)
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
 
     from torch._export.verifier import Verifier
 
