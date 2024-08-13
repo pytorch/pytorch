@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_inductor_cache
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -32,6 +33,7 @@ def filesize(filename: Path):
 
 @config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
+    @skipIfWindows
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
