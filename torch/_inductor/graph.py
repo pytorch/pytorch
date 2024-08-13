@@ -237,7 +237,7 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
 
         is_custom_op = isinstance(
             cur.target, torch._ops.OpOverload
-        ) and not torch._library.utils.is_builtin(node.target)
+        ) and not torch._library.utils.is_builtin(cur.target)
         if op in ops_dislike_padding or is_custom_op:
             cur.meta["dislike_padding"] = True
 
