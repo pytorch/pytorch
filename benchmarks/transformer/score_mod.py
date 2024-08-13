@@ -160,33 +160,41 @@ def run_single_experiment(
                     query, key, value, attn_mask, **kwargs
                 )
 
-        else:
+        elif config.backend == "fav3":
+            try:
+                from flash_attn_interface import flash_attn_func
+            except ImportError:
+                print(
+                    "Flash attention 3 is not installed. Please install it to run with fav3 backend."
+                )
+                raise
             kwargs["causal"] = kwargs.pop("is_causal", False)
 
             def eager_sdpa(query, key, value, _):
                 q = query.transpose(1, 2)
                 k = key.transpose(1, 2)
                 v = value.transpose(1, 2)
-                if config.backend == "fav3":
-                    try:
-                        from flash_attn_interface import flash_attn_func
-                    except ImportError:
-                        print(
-                            "Flash attention 3 is not installed. Please install it to run with fav3 backend."
-                        )
-                        raise
-                    return (flash_attn_func(q, k, v, **kwargs)[0]).transpose(1, 2)
-                elif config.backend == "fakv":
-                    try:
-                        from flash_attn import flash_attn_with_kvcache
-                    except ImportError:
-                        print(
-                            "Flash attention 2 is not installed. Please install it to run with fakv backend."
-                        )
-                        raise
-                    return (flash_attn_with_kvcache(q, k, v, **kwargs)[0]).transpose(
-                        1, 2
-                    )
+                return (flash_attn_func(q, k, v, **kwargs)[0]).transpose(1, 2)
+
+        else:
+            try:
+                from flash_attn import flash_attn_with_kvcache
+            except ImportError:
+                print(
+                    "Flash attention 2 is not installed. Please install it to run with fakv backend."
+                )
+                raise
+            kvcache_args = {}
+            if get_func_name(config.mask_mod) == "offset":
+                kvcache_args["cache_seqlens"] = kv_seq_len // 2
+
+            def eager_sdpa(query, key, value, _):
+                q = query.transpose(1, 2)
+                k = key.transpose(1, 2)
+                v = value.transpose(1, 2)
+                return (flash_attn_with_kvcache(q, k, v, **kvcache_args)).transpose(
+                    1, 2
+                )
 
         if max_autotune:
             compiled_sdpa = torch.compile(
