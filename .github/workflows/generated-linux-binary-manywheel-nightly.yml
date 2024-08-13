@@ -47,7 +47,7 @@ jobs:
     uses: ./.github/workflows/build-manywheel-images.yml
 
   manywheel-py3_9-cpu-build:
-    if: ${{ always() && github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: calculate-manylinux-images
     with:
@@ -56,8 +56,7 @@ jobs:
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
-      # ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-builder-cpu.outputs.docker-image }}
+      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-images.outputs.build-docker-cpu }}
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
