@@ -509,6 +509,124 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   return output;
 }
 
+static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+  using namespace mps;
+
+  id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
+  id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
+  id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+
+      uint64_t originalBatchSize = batch1.sizes().size() > 2 ? batch1.size(0) : 1;
+      uint64_t aRows = batch1.size(-2);
+      uint64_t bRows = batch2.size(-2);
+      uint64_t resRows = result.size(-2);
+      uint64_t aCols = batch1.size(-1);
+      uint64_t bCols = batch2.size(-1);
+      uint64_t resCols = result.size(-1);
+      uint64_t aElemSize = batch1.element_size();
+      uint64_t bElemSize = batch2.element_size();
+      uint64_t resElemSize = result.element_size();
+      MPSDataType dtype = getMPSDataType(batch1);
+
+
+      uint64_t maxSupportedElems = pow(2,32);
+      uint64_t elemInMatrix = resRows * resCols;
+      uint64_t largestSupportedBatchSize = floor(pow(2,32) / elemInMatrix);
+      uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
+      uint64_t lastBatchSize = originalBatchSize % batchSize;
+
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSMatrixMultiplication *matmul = [[MPSMatrixMultiplication alloc] initWithDevice:device
+                                                                    resultRows:resRows
+                                                                    resultColumns:resCols
+                                                                    interiorColumns:aCols];
+
+      getMPSProfiler().beginProfileKernel(matmul, " tiled_bmm_mps", {batch1, batch2});
+
+
+      MPSMatrixDescriptor *aDesc_ = [MPSMatrixDescriptor matrixDescriptorWithRows: aRows
+                                                                         columns: aCols
+                                                                        matrices: batchSize
+                                                                        rowBytes: aCols * aElemSize
+                                                                     matrixBytes: aRows * aCols * aElemSize
+                                                                        dataType: dtype];
+      MPSMatrixDescriptor *bDesc_ = [MPSMatrixDescriptor matrixDescriptorWithRows: bRows
+                                                                         columns: bCols
+                                                                        matrices: batchSize
+                                                                        rowBytes: bCols * bElemSize
+                                                                     matrixBytes: bRows * bCols * bElemSize
+                                                                        dataType: dtype];
+      MPSMatrixDescriptor *resDesc_ = [MPSMatrixDescriptor matrixDescriptorWithRows: resRows
+                                                                           columns: resCols
+                                                                          matrices: batchSize
+                                                                          rowBytes: resCols * resElemSize
+                                                                       matrixBytes: resRows * resCols * resElemSize
+                                                                          dataType: dtype];
+
+      //Descriptors to use for last batch if it exists
+      //.matrices is a readonly property so we need a separate descriptor.
+      MPSMatrixDescriptor *aDescLastBatch, *bDescLastBatch, *resDescLastBatch;
+      if(lastBatchSize != 0) {
+        aDescLastBatch = [MPSMatrixDescriptor matrixDescriptorWithRows: aRows
+                                                           columns: aCols
+                                                          matrices: lastBatchSize
+                                                          rowBytes: aCols * aElemSize
+                                                       matrixBytes: aRows * aCols * aElemSize
+                                                          dataType: dtype];
+        bDescLastBatch = [MPSMatrixDescriptor matrixDescriptorWithRows: bRows
+                                                           columns: bCols
+                                                          matrices: lastBatchSize
+                                                          rowBytes: bCols * bElemSize
+                                                       matrixBytes: bRows * bCols * bElemSize
+                                                          dataType: dtype];
+        resDescLastBatch = [MPSMatrixDescriptor matrixDescriptorWithRows: resRows
+                                                             columns: resCols
+                                                            matrices: lastBatchSize
+                                                            rowBytes: resCols * resElemSize
+                                                         matrixBytes: resRows * resCols * resElemSize
+                                                            dataType: dtype];
+
+      }
+
+      uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+      auto aDesc = aDesc_;
+      auto bDesc = bDesc_;
+      auto resDesc = resDesc_;
+      for (const auto i : c10::irange(requiredIterations)) {
+        if(i == requiredIterations - 1 && lastBatchSize != 0) {
+            aDesc = aDescLastBatch;
+            bDesc = bDescLastBatch;
+            resDesc = resDescLastBatch;
+        }
+        const uint64_t aArrayOffset = i * batchSize * aRows * aCols;
+        const uint64_t bArrayOffset = i * batchSize * bRows * bCols;
+        const uint64_t resArrayOffset = i * batchSize * resRows * resCols;
+
+        MPSMatrix* aMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                         offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
+                                                          descriptor:aDesc] autorelease];
+        MPSMatrix* bMatrix = [[[MPSMatrix alloc] initWithBuffer:bBuffer
+                                                         offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
+                                                          descriptor:bDesc] autorelease];
+        MPSMatrix* resMatrix = [[[MPSMatrix alloc] initWithBuffer:resBuffer
+                                                         offset:(result.storage_offset() + resArrayOffset) * resElemSize
+                                                          descriptor:resDesc] autorelease];
+        [matmul encodeToCommandBuffer: commandBuffer
+                           leftMatrix: aMatrix 
+                          rightMatrix: bMatrix
+                         resultMatrix: resMatrix];
+      }
+    }
+  });
+  return result;
+}
+
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
@@ -541,6 +659,18 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
         }
       }
     }
+  }
+
+  //Currently unsupported if the matmul output goes over the 32-bit indexing limit
+  TORCH_CHECK(batch1.size(1) * batch2.size(2) <= pow(2, 32), "Output size of the matrix multiplication is larger than currently supported by the MPS backend: ",
+    batch1.size(1),",", batch2.size(2), ", needs to be less than 2**32 elements. Use `PYTORCH_ENABLE_MPS_FALLBACK=1` as a temporary fix. ",
+    "File a feature request for this use case against the MPS backend at https://github.com/pytorch/pytorch/issues");
+
+  //Check if we need to split the batch to do the computation 
+  uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
+  if(resultSize > pow(2,32)) {
+    result = tiled_bmm_out_mps_impl(batch1, batch2, result);
+    return result;
   }
 
   MPSStream* stream = getCurrentMPSStream();
