@@ -566,7 +566,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         with self.assertRaisesRegex(
             KeyError,
-            "Valid mesh_dim_names should be a contiguous or non-contiguous subsequence",
+            "Valid mesh_dim_names should be a subsequence of",
         ):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
