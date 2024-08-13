@@ -1,7 +1,7 @@
 import time
 from functools import cached_property, wraps
 from statistics import median
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Concatenate, Dict, List, Tuple
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -16,10 +16,11 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
-    """Wrapper that logs duration of `fn`, in milliseconds, along with a representation
-    of the function's args and kwargs, if logging is enabled. If logging is disabled,
-    this becomes a no-op.
+def maybe_time(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
+    """Wrapper that logs the duration of `fn`, in milliseconds, along with a representation
+    of the function's args and kwargs, if logging is enabled. It is expected that `fn` is
+    a method of `Benchmarker` or one of its subclasses; typing limitations prevent us from
+    declaring this directly. If logging is disabled, this becomes a no-op.
     """
 
     # no-op if benchmarking-specific logging is disabled
@@ -27,11 +28,12 @@ def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
         return fn
 
     @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         start_t = time.perf_counter()
         result = fn(*args, **kwargs)
         logger.debug(
-            "fn:%s args:[%r, %r] took %f milliseconds.",
+            "Call `benchmarking.%s.%s(*args=%r, **kwargs=%r)` took %f milliseconds.",
+            self.__class__.__name__,
             fn.__name__,
             args,
             kwargs,
@@ -75,25 +77,26 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
-        for arg_or_kwarg in (fn_args + tuple(fn_kwargs.items())):
+        for arg_or_kwarg in fn_args + tuple(fn_kwargs.items()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
             if inferred_device is None:
                 inferred_device = arg_or_kwarg.device
                 continue
             if arg_or_kwarg.device != inferred_device:
-                raise NotImplementedError(
+                raise ValueError(
                     "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
                 )
         if inferred_device is None:
-            raise NotImplementedError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)
-        if inferred_device == "cpu":
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        if inferred_device == torch.device("cpu"):
             return self.benchmark_cpu(_callable, **kwargs)
-        # TODO(nmacchioni): For non-GPU functions we default to using the GPU-specific benchmarking
-        # implementation, we may want to alternate implementations for other device types.
+        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+        # implementation which was written specifically with CUDA devices in mind, we may want to
+        # explore alternate implementations for other device types.
         return self.benchmark_gpu(_callable, **kwargs)
 
     @maybe_time
