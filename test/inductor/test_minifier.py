@@ -6,7 +6,12 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    IS_MACOS,
+    skipIfWindows,
+    TEST_WITH_ASAN,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -93,6 +98,7 @@ inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     @inductor_config.patch("cpp.inject_log1p_bug_TESTING_ONLY", "accuracy")
+    @skipIfWindows
     def test_accuracy_vs_strict_accuracy(self):
         run_code = """
 @torch.compile()

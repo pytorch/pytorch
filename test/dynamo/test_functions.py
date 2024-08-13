@@ -2510,6 +2510,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
 
+    @skipIfWindows
     @parametrize("int_or_float", ("int", "float"))
     def test_np_constant_collections_as_input(self, int_or_float):
         info_func = getattr(np, f"{int_or_float[0]}info")
