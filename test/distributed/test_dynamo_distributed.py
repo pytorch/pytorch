@@ -964,6 +964,61 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config, "fx_graph_cache", True)
+    @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
+    @patch.object(torch._inductor.config, "sleep_sec_TESTING_ONLY", 10)
+    def test_asymmetric_compilation_with_fx_cache(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache(), _dynamo_dist_per_rank_init(
+            self.rank, self.world_size
+        ):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            device = f"cuda:{self.rank}"
+
+            pg = dist.distributed_c10d._get_default_group()
+
+            @torch.compile
+            def f(x):
+                y = 2 * x
+                return y.sum()
+
+            backend = pg._get_backend(torch.device(device))
+            backend._set_default_timeout(timedelta(seconds=5))
+            counters.clear()
+
+            x = torch.ones(4, device=device)
+
+            f(x)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            w = pg.allreduce(x)
+            w.wait()
+            torch.cuda.synchronize(device)
+            torch._dynamo.reset()
+
+            if self.rank == 0:
+                with fresh_inductor_cache():
+                    f(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+            else:
+                f(x)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            w = pg.allreduce(x)
+            w.wait()
+            torch.cuda.synchronize(device)
+
 
 @requires_nccl()
 @requires_cuda

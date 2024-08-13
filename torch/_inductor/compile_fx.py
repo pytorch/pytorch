@@ -701,6 +701,11 @@ def fx_codegen_and_compile(
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
+    if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+        import time
+
+        time.sleep(sleep_sec)
+
     with dynamo_utils.preserve_rng_state():
         if is_tf32_warning_applicable(gm):
             _warn_tf32_disabled()
