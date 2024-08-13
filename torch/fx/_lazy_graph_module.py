@@ -62,6 +62,20 @@ def _make_graph_module(*args, graph_module_cls=None, **kwargs):
     return graph_module_cls(*args, **kwargs)
 
 
+def _remove_alias_info(dct):
+    # alias_info isn't serializable. So we're going to remove it.
+    # If it is needed then we can recompute it.
+    if "alias_info" in dct["meta"]:
+        del dct["meta"]["alias_info"]
+    from torch._inductor.fx_utils import UpdateAliasInfo
+
+    dct["_create_node_hooks"] = [
+        hook
+        for hook in dct["_create_node_hooks"]
+        if not isinstance(hook, UpdateAliasInfo)
+    ]
+
+
 @compatibility(is_backward_compatible=False)
 class _LazyGraphModule(GraphModule):
     """
@@ -143,6 +157,7 @@ class _LazyGraphModule(GraphModule):
         dict_without_graph = self.__dict__.copy()
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
+        _remove_alias_info(dict_without_graph)
 
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         import_block = _format_import_block(python_code.globals, exporter.importer)
@@ -163,6 +178,7 @@ class _LazyGraphModule(GraphModule):
         dict_without_graph = self.__dict__.copy()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph["_graph"]
+        _remove_alias_info(dict_without_graph)
         return (reduce_graph_module, (dict_without_graph, import_block))
 
     def _real_recompile(self):

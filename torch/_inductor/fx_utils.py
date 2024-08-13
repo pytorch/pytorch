@@ -280,7 +280,7 @@ class AliasInfo:
         # gets created.
         # We push the node to a queue and assume meta["val"] is available
         # when find_aliases gets called.
-        gm._register_create_node_hook(lambda n: self._queue.append(weakref.ref(n)))
+        gm._register_create_node_hook(UpdateAliasInfo(self))
 
     def find_aliases(self, node: torch.fx.Node) -> List[NodeRef]:
         for ref in self._queue:
@@ -300,6 +300,14 @@ class AliasInfo:
         if maybe_storage not in self._data:
             self._data[maybe_storage] = []
         self._data[maybe_storage].append(weakref.ref(node))
+
+
+class UpdateAliasInfo:
+    def __init__(self, alias_info):
+        self.alias_info = alias_info
+
+    def __call__(self, node):
+        self.alias_info._queue.append(weakref.ref(node))
 
 
 def get_node_storage_obj(node: torch.fx.Node) -> Optional[torch.UntypedStorage]:
