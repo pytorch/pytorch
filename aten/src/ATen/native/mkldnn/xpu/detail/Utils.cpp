@@ -359,8 +359,7 @@ static inline bool is_smf_channels_last(const Tensor& t){
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose){
+    const at::Tensor& weight){
 
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
@@ -375,6 +374,75 @@ bool use_channels_last_for_conv(
   }
 
   return false;
+}
+
+dnnl::memory::format_tag conv_src_fmt(
+    const int64_t ndim,
+    const bool is_channels_last) {
+  if (!is_channels_last) {
+    return (ndim == 3)
+        ? dnnl::memory::format_tag::ncw
+        : ((ndim == 4) ? dnnl::memory::format_tag::nchw
+                       : ((ndim == 5) ? dnnl::memory::format_tag::ncdhw
+                                      : dnnl::memory::format_tag::undef));
+  } else {
+    return (ndim == 3)
+        ? dnnl::memory::format_tag::nwc
+        : ((ndim == 4) ? dnnl::memory::format_tag::nhwc
+                       : ((ndim == 5) ? dnnl::memory::format_tag::ndhwc
+                                      : dnnl::memory::format_tag::undef));
+  }
+}
+
+dnnl::memory::dims compatible_weight_dims(
+    const int64_t ndim,
+    const int64_t groups,
+    const int64_t oc,
+    const int64_t ic,
+    const IntArrayRef wsizes) {
+  if (ndim == 3) {
+    auto kw = wsizes[2];
+    return (groups != 1) ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
+                         : dnnl::memory::dims({oc, ic, kw});
+  } else if (ndim == 4) {
+    auto kh = wsizes[2];
+    auto kw = wsizes[3];
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kh, kw})
+        : dnnl::memory::dims({oc, ic, kh, kw});
+  } else if (ndim == 5) {
+    auto kd = wsizes[2];
+    auto kh = wsizes[3];
+    auto kw = wsizes[4];
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kd, kh, kw})
+        : dnnl::memory::dims({oc, ic, kd, kh, kw});
+  }
+
+  return {};
+}
+
+dnnl::memory::format_tag conv_weight_fmt(
+    const int64_t ndim,
+    const bool grouped,
+    const bool is_channels_last) {
+  if (!is_channels_last) {
+    return (ndim == 3)
+        ? (grouped ? dnnl::memory::format_tag::goiw : dnnl::memory::format_tag::oiw)
+        : (ndim == 4)
+        ? (grouped ? dnnl::memory::format_tag::goihw : dnnl::memory::format_tag::oihw)
+        : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::goidhw
+                                  : dnnl::memory::format_tag::oidhw)
+                       : dnnl::memory::format_tag::undef);
+  } else {
+    return (ndim == 3)
+        ? (grouped ? dnnl::memory::format_tag::gowi : dnnl::memory::format_tag::owi)
+        : (ndim == 4)
+        ? (grouped ? dnnl::memory::format_tag::gohwi : dnnl::memory::format_tag::ohwi)
+        : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
+                                  : dnnl::memory::format_tag::odhwi)
+                       : dnnl::memory::format_tag::undef);
+  }
 }
 
 }
