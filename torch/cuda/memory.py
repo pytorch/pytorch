@@ -71,11 +71,15 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
         "_cuda_endAllocateCurrentStreamToPool"
     )
+    torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
+    torch._C.__dict__["_cuda_getPoolUseCount"] = _dummy_type("_cuda_getPoolUseCount")
 
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateCurrentStreamToPool,
+    _cuda_getPoolUseCount,
+    _cuda_releasePool,
     _MemPool,
     _MemPoolContext,
 )
@@ -996,6 +1000,44 @@ class MemPool(_MemPool):
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
         r"""Returns the allocator this MemPool routes allocations to"""
         return super().allocator
+
+    def use_count(self, device: Union[Device, int] = None):
+        r"""Returns the number of use_mem_pool context managers using this pool.
+
+        Args:
+            device (torch.device or int, optional): selected device. Returns
+                the use count of a pool on the current device, given by
+                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+                (default).
+
+        """
+        torch.cuda.init()
+        device_index = (
+            torch.cuda.current_device() if device is None else _get_device_index(device)
+        )
+        return _cuda_getPoolUseCount(device_index, self.id)
+
+    def release(self, device: Union[Device, int] = None):
+        r"""Convenience function that attempts to release a pool, and mark its memory
+        to be free'd based.
+        
+        Note that the memory in a pool can only be free'd when its use count is 0.
+        When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
+        back to the system.
+
+        Args:
+            device (torch.device or int, optional): selected device. Attempts
+                to release a pool on the current device, given by
+                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+                (default).
+
+        """
+        torch.cuda.init()
+        device_index = (
+            torch.cuda.current_device() if device is None else _get_device_index(device)
+        )
+        for _ in range(self.use_count()):
+            _cuda_releasePool(device_index, self.id)
 
 
 class MemPoolContext(_MemPoolContext):

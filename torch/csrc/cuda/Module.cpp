@@ -1300,6 +1300,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_cuda_getPoolUseCount",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        return c10::cuda::CUDACachingAllocator::getPoolUseCount(
+            device, mempool_id);
+      });
+
+  m.def(
       "_cuda_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
          at::cuda::MempoolId_t mempool_id,
