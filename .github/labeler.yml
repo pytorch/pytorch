@@ -43,7 +43,7 @@
 - aten/src/ATen/native/cpu/**
 - aten/src/ATen/native/quantized/cpu/**
 - aten/src/ATen/native/Convolution*.cpp
-- aten/src/ATen/native/mkldnn/**
+- aten/src/ATen/native/onednn/**
 - torch/cpu/**
 - torch/utils/mkldnn.py
 - torch/utils/_sympy/**
