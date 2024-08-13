@@ -510,7 +510,7 @@ def _multi_tensor_adafactor(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
         else:
-            torch._foreach_add_(device_state_steps, 1)
+            torch._foreach_add_(device_state_steps, 1.0)
 
         one_minus_beta2_ts = []
         beta2_ts = []
