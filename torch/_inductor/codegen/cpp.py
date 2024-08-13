@@ -3309,7 +3309,7 @@ class TilingSelect:
                     "store": 2,
                 }
                 # op_name to func checking if contiguous index
-                op_name_to_stride_func: Dict[str, Callable] = {
+                op_name_to_stride_func: Dict[str, Callable[[int], bool]] = {
                     "index_expr": lambda stride: not (
                         stride == 0 or stride is not None
                     ),
