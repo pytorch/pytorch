@@ -4228,7 +4228,6 @@ class CppScheduling(BaseScheduling):
             self.codegen_outer_loop_node(node)
         else:
             nodes: List[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
-            # Apply loop split optimization
             nodes = self.optimize_loop_order(nodes)
             cpp_kernel_proxy = CppKernelProxy(kernel_group)
             cpp_kernel_proxy.codegen_nodes(nodes)
