@@ -65,8 +65,12 @@ class AHTrain:
         )
         self.parser.add_argument(
             "--ranking",
-            action="store_true",
-            help="Learn a heuristic that ranks choices.",
+            type=int,
+            default=None,
+            help="""
+                Makes AutoHeuristic learn a heuristic that ranks choices instead of predicting a single choice.
+                The argument is the number of choices the heuristic will provide.
+            """,
         )
 
     def parse_args(self):
@@ -91,7 +95,7 @@ class AHTrain:
             self.args.nrows,
             self.args.heuristic_name,
             self.args.save_dot,
-            self.args.ranking,
+            self.args.ranking is not None,
         )
 
     def filter_df(self, df):
