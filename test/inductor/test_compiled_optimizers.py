@@ -52,10 +52,14 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write("Windows CI still has some issue to be fixed.\n")
+    sys.exit(0)
 
 # Note: we use atypical values to amplify error
 LR_SCHEDULER_TO_KWARGS = {

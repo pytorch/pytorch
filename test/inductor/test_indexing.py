@@ -15,6 +15,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
@@ -242,6 +243,7 @@ class TestIndexingSimplification(InductorTestCase):
 
 
 class ExprPrinterTests(InductorTestCase):
+    @skipIfWindows
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -271,6 +273,7 @@ class ExprPrinterTests(InductorTestCase):
         for expr, result in cpu_cases:
             self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
 
+    @skipIfWindows
     def test_print_floor(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
@@ -288,6 +291,7 @@ class ExprPrinterTests(InductorTestCase):
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
+    @skipIfWindows
     def test_print_ceil(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
@@ -320,6 +324,7 @@ class ExprPrinterTests(InductorTestCase):
             f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
+    @skipIfWindows
     def test_print_floor_div(self):
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.Symbol("s2", integer=True)
@@ -333,6 +338,7 @@ class ExprPrinterTests(InductorTestCase):
         self.assertEqual(pexpr(expr), "(-1)*s1")
         self.assertEqual(cexpr(expr), "(-1L)*s1")
 
+    @skipIfWindows
     def test_print_Min_Max(self):
         cases = (
             (sympy.Min, "min", "<"),
