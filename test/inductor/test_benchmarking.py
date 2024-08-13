@@ -41,7 +41,7 @@ class TestBenchmarker(TestCase):
         lambda params: params["benchmarker_cls"] is Benchmarker
         and params["device"] == GPU_TYPE,
     )
-    @parametrize("benchmarker_cls", (Benchmarker))
+    @parametrize("benchmarker_cls", (Benchmarker,))
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_benchmark(self, benchmarker_cls, device):
         benchmarker = benchmarker_cls()
@@ -56,7 +56,7 @@ class TestBenchmarker(TestCase):
         )
 
     @unittest.skipIf(not HAS_CPU, "requires CPU")
-    @parametrize("benchmarker_cls", (Benchmarker))
+    @parametrize("benchmarker_cls", (Benchmarker,))
     def test_benchmark_cpu(self, benchmarker_cls, device="cpu"):
         benchmarker = benchmarker_cls()
         _, _callable = self.make_sum(device)
@@ -68,7 +68,7 @@ class TestBenchmarker(TestCase):
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker,
     )
-    @parametrize("benchmarker_cls", (Benchmarker))
+    @parametrize("benchmarker_cls", (Benchmarker,))
     def test_benchmark_gpu(self, benchmarker_cls, device=GPU_TYPE):
         benchmarker = benchmarker_cls()
         _, _callable = self.make_sum(device)
