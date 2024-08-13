@@ -404,22 +404,6 @@ inline void {{kernel_name}}_kernel(
     };
     c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
-    auto loadb = [&, COLS, VLEN](int k) {
-        {{kernel.unroll_pragma(4)}}
-        for (int col = 0; col < COLS; col++) {
-            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
-            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
-            vb[col] = at::vec::convert<{{compute_t}}>(b);
-            {%- elif input2_dtype == torch.int8 %}
-            // Convert VLEN int8 elements to int32, and then fp32
-            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
-            vb[col] = at::vec::convert<float>(b32);
-            {%- else %}
-            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
-            {%- endif %}
-        }
-    };
-
     auto compute = [&, COLS](auto i, int k) {
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
@@ -432,12 +416,24 @@ inline void {{kernel_name}}_kernel(
             {%- endif %}
         }
 
+        if constexpr (row == 0) {
+            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
+            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
+            vb[col] = at::vec::convert<{{compute_t}}>(b);
+            {%- elif input2_dtype == torch.int8 %}
+            // Convert VLEN int8 elements to int32, and then fp32
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
+            {%- else %}
+            vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
+            {%- endif %}
+        }
+
         constexpr int idx = row * COLS + col;
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
     for (int k = 0; k < K; ++k) {
-        loadb(k);
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
 
