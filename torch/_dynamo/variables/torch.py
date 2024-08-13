@@ -114,6 +114,7 @@ constant_fold_functions = [
     torch.nn.functional._Reduction.get_enum,  # type: ignore[attr-defined]
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
+    torch.autograd._is_checkpoint_valid,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.extend(
@@ -154,7 +155,7 @@ class BaseTorchVariable(VariableTracker):
             source=source,
         )
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -190,7 +191,7 @@ class BaseTorchVariable(VariableTracker):
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
@@ -331,7 +332,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TorchInGraphFunctionVariable({self.value})"
 
     def get_function(self):
