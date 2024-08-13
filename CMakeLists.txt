@@ -1034,7 +1034,6 @@ if(NOT MSVC)
     endif()
   endif()
 
-  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
