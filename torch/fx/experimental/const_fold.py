@@ -275,13 +275,13 @@ def split_const_subgraphs(
             node.replace_all_uses_with(folded_attrs)
             break
 
-    split.graph.eliminate_dead_code()
-
     # Finally, inline the non-constant submod (if it exists) into the split submod.
     # This is so that the original caller who may have passed in a graph module will
     # get back out a graph module whose graph is traced to the same granularity.
     if hasattr(split, non_const_mod_name):
         _inline_module(split, non_const_mod_name)
+
+    split.graph.eliminate_dead_code()
 
     return FoldedGraphModule(
         split,
