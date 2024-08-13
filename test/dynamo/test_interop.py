@@ -3,6 +3,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 def fn(a, b):
@@ -21,14 +22,17 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         fx_fn = torch.fx.symbolic_trace(fn)
         self._common(lambda a, b: fx_fn(a, b) + 1)
 
+    @skipIfWindows
     def test_script_fn(self):
         script_fn = torch.jit.script(fn)
         self._common(lambda a, b: script_fn(a, b) + 1)
 
+    @skipIfWindows
     def test_trace_fn(self):
         trace_fn = torch.jit.trace(fn, [torch.zeros(10), torch.zeros(10)])
         self._common(lambda a, b: trace_fn(a, b) + 1)
 
+    @skipIfWindows
     def test_vmap_in_graph(self):
         from functools import wraps
 
