@@ -5,11 +5,11 @@ from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
+
 from torch._dynamo.utils import counters
-from torch._inductor.utils import is_cpu_device
 
 
-log = torch._logging.getArtifactLogger(__name__, "benchmarking")
+logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 
 
 MILLISECONDS_PER_SECOND = 1000
@@ -19,22 +19,25 @@ T = TypeVar("T")
 
 
 def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
-    """Wrapper that logs function durations, in milliseconds, along with the
-    function's args and kwargs if logging is enabled, otherwise a no-op.
+    """Wrapper that logs duration of `fn`, in milliseconds, along with a representation
+    of the function's args and kwargs, if logging is enabled. If logging is disabled,
+    this becomes a no-op.
     """
+
+    # no-op if benchmarking-specific logging is disabled
     if not torch._logging._internal.log_state.is_artifact_enabled("benchmarking"):
         return fn
 
     @wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        start_s = time.perf_counter()
+        start_t = time.perf_counter()
         result = fn(*args, **kwargs)
-        log.debug(
-            "fn:%r args:[%r, %r] took %f milliseconds.",
+        logger.debug(
+            "fn:%s args:[%r, %r] took %f milliseconds.",
             fn.__name__,
             args,
             kwargs,
-            (time.perf_counter() - start_s) * MILLISECONDS_PER_SECOND,
+            (time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND,
         )
         return result
 
@@ -42,15 +45,19 @@ def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
 
 
 def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
-    """Wrapper that increments dynamo counters on function call for subclasses of `Benchmarker`;
-    counter scheme is `counters["inductor"]["benchmarking.Foo.bar"]` where "Foo" is the subclass
-    and "bar" is the function.
+    """Wrapper that increments relevant dynamo counters on `fn` call. It is expected that
+    `fn` is a method of `Benchmarker` or a subclass; typing limitations prevent us from
+    declaring this directly. The counter incrementation follows the formula,
+
+    `counters["inductor"]["benchmarking.Foo.bar] += 1`
+
+    where `Foo` is the class whose' instance called the function, and `bar` is the function name.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         counters["inductor"][
-            "benchmarking." + type(self).__name__ + "." + fn.__name__
+            "benchmarking." + self.__class__.__name__ + "." + fn.__name__
         ] += 1
         return fn(self, *args, **kwargs)
 
@@ -70,8 +77,14 @@ class Benchmarker:
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:
-        """Construct benchmarkable callable and dispatch benchmark request to the appropriate
-        benchmarking function depending on the device type of `fn_args` and `fn_kwargs`.
+        """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
+        actual runtime calculation is dictated by the benchmarking implementation, but may be
+        one of [mean, median, minimum, etc.]). Functions as a convenience wrapper around
+        device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
+        `NotImplementedError(...)` if we can't safely infer the device type of `fn`; for
+        example, if multiple device types are found in `fn_args` and `fn_kwargs`, or if no
+        device types are found.
+
 
         Arguments:
         - fn: The function to benchmark.
@@ -79,28 +92,49 @@ class Benchmarker:
         - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
-        - **kwargs: The benchmarker's keyword arguments.
+        - **kwargs: The benchmarking implementation's kwargs.
 
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        if is_cpu_device(list(fn_args) + list(fn_kwargs.values())):
-            return self.benchmark_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
-        return self.benchmark_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
+        inferred_device = None
+        for arg_or_kwarg in (fn_args + fn_kwargs.items()):
+            if not isinstance(arg_or_kwarg, torch.Tensor):
+                continue
+            if inferred_device is None:
+                inferred_device = arg_or_kwarg.device
+                continue
+            if arg_or_kwarg.device != inferred_device:
+                raise NotImplementedError(
+                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                )
+        if inferred_device is None:
+            raise NotImplementedError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
+            )
+        _callable = lambda: fn(*fn_args, **fn_kwargs)
+        if inferred_device == "cpu":
+            return self.benchmark_cpu(_callable, **kwargs)
+        # TODO(nmacchioni): For non-GPU functions we default to using the GPU-specific benchmarking
+        # implementation, we may want to alternate implementations for other device types.
+        return self.benchmark_gpu(_callable, **kwargs)
 
     @maybe_time
     @count
     def benchmark_cpu(
         self: Self, _callable: Callable[[], Any], warmup: int = 20, rep: int = 100
     ) -> float:
-        """Benchmark a CPU callable.
+        """Benchmark the CPU callable, `_callable`, and return the median runtime,
+        in milliseconds.
 
         Arguments:
-        - _callable: The callable to benchmark.
+        - _callable: The CPU callable to benchmark.
 
         Keyword Arguments:
-        - warmup: Duration to run the callable before benchmarking, in milliseconds.
-        - rep: Duration to run the benchmarking, in milliseconds.
+        - warmup: Optionally, the duration, in milliseconds, to run `_callable`
+        before benchmarking starts.
+        - rep: Optionally, the duration, in milliseconds, to run `_callable`
+        during benchmarking.
 
         Returns:
         - The median runtime of `_callable`, in milliseconds.
@@ -108,13 +142,13 @@ class Benchmarker:
 
         def run_for(ms: int) -> List[float]:
             timings = []
-            run_start_s = time.perf_counter()
+            run_start_t = time.perf_counter()
             while True:
-                start_s = time.perf_counter()
+                start_t = time.perf_counter()
                 _callable()
-                end_s = time.perf_counter()
-                timings.append((end_s - start_s) * MILLISECONDS_PER_SECOND)
-                if ((end_s - run_start_s) * MILLISECONDS_PER_SECOND) > ms:
+                end_t = time.perf_counter()
+                timings.append((end_t - start_t) * MILLISECONDS_PER_SECOND)
+                if ((end_t - run_start_t) * MILLISECONDS_PER_SECOND) > ms:
                     break
             return timings
 
@@ -131,7 +165,7 @@ class TritonBenchmarker(Benchmarker):
     @maybe_time
     @count
     def triton_do_bench(self: Self) -> Callable[..., Any]:
-        """Lazily import Triton's do_bench."""
+        """Lazily import Triton's `do_bench`."""
         try:
             from triton.testing import do_bench
         except ImportError as e:
@@ -141,15 +175,16 @@ class TritonBenchmarker(Benchmarker):
     @maybe_time
     @count
     def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
-        """Benchmark a GPU callable using Triton's do_bench.
+        """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
-        - _callable: The callable to benchmark.
+        - _callable: The GPU callable to benchmark.
 
         Keyword Arguments:
-        - quantiles: A tuple of floats denoting the requested quantiles.
-        - return_mode: The requested return mode, one of "min", "max", "mean", or "median".
-        - **kwargs: Additional kwargs passed to triton.testing.do_bench.
+        - quantiles: Optionally, a tuple of floats denoting the requested quantiles.
+        - return_mode: Optionally, the requested return mode. Currently, Triton's
+        `do_bench` supports min, max, mean, and median return modes.
+        - **kwargs: Additional kwargs passed to Triton's `do_bench`.
 
         Returns:
         - The runtime of `callable`, in milliseconds. If `kwargs["quantiles"]` is specified,
