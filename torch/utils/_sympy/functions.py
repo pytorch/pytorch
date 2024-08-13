@@ -468,8 +468,6 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                 return cls.zero  # type: ignore[attr-defined]
             # remove redundant args that are easily identified
             args = cls._collapse_arguments(args, **assumptions)
-            # find local zeros
-            args = cls._find_localzeros(args, **assumptions)
         args = frozenset(args)
 
         if not args:
