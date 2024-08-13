@@ -115,7 +115,9 @@ class AHTrainDecisionTree(AHTrain):
     def ranking_num_choices(self):
         # if the heuristic is used for ranking, this function returns the number
         # of choices that the heuristic will return
-        return 5
+        if self.args.ranking is None:
+            return 5
+        return self.args.ranking
 
     def train_and_evaluate_models(
         self,
