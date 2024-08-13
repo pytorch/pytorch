@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
-
+#include <iostream>
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
@@ -39,6 +39,7 @@ struct VecMaskLoad {
   static inline VectorizedN<data_t, data_n> apply(
       const data_t* ptr,
       const VecMask<mask_t, mask_n>& vec_mask) {
+    printf("base VecMaskLoad apply\n");
     constexpr typename VecMask<mask_t, mask_n>::size_type size =
         VecMask<mask_t, mask_n>::size();
     static_assert(VectorizedN<data_t, data_n>::size() >= size);
@@ -104,6 +105,9 @@ class VecMask {
 
   template <typename U, int L>
   static VecMask<T, N> from(const VectorizedN<U, L>& b_vec) {
+    std::cout << "U: " << typeid(U).name() << " L: " << L << "\n";
+    std::cout << "T: " << typeid(T).name() << " N: " << N << "\n";
+    printf("base VecMask from\n");
     __at_align__ U b_buf[size()];
     if constexpr (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
@@ -125,6 +129,9 @@ class VecMask {
 
   template <typename U>
   static VecMask<T, N> from(U* b) {
+    std::cout << "U: " << typeid(U).name() << "\n";
+    std::cout << "T: " << typeid(T).name() << " N: " << N << "\n";
+    printf("base VecMask from * \n");
     using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
 #ifndef __msvc_cl__
@@ -170,6 +177,7 @@ class VecMask {
   }
 
   inline bool all_zero() const {
+    printf("base all_zero\n");
     __at_align__ T mask[size()];
     mask_.store(mask);
     return std::all_of(
@@ -177,6 +185,7 @@ class VecMask {
   }
 
   inline bool all_masked() const {
+    printf("base all_masked\n");
     __at_align__ T mask[size()];
     mask_.store(mask);
     return std::all_of(
@@ -184,6 +193,7 @@ class VecMask {
   }
 
   inline bool is_masked(int i) const {
+    printf("base is_masked\n");
     __at_align__ T mask[size()];
     mask_.store(mask);
     return mask[i] != static_cast<T>(0);

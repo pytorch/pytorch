@@ -9,25 +9,78 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-template <typename T, typename mask_t>
+template <typename T, typename mask_t, int mask_n>
 struct VecMaskLoad<
     T,
     1,
     mask_t,
-    1,
+    mask_n,
     typename std::enable_if_t<
-        std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-            std::is_same_v<T, uint32_t>,
+        (mask_n == 1 || mask_n == 2) &&
+        (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>),
         void>> {
   static inline VectorizedN<T, 1> apply(
       const T* ptr,
-      const VecMask<mask_t, 1>& vec_mask) {
+      const VecMask<mask_t, mask_n>& vec_mask) {
     auto int_mask = vec_mask.template cast<int, 1>()[0];
     if constexpr (std::is_same_v<T, float>) {
       return Vectorized<T>(_mm256_maskload_ps(ptr, int_mask));
     } else {
       return Vectorized<T>(_mm256_maskload_epi32(ptr, int_mask));
     }
+  }
+};
+
+template <typename T, typename mask_t, int mask_n>
+struct VecMaskLoad<
+    T,
+    2,
+    mask_t,
+    mask_n,
+    typename std::enable_if_t<
+        (mask_n == 2 || mask_n == 4) &&
+        (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+            std::is_same_v<T, uint32_t>),
+        void>> {
+  static inline VectorizedN<T, 2> apply(
+      const T* ptr,
+      const VecMask<mask_t, mask_n>& vec_mask) {
+    auto int_mask = vec_mask.template cast<int, 2>();
+    auto result = at::vec::VectorizedN<T, 2>();
+    if constexpr (std::is_same_v<T, float>) {
+      result[0] = _mm256_maskload_ps(ptr, int_mask[0]);
+      result[1] = _mm256_maskload_ps(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
+    } else {
+      result[0] = _mm256_maskload_epi32(ptr, int_mask[0]);
+      result[1] = _mm256_maskload_epi32(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
+    }
+    return result;
+  }
+};
+
+template <typename T, typename mask_t>
+struct VecMaskLoad<
+    T,
+    2,
+    mask_t,
+    1,
+    typename std::enable_if<
+        std::is_same_v<T, int64_t> ||
+        std::is_same_v<T, double>>::type> {
+  static inline VectorizedN<T, 2> apply(
+      const T* ptr,
+      const VecMask<mask_t, 1>& vec_mask) {
+    auto int64_mask = vec_mask.template cast<int64_t, 2>();
+    auto result = at::vec::VectorizedN<T, 2>();
+    if constexpr (std::is_same_v<T, double>) {
+      result[0] = _mm256_maskload_pd(ptr, int64_mask[0]);
+      result[1] = _mm256_maskload_pd(ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
+    } else {
+      result[0] = _mm256_maskload_epi64(ptr, int64_mask[0]);
+      result[1] = _mm256_maskload_epi64(ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
+    }
+    return result;
   }
 };
 
@@ -69,6 +122,66 @@ struct VecMaskCast<dst_t, 1, int64_t, 2> {
   }
 };
 
+template <typename mask_t>
+struct VecMaskCast<int64_t, 2, mask_t, 1> {
+  static inline VecMask<int64_t, 2> apply(const VecMask<mask_t, 1>& vec_mask) {
+    auto int_mask = vec_mask.template cast<int, 1>();
+    auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[0]));
+    return int64_vec;
+  }
+};
+
+template <>
+struct VecMaskCast<double, 2, float, 1> {
+  static inline VecMask<double, 2> apply(const VecMask<float, 1>& vec_mask) {
+    VectorizedN<double, 2> result;
+    result[0] = _mm256_cvtps_pd(_mm256_extractf128_ps(vec_mask[0], 0));
+    result[1] = _mm256_cvtps_pd(_mm256_extractf128_ps(vec_mask[0], 1));
+    return result;
+  }
+};
+
+template <>
+struct VecMaskCast<float, 1, double, 2> {
+  static inline VecMask<float, 1> apply(const VecMask<double, 2>& vec_mask) {
+    VectorizedN<float, 1> result;
+    result[0] = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(vec_mask[0])), _mm256_cvtpd_ps(vec_mask[1]), 1);
+    return result;
+  }
+};
+
+// TODO: add specialization of VecMaskCast for int64_t <-> double
+
+template <typename mask_t>
+struct VecMaskCast<int64_t, 4, mask_t, 2> {
+  static inline VecMask<int64_t, 4> apply(const VecMask<mask_t, 2>& vec_mask) {
+    auto result = at::vec::VectorizedN<int64_t, 4>();
+    auto int_mask = vec_mask.template cast<int, 2>();
+    auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[0]));
+    result[0] = int64_vec[0];
+    result[1] = int64_vec[1];
+    int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[1]));
+    result[2] = int64_vec[0];
+    result[3] = int64_vec[1];
+    return VecMask<int64_t, 4>(result);
+  }
+};
+
+template <typename dst_t>
+struct VecMaskCast<dst_t, 2, int64_t, 4> {
+  static inline VecMask<dst_t, 2> apply(const VecMask<int64_t, 4>& vec_mask) {
+    auto result = VecMask<int, 2>();
+    auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
+    int64_vec[0] = vec_mask[0];
+    int64_vec[1] = vec_mask[1];
+    result[0] = convert<int, 1, int64_t, 2>(int64_vec)[0];
+    int64_vec[0] = vec_mask[2];
+    int64_vec[1] = vec_mask[3];
+    result[1] = convert<int, 1, int64_t, 2>(int64_vec)[0];
+    return VecMask<int, 2>(result).cast<dst_t, 2>();
+  }
+};
+
 template <>
 inline bool VecMask<int, 1>::all_zero() const {
   return _mm256_testz_si256(mask_[0], mask_[0]);
@@ -83,6 +196,36 @@ template <>
 inline bool VecMask<int, 1>::all_masked() const {
   int mask = _mm256_movemask_ps(_mm256_castsi256_ps(mask_[0]));
   return mask == 0xff;
+}
+
+template <>
+inline bool VecMask<int64_t, 4>::all_zero() const {
+  return _mm256_testz_si256(mask_[0], mask_[0]) &&
+         _mm256_testz_si256(mask_[1], mask_[1]) &&
+         _mm256_testz_si256(mask_[2], mask_[2]) &&
+         _mm256_testz_si256(mask_[3], mask_[3]);
+}
+
+template <>
+inline bool VecMask<int64_t, 4>::is_masked(int i) const {
+  if (i < 4) {
+    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << i);
+  } else if (i < 8) {
+    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 4));
+  } else if (i < 12) {
+    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 8));
+  } else {
+    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 12));
+  }
+}
+
+template <>
+inline bool VecMask<int64_t, 4>::all_masked() const {
+  int mask0 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0]));
+  int mask1 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[1]));
+  int mask2 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[2]));
+  int mask3 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[3]));
+  return mask0 == 0x0f && mask1 == 0x0f && mask2 == 0x0f && mask3 == 0x0f;
 }
 
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \

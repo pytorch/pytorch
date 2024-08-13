@@ -2244,24 +2244,16 @@ class TritonKernel(SIMDKernel):
         )
 
         if not self.persistent_reduction:
-
-            def sum_fn(a, b):
-                return [ops.add(ai, bi) for ai, bi in zip(a, b)]
-
-            sum_helper_fn = self._lift_helper(sum_fn, len(values))
-            pre_reduce_vars = ", ".join(
-                f"{scan_var} * (rbase == (RBLOCK - 1))"
-                for scan_var in partial_scan_vars
-            )
             # tl.reduce doesn't work for non-commutative operators, so instead
             # of repeating the scan op as a reduction, we use sum to select the
             # last scan value
-            partial_reduce_vars = cse_multiple(
-                f"tl.reduce(({pre_reduce_vars}), -1, {sum_helper_fn}, keep_dims=True)",
-                len(values),
-                masks,
-            )
-            accs_next = combine_fn(tuple(accumulators), partial_reduce_vars)
+            partial_reduce_vars = [
+                cse_compute(
+                    f"triton_helpers.select_one(({partial_scan_var}), rbase == (RBLOCK - 1), dim=-1, keep_dims=True)"
+                )
+                for partial_scan_var in partial_scan_vars
+            ]
+            accs_next = combine_fn(tuple(accumulators), tuple(partial_reduce_vars))
             full_scan_vars = combine_fn(tuple(accumulators), partial_scan_vars)
             result_vars = [
                 cse_compute(f"tl.where(roffset > 0, {full_scan}, {partial_scan})")
@@ -2807,7 +2799,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-        _, call_args, arg_types, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 if V.graph.cpp_wrapper:
