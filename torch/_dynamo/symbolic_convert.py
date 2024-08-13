@@ -471,13 +471,14 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             try:
                 x = value.var_getattr(self, "__bool__")  # type: ignore[arg-type]
-            except exc.ObservedException:
+            except exc.ObservedAttributeError:
+                exc.handle_observed_exception(self)
                 # if __bool__ is missing, trying __len__ to infer a truth value.
-                x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                try:
                     x = value.var_getattr(self, "__len__")  # type: ignore[arg-type]
+                except exc.ObservedAttributeError:
+                    exc.handle_observed_exception(self)
+                    x = None
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
@@ -684,7 +685,7 @@ def break_graph_if_unsupported(*, push):
 class BytecodeDistpatchTableMeta(type):
     """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
 
-    def __init__(cls, name, bases, dct):
+    def __init__(cls, name, bases, dct) -> None:
         super().__init__(name, bases, dct)
 
         def _missing(opname, *args):
@@ -1321,7 +1322,7 @@ class InstructionTranslatorBase(
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
@@ -1625,8 +1626,8 @@ class InstructionTranslatorBase(
 
         if not isinstance(
             argsvars, BaseListVariable
-        ) and argsvars.has_force_unpack_var_sequence(self):
-            argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
+        ) and argsvars.has_unpack_var_sequence(self):
+            argsvars = TupleVariable(argsvars.unpack_var_sequence(self))
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
@@ -1795,7 +1796,7 @@ class InstructionTranslatorBase(
         items = []
         for seq in seqs:
             try:
-                items.extend(seq.force_unpack_var_sequence(self))
+                items.extend(seq.unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
         self.push(cls(items, mutable_local=MutableLocal()))
@@ -1833,7 +1834,7 @@ class InstructionTranslatorBase(
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
 
-        keys = keys.force_unpack_var_sequence(self)
+        keys = keys.unpack_var_sequence(self)
         assert len(keys) == len(values)
 
         self.push(
@@ -1923,8 +1924,8 @@ class InstructionTranslatorBase(
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        elif seq.has_force_unpack_var_sequence(self):
-            val = seq.force_unpack_var_sequence(self)
+        elif seq.has_unpack_var_sequence(self):
+            val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         if len(val) != inst.argval:
@@ -1937,8 +1938,8 @@ class InstructionTranslatorBase(
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        if seq.has_force_unpack_var_sequence(self):
-            vals = list(seq.force_unpack_var_sequence(self))
+        if seq.has_unpack_var_sequence(self):
+            vals = list(seq.unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2121,7 +2122,7 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in tos):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(k) for k in tos]))  # type: ignore[attr-defined]
+            self.push(TupleVariable([tos1.getitem_const(self, k) for k in tos]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -2362,7 +2363,7 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+            self.push(TupleVariable(self.pop().unpack_var_sequence(self)))
         else:
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
@@ -2515,7 +2516,7 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-    ):
+    ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
         self.distributed_state = distributed_state
@@ -2621,7 +2622,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-    ):
+    ) -> None:
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
@@ -2705,10 +2706,18 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
+
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
-            # if it reaches here, it means Dynamo failed to inline a functorch function
             name = ci.key().name.lower()
-            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            msg = (
+                "If you are reaching here, it means dynamo failed for one of the following reasons:\n"
+                # Calling a torch.compiled function
+                f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
+                f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
+                "For more information, see PyTorch issue #128711."
+                # if it reaches here, it means Dynamo failed to inline a functorch function
+                f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            )
             unimplemented(msg)
 
     def get_example_value(self, source: Source):
@@ -3095,7 +3104,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: Dict[str, VariableTracker],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
-    ):
+    ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
@@ -3264,7 +3273,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
 
@@ -3295,7 +3304,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             val = tos.next_variable(self)
         except (StopIteration, exc.ObservedUserStopIteration) as ex:
             if isinstance(ex, exc.ObservedUserStopIteration):
-                exc.handle_observed_user_stop_iteration(self)
+                exc.handle_observed_exception(self)
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()

@@ -190,7 +190,7 @@ class TestNN(NNTestCase):
 
     def test_share_memory(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = nn.Parameter(torch.eye(5))
                 self.par = nn.ParameterList()
@@ -308,7 +308,7 @@ class TestNN(NNTestCase):
             return [k for k, _ in named_parameters]
 
         class M1(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param1 = nn.Parameter(torch.empty(3, 3))
                 self.param2 = self.param1
@@ -320,7 +320,7 @@ class TestNN(NNTestCase):
                          ["param1", "param2"])
 
         class M2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = nn.Linear(3, 4, bias=False)
                 self.mod2 = self.mod1
@@ -359,7 +359,7 @@ class TestNN(NNTestCase):
 
         # test remove_duplicate
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = Buffer(torch.empty(3, 5))
                 self.buffer2 = self.buffer1
@@ -372,7 +372,7 @@ class TestNN(NNTestCase):
 
     def test_buffer_bad_module_subclass(self):
         class MyBadModule(nn.Linear):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(2, 2)
                 self.bar = Buffer(torch.rand(2, 2))
 
@@ -385,7 +385,7 @@ class TestNN(NNTestCase):
 
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
@@ -413,7 +413,7 @@ class TestNN(NNTestCase):
 
     def test_train_errors_for_invalid_mode(self):
         class SubclassNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(2, 2)
 
@@ -486,7 +486,7 @@ class TestNN(NNTestCase):
 
     def test_modules(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = l
                 self.l2 = l
@@ -499,7 +499,7 @@ class TestNN(NNTestCase):
 
     def test_named_modules(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = l
                 self.l2 = l
@@ -2507,7 +2507,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_container_copy(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(4, 5)
 
@@ -12020,7 +12020,7 @@ if __name__ == '__main__':
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = nn.Linear(10, 10)
                 self.layer2 = nn.Linear(10, 10)
@@ -12892,13 +12892,13 @@ class TestFusionUtils(TestCase):
 class TestUtils(TestCase):
     def test_consume_prefix_in_state_dict_if_present(self):
         class Block(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(3, 3, 3, bias=True)
                 self.conv2 = nn.Conv2d(3, 3, 3, bias=False)
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(5, 5)
                 self.linear2 = nn.Linear(5, 5)

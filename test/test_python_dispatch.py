@@ -44,6 +44,7 @@ from torch.utils._mode_utils import all_same_mode, no_dispatch
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
+    is_in_torch_dispatch_mode,
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
@@ -234,7 +235,7 @@ class TestPythonRegistration(TestCase):
                 self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
                 # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-                # combination if someone overrided the behavior for the same before them
+                # combination if someone overridden the behavior for the same before them
                 with self.assertRaisesRegex(
                     RuntimeError, "already a kernel registered from python"
                 ):
@@ -1645,7 +1646,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
         sub_count = 0
 
         class PoliteMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.pre_count = 0
                 self.post_count = 0
 
@@ -1750,6 +1751,35 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
+    def test_mode_detection(self):
+        class InfraMode(TorchDispatchMode):
+            @classmethod
+            def is_infra_mode(cls):
+                return True
+
+        class NonInfraMode(TorchDispatchMode):
+            pass
+
+        with InfraMode():
+            self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+            with NonInfraMode():
+                self.assertTrue(is_in_torch_dispatch_mode())
+                self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
+                with InfraMode():
+                    self.assertTrue(is_in_torch_dispatch_mode())
+                    self.assertTrue(
+                        is_in_torch_dispatch_mode(include_infra_modes=False)
+                    )
+
+                self.assertTrue(is_in_torch_dispatch_mode())
+                self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
+            self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+
+        self.assertFalse(is_in_torch_dispatch_mode())
+        self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(
@@ -1836,7 +1866,10 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                     wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
                 )
                 logging.getLogger("NonWrapperSubclass").info(
-                    f"{func.__module__}.{func.__name__}", args, kwargs, rs  # noqa: G004
+                    f"{func.__module__}.{func.__name__}",  # noqa: G004
+                    args,
+                    kwargs,
+                    rs,
                 )
                 return rs
 

@@ -1350,7 +1350,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
                 self.dont_fold_me = torch.nn.Parameter(torch.randn(2, 2))
@@ -1389,7 +1389,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(2, 2)
 
@@ -1420,7 +1420,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1500,9 +1500,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def transform_for_annotation(
                 self, model: torch.fx.GraphModule
             ) -> torch.fx.GraphModule:
-                for n in model.graph.nodes:
+                # Make a copy of the graph to ensure that we are using the
+                # return value of this function.
+                graph = torch.fx.Graph()
+                graph.graph_copy(model.graph, {})
+                for n in graph.nodes:
                     if n.target == torch.ops.aten.add.Tensor:
                         n.target = torch.ops.aten.mul.Tensor
+                model = torch.fx.GraphModule(model, graph)
                 return model
 
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -1815,7 +1820,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
@@ -1881,7 +1886,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
 
@@ -1949,7 +1954,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_allow_exported_model_train_eval(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
                 self.dropout = torch.nn.Dropout(0.5)
@@ -2250,7 +2255,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             return model
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -2314,7 +2319,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 
