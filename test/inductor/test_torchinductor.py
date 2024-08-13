@@ -7221,7 +7221,7 @@ class CommonTemplate:
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
 
-    def test_actual_stride(self):
+    def test_exact_stride(self):
         full = torch.randn((16, 16), device=self.device)
         view = torch.as_strided(full, (16, 8), full.stride())
 

@@ -258,6 +258,19 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
+def get_new_stride_with_stride_order(
+    stride: Sequence[Union[int, torch.SymInt, Expr]],
+    stride_order: Sequence[int],
+) -> Sequence[Union[int, torch.SymInt, Expr]]:
+    """
+    Convert strides order to new stride
+    """
+    new_stride = [stride[0] for _ in range(len(stride))]
+    for i, elem in enumerate(stride_order):
+        new_stride[i] = stride[elem]
+    return new_stride
+
+
 @overload
 def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
     ...
@@ -2085,7 +2098,7 @@ def as_storage_and_layout(
     want_contiguous: bool = False,
     stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
-    actual_strides: Optional[Sequence[Union[int, Integer]]] = None,
+    exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
 ) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
@@ -2100,7 +2113,7 @@ def as_storage_and_layout(
             want_contiguous=want_contiguous,
             stride_order=stride_order,
             allow_padding=allow_padding,
-            actual_strides=actual_strides,
+            exact_strides=exact_strides,
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
@@ -2111,9 +2124,9 @@ def as_storage_and_layout(
                 x.data.freeze_layout_with_stride_order(
                     stride_order, allow_padding=allow_padding
                 )
-            elif actual_strides is not None:
-                x.data.freeze_layout_with_actual_strides(
-                    actual_strides, allow_padding=allow_padding
+            elif exact_strides is not None:
+                x.data.freeze_layout_with_exact_strides(
+                    exact_strides, allow_padding=allow_padding
                 )
             else:
                 x.data.decide_layout()
@@ -3208,8 +3221,8 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def as_actual_strides(self, actual_strides, allow_padding=False):
-        new_stride = actual_strides
+    def as_exact_strides(self, exact_strides, allow_padding=False):
+        new_stride = exact_strides
         if self.should_pad_strides() and allow_padding:
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
 
@@ -3447,10 +3460,10 @@ class Buffer(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
-    def freeze_layout_with_actual_strides(self, actual_strides, allow_padding=False):
+    def freeze_layout_with_exact_strides(self, exact_strides, allow_padding=False):
         assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_actual_strides(
-            actual_strides, allow_padding=allow_padding
+        self.layout = self.layout.as_exact_strides(
+            exact_strides, allow_padding=allow_padding
         )
 
     def is_zero_elements(self):
@@ -4702,7 +4715,65 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_stride_order(cls, x, order, allow_padding=False, actual_strides=None):
+    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
+        assert exact_strides is not None
+        order = get_stride_order(exact_strides)
+        if x.get_numel() == 0:  # Layout doesn't matter
+            return x
+        if is_storage_and_layout(x):
+            while isinstance(x.get_layout(), NonOwningLayout):
+                x = x.get_layout().view
+            if isinstance(x.get_layout(), FlexibleLayout):
+                as_storage_and_layout(
+                    x,
+                    freeze=True,
+                    want_contiguous=False,
+                    stride_order=None,
+                    allow_padding=allow_padding,
+                    exact_strides=exact_strides,
+                )
+                return x
+            # @TODO: do we need to check `x.get_layout().is_stride_ordered(order)`?
+            elif isinstance(x.get_layout(), FixedLayout) and list(
+                x.get_layout().stride
+            ) == list(exact_strides):
+                return x
+            elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
+                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
+                    raise AssertionError(
+                        "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
+                    )
+                elif isinstance(x.get_layout().real_layout(), FixedLayout):
+                    return x
+        # TODO - Storage to InputBuffer
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+            return x
+        if (
+            isinstance(x, TensorBox)
+            and isinstance(x.data, BaseView)
+            and not isinstance(x.data, ReinterpretView)
+            and is_storage_and_layout(x.unwrap_view())
+            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+        ):
+            try:
+                x.data = cls.convert_to_reinterpret_view(x.data)
+                return cls.require_stride_order(x, order, allow_padding=allow_padding)
+            except NotImplementedError:
+                pass
+        x = cls.copy_input(x)
+        as_storage_and_layout(
+            x,
+            freeze=True,
+            want_contiguous=False,
+            stride_order=None,
+            allow_padding=allow_padding,
+            exact_strides=exact_strides,
+        )
+        assert is_stride_order_storage_and_layout(x, order)
+        return x
+
+    @classmethod
+    def require_stride_order(cls, x, order, allow_padding=False):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
@@ -4731,39 +4802,27 @@ class ExternKernel(InputsKernel):
                     if is_stride_order_storage_and_layout(x, order)
                     else order,
                     allow_padding=allow_padding,
-                    actual_strides=actual_strides,
                 )
                 return x
-            elif isinstance(x.get_layout(), FixedLayout) and (
-                (order and x.get_layout().is_stride_ordered(order))
-                or (
-                    actual_strides
-                    and list(x.get_layout().stride) == list(actual_strides)
-                )
-            ):
+            elif isinstance(
+                x.get_layout(), FixedLayout
+            ) and x.get_layout().is_stride_ordered(order):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(
                         "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
-                elif (
-                    isinstance(x.get_layout().real_layout(), FixedLayout)
-                    and order
-                    and x.get_layout().real_layout().is_stride_ordered(order)
-                ):
+                elif isinstance(
+                    x.get_layout().real_layout(), FixedLayout
+                ) and x.get_layout().real_layout().is_stride_ordered(order):
                     return x
 
         # TODO - Storage to InputBuffer
-        if (
-            isinstance(x, InputBuffer)
-            and order
-            and x.get_layout().is_stride_ordered(order)
-        ):
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
             return x
         if (
-            order
-            and isinstance(x, TensorBox)
+            isinstance(x, TensorBox)
             and isinstance(x.data, BaseView)
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
@@ -4781,10 +4840,8 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            actual_strides=actual_strides,
         )
-        if order and not actual_strides:
-            assert is_stride_order_storage_and_layout(x, order)
+        assert is_stride_order_storage_and_layout(x, order)
         return x
 
     @classmethod
