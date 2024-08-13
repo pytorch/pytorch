@@ -410,10 +410,9 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                 new_output.users.clear()
                 node_replace_(call_mod_node, new_output)
             elif isinstance(new_output, (list, tuple)):
-                # Clear the users of the output node and set
-                # the users to be the users of original call_module node.
+                # Pop subgraph output node from users.
                 for node in new_output:
-                    node.users.clear()
+                    node.users.pop(output[0])
 
                 # Inline the get_item calls for the output node.
                 get_item_users = nodes_filter(
