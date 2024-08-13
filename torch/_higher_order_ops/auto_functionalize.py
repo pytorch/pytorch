@@ -337,7 +337,7 @@ def do_auto_functionalize(
             # Get addressed of all aliasing tensors.
             (tensors_ls, addresses_ls) = get_all_aliases(arg)
 
-            arg_to_aliased[arg] = tensors_ls
+            arg_to_aliased[arg_name] = tensors_ls
             all_aliased_addresses |= set(addresses_ls)
 
     # remove any alias in all_aliased_addresses that is also an argument.
