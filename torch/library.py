@@ -531,6 +531,10 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
     """
+    return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
+
+
+def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -549,13 +553,23 @@ def impl(qualname, types, func=None, *, lib=None):
 
     def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
+
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        for key in keys:
-            use_lib.impl(qualname, func, key)
+        if disable_dynamo:
+
+            @torch._disable_dynamo
+            def func_no_dynamo(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            for key in keys:
+                use_lib.impl(qualname, func_no_dynamo, key)
+        else:
+            for key in keys:
+                use_lib.impl(qualname, func, key)
 
     if func is None:
         return register
@@ -663,7 +677,8 @@ def register_kernel(
     assert isinstance(op, str)
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
-    return impl(op, device_types, func, lib=lib)
+
+    return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
 
 
 def register_fake(

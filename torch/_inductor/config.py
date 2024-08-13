@@ -66,7 +66,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
 )
 
 # dead code elimination
@@ -741,7 +741,13 @@ class cpp:
     # When set to 0, the number of slices is unlimited.
     gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
 
-    # For debugging purpose, configure the pre-defined thread blocking factors for
+    # For perf tuning and debugging purpose, configure the pre-defined cache blocking for
+    # MxNxK dims respectively. The blockings are separated by comma and the unit is
+    # the number of register blocks.
+    # For example, "4,1,10" means 4 register blocks on M, 1 on N and 10 on K respectively.
+    gemm_cache_blocking = os.environ.get("TORCHINDUCTOR_CPP_GEMM_CACHE_BLOCKING", None)
+
+    # For perf tuning and debugging purpose, configure the pre-defined thread blocking factors for
     # MxNxK dims respectively. The factors are separated by comma and their product
     # should be the same as the total number of threads.
     # For example, if the total number of threads is 56, "7,4,2" means the work is
@@ -805,6 +811,10 @@ class triton:
 
     # limit tiling dimensions
     max_tiles = 2
+
+    # Prefer higher dimensional tilings. This simplifies indexing expressions, making
+    # it easier to identify block pointers.
+    prefer_nd_tiling: bool = False
 
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
@@ -890,6 +900,15 @@ class aot_inductor:
     debug_dump_consts_bin: bool = (
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
+
+    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
+    # for debugging purpose
+    debug_intermediate_value_printer = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    )
+
+    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
