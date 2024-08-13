@@ -13,6 +13,7 @@ from torch._dynamo.testing import skipIfNotPy311
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
     find_free_port,
+    IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
@@ -83,8 +84,9 @@ def single_record_test(**kwargs):
 
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(2, output_code=True)
-    test_aot_graphs = multi_record_test(3, aot_graphs=True)
+    if not IS_WINDOWS:
+        test_output_code = multi_record_test(2, output_code=True)
+        test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
     @make_logging_test(schedule=True)
@@ -154,9 +156,10 @@ from user code:
     output = output.add(torch.ones(10, 10))""",  # noqa: B950
         )
 
-    test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
+    if not IS_WINDOWS:
+        test_aot = within_range_record_test(2, 6, aot=logging.INFO)
+        test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
+        test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @skipIfWindows
     @make_logging_test()
