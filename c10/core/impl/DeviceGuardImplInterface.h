@@ -143,7 +143,7 @@ struct C10_API DeviceGuardImplInterface {
    * Set the current stream to Stream
    */
   virtual void setStream(Stream) const {
-    TORCH_CHECK(false, "Backend doesn't support set to a new Stream.")
+    TORCH_CHECK(false, "Backend doesn't support set the current stream.")
   }
 
   /**
@@ -290,7 +290,6 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
-
   DeviceIndex deviceCount() const noexcept override {
     return 1;
   }

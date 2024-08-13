@@ -314,7 +314,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.current_device,
         torch.current_stream,
         torch.device_count,
-        torch.is_available,
+        torch.has_accelerator,
         torch.set_device,
         torch.set_stream,
         torch.synchronize,

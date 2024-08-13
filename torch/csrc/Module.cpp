@@ -1108,6 +1108,27 @@ PyObject* THPModule_getAccelerator(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_hasAccelerator(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser({
+      "has_accelerator(c10::string_view? device_type=None)",
+  });
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::DeviceType device_type = r.accelerator(0);
+  torch::utils::maybe_initialize_device(device_type);
+  c10::impl::VirtualGuardImpl impl(device_type);
+  if (impl.deviceCount() > 0) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_deviceCount(
     PyObject* _unused,
     PyObject* args,
@@ -1123,27 +1144,6 @@ PyObject* THPModule_deviceCount(
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   return THPUtils_packDeviceIndex(impl.deviceCount());
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THPModule_isAvailable(
-    PyObject* _unused,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static torch::PythonArgParser parser({
-      "is_available(c10::string_view? device_type=None)",
-  });
-  torch::ParsedArgs<1> parsed_args{};
-  auto r = parser.parse(args, kwargs, parsed_args);
-
-  c10::DeviceType device_type = r.accelerator(0);
-  torch::utils::maybe_initialize_device(device_type);
-  c10::impl::VirtualGuardImpl impl(device_type);
-  if (impl.deviceCount() > 0) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1708,12 +1708,12 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"current_accelerator", THPModule_getAccelerator, METH_NOARGS, nullptr},
-    {"device_count",
-     castPyCFunctionWithKeywords(THPModule_deviceCount),
+    {"has_accelerator",
+     castPyCFunctionWithKeywords(THPModule_hasAccelerator),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"is_available",
-     castPyCFunctionWithKeywords(THPModule_isAvailable),
+    {"device_count",
+     castPyCFunctionWithKeywords(THPModule_deviceCount),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"set_device",
