@@ -6,6 +6,11 @@ name: linux-binary-manywheel
 
 
 on:
+  pull_request:
+    paths:
+      - '.ci/docker/manywheel/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-manywheel-images.yml
   push:
     branches:
       - nightly
@@ -16,11 +21,7 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.ci/docker/manywheel/*'
-      - '.ci/docker/common/*'
-      - .github/workflows/build-manywheel-images.yml
+
 
 env:
   # Needed for conda builds
