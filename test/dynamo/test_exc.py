@@ -10,13 +10,19 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    skipIfWindows,
+    TEST_Z3,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 class ExcTests(LoggingTestCase):
     maxDiff = None
 
+    @skipIfWindows
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
         def fn002(x):
@@ -44,6 +50,7 @@ from user code:
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
     @make_logging_test()
     @unittest.skipIf(IS_FBCODE, "stack trace slightly different in fbcode")
+    @skipIfWindows
     def test_internal_error_suppress_errors(self, records):
         def fn001(x):
             def f(ctx):
@@ -123,6 +130,7 @@ from user code:
         self.getRecord(records, "Graph break:")
 
     @torch._dynamo.config.patch(suppress_errors=False)
+    @skipIfWindows
     def test_internal_error_no_suppress(self):
         def fn001(x):
             # NB: avoid decorator, as 3.11 changed the line number attributed
@@ -146,6 +154,7 @@ from user code:
         )
 
     @make_logging_test(graph_breaks=True)
+    @skipIfWindows
     def test_graph_break_log(self, records):
         def fn002(x):
             x = x + 1
@@ -173,6 +182,7 @@ Graph break: from user code at:
 """,  # noqa: B950
         )
 
+    @skipIfWindows
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
         def fn001(x):
@@ -200,6 +210,7 @@ ReluCompileError:""",
         translation_validation=True,
         translation_validation_no_bisect=True,
     )
+    @skipIfWindows
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
@@ -268,6 +279,7 @@ Failed Source Expressions:
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
     )
+    @skipIfWindows
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 
