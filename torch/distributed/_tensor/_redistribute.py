@@ -118,14 +118,15 @@ def _gen_transform_infos(
                     # mesh_dim, we need to replicate the tensor on the mesh dim first to clear the nested sharding
                     target = Replicate()
 
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=mesh_dim,
-                    src_dst_placements=(current, target),
-                    logical_shape=mesh_dims_to_logical_shape[mesh_dim],
+            if current != target:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=mesh_dim,
+                        src_dst_placements=(current, target),
+                        logical_shape=mesh_dims_to_logical_shape[mesh_dim],
+                    )
                 )
-            )
-            current_placements[mesh_dim] = target
+                current_placements[mesh_dim] = target
 
     # We always traverse from outer placement to inner placement to collect the remaining
     # needed transform infos (i.e. the replication from nested sharding might need to further
