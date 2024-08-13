@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     parametrize,
     skipIfRocm,
+    skipIfWindows,
     slowTest,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -404,6 +405,7 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @skipIfWindows
     @config.patch(freezing=True)
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
@@ -545,6 +547,7 @@ class CPUReproTests(TestCase):
         }
         self._test_lstm_packed(params_dict)
 
+    @skipIfWindows
     def test_lstm_packed_change_input_sizes_cpu(self):
         params_dict = {
             "unbatched": [False],
@@ -1532,6 +1535,7 @@ class CPUReproTests(TestCase):
         p1 = torch.randn(1)
         self.common(fn, (p0, p1))
 
+    @skipIfWindows
     def test_no_op_squeeze(self):
         @torch._dynamo.optimize("inductor")
         def forward(arg0_1):
@@ -1540,6 +1544,7 @@ class CPUReproTests(TestCase):
         x = torch.randn((10, 20))
         self.common(forward, (x,))
 
+    @skipIfWindows
     def test_parallel_num_threads(self):
         @torch._dynamo.optimize("inductor")
         def fn(x1, x2):
@@ -1676,6 +1681,7 @@ class CPUReproTests(TestCase):
         actual = torch.compile(reduce_example, fullgraph=True)(*args)
         self.assertEqual(expected, actual)
 
+    @skipIfWindows
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
         def fn(a, b):
@@ -1888,6 +1894,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(2)
 
     @requires_vectorization
+    @skipIfWindows
     def test_ops_masked_with_bool_input(self):
         x = torch.zeros(129, dtype=torch.bool)
         size = [2, 3]
@@ -1906,6 +1913,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(res_aten_eager, res)
 
     @patch("torch.cuda.is_available", lambda: False)
+    @skipIfWindows
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -2517,6 +2525,7 @@ class CPUReproTests(TestCase):
             self.common(func, (x1, x2))
             check_metrics_vec_kernel_count(2)
 
+    @skipIfWindows
     def test_randint_symint_input(self):
         # https://github.com/pytorch/pytorch/issues/122405
         @torch.compile(fullgraph=True)
@@ -2582,6 +2591,7 @@ class CPUReproTests(TestCase):
             )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    @skipIfWindows
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
@@ -2854,6 +2864,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
     @config.patch({"cpp.descriptive_names": "original_aten"})
+    @skipIfWindows
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
@@ -2967,6 +2978,7 @@ class CPUReproTests(TestCase):
         ):
             fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
 
+    @skipIfWindows
     def test_horizontal_fusion(self):
         def fn(a, b, c, idx):
             _a = torch.index_select(a, dim=0, index=idx)
@@ -3023,6 +3035,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
+    @skipIfWindows
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
@@ -3072,6 +3085,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    @skipIfWindows
     def test_non_contiguous_index_with_constant_stride(self):
         def fn(x):
             x1 = x[:, :, :, ::2]
@@ -3349,6 +3363,7 @@ class CPUReproTests(TestCase):
             self.assertEqual(v1, v2)
 
     @config.patch(inplace_buffers=True)
+    @skipIfWindows
     def test_in_out_buffer(self):
         def fn(x, y):
             z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
@@ -3734,6 +3749,7 @@ class CPUReproTests(TestCase):
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
+    @skipIfWindows
     def test_symbolic_shape_scalar_value_reduction(self):
         def fn(x, y):
             return y + torch.ones(x).sum()
@@ -3930,6 +3946,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @skipIfWindows
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
         input = torch.randn(5, 128, dtype=torch.float32)
@@ -3965,6 +3982,7 @@ class CPUReproTests(TestCase):
         assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch({"cpp.dynamic_threads": True})
+    @skipIfWindows
     def test_reduction_with_dynamic_threads(self):
         def fn(a, b):
             return a.sum(), b.sum()
@@ -4026,6 +4044,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
 
     @requires_vectorization
+    @skipIfWindows
     def test_vec_indirect_load_cse_cache(self):
         # https://github.com/pytorch/pytorch/issues/123502
         from math import inf
@@ -4086,6 +4105,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 check_metrics_vec_kernel_count(1)
 
+    @skipIfWindows
     def test_consistent_remove_buffers(self):
         def fn(x):
             z = x + x
@@ -4106,6 +4126,7 @@ class CPUReproTests(TestCase):
             ).run(code)
 
     @requires_vectorization
+    @skipIfWindows
     def test_bool_reduction_vec(self):
         for op in (
             torch.masked.mean,
