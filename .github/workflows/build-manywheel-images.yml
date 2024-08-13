@@ -56,7 +56,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux-builder:cpu
       - name: Output Docker Image name
         run: |
-          if [[ env.WITH_PUSH == 'false' ]]; then
+          if [[ ${{env.WITH_PUSH}} == 'false' ]]; then
             echo "build-docker-cpu=${{steps.calculate-docker-image.outputs.docker-image}}" >> "${GITHUB_OUTPUT}"
           else
             echo "build-docker-cpu=pytorch/manylinux-builder:cpu-main" >> "${GITHUB_OUTPUT}"
