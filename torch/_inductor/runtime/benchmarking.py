@@ -86,10 +86,9 @@ class Benchmarker:
         actual runtime calculation is dictated by the benchmarking implementation, but may be
         one of [mean, median, minimum, etc.]). Functions as a convenience wrapper around
         device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
-        `NotImplementedError(...)` if we can't safely infer the device type of `fn`; for
-        example, if multiple device types are found in `fn_args` and `fn_kwargs`, or if no
-        device types are found.
-
+        `ValueError(...)` if we can't safely infer the device type of `fn`; for example,
+        if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
+        types are found.
 
         Arguments:
         - fn: The function to benchmark.
