@@ -41,8 +41,6 @@ DTensor provides dedicated tensor factory functions to allow creating :class:`DT
 using torch.Tensor like factory function APIs (i.e. torch.ones, torch.empty, etc), by additionally
 specifying the :class:`DeviceMesh` and :class:`Placement` for the :class:`DTensor` created:
 
-.. currentmodule:: torch.distributed.tensor
-
 .. autofunction:: zeros
 
 .. autofunction:: ones

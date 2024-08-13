@@ -21,7 +21,7 @@ class TestBench(TestCase):
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
     def test_benchmarker(self):
-        res = benchmarker.benchmark(self._bench_fn, (), {})
+        res = benchmarker.benchmark_gpu(self._bench_fn)
         log.warning("do_bench result: %s", res)
         self.assertGreater(res, 0)
 

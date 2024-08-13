@@ -221,21 +221,23 @@ class DTensor(torch.Tensor):
     write distributed program as if it's a single-device program with the same convergence property. It
     provides a uniform tensor sharding layout (DTensor Layout) through specifying the :class:`DeviceMesh`
     and :class:`Placement`:
-        * :class:`DeviceMesh` represents the device topology and the communicators of the cluster using
-            an n-dimensional array.
-        * :class:`Placement` describes the sharding layout of the logical tensor on the :class:`DeviceMesh`.
-            DTensor supports three types of placements: :class:`Shard`, :class:`Replicate` and :class:`Partial`.
+
+    * :class:`DeviceMesh` represents the device topology and the communicators of the cluster using
+    an n-dimensional array.
+    * :class:`Placement` describes the sharding layout of the logical tensor on the :class:`DeviceMesh`.
+    DTensor supports three types of placements: :class:`Shard`, :class:`Replicate` and :class:`Partial`.
 
     There're three ways to construct a :class:`DTensor`:
-        1. :meth:`distribute_tensor` creates a :class:`DTensor` from a logical or "global" ``torch.Tensor`` on
-            each rank. This could be used to shard the leaf ``torch.Tensor`` s (i.e. model parameters/buffers
-            and inputs).
-        2. :meth:`from_local` creates a :class:`DTensor` from a local ``torch.Tensor`` on each rank, which can
-            be used to create :class:`DTensor` from a non-leaf ``torch.Tensor`` s (i.e. intermediate activation
-            tensors during forward/backward).
-        3. DTensor provides dedicated tensor factory methods (e.g. :meth:`empty`, :meth:`ones`, :meth:`randn`, etc.)
-            to allow different :class:`DTensor` creations by directly specifying the :class:`DeviceMesh` and
-            :class:`Placement`
+
+    1. :meth:`distribute_tensor` creates a :class:`DTensor` from a logical or "global" ``torch.Tensor`` on
+    each rank. This could be used to shard the leaf ``torch.Tensor`` s (i.e. model parameters/buffers
+    and inputs).
+    2. :meth:`from_local` creates a :class:`DTensor` from a local ``torch.Tensor`` on each rank, which can
+    be used to create :class:`DTensor` from a non-leaf ``torch.Tensor`` s (i.e. intermediate activation
+    tensors during forward/backward).
+    3. DTensor provides dedicated tensor factory methods (e.g. :meth:`empty`, :meth:`ones`, :meth:`randn`, etc.)
+    to allow different :class:`DTensor` creations by directly specifying the :class:`DeviceMesh` and
+    :class:`Placement`
 
     ``DTensor`` overrides the PyTorch operators to perform sharded computation or issue communications when necessary.
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
@@ -492,11 +494,12 @@ class DTensor(torch.Tensor):
 
         When redistributing from current to the new placements on one device mesh dimension, we
         will perform the following operations including communication collective or local operation:
-            1. ``Shard(dim)`` -> ``Replicate()``: ``all_gather``
-            2. ``Shard(src_dim)`` -> ``Shard(dst_dim)``: ``all_to_all``
-            3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
-            4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
-            5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
+
+        1. ``Shard(dim)`` -> ``Replicate()``: ``all_gather``
+        2. ``Shard(src_dim)`` -> ``Shard(dst_dim)``: ``all_to_all``
+        3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
+        4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
+        5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
 
         ``redistribute`` would correctly figure out the necessary redistribute steps for DTensors
         that are created either on 1-D or N-D DeviceMesh.
@@ -780,12 +783,13 @@ def distribute_module(
 ) -> nn.Module:
     """
     This function expose three functions to control the parameters/inputs/outputs of the module:
+
     1. To perform sharding on the module before runtime execution by specifying the
-        ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
-        parameters according to the `partition_fn` specified).
+    ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
+    parameters according to the `partition_fn` specified).
     2. To control the inputs or outputs of the module during runtime execution by
-        specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
-        :class:`DTensor`, convert the output back to torch.Tensor)
+    specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
+    :class:`DTensor`, convert the output back to torch.Tensor)
 
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
