@@ -582,6 +582,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         or (
             mat1.layout.dtype == torch.float32 and torch.backends.cuda.matmul.allow_tf32
         )
+        or (mat1.layout.dtype == torch.bfloat16 and mat2.layout.dtype == torch.uint8)
     )
 
     if inductor_config.mixed_mm_choice == "triton":

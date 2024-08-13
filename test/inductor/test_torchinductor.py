@@ -3280,6 +3280,28 @@ class CommonTemplate:
             atol=0.1,
         )
 
+    @skipIfPy312
+    @config.patch(mixed_mm_choice="triton")
+    def test_mixed_mm_exhaustive_dtypes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        dtypes_left = [torch.float16, torch.float32, torch.bfloat16]
+        dtypes_right = [torch.int8, torch.uint8]
+        dtype_ranges = {torch.uint8: (0, 255), torch.int8: (-128, 127)}
+        for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
+            low, high = dtype_ranges[dtype_right]
+            self.common(
+                fn,
+                (
+                    torch.randn(256, 256, dtype=dtype_left),
+                    torch.randint(low, high, (256, 256), dtype=dtype_right),
+                ),
+                check_lowp=True,
+                rtol=0.01,
+                atol=0.1,
+            )
+
     @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
