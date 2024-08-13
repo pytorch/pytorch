@@ -66,7 +66,7 @@ def _merge_sdpa(
     softmax_lse = torch.stack([lse.exp() for lse in logsumexps]).sum(dim=0).log_()
 
     out = []
-    for i, (chunk, chunk_lse) in enumerate(zip(chunks, logsumexps)):
+    for chunk, chunk_lse in zip(chunks, logsumexps):
         softmax_lse_corrected = torch.exp(chunk_lse - softmax_lse)
         out_corrected = chunk * softmax_lse_corrected.unsqueeze(-1).to(chunk.dtype)
         out.append(out_corrected)

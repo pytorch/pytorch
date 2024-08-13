@@ -367,7 +367,6 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [output, input, index, src]
