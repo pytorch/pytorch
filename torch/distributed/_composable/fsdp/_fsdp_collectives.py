@@ -1,5 +1,5 @@
 # mypy: allow-untyped-decorators
-from typing import List, NamedTuple, Optional, Tuple, Union
+from typing import cast, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch._dynamo.compiled_autograd as ca
@@ -12,7 +12,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
 )
-from ._fsdp_param import FSDPParam
+from ._fsdp_param import FSDPParam, ShardedState
 
 
 class AllGatherResult(NamedTuple):
@@ -134,9 +134,7 @@ def foreach_all_gather(
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     with torch.cuda.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs: List[List[torch.Tensor]] = [
-            fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
-        ]
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
@@ -177,6 +175,40 @@ def foreach_all_gather(
             param_all_gather_input_numels,
             inp_split_sizes,
         )
+
+
+@torch.no_grad()
+def _get_param_all_gather_inputs(
+    fsdp_params: List[FSDPParam],
+) -> List[List[torch.Tensor]]:
+    # Intentionally run a fast-path that bypasses abstractions for the common
+    # FSDP case of bf16/fp32 mixed precision in order to use `_foreach_copy_`
+    # for lower CPU overhead and more efficient copying
+    if not ca.compiled_autograd_enabled and all(
+        (
+            fsdp_param.param_dtype is not None
+            and not fsdp_param.offload_to_cpu
+            and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+        )
+        for fsdp_param in fsdp_params
+    ):
+        param_dtype, device = fsdp_params[0].param_dtype, fsdp_params[0].device
+        all_gather_inputs = [
+            fsdp_param._sharded_param_data
+            if fsdp_param.sharded_state == ShardedState.SHARDED
+            else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
+            for fsdp_param in fsdp_params
+        ]
+        all_gather_input_numels = [t.numel() for t in all_gather_inputs]
+        flat_all_gather_input = torch.empty(
+            (sum(all_gather_input_numels),), device=device, dtype=param_dtype
+        )
+        splits = torch.split(flat_all_gather_input, all_gather_input_numels)
+        torch._foreach_copy_(splits, all_gather_inputs)
+        return [[split] for split in splits]
+    # Fall back to the slow path that incurs dispatcher overhead per tensor
+    # but allows for more flexible pre-all-gather transforms
+    return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
 
 
 @torch.no_grad()
