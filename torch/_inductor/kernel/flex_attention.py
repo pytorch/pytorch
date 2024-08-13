@@ -222,6 +222,7 @@ compute_flex_attention = r"""
     if IS_DIVISIBLE:
         q = tl.load(Q_block_ptr)
     else:
+        # boundary check is not free, so we only do it when necessary.
         q = tl.load(Q_block_ptr, boundary_check=(0,))
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -447,10 +448,12 @@ def fwd_compute_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     if is_last_block:
-        # Applying mod to index for last block for non divisible seqlen.
+        # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
+        # which is larger than the actual number of elements. To avoid access memory out of bound,
+        # we need to mask out the elements that are out of Q_LEN & KV_LEN.
         offs_m = offs_m % Q_LEN
         offs_n = offs_n % KV_LEN
-    # TODO: Add load mask in modification when M/N Boundary is not safe
+
     {{ modification(
         subgraph_number=0,
         output_name="post_mod_scores",
