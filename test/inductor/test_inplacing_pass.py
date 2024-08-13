@@ -234,9 +234,22 @@ class TestMutationRegionId(InductorTestCase):
         from torch._inductor.pattern_matcher import compute_mutation_region_ids
 
         compute_mutation_region_ids(gm.graph)
-        ids = [n.meta["mutation_region_id"] for n in gm.graph.nodes]
-        # Expect to see three groups
-        self.assertExpectedInline(str(ids), """[0, 0, 0, 2, 2, 2, 4, 4, 4, 4]""")
+        ids = [str(n.meta["mutation_region_id"]) for n in gm.graph.nodes]
+        # Expect to see three barrier_ids and no reinplace_ids
+        self.assertExpectedInline(
+            "\n".join(ids),
+            """\
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=2, reinplace_id=None)
+MutationRegionId(barrier_id=2, reinplace_id=None)
+MutationRegionId(barrier_id=2, reinplace_id=None)
+MutationRegionId(barrier_id=2, reinplace_id=None)""",
+        )
 
     def test_auto_functionalized(self):
         def f(a):
@@ -245,7 +258,7 @@ class TestMutationRegionId(InductorTestCase):
             d = b.view(-1)
             e = torch.ops.higher_order.auto_functionalized(sin._opoverload, x=c, out=b)
             g = a.clone()
-            a.set_(b)
+            a.set_(c)
             h = a.clone()
             return h
 
@@ -254,11 +267,23 @@ class TestMutationRegionId(InductorTestCase):
         from torch._inductor.pattern_matcher import compute_mutation_region_ids
 
         compute_mutation_region_ids(gm.graph)
-        ids = [n.meta["mutation_region_id"] for n in gm.graph.nodes]
-        # b and d are marked with (3)
-        # Everything else before the set_ is marked with 0
-        # Everything after the set_ is marked with 2
-        self.assertExpectedInline(str(ids), """[0, 3, 0, 3, 0, 0, 0, 0, 2, 2, 2]""")
+        ids = [str(n.meta["mutation_region_id"]) for n in gm.graph.nodes]
+        # b and d should have their own reinplace_id
+        self.assertExpectedInline(
+            "\n".join(ids),
+            """\
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)""",
+        )
 
     def test_auto_functionalized_incremental(self):
         def f(a):
@@ -267,7 +292,7 @@ class TestMutationRegionId(InductorTestCase):
             d = b.view(-1)
             e = torch.ops.higher_order.auto_functionalized(sin._opoverload, x=c, out=b)
             g = a.clone()
-            a.set_(b)
+            a.set_(g)
             h = a.clone()
             return h
 
@@ -279,26 +304,56 @@ class TestMutationRegionId(InductorTestCase):
         )
 
         compute_mutation_region_ids(gm.graph)
-        ids = [n.meta.get("mutation_region_id", None) for n in gm.graph.nodes]
-        self.assertExpectedInline(str(ids), """[0, 3, 0, 3, 0, 0, 0, 0, 2, 2, 2]""")
+        ids = [str(n.meta["mutation_region_id"]) for n in gm.graph.nodes]
+        self.assertExpectedInline(
+            "\n".join(ids),
+            """\
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)""",
+        )
 
         graph = gm.graph
         nodes = list(graph.nodes)
         a, b, c, d, *_ = nodes
 
         with gm.graph.inserting_after(d):
-            k = gm.graph.call_function(torch.ops.aten.clone.default, args=(a,))
             af = gm.graph.call_function(
                 torch.ops.higher_order.auto_functionalized,
                 args=(sin._opoverload,),
                 kwargs={"x": a, "out": c},
             )
             af.meta["val"] = None
+            # Unrelated
+            k = gm.graph.call_function(torch.ops.aten.clone.default, args=(a,))
+            k.meta["val"] = a.meta["val"].clone()
 
         get_mutation_region_id(gm.graph, af)
-        ids = [n.meta.get("mutation_region_id", None) for n in gm.graph.nodes]
+        ids = [str(n.meta["mutation_region_id"]) for n in gm.graph.nodes]
         self.assertExpectedInline(
-            str(ids), """[0, 3, 5, 3, 0, None, 0, 0, 0, 0, 2, 2, 2]"""
+            "\n".join(ids),
+            """\
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=1)
+MutationRegionId(barrier_id=0, reinplace_id=0)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=0, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)
+MutationRegionId(barrier_id=1, reinplace_id=None)""",
         )
 
 
