@@ -22,6 +22,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
@@ -40,6 +41,7 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.utils._triton import has_triton
 
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
@@ -54,7 +56,7 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 class MyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = torch.nn.Linear(10, 10)
 
@@ -99,6 +101,8 @@ class MyModelConv2d(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
+    device_type = GPU_TYPE
+
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -195,7 +199,7 @@ class TestFxGraphCache(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            "torch._inductor.fb.remote_cache.FbRemoteFxGraphCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
@@ -437,38 +441,51 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
-    @requires_gpu()
-    @requires_triton()
-    @config.patch({"max_autotune": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_inductor_counters(self):
         """
         Test that we bump the inductor counters on a cache hit.
         """
+        compile_to_fn = GraphLowering.compile_to_fn
 
-        def fn(a, b):
-            return torch.mm(a, b)
+        counter_name = "a_test_counter"
+        counter_incr = 7
 
-        a = torch.rand(8, 32, device="cuda")
-        b = torch.rand(32, 8, device="cuda")
+        def bump_counter(self):
+            # Mock that bumps some arbitrary test counter by a set amount, then calls
+            # the original GraphLowering.compile_to_fn.
+            counters["inductor"][counter_name] += counter_incr
+            return compile_to_fn(self)
 
-        compiled_fn = torch.compile(fn)
+        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
 
-        counters.clear()
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+            def fn(a, b):
+                return torch.mm(a, b)
 
-        # Verify the "miss" case.
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            a = torch.rand(8, 32, device="cpu")
+            b = torch.rand(32, 8, device="cpu")
 
-        # Verify the "hit" case
-        self.reset()
-        counters.clear()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            compiled_fn = torch.compile(fn)
+
+            # Verify the "miss" case.
+            counter_val = 2
+            counters["inductor"][counter_name] = counter_val
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(
+                counters["inductor"][counter_name], counter_val + counter_incr
+            )
+
+            # Verify the "hit" case.
+            self.reset()
+            counter_val = 5
+            counters["inductor"][counter_name] = counter_val
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(
+                counters["inductor"][counter_name], counter_val + counter_incr
+            )
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

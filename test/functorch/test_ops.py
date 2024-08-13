@@ -934,7 +934,6 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
-                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1062,6 +1061,7 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         {
             xfail("as_strided", "partial_views"),
+            xfail("as_strided_copy"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1175,7 +1175,6 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
-            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1290,7 +1289,6 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
-        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1343,6 +1341,7 @@ class TestOperators(TestCase):
         "test_vmapjvpall",
         vmapjvpall_fail.union(
             {
+                xfail("as_strided_copy"),
                 decorate(
                     "linalg.det",
                     "singular",
@@ -1429,11 +1428,8 @@ class TestOperators(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
-            }
-        ).difference(
-            {
-                # as_strided_copy fails test_vmapvjp, succeeds here
-                xfail("as_strided_copy", ""),
+                xfail("t_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1570,11 +1566,8 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
-            }
-        ).difference(
-            {
-                # as_strided_copy fails test_vmapvjp, succeeds here
-                xfail("as_strided_copy", ""),
+                xfail("t_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1798,6 +1791,9 @@ class TestOperators(TestCase):
                 ),  # NYI: forward-AD for soft_margin_loss_backward
                 xfail("nn.functional.ctc_loss", ""),  # NYI: forward-AD for _ctc_loss
                 xfail("nn.functional.pdist", ""),  # NYI: forward-AD with _pdist_forward
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # NYI: forward-AD for _safe_softmax
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail(
@@ -1980,6 +1976,9 @@ class TestOperators(TestCase):
                 xfail(
                     "nn.functional.ctc_loss"
                 ),  # ForwardAD not implemented and no decomposition
+                xfail(
+                    "torch.ops.aten._safe_softmax.default"
+                ),  # ForwardAD not implemented
                 xfail("nn.functional.dropout2d"),  # calls random op
                 xfail("nn.functional.dropout3d"),  # calls random op
                 xfail("nn.functional.dropout"),  # calls random op

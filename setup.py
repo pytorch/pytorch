@@ -68,9 +68,6 @@
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
-#   USE_QNNPACK=0
-#     disables QNNPACK build (quantized 8-bit operators)
-#
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
@@ -365,8 +362,6 @@ def get_submodule_folders():
             "gloo",
             "cpuinfo",
             "onnx",
-            "foxi",
-            "QNNPACK",
             "fbgemm",
             "cutlass",
         ]
@@ -1138,7 +1133,8 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
-        "sympy",
+        'sympy==1.12.1 ; python_version == "3.8"',
+        'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
         "fsspec",
@@ -1200,7 +1196,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree==0.11.0"],
+        "optree": ["optree>=0.12.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 

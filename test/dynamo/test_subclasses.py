@@ -2,11 +2,9 @@
 import functools
 import itertools
 import unittest
-
 from functools import partial
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -14,7 +12,6 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
-
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     ShapeEnv,
@@ -391,7 +388,7 @@ def func(a):
 
 
 class EagerRecordGraphAndInputs:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graphs = []
         self.example_inputs = []
 
@@ -735,7 +732,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
-            def __init__(self):
+            def __init__(self) -> None:
                 self._ndim = 10
 
             @classmethod
@@ -990,12 +987,12 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
-        add_ = l_x_.add_(1.0)
-        relu_ = torch.relu_(l_x_);  l_x_ = None
-        add = add_ + relu_;  add_ = relu_ = None
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
         return (add,)
 """,
         )
@@ -1032,12 +1029,12 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
-        add_ = l_x_.add_(1.0)
-        relu_ = torch.relu_(l_x_);  l_x_ = None
-        add = add_ + relu_;  add_ = relu_ = None
+        add_: "f32[3, 4]" = l_x_.add_(1.0)
+        relu_: "f32[3, 4]" = torch.relu_(l_x_);  l_x_ = None
+        add: "f32[3, 4]" = add_ + relu_;  add_ = relu_ = None
         return (add,)
 """,
         )
@@ -1089,11 +1086,11 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -1109,17 +1106,17 @@ class GraphModule(torch.nn.Module):
             2,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem = wrap[0];  wrap = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
 """,
         )
@@ -1139,17 +1136,17 @@ class GraphModule(torch.nn.Module):
             3,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, L_x_: "f32[3, 4]"):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        getitem = wrap[0];  wrap = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
-        def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[3, 4]"):
+            add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
 """,
         )
@@ -1377,6 +1374,15 @@ s1 > 3""",
         x3 = CtxSubclassTensor(torch.ones(2), 4)
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    def test_tensor_subclass_ctx_recursive_guards(self):
+        x0 = torch.ones(2, 2)
+        x1 = CtxSubclassTensor(x0.clone(), 2)
+        x2 = CtxSubclassTensor(x0.clone(), 3)
+        tt0 = TwoTensor(x0.clone(), x1)
+        tt1 = TwoTensor(x0.clone(), x2)
+
+        _check_recompiles(self, lambda x: x * x, (tt0,), (tt1,), True)
 
     def test_tensor_subclass_ctx_custom_guards_override(self):
         class CtxSubclassTensorCustomGuardFn(CtxSubclassTensor):
@@ -1909,9 +1915,7 @@ Eq(s10, s8)""",
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
                     guard_str,
-                    """\
-Eq(s3 - 1, s0)
-Eq(zf1, zf6)""",
+                    """Eq(s3 - 1, s0)""",
                 )
             else:
                 self.assertExpectedInline(

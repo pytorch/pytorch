@@ -24,6 +24,8 @@
 
 import functools as _functools
 import warnings
+
+from _codecs import encode
 from collections import Counter, OrderedDict
 from pickle import (
     APPEND,
@@ -71,6 +73,15 @@ from typing import Any, Dict, List
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
 
+
+# modules in this list are never allowed, even if the user attempts to allowlist
+# functions/classes from them
+_blocklisted_modules = [
+    "sys",
+    "os",
+    "posix",
+    "nt",
+]
 
 _marked_safe_globals_list: List[Any] = []
 
@@ -149,6 +160,8 @@ def _get_allowed_globals():
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
         "torch.device": torch.device,
+        "_codecs.encode": encode,  # for bytes
+        "builtins.bytearray": bytearray,  # for bytearray
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
@@ -221,6 +234,10 @@ class Unpickler:
                     elif module in IMPORT_MAPPING:
                         module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
+                if module in _blocklisted_modules:
+                    raise RuntimeError(
+                        f"Trying to load unsupported GLOBAL {full_path} whose module {module} is blocked."
+                    )
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():

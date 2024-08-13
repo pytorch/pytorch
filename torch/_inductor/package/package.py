@@ -14,12 +14,13 @@ import torch.utils._pytree as pytree
 from torch._inductor import config, exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
+
 from .build_package import build_package_contents
 from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
 
 class PT2ArchiveWriter:
-    def __init__(self, archive_path: str):
+    def __init__(self, archive_path: str) -> None:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
@@ -54,7 +55,7 @@ class PT2ArchiveWriter:
 
 
 class PT2ArchiveReader:
-    def __init__(self, archive_path: str):
+    def __init__(self, archive_path: str) -> None:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 

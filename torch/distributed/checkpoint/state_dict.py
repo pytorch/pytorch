@@ -358,6 +358,9 @@ def _verify_options(
             optim_state_dict_config,
         ):
             with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="FSDP.state_dict_type", category=FutureWarning
+                )
                 with FSDP.state_dict_type(
                     module=module,
                     state_dict_type=state_dict_type,
@@ -549,7 +552,7 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    if info.broadcast_from_rank0:
+    if info.broadcast_from_rank0 or info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
@@ -558,9 +561,15 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(
-            state_dict, local_state_dict, device=device, strict=info.strict
-        )
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
+            model.to_empty(device=device)
+        if info.broadcast_from_rank0:
+            _broadcast_state_dict(
+                state_dict, local_state_dict, device=device, strict=info.strict
+            )
+        elif info.full_state_dict:
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 

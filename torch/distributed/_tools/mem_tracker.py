@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
@@ -32,8 +31,8 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_flatten, tree_map_only
-
 from torch.utils.weak import WeakIdKeyDictionary, weakref
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
