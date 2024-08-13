@@ -803,15 +803,15 @@ def _sympy_ge(a, b):
 
 
 def _sympy_min(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Min
 
-    return sympy.Min(a, b)
+    return Min(a, b)
 
 
 def _sympy_max(a, b):
-    import sympy
+    from torch.utils._sympy.functions import Max
 
-    return sympy.Max(a, b)
+    return Max(a, b)
 
 
 def _sympy_ite(a, t, f):
