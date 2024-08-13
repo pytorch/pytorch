@@ -129,7 +129,7 @@ def auto_functionalized_dense(
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     _arg_to_aliased = {}
     for name in _mutable_args_names:
-        _arg_to_aliased[name] = kwargs.pop("_{}_aliases".format(name))
+        _arg_to_aliased[name] = kwargs.pop(f"_{name}_aliases")
 
     new_kwargs = dict(**kwargs)
     result = []
@@ -152,24 +152,26 @@ def auto_functionalized_dense(
         result.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
-    
+
     # Map every argument to the addresses of its aliases.
     def transform(input):
         if isinstance(input, list):
             return [item._cdata for item in input]
         else:
             return input._cdata
-    _arg_to_aliased_addresses = {
-        arg: [transform(t) for t in entries] for (arg, entries) in _arg_to_aliased.items()
-    }
 
+    _arg_to_aliased_addresses = {
+        arg: [transform(t) for t in entries]
+        for (arg, entries) in _arg_to_aliased.items()
+    }
 
     def observe_mutation(alias, mutation_source):
         return alias.as_strided_scatter(
-                    mutation_source,
-                    mutation_source.size(),
-                    mutation_source.stride(),
-                    mutation_source.storage_offset())
+            mutation_source,
+            mutation_source.size(),
+            mutation_source.stride(),
+            mutation_source.storage_offset(),
+        )
 
     for alias in _all_aliased:
         alias_with_effects = alias
@@ -185,21 +187,25 @@ def auto_functionalized_dense(
                 # if the argument is mutated in place, item would have already observed the effect.
                 continue
 
-            if(isinstance(arg, list)):
-                for (i, elem) in enumerate(arg):
+            if isinstance(arg, list):
+                for i, elem in enumerate(arg):
                     aliased_addresses = _arg_to_aliased_addresses[name][i]
                     if alias._cdata not in _arg_to_aliased_addresses[name]:
                         continue
                     mutation_source = new_kwargs[name][i]
-                    alias_with_effects = observe_mutation(alias_with_effects, mutation_source)
-        
+                    alias_with_effects = observe_mutation(
+                        alias_with_effects, mutation_source
+                    )
+
             else:
                 aliased_addresses = _arg_to_aliased_addresses[name]
                 if alias._cdata not in _arg_to_aliased_addresses[name]:
                     continue
                 mutation_source = new_kwargs[name]
-                alias_with_effects = observe_mutation(alias_with_effects, mutation_source)
-        
+                alias_with_effects = observe_mutation(
+                    alias_with_effects, mutation_source
+                )
+
         result.append(alias_with_effects)
 
     if isinstance(out, tuple):
@@ -350,9 +356,8 @@ def do_auto_functionalize(
     all_aliased_unwrapped = ctx.unwrap_tensors(all_aliased_original)
 
     with ctx.redispatch_to_next():
-
         for arg in mutable_args_names:
-            unwrapped_kwargs["_{}_aliases".format(arg)] = arg_to_aliased.get(arg, [])
+            unwrapped_kwargs[f"_{arg}_aliases"] = arg_to_aliased.get(arg, [])
 
         unwrapped_outs = auto_functionalized(
             op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped)  # type: ignore[arg-type]
