@@ -33,11 +33,13 @@ inner(torch.randn(20, 20).to("{device}"))
 """
         self._run_full_test(run_code, "aot", expected_error, isolate=False)
 
+    @skipIfWindows
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "compile_error")
     def test_after_aot_cpu_compile_error(self):
         self._test_after_aot("cpu", "CppCompileError")
 
+    @skipIfWindows
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_after_aot_cpu_accuracy_error(self):
@@ -53,6 +55,7 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_gpu_accuracy_error(self):
         self._test_after_aot(GPU_TYPE, "AccuracyError")
 
+    @skipIfWindows
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_constant_in_graph(self):
         run_code = """\
@@ -152,6 +155,7 @@ class Repro(torch.nn.Module):
         return (relu,)""",
         )
 
+    @skipIfWindows
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_offload_to_disk(self):
         # Just a smoketest, this doesn't actually test that memory

@@ -7,6 +7,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
     skipIfRocm,
+    skipIfWindows,
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -31,6 +32,7 @@ inner(torch.randn(2, 2).to("{device}"))
         # These must isolate because they crash the process
         self._run_full_test(run_code, "aot", expected_error, isolate=True)
 
+    @skipIfWindows
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cpu_runtime_error(self):
