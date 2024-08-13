@@ -2574,6 +2574,13 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: List[int], dim: int
 ):
+    # If the input tensors self and indices came from max_pool call as
+    # required by the documentation, this operation is deterministic
+    # because that ensures that if there are two entries in `indices`
+    # tensor that are equal, the corresponding values in `self` are also
+    # equal. If this condition is not satisfied, the operation is
+    # non-deterministic as one of the different values in `self` 'wins'.
+    utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim

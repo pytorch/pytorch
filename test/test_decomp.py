@@ -511,7 +511,7 @@ core_backward_failures = {
     # calculated using a numerical jacobian and the values become slightly different.
     # Implementations are free to assume that the values are idential and
     # therefore the decomposition and eager results are slightly different.
-    skip("max_unpool2d"),
+    skip("nn.functional.max_unpool2d"),
 }
 if not TEST_WITH_SLOW:
     core_backward_failures.update(
