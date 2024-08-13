@@ -142,8 +142,45 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides both a decorator and a context manager to disable compilation on a function
+    This function provides a decorator manager to disable compilation on a function
     It also provides the option of recursively disabling called functions
+
+    NOTE: Interaction between `compile`, `disable`, and `enable`
+
+    `compile` is is a "marker" that Dynamo should attempt to compile the function
+    and its nested calls.
+
+    `disable` is higher-priority - it signifies that a function (and its nested
+    calls in the case recursive=True) should not be compiled.
+
+    In particular, `disable` overrides `compile` - if you want to re-enable compilation,
+    use `enable`. `disable` and `enable` have the same priority.
+
+    e.g.
+    @enable
+    def a(x):
+        ...
+
+    @disable
+    def b(x):
+        a(x)
+        ...
+
+    @compile
+    def c(x):
+        b(x)
+        ...
+
+    @disable
+    def d(x):
+        c(x)
+        ...
+
+    Calling `a`  will result in no compilation.
+    Calling `b` will result in no compilation
+    Calling `c` will result in `c` and `a` being compiled.
+        A graph break will occur when `b` is called.
+    Calling `d` will result in `a` being compiled.
 
     Args:
         fn (optional): The function to disable
@@ -152,6 +189,17 @@ def disable(fn=None, recursive=True):
     import torch._dynamo
 
     return torch._dynamo.disable(fn, recursive)
+
+def enable(fn=None):
+    """
+    Decorator to re-enable compilation - inverse of `disable`.
+
+    Compilation will only occur if there was a previous `compile` call.
+    """
+    import torch._dynamo
+
+    return torch._dynamo.enable(fn)
+
 
 def cudagraph_mark_step_begin():
     """

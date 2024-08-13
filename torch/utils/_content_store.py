@@ -53,7 +53,7 @@ def lazy_compile(**compile_kwargs):
     def decorate_fn(fn):
         @functools.wraps(fn)
         def compile_hook(*args, **kwargs):
-            compiled_fn = torch.compile(fn, **compile_kwargs)
+            compiled_fn = torch.compiler.enable(torch.compile(fn, **compile_kwargs))
             globals()[fn.__name__] = functools.wraps(fn)(compiled_fn)
             return compiled_fn(*args, **kwargs)
 

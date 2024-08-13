@@ -41,47 +41,13 @@ def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo.
 
+    See note on torch.compiler.disable for details about the compile/disable/enable interaction.
+
     If recursive=True, Dynamo is completely skipped on the decorated function
     frame as well as the recursively invoked functions.
 
     If recursive=False, Dynamo skips frames associated with the function code,
     but still process recursively invoked frames.
-
-    NOTE: Interaction between `compile`, `disable`, and `enable`
-
-    `compile` is is a "marker" that Dynamo should attempt to compile the function
-    and its nested calls.
-
-    `disable` is higher-priority - it signifies that a function (and its nested
-    calls in the case recursive=True) should not be compiled.
-
-    In particular, `disable` overrides `compile` - if you want to re-enable compilation,
-    use `enable`. `disable` and `enable` have the same priority.
-
-    e.g.
-    @enable
-    def a(x):
-        ...
-
-    @disable
-    def b(x):
-        a(x)
-        ...
-
-    @compile
-    def c(x):
-        b(x)
-        ...
-
-    @disable
-    def d(x):
-        c(x)
-        ...
-
-    Calling `a`  will result in no compilation.
-    Calling `b` will result in no compilation
-    Calling `c` will result in `c` and `a` being compiled.
-    Calling `d` will result in `a` being compiled.
     """
     if recursive:
         if fn is not None:

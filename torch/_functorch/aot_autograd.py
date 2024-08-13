@@ -3,7 +3,7 @@
 import itertools
 from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NewType, Optional, Tuple
 from unittest.mock import patch
 
 import torch
@@ -427,16 +427,108 @@ AOT_COUNTER = itertools.count()
 
 aot_autograd_decompositions = {}
 
+FakifiedFlatArgs = NewType("FakifiedFlatArgs", List[Any])
+
+
+def process_inputs(
+    flat_args: List[Any],
+    aot_config: AOTConfig,
+    fake_mode: FakeTensorMode,
+    shape_env: Optional[ShapeEnv],
+) -> FakifiedFlatArgs:
+    with fake_mode:
+
+        def convert(idx, x):
+            if shape_env is not None:
+                from torch._dynamo.source import ConstantSource
+
+                if isinstance(x, int):
+                    # We always specialize on scalar values in export.
+                    if aot_config.is_export:
+                        return x
+                    source = ConstantSource(f"sym_{idx}")
+                    return shape_env.create_symintnode(
+                        shape_env.create_symbol(x, source), hint=x, source=source
+                    )
+            if isinstance(x, torch.ScriptObject):
+                return torch._library.fake_class_registry.maybe_to_fake_obj(
+                    fake_mode, x
+                )
+            if not isinstance(x, torch.Tensor):
+                return x
+            if isinstance(x, FakeTensor):
+                assert x.fake_mode is fake_mode
+                return x
+            if is_traceable_wrapper_subclass(x):
+                attrs, _ = x.__tensor_flatten__()
+                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
+                    assert all(
+                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
+                    )
+                    return x
+
+            # see note [Tensor Fakification and Symbol Caching]
+            symbolic_context = None
+            source = None
+            trace = True
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if x in tracing_context.tensor_to_context:
+                    symbolic_context = tracing_context.tensor_to_context[x]
+                    source = symbolic_context.tensor_source
+                    # We already fakeified this tensor in Dynamo, don't
+                    # dump the trace for it again
+                    trace = False
+            if (
+                idx < aot_config.num_params_buffers
+                and config.static_weight_shapes
+                and not symbolic_context
+            ):
+                # TODO: Ensure that this codepath is never exercised from
+                # Dynamo
+                return fake_mode.from_tensor(x, static_shapes=True)
+
+            return fake_mode.from_tensor(
+                x,
+                static_shapes=False,
+                symbolic_context=symbolic_context,
+                source=source,
+                trace=trace,
+            )
+
+        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
+
+
+def construct_fake_mode(
+    flat_args: List[Any], aot_config: AOTConfig
+) -> Tuple[FakeTensorMode, Optional[ShapeEnv]]:
+    fake_mode = detect_fake_mode(flat_args)
+    if fake_mode is None:
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+    else:
+        shape_env = fake_mode.shape_env
+    return (fake_mode, shape_env)
+
 
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+    flat_fn,
+    fake_flat_args: FakifiedFlatArgs,
+    aot_config: AOTConfig,
+    fake_mode: FakeTensorMode,
+    shape_env: Optional[ShapeEnv],
 ) -> Tuple[Callable, ViewAndMutationMeta]:
     with dynamo_timed("create_aot_dispatcher_function"):
-        return _create_aot_dispatcher_function(flat_fn, flat_args, aot_config)
+        return _create_aot_dispatcher_function(
+            flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
+        )
 
 
 def _create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+    flat_fn,
+    fake_flat_args: FakifiedFlatArgs,
+    aot_config: AOTConfig,
+    fake_mode: FakeTensorMode,
+    shape_env: Optional[ShapeEnv],
 ) -> Tuple[Callable, ViewAndMutationMeta]:
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -482,13 +574,6 @@ def _create_aot_dispatcher_function(
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    fake_mode = detect_fake_mode(flat_args)
-    if fake_mode is None:
-        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-    else:
-        shape_env = fake_mode.shape_env
-
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
@@ -504,67 +589,6 @@ def _create_aot_dispatcher_function(
     ), (
         python_dispatcher_mode
     ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-
-        def process_inputs(flat_args):
-            def convert(idx, x):
-                if shape_env is not None:
-                    from torch._dynamo.source import ConstantSource
-
-                    if isinstance(x, int):
-                        # We always specialize on scalar values in export.
-                        if aot_config.is_export:
-                            return x
-                        source = ConstantSource(f"sym_{idx}")
-                        return shape_env.create_symintnode(
-                            shape_env.create_symbol(x, source), hint=x, source=source
-                        )
-                if isinstance(x, torch.ScriptObject):
-                    return torch._library.fake_class_registry.maybe_to_fake_obj(
-                        fake_mode, x
-                    )
-                if not isinstance(x, torch.Tensor):
-                    return x
-                if isinstance(x, FakeTensor):
-                    assert x.fake_mode is fake_mode
-                    return x
-                if is_traceable_wrapper_subclass(x):
-                    attrs, _ = x.__tensor_flatten__()
-                    if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                        assert all(
-                            getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                        )
-                        return x
-
-                # see note [Tensor Fakification and Symbol Caching]
-                symbolic_context = None
-                source = None
-                trace = True
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    if x in tracing_context.tensor_to_context:
-                        symbolic_context = tracing_context.tensor_to_context[x]
-                        source = symbolic_context.tensor_source
-                        # We already fakeified this tensor in Dynamo, don't
-                        # dump the trace for it again
-                        trace = False
-                if (
-                    idx < aot_config.num_params_buffers
-                    and config.static_weight_shapes
-                    and not symbolic_context
-                ):
-                    # TODO: Ensure that this codepath is never exercised from
-                    # Dynamo
-                    return fake_mode.from_tensor(x, static_shapes=True)
-
-                return fake_mode.from_tensor(
-                    x,
-                    static_shapes=False,
-                    symbolic_context=symbolic_context,
-                    source=source,
-                    trace=trace,
-                )
-
-            return [convert(idx, x) for idx, x in enumerate(flat_args)]
-
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,
@@ -580,8 +604,6 @@ def _create_aot_dispatcher_function(
                 else arg
                 for arg in fake_flat_args
             ]
-
-        fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = any(
             x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
@@ -838,11 +860,16 @@ def aot_function(
         # Compile the function and save it in the cache
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
-
+            (fake_mode, shape_env) = construct_fake_mode(flat_args, aot_config)
+            fake_flat_args: FakifiedFlatArgs = process_inputs(
+                flat_args, aot_config, fake_mode, shape_env
+            )
             compiled_fn, _ = create_aot_dispatcher_function(
                 flat_fn,
-                flat_args,
+                fake_flat_args,
                 aot_config,
+                fake_mode,
+                shape_env,
             )
             cached_res = (compiled_fn, out_spec)
 
@@ -1015,20 +1042,26 @@ def aot_module_simplified(
         no_tangents=False,
         cache_key=None,
     )
+    fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
+    fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
 
     def dispatch_and_compile():
         functional_call = create_functional_call(mod, params_spec, params_len)
         with compiled_autograd.disable():
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,
-                full_args,
+                fake_flat_args,
                 aot_config,
+                fake_mode,
+                shape_env,
             )
         return compiled_fn
 
     # Autograd cache stuff
     if config.enable_autograd_cache:
-        compiled_fn = AOTAutogradCache.load(dispatch_and_compile, mod, args, aot_config)
+        compiled_fn = AOTAutogradCache.load(
+            dispatch_and_compile, mod, fake_flat_args, aot_config
+        )
     else:
         compiled_fn = dispatch_and_compile()
 
@@ -1436,11 +1469,15 @@ def _aot_export_function(
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
     )
+    fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
+    fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
 
     fx_g, meta = create_aot_dispatcher_function(
         flat_fn,
-        flat_args,
+        fake_flat_args,
         aot_config,
+        fake_mode,
+        shape_env,
     )
     return fx_g, meta, in_spec, out_spec.spec
 
