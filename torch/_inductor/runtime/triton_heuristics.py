@@ -628,7 +628,7 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, do_bench_using_profiling = False, **kwargs):
+    def bench(self, launcher, *args, grid, do_bench_using_profiling=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs wiht spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
