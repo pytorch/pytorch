@@ -207,6 +207,10 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
             )
 
     assert batch_size
+
+    if dim in input_bdims:
+        raise ValueError("Vmap in_dim may not conincide with dim of associative_scan")
+
     input_unwrapped = []
     for x, bdim in zip(input, input_bdims):
         unwrap = get_unwrapped(x) if is_batchedtensor(x) else x

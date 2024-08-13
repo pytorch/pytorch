@@ -1211,15 +1211,106 @@ def forward(self, pred_1, x_1):
 
         x = torch.tile(
             torch.unsqueeze(
-                torch.unsqueeze(
-                    torch.arange(
-                        0, 10, device=device, dtype=torch.float32, requires_grad=True
-                    ),
-                    0,
+                torch.arange(
+                    0, 10, device=device, dtype=torch.float32, requires_grad=True
                 ),
-                -1,
+                0,
             ),
-            (4, 1, 4),
+            (4, 1),
+        )
+
+        def associative_scan_fct(x):
+            return associative_scan(add, x, 0)
+
+        associative_scan1 = torch.vmap(associative_scan_fct, in_dims=0, out_dims=0)
+        associative_scan2 = associative_scan
+
+        result1 = associative_scan1(x)
+        result2 = associative_scan2(add, x, 1)
+        expected_result = _fake_associative_scan(add, x, 1)
+        self.assertEqual(result1, expected_result)
+        self.assertEqual(result2, expected_result)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_vmap_dims(self, device):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        for _ in range(10):
+            dims = random.randint(3, 9)
+            shapes = [random.randint(2, 10) for d in range(dims)]
+            x = torch.randn(*shapes, device=device)
+            in_dim = random.randint(0, dims - 1)
+            out_dim = random.randint(0, dims - 1)
+            scan_dim = random.randint(0, dims - 2)
+
+            def associative_scan_fct(x):
+                return associative_scan(add, x, scan_dim)
+
+            associative_scan1 = torch.compile(
+                torch.vmap(associative_scan_fct, in_dims=in_dim, out_dims=out_dim),
+                fullgraph=True,
+            )
+            associative_scan2 = associative_scan
+
+            if in_dim == scan_dim:
+                with self.assertRaisesRegex(Exception, ".*"):
+                    result1 = associative_scan1(x)
+
+            else:
+                result1 = associative_scan1(x)
+                result2 = [
+                    torch.unsqueeze(
+                        associative_scan2(
+                            add,
+                            torch.squeeze(
+                                torch.ops.aten.slice(x, in_dim, x_ind, x_ind + 1, 1),
+                                in_dim,
+                            ),
+                            scan_dim,
+                        ),
+                        in_dim,
+                    )
+                    for x_ind in range(x.shape[in_dim])
+                ]
+                result2 = torch.concatenate(result2, in_dim)
+                result2 = torch.movedim(result2, in_dim, out_dim)
+                expected_result = [
+                    torch.unsqueeze(
+                        _fake_associative_scan(
+                            add,
+                            torch.squeeze(
+                                torch.ops.aten.slice(x, in_dim, x_ind, x_ind + 1, 1),
+                                in_dim,
+                            ),
+                            scan_dim,
+                        ),
+                        in_dim,
+                    )
+                    for x_ind in range(x.shape[in_dim])
+                ]
+                expected_result = torch.concatenate(expected_result, in_dim)
+                expected_result = torch.movedim(expected_result, in_dim, out_dim)
+                self.assertEqual(result1, expected_result)
+                self.assertEqual(result2, expected_result)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_vmap_comp(self, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        x = torch.tile(
+            torch.unsqueeze(
+                torch.arange(
+                    0, 10, device=device, dtype=torch.float32, requires_grad=True
+                ),
+                0,
+            ),
+            (4, 1),
         )
         torch.compiler.reset()
 
@@ -1227,47 +1318,15 @@ def forward(self, pred_1, x_1):
             return associative_scan(add, x, 0)
 
         associative_scan1 = torch.compile(
-            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+            torch.vmap(associative_scan_fct, in_dims=0, out_dims=0), fullgraph=True
         )
-        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+        associative_scan2 = associative_scan
 
         result1 = associative_scan1(x)
-        # result2 = associative_scan2(x)
+        result2 = associative_scan2(add, x, 1)
         expected_result = _fake_associative_scan(add, x, 1)
         self.assertEqual(result1, expected_result)
-        # self.assertEqual(result2, expected_result)
-
-        torch.compiler.reset()
-
-        def associative_scan_fct(x):
-            return associative_scan(add, x, 1)
-
-        associative_scan1 = torch.compile(
-            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
-        )
-        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
-
-        result1 = associative_scan1(x)
-        # result2 = associative_scan2(x)
-        expected_result = _fake_associative_scan(add, x, 2)
-        self.assertEqual(result1, expected_result)
-        # self.assertEqual(result2, expected_result)
-
-        torch.compiler.reset()
-
-        def associative_scan_fct(x):
-            return associative_scan(add, x, 1)
-
-        associative_scan1 = torch.compile(
-            torch.vmap(associative_scan_fct, in_dims=1), fullgraph=True
-        )
-        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1)
-
-        result1 = associative_scan1(x)
-        # result2 = associative_scan2(x)
-        expected_result = torch.transpose(_fake_associative_scan(add, x, 2), 0, 1)
-        self.assertEqual(result1, expected_result)
-        # self.assertEqual(result2, expected_result)
+        self.assertEqual(result2, expected_result)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("device", [torch.device("cuda")])
