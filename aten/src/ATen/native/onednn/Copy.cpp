@@ -22,7 +22,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 
 namespace at {
 namespace native {

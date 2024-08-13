@@ -50,7 +50,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 
 namespace at {
 namespace native {

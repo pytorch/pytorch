@@ -81,7 +81,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 

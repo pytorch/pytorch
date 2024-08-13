@@ -17,7 +17,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
-#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_onednn.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -38,7 +38,7 @@
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
 #include <ATen/native/onednn/Utils.h>
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ideep.hpp>
 #endif
 

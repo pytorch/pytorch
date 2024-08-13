@@ -26,7 +26,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
 namespace at { namespace native {

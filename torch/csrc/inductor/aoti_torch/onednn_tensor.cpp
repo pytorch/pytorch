@@ -1,8 +1,8 @@
 #include <ATen/Config.h>
-#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/onednn_tensor.h>
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ideep.hpp>
 #endif
 
