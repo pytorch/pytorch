@@ -53,7 +53,7 @@ class AutoFunctionalized(HigherOrderOperator):
     underscore is to prevent collisions with kwarg names in **kwargs.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("auto_functionalized")
 
     def __call__(
@@ -122,9 +122,9 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
     _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
-    **kwargs: Dict[str, Any],
+    **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
-    _all_aliased = kwargs.pop("_all_aliased", [])
+    _all_aliased: List[Tensor] = kwargs.pop("_all_aliased", [])
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     _arg_to_aliased = {}
@@ -190,7 +190,7 @@ def auto_functionalized_dense(
             if isinstance(arg, list):
                 for i, elem in enumerate(arg):
                     aliased_addresses = _arg_to_aliased_addresses[name][i]
-                    if alias._cdata not in _arg_to_aliased_addresses[name]:
+                    if alias._cdata not in aliased_addresses:
                         continue
                     mutation_source = new_kwargs[name][i]
                     alias_with_effects = observe_mutation(
@@ -199,7 +199,7 @@ def auto_functionalized_dense(
 
             else:
                 aliased_addresses = _arg_to_aliased_addresses[name]
-                if alias._cdata not in _arg_to_aliased_addresses[name]:
+                if alias._cdata not in aliased_addresses:
                     continue
                 mutation_source = new_kwargs[name]
                 alias_with_effects = observe_mutation(
@@ -297,6 +297,7 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = arg.default_value
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
+
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
@@ -305,7 +306,7 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
 
-    arg_to_aliased = {}
+    arg_to_aliased: Dict[str, Any] = {}
     all_aliased_addresses = set()
 
     def get_all_aliases(tensor):
@@ -357,7 +358,10 @@ def do_auto_functionalize(
 
     with ctx.redispatch_to_next():
         for arg in mutable_args_names:
-            unwrapped_kwargs[f"_{arg}_aliases"] = arg_to_aliased.get(arg, [])
+            # mypy errors:
+            # No overload variant of "__setitem__" of "list" matches argument types "str", "Any"
+            # Invalid index type "str".
+            unwrapped_kwargs[f"_{arg}_aliases"] = arg_to_aliased.get(arg, [])  # type: ignore[call-overload,index]
 
         unwrapped_outs = auto_functionalized(
             op, **dict(unwrapped_kwargs, _all_aliased=all_aliased_unwrapped)  # type: ignore[arg-type]

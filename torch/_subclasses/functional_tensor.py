@@ -608,7 +608,7 @@ class BaseFunctionalizeAPI(ABC):
     @abstractmethod
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]:
         pass
 
     @abstractmethod
