@@ -41,6 +41,7 @@ from .utils import (
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 
 
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
@@ -300,6 +301,18 @@ def aot_dispatch_autograd_graph(
     # we have to add additional token argument to the joint graph manually after tracing.
     if fw_metadata.num_backward_discovered_tokens > 0:
         add_discovered_token_in_backward_as_input(fx_g)
+        if aot_config.enable_log:
+            aot_graphs_effects_log.info(
+                "%s",
+                lazy_format_graph_code(
+                    "aot_config id: %s, fw_metadata=%s, Joint graph after adding effect tokens discovered in backward",
+                    fx_g,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)

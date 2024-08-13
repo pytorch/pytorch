@@ -490,18 +490,18 @@ def aot_dispatch_autograd(
         # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
         #     so we need to figure out which subclass fw inputs they map to.
         if maybe_subclass_meta is None:
-            assert isinstance(inner_meta.num_bw_out_tokens, int)
-            num_bw_out_tokens: int = inner_meta.num_bw_out_tokens
+            assert isinstance(inner_meta.num_backward_out_tokens, int)
+            num_backward_out_tokens: int = inner_meta.num_backward_out_tokens
             assert (
                 len(bw_outs)
                 == len(fw_metadata.input_info)
                 + inner_meta.num_outputs_rng_offset
-                + num_bw_out_tokens
+                + num_backward_out_tokens
             )
             bw_outs_no_rng = bw_outs
-            if (inner_meta.num_outputs_rng_offset + num_bw_out_tokens) > 0:
+            if (inner_meta.num_outputs_rng_offset + num_backward_out_tokens) > 0:
                 bw_outs_no_rng = bw_outs[
-                    : -(inner_meta.num_outputs_rng_offset + num_bw_out_tokens)
+                    : -(inner_meta.num_outputs_rng_offset + num_backward_out_tokens)
                 ]
             assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
 
