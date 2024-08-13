@@ -43,15 +43,8 @@ concurrency:
 
 jobs:
   calculate-manylinux-builder-cpu:
-    runs-on:  ubuntu-latest
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-      - name: Build Docker Images
-        uses: ./.github/workflows/build-manywheel-images.yml
+    uses: ./.github/workflows/build-manywheel-images.yml
 
   manywheel-py3_9-cpu-build:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
