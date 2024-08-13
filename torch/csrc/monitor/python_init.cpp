@@ -306,7 +306,7 @@ void initMonitorBindings(PyObject* module) {
     std::optional<c10::monitor::WaitCounterHandle::WaitGuard> guard;
   };
   py::class_<WaitCounterTracker, std::shared_ptr<WaitCounterTracker>>(
-      m, "WaitCounterTracker")
+      m, "_WaitCounterTracker")
       .def(
           "__enter__",
           [](const std::shared_ptr<WaitCounterTracker>& self) {
@@ -319,7 +319,7 @@ void initMonitorBindings(PyObject* module) {
 
   py::class_<c10::monitor::WaitCounterHandle>(
       m,
-      "WaitCounter",
+      "_WaitCounter",
       R"DOC(
         WaitCounter represents a named duration counter.
         Multiple units of work can be tracked by the same WaitCounter. Depending

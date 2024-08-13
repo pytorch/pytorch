@@ -56,7 +56,7 @@ def prepare_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 
@@ -96,7 +96,7 @@ def prepare_pt2e(
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
@@ -129,7 +129,7 @@ def prepare_qat_pt2e(
         )
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 10)
 
@@ -165,7 +165,7 @@ def prepare_qat_pt2e(
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_qat_pt2e")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
-    quantizer.transform_for_annotation(model)
+    model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
