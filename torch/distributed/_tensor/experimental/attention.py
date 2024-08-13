@@ -13,12 +13,15 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
+# TODO: expose a single API
+__all__ = ["attention_context_parallel", "AttentionOp", "AttentionContextParallel"]
+
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 _rerun_forward = False
 
 
-def sdpa_handler(
+def _sdpa_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
@@ -340,7 +343,7 @@ def _scaled_dot_product_chunk_flash_attention(
     return local_results
 
 
-def sdpa_backward_handler(
+def _sdpa_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
@@ -503,8 +506,8 @@ def _scaled_dot_product_ring_flash_attention_backward(
 
 
 customized_ops = {
-    aten._scaled_dot_product_flash_attention.default: sdpa_handler,
-    aten._scaled_dot_product_flash_attention_backward.default: sdpa_backward_handler,
+    aten._scaled_dot_product_flash_attention.default: _sdpa_handler,
+    aten._scaled_dot_product_flash_attention_backward.default: _sdpa_backward_handler,
 }
 
 

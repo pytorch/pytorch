@@ -17,6 +17,9 @@ from torch.distributed._tensor._collective_utils import (
 from torch.distributed.device_mesh import DeviceMesh
 
 
+__all__ = ["Placement", "Shard", "Replicate", "Partial", "DTensorSpec", "TensorMeta"]
+
+
 class Placement:
     # base class Placement type
 

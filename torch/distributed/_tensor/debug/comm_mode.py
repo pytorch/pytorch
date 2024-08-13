@@ -21,6 +21,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
 
+__all__ = ["CommDebugMode"]
+
 funcol_native = torch.ops._c10d_functional
 funcol_py = torch.ops.c10d_functional
 funcol_autograd = torch.ops._c10d_functional_autograd
