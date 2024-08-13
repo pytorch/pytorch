@@ -249,6 +249,7 @@ class DTensor(torch.Tensor):
     proper sharding layout (determined by the operator semantic itself), which propagates the sharding layout to the next
     operator call, so user only need to specify the leaf tensor's sharding layout in the beginning of the computation.
     """
+
     _local_tensor: torch.Tensor
     _spec: DTensorSpec
     __slots__ = ["_local_tensor", "_spec"]
@@ -812,6 +813,7 @@ def distribute_module(
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
         return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
+
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
