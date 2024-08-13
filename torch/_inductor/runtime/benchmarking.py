@@ -69,7 +69,7 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
-        for arg_or_kwarg in (fn_args + fn_kwargs.items()):
+        for arg_or_kwarg in (fn_args + tuple(fn_kwargs.items())):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
             if inferred_device is None:
