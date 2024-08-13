@@ -278,6 +278,9 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    def to_dense(self):
+        return self.elem.to_dense()
+
     @property
     def layout(self):
         return self.elem.layout
