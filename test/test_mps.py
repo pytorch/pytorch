@@ -3564,40 +3564,42 @@ class TestMPS(TestCaseMPS):
                 r_mps = r_func(z_mps)
                 self.assertEqual(r, r_mps)
 
-        # Tests for previously encountered MPS bugs
-        helper(
-            torch.randn(4, 4, dtype=torch_type),
-            lambda x: x[1],
-            lambda y: y.reshape(2, 2),
-            lambda z: z + 1
-        )
-        helper(
-            torch.randn(2, 4, dtype=torch_type),
-            lambda x: x[1],
-            lambda y: y + torch.ones(4, device=y.device)
-        )
-        helper(
-            torch.randn(4, 6, dtype=torch_type),
-            lambda x: x[1],
-            lambda y: y.reshape(3, 2).t(),
-            lambda z: z + 1
-        )
-        helper(
-            torch.arange(4, dtype=torch_type).resize(1, 2, 2),
-            lambda x: x.permute(2, 0, 1),
-            lambda y: y + 1
-        )
-        helper(
-            torch.randn(4, 8, dtype=torch_type),
-            lambda x: x.transpose(0, 1).reshape(-1),
-            lambda y: y[:2],
-            lambda z: z + 1
-        )
-        helper(
-            torch.randn(1, dtype=torch_type),
-            lambda x: x.expand(2, 3),
-            lambda y: y + torch.ones(2, 3, device=y.device)
-        )
+        # Skip bfloat16 before MacOS15
+        if not (product_version < 15.0 and torch_type == torch.bfloat16):
+            # Tests for previously encountered MPS bugs
+            helper(
+                torch.randn(4, 4, dtype=torch_type),
+                lambda x: x[1],
+                lambda y: y.reshape(2, 2),
+                lambda z: z + 1
+            )
+            helper(
+                torch.randn(2, 4, dtype=torch_type),
+                lambda x: x[1],
+                lambda y: y + torch.ones(4, device=y.device)
+            )
+            helper(
+                torch.randn(4, 6, dtype=torch_type),
+                lambda x: x[1],
+                lambda y: y.reshape(3, 2).t(),
+                lambda z: z + 1
+            )
+            helper(
+                torch.arange(4, dtype=torch_type).resize(1, 2, 2),
+                lambda x: x.permute(2, 0, 1),
+                lambda y: y + 1
+            )
+            helper(
+                torch.randn(4, 8, dtype=torch_type),
+                lambda x: x.transpose(0, 1).reshape(-1),
+                lambda y: y[:2],
+                lambda z: z + 1
+            )
+            helper(
+                torch.randn(1, dtype=torch_type),
+                lambda x: x.expand(2, 3),
+                lambda y: y + torch.ones(2, 3, device=y.device)
+            )
 
     def test_slice_reshape_contiguous(self):
         x = torch.randn(4, 4)
