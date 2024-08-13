@@ -107,8 +107,7 @@ class Benchmarker:
                 continue
             if inferred_device is None:
                 inferred_device = arg_or_kwarg.device
-                continue
-            if arg_or_kwarg.device != inferred_device:
+            elif arg_or_kwarg.device != inferred_device:
                 raise ValueError(
                     "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
                 )
