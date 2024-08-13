@@ -342,7 +342,7 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,pass,0
+torch_multimodal_clip,fail_to_run,0
 
 
 

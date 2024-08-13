@@ -42,7 +42,7 @@ basic_gnn_gin,pass,0
 
 
 
-basic_gnn_sage,fail_to_run,0
+basic_gnn_sage,pass,0
 
 
 
@@ -342,7 +342,7 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,pass,0
+torch_multimodal_clip,fail_to_run,0
 
 
 
