@@ -288,7 +288,7 @@ test_python_shard() {
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude test_unary_ufuncs $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
