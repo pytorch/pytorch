@@ -14,7 +14,12 @@ from torch.distributed._tensor.api import (
     randn,
     zeros,
 )
-from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.optim.optimizer import (
     _foreach_supported_types as _optim_foreach_supported_types,
@@ -34,6 +39,7 @@ __all__ = [
     "Shard",
     "Replicate",
     "Partial",
+    "Placement",
     "ones",
     "empty",
     "full",
