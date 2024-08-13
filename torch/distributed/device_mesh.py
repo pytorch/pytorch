@@ -541,8 +541,7 @@ else:
             ):
                 raise KeyError(
                     f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                    "Valid mesh_dim_names should be a contiguous or non-contiguous "
-                    f"subsequence of valid mesh_dim_names from {self.mesh_dim_names}."
+                    f"Valid mesh_dim_names should be a subsequence of {self.mesh_dim_names}."
                 )
 
             submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
