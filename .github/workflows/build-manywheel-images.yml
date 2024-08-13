@@ -2,6 +2,7 @@ name: Build manywheel docker images
 
 on:
   workflow_dispatch:
+  workflow_call:
   push:
     branches:
       - main
@@ -14,12 +15,6 @@ on:
       - '.ci/docker/manywheel/*'
       - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
-  pull_request:
-    paths:
-      - '.ci/docker/manywheel/*'
-      - '.ci/docker/common/*'
-      - .github/workflows/build-manywheel-images.yml
-
 
 env:
   DOCKER_REGISTRY: "docker.io"
