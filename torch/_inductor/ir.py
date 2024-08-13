@@ -43,7 +43,6 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
-from torch._ops import OpOverload
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -74,8 +73,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -3952,7 +3951,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(algo, args, {"out": out})
+        return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -4258,21 +4257,6 @@ class ConcatKernel(NopKernel):
         return True
 
 
-def get_aten_cpp_kernel_name(kernel: object) -> Optional[str]:
-    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
-    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-    #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
-    if not isinstance(kernel, OpOverload) or kernel.namespace != "aten":
-        return None
-    opname = (
-        kernel.__name__.split(".")[0]
-        if kernel._overloadname == "default"
-        else kernel.__name__.replace(".", "_")
-    )
-    return f"at::_ops::{opname}::call"
-
-
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
@@ -4316,11 +4300,10 @@ class ExternKernel(InputsKernel):
         self.constant_args = constant_args
         self.kwargs = kwargs if kwargs else {}
         self.output_view = output_view
-        self.python_kernel_name = python_kernel_name
-        # If cpp_kernel_name is None, we will try to construct it from op_overload
-        self.cpp_kernel_name = cpp_kernel_name or get_aten_cpp_kernel_name(op_overload)
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
+        self.set_cpp_kernel_name(cpp_kernel_name)
+        self.set_python_kernel_name(python_kernel_name)
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
         self.mutation_outputs = []
@@ -4412,6 +4395,59 @@ class ExternKernel(InputsKernel):
 
     def codegen(self, wrapper):
         raise NotImplementedError
+
+    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):
+        self.cpp_kernel_name = cpp_kernel_name
+        self.cpp_kernel_overload_name = None
+        self.cpp_kernel_key = None
+        self.cpp_op_schema = None
+        if not V.graph.cpp_wrapper or not isinstance(
+            self.op_overload, torch._ops.OpOverload
+        ):
+            return
+
+        kernel = self.op_overload
+        if self.cpp_kernel_name is None:
+            # Try to construct cpp_kernel_name from op_overload
+            if kernel.namespace == "aten":
+                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=std::nullopt)
+                # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                #       c10::optional<int64_t> dim=std::nullopt, c10::optional<int64_t> output_size=std::nullopt)
+                opname = (
+                    kernel.__name__.split(".")[0]
+                    if kernel._overloadname == "default"
+                    else kernel.__name__.replace(".", "_")
+                )
+                self.cpp_kernel_name = f"at::_ops::{opname}::call"
+            else:
+                self.cpp_kernel_name = kernel._schema.name
+
+        # Set up info for runtime schema lookup
+        # TODO: The logics here may be further simplified.
+        from .codegen.wrapper import get_cpp_op_schema
+
+        self.cpp_kernel_overload_name = kernel._schema.overload_name
+        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        try:
+            self.cpp_op_schema = get_cpp_op_schema(kernel)
+        except Exception:
+            self.cpp_op_schema = ""
+
+    def set_python_kernel_name(self, python_kernel_name: Optional[str]):
+        self.python_kernel_name = python_kernel_name
+        if python_kernel_name is not None:
+            return
+
+        kernel = self.op_overload
+        if kernel is None:
+            pass
+        elif isinstance(kernel, torch._ops.HigherOrderOperator):
+            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
+        else:
+            self.python_kernel_name = (
+                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+            )
 
     def get_kernel_name(self):
         return (
@@ -4730,16 +4766,33 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
-    def codegen_const_args(self):
+    def codegen_const_args(self, names: Optional[List[str]] = None):
         if V.graph.cpp_wrapper:
             result = []
+            # Aten ops follow the convention that tensor args are before non-tensor args,
+            # in which case the following 'len(self.inputs) + i' logic works. But this
+            # may not be true for other ops, and if that is the case, caller needs to
+            # pass in a list of const arg names for arg_properties lookup.
+            name_to_arg_properties = None
+            if names and self.arg_properties:
+                assert len(self.constant_args) == len(
+                    names
+                ), "names passed to codegen_const_args does not match self.constant_args"
+                name_to_arg_properties = {
+                    arg.get("name"): arg for arg in self.arg_properties
+                }
+
             for i, x in enumerate(self.constant_args):
-                idx = len(self.inputs) + i
-                type_ = (
-                    self.arg_properties[i].get("type")
-                    if self.arg_properties and idx < len(self.arg_properties)
-                    else None
-                )
+                if name_to_arg_properties is not None:
+                    prop = name_to_arg_properties.get(names[i])  # type: ignore[index]
+                    type_ = prop.get("type") if prop else None
+                else:
+                    idx = len(self.inputs) + i
+                    type_ = (
+                        self.arg_properties[idx].get("type")
+                        if self.arg_properties and idx < len(self.arg_properties)
+                        else None
+                    )
                 result.append(
                     V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
                 )
@@ -5156,7 +5209,6 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
-        self.python_kernel_name = "aten.bernoulli_"
         if not config.abi_compatible:
             # TODO: this should be simplified once we switch to ABI-compatible only
             self.cpp_kernel_name = "at::native::bernoulli_"
@@ -5170,9 +5222,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
-        )
+        wrapper.codegen_device_copy(src, dst)
 
     def should_allocate(self):
         return False
@@ -5351,7 +5401,6 @@ class ScatterFallback(ExternKernel):
             ordered_kwargs_for_cpp_kernel=["reduce", "include_self"],
             op_overload=op_overload,
         )
-        self.cpp_kernel_name = get_aten_cpp_kernel_name(op_overload)
         V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
@@ -5727,32 +5776,6 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             return OrderedSet()
 
-    def set_cpp_kernel(self, kernel):
-        from .codegen.wrapper import get_cpp_op_schema
-
-        assert (
-            not kernel._schema.is_mutable
-        ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
-
-        # These checks are here because ops that return aliasing tensors will
-        # return type Tensor& instead of Tensor, but codegen will always write
-        # type Tensor on the LHS.
-        def is_not_write(arg):
-            return arg.alias_info is None or not arg.alias_info.is_write
-
-        assert all(
-            is_not_write(x) for x in kernel._schema.arguments
-        ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
-        assert all(
-            is_not_write(x) for x in kernel._schema.returns
-        ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
-
-        self.cpp_kernel_name = kernel._schema.name
-        self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
-
-        self.cpp_op_schema = get_cpp_op_schema(kernel)
-
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -5905,25 +5928,16 @@ class FallbackKernel(ExternKernelAlloc):
                         kernel,
                     )
                     self.use_runtime_dispatch = True
-                    self.set_cpp_kernel(kernel)
-            self.python_kernel_name = f"torch.ops.{kernel}"
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
-                self.set_cpp_kernel(kernel)
                 if not config.abi_compatible:
                     self.use_runtime_dispatch = True
-            else:
-                self.python_kernel_name = str(kernel)
-        elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
-            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
-                self.set_cpp_kernel(kernel)
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
@@ -6954,9 +6968,13 @@ class _CollectiveKernel(FallbackKernel):
 
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
-    def set_cpp_kernel(self, kernel):
+    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):
         from .codegen.wrapper import get_cpp_op_schema
 
+        assert (
+            type(self.op_overload) is torch._ops.OpOverload
+        ), "Setting cpp kernel needs a valid op_overload"
+        kernel = self.op_overload
         self.cpp_kernel_name = kernel._schema.name
         self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
@@ -6976,8 +6994,6 @@ class _CollectiveKernel(FallbackKernel):
     def create_inplace(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
-        cpp_kernel_name = kernel._name
-        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -6998,8 +7014,6 @@ class _CollectiveKernel(FallbackKernel):
             non_tensor_args,
             unflatten_args,
         )
-        packed.cpp_kernel_name = cpp_kernel_name
-        packed.python_kernel_name = python_kernel_name
 
         inps = pytree.tree_leaves(inputs)
         packed.mutation_outputs.extend(
@@ -7041,8 +7055,6 @@ class _CollectiveKernel(FallbackKernel):
     def create_out_of_place(
         cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ):
-        cpp_kernel_name = kernel._name
-        python_kernel_name = cpp_kernel_name.replace("::", ".")
         with V.graph.fake_mode:
             (
                 example_output,
@@ -7064,8 +7076,6 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
-            packed.cpp_kernel_name = cpp_kernel_name
-            packed.python_kernel_name = python_kernel_name
             packed.outputs = [
                 MultiOutput(
                     cls.tensor_to_layout(tensor),
@@ -7083,8 +7093,6 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
             )
-            packed.cpp_kernel_name = cpp_kernel_name
-            packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
 

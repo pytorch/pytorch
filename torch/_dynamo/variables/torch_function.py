@@ -175,7 +175,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.torch_function_fn = kwargs.pop("torch_function_fn")
         super().__init__(*args, **kwargs)
 
@@ -216,8 +216,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # but the global's lifetime is tied to the first invocation (and
         # may be deleted when the first torch.compile invocation is deleted)
         # We mangle it based off of the output_graph's id.
-        compile_id = tx.output.compile_id
-        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{id}"
+        cid = tx.output.compile_id
+        return f"__subclass_{self.class_type.__name__}_{id(self.class_type)}_c{cid}"
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         # [Note: __torch_function__] We currently only support attributes that are defined on
