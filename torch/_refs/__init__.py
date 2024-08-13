@@ -4985,10 +4985,12 @@ def arange(
         xstart = sym_int(start)
         xend = sym_int(end)
         xstep = sym_int(step)
+    else:
+        xstart, xend, xstep = start, end, step
 
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64:
+    if dtype == torch.int64 or builtins.all(isinstance(arg, IntLike) for arg in (xstart, xend, xstep)):
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
