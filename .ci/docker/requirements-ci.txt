@@ -312,3 +312,9 @@ lxml==5.0.0
 # Python-3.9 binaries
 
 PyGithub==2.3.0
+
+sympy==1.12.1 ; python_version == "3.8"
+sympy==1.13.1 ; python_version >= "3.9"
+#Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
+#Pinned versions:
+#test that import:
