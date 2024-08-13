@@ -439,7 +439,7 @@ def fwd_compute_block_mn(
     if is_last_block:
         # Applying mod to index for last block for non divisible seqlen.
         offs_m = offs_m % Q_LEN
-        offs_m = offs_n % KV_LEN
+        offs_n = offs_n % KV_LEN
     # TODO: Add load mask in modification when M/N Boundary is not safe
     {{ modification(
         subgraph_number=0,
@@ -454,7 +454,7 @@ def fwd_compute_block_mn(
 
     if is_last_block:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        post_mod_scores = tl.where(offs_n[None, :] < KV_LEN, post_mod_scores, float("-inf"))
+        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
 
     if not IS_FULL_BLOCKS:
         {{ modification(

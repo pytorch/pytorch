@@ -1536,6 +1536,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
     @supported_platform
+    def test_causal_block_non_divisible(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S - 1, S - 1)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
+
+    @supported_platform
+    def test_causal_block_non_divisible_with_captured_buffer(self):
+        Q_S = S - 3
+        KV_S = S - 3
+        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
+
+        def score_mod(score, b, h, q, kv):
+            return score + offset_q[q] + offset_kv[kv]
+
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S)
+        # block_mask = None
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
+    @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(
@@ -1654,29 +1683,6 @@ class GraphModule(torch.nn.Module):
             return full
 """,  # noqa: B950
         )
-
-    @supported_platform
-    def test_nyi_for_non_divisible_seq_lens(self):
-        with self.assertRaisesRegex(
-            NotImplementedError, "NYI: L must be a multiple of 128"
-        ):
-            flex_attention(
-                torch.randn((1, 2, 3, 4)),
-                torch.randn((1, 2, 10, 5)),
-                torch.randn((1, 2, 10, 5)),
-                score_mod=_identity,
-            )
-
-        with self.assertRaisesRegex(
-            NotImplementedError, "NYI: L must be a multiple of 128"
-        ):
-            compiled_flex = torch.compile(flex_attention)
-            compiled_flex(
-                torch.randn((1, 2, 3, 4)),
-                torch.randn((1, 2, 10, 5)),
-                torch.randn((1, 2, 10, 5)),
-                score_mod=_identity,
-            )
 
 
 class TestBlockMask(InductorTestCase):
@@ -1913,35 +1919,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 BLOCK_SIZE=(64, 64),
                 mask_mod=noop_mask,
             )
-
-    @supported_platform
-    def test_causal_block_non_divisible(self):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
-
-        block_mask = create_block_mask(mask_mod, 1, 1, S - 1, S - 1)
-        attention = functools.partial(flex_attention, block_mask=block_mask)
-
-        self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
-
-    @supported_platform
-    def test_causal_block_non_divisible_with_captured_buffer(self):
-        Q_S = S - 9
-        KV_S = S - 9
-        offset_q = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
-        offset_kv = torch.randn(KV_S, device="cuda", dtype=torch.bfloat16)
-
-        def score_mod(score, b, h, q, kv):
-            return score + offset_q[q] + offset_kv[kv]
-
-        def mask_mod(b, h, q, kv):
-            return q >= kv
-
-        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S)
-        # block_mask = None
-        attention = functools.partial(flex_attention, block_mask=block_mask)
-
-        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
