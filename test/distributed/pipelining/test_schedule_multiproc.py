@@ -491,25 +491,22 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleWithW])
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
+        batch_size = 2
+        d_hid = 128
+        num_steps = 2
         n_stages = ScheduleClass.n_stages
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
         ref_mod = copy.deepcopy(full_mod)
         x = torch.randn(batch_size, d_hid, device=self.device)
+        # x = torch.randn(batch_size, d_hid, device=self.device, requires_grad=True)
         with torch.no_grad():
             y = ref_mod(x)
             # Add a small perturbation
             target = y + torch.randn(batch_size, d_hid, device=self.device)
 
         loss_fn = torch.nn.MSELoss(reduction="sum")
-
-        # Run reference
-        for _ in range(2):
-            ref_mod.zero_grad()
-            ref_out = ref_mod(x)
-            ref_loss = loss_fn(ref_out, target)
-            ref_loss.backward()
 
         # Create a pipeline stage to wrap that submodule
         num_microbatches = ScheduleClass.num_microbatches
@@ -521,9 +518,6 @@ class ScheduleTest(MultiProcContinousTest):
         stage_modules = [
             full_mod.get_submodule(submod_name) for submod_name in submod_names
         ]
-        # Zero gradients
-        for stage_module in stage_modules:
-            stage_module.zero_grad()
         stages = [
             PipelineStage(
                 stage_module,
@@ -537,9 +531,16 @@ class ScheduleTest(MultiProcContinousTest):
 
         schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
 
-        # Run
-        # TODO how to better specify .step() when first and last stage are on rank 0...
-        for _ in range(2):
+        # Run reference
+        ref_x = x.clone().detach().requires_grad_(x.requires_grad)
+        torch.testing.assert_close(x, ref_x)
+        for _ in range(num_steps):
+            ref_out = ref_mod(ref_x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        # Run pipelined stages
+        for _ in range(num_steps):
             if self.rank == 0:
                 schedule.step(x)
             elif self.rank == self.world_size - 1:
@@ -549,7 +550,7 @@ class ScheduleTest(MultiProcContinousTest):
                 schedule.step()
         # print(f"{ref_mod=}")
 
-        # Every rank checks gradients
+        # Every rank checks parameters compared with the reference model
         for stage_module, submod_name in zip(stage_modules, submod_names):
             # print(f"{stage_module=}, {submod_name=}")
             # Get corresponding submodule from reference model
@@ -560,9 +561,12 @@ class ScheduleTest(MultiProcContinousTest):
                 # print(f"{name=}, {p=}, {p.grad=}")
                 ref_p = ref_submod.get_parameter(name)
                 try:
+                    # print(f"{p=}, {ref_p=}")
                     torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
                 except AssertionError:
-                    print(f"Gradient test failed for {submod_name}.{name}: {p.grad} vs {ref_p.grad}")
+                    print(
+                        f"Parameter test failed for {submod_name}.{name}: {p.grad} vs {ref_p.grad}"
+                    )
                     raise
 
     @requires_nccl()

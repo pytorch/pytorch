@@ -5,7 +5,11 @@ import copy
 from model_registry import MLPModule
 
 import torch
-from torch.distributed.pipelining._backward import stage_backward, stage_backward_input, stage_backward_weight
+from torch.distributed.pipelining._backward import (
+    stage_backward,
+    stage_backward_input,
+    stage_backward_weight,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -72,6 +76,7 @@ class StageBackwardTests(TestCase):
         loss = loss_fn(out, target)
         dinputs, param_groups = stage_backward_input(
             stage_outputs=(loss,),
+            output_grads=None,
             stage_inputs=[x],
             weights=mod.parameters(),
         )
@@ -102,6 +107,7 @@ class StageBackwardTests(TestCase):
         loss = loss_fn(out, target)
         dinputs, param_groups = stage_backward_input(
             stage_outputs=(loss,),
+            output_grads=None,
             stage_inputs=[x],
             weights=mod.parameters(),
         )
@@ -132,7 +138,7 @@ class StageBackwardTests(TestCase):
             inputs.append(x)
             # As in a pipeline stage, the inputs to this stage requires gradients
             x.requires_grad_(True)
-    
+
         target = torch.randn(batch_size, d_hid)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
@@ -149,6 +155,7 @@ class StageBackwardTests(TestCase):
             loss = loss_fn(out, target)
             dinputs, param_groups = stage_backward_input(
                 stage_outputs=(loss,),
+                output_grads=None,
                 stage_inputs=[x],
                 weights=mod.parameters(),
             )
@@ -170,6 +177,7 @@ class StageBackwardTests(TestCase):
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
+
 
 if __name__ == "__main__":
     run_tests()

@@ -90,9 +90,9 @@ def get_param_groups(
     param_groups = dict()  # keyed on intermediates
     for i, param in enumerate(params):
         closure, intersected = reverse_closure([param], inputs_closure)
-        param_group = {
-            "params": set([param]),
-            "intermediates": set(intersected),
+        param_group: dict[str, set] = {
+            "params": {param},
+            "intermediates": intersected,
         }
         for input_node in intersected:
             existing = param_groups.get(input_node, None)
@@ -115,13 +115,13 @@ def get_param_groups(
             unique_param_groups.append(param_group)
             union_params = union_params.union(param_group["params"])
 
-    print(f"{union_params=}, {params=}")
-    assert union_params == set(params)
+    # assert union_params == set(params)
     return unique_param_groups
 
 
 def stage_backward_input(
     stage_outputs: List[torch.Tensor],
+    output_grads: Optional[List[torch.Tensor]],
     stage_inputs: List[torch.Tensor],
     weights: Iterator[Parameter],
 ):
@@ -153,13 +153,18 @@ def stage_backward_input(
             # save their inputs.
             intermediate.register_prehook(get_hook(param_group, i))
 
-    # print(f"{stage_outputs=}, {stage_inputs=}")
     # Stage 0 inputs do not require grads? Should we skip in that case?
     if all(tensor.requires_grad for tensor in stage_inputs):
+        if output_grads is None:
+            # In case this is the loss and there are no output_grads, then we just use 1s
+            output_grads = [
+                torch.ones_like(stage_output) for stage_output in stage_outputs
+            ]
+
         dinputs = torch.autograd.grad(
             stage_outputs,
             inputs=stage_inputs,
-            grad_outputs=(torch.ones_like(stage_outputs[0]),),
+            grad_outputs=output_grads,
             retain_graph=True,
         )
 
@@ -177,7 +182,7 @@ def stage_backward_input(
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
-) -> None:
+):
     all_dweights = dict()
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
@@ -201,8 +206,14 @@ def stage_backward_weight(
     out = []
     for w in weights:
         grad_acc = _get_grad_fn_or_grad_acc(w)
-        out.append(all_dweights[grad_acc])
+        dweight = all_dweights[grad_acc]
+        out.append(dweight)
+        if w.grad is None:
+            w.grad = dweight
+        else:
+            w.grad += dweight
     return out
+
 
 def stage_backward(
     stage_output,

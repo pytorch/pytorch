@@ -621,6 +621,7 @@ class _PipelineStageBase(ABC):
 
             dinputs, param_groups = stage_backward_input(
                 bwd_kwargs["stage_output"],
+                bwd_kwargs["output_grads"],
                 bwd_kwargs["input_values"],
                 self.submod.parameters(),
             )
@@ -629,6 +630,8 @@ class _PipelineStageBase(ABC):
                 dinputs,
                 input_values,
                 param_groups,
+                bwd_kwargs["stage_output"],
+                bwd_kwargs["output_grads"],
             )
             self.grads_input = dinputs
 
@@ -651,11 +654,22 @@ class _PipelineStageBase(ABC):
             )
             self.dw_runner.pop(bwd_chunk_id)()
         else:
-            dinputs, input_values, param_groups = self.backward_state.pop(bwd_chunk_id)
-            dweights = self.dw_runner.pop(bwd_chunk_id)(self.submod.parameters(), param_groups)
-            # all grads
-            # for grad in tuple(dinputs) + tuple(dweights):
-            #     print(f"{grad.shape=}")
+            (
+                dinputs,
+                input_values,
+                param_groups,
+                stage_output,
+                output_grads,
+            ) = self.backward_state.pop(bwd_chunk_id)
+            if self.stage_index != 0:
+                dweights = self.dw_runner.pop(bwd_chunk_id)(
+                    self.submod.parameters(), param_groups
+                )
+            else:
+                # TODO: figure out a better way to do this
+                # incase inputs does not require gradient, then the parameter group will not be fully captured
+                # in this case, we need call grad directly on the parameters
+                torch.autograd.backward(stage_output, grad_tensors=output_grads)
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
