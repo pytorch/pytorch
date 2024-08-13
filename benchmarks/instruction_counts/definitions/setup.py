@@ -1,5 +1,5 @@
 """Define some common setup blocks which benchmarks can reuse."""
-
+# mypy: ignore-errors
 import enum
 
 from core.api import GroupedSetup
