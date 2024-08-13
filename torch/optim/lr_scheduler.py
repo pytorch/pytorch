@@ -1075,7 +1075,7 @@ class CosineAnnealingLR(LRScheduler):
         self,
         optimizer: Optimizer,
         T_max: int,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107
@@ -1742,7 +1742,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         optimizer: Optimizer,
         T_0: int,
         T_mult=1,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107
