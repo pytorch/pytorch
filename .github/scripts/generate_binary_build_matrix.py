@@ -166,7 +166,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
+    "cuda-aarch64": "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3",
 }
 
 CONDA_CONTAINER_IMAGES = {

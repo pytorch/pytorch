@@ -113,7 +113,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
@@ -138,7 +138,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
@@ -224,7 +224,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       runner_prefix: amz2023.
@@ -249,7 +249,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
@@ -335,7 +335,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       runner_prefix: amz2023.
@@ -360,7 +360,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
@@ -446,7 +446,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       runner_prefix: amz2023.
@@ -471,7 +471,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:d86343bac7abb10c50c0ad2a9fa452efc70810e3
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
