@@ -174,8 +174,7 @@ sycl::event convolution(
   bool is_channels_last = use_channels_last_for_conv(src, weight, false);
 
   // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) = conv_get_md(src, weight, dst, groups, is_channels_last);
+  auto [src_md, weight_md, dst_md] = conv_get_md(src, weight, dst, groups, is_channels_last);
 
   auto bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = bia.defined()
@@ -239,7 +238,7 @@ sycl::event convolution(
 
   size_t scratchpad_size = conv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
@@ -269,8 +268,7 @@ sycl::event convolution_backward_weights(
   bool is_channels_last = use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/false);
 
   // create dnnl::memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       conv_get_md(src, diff_weight, diff_dst, groups, is_channels_last);
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()
@@ -341,7 +339,7 @@ sycl::event convolution_backward_weights(
 
   size_t scratchpad_size = conv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
@@ -371,8 +369,7 @@ sycl::event convolution_backward_data(
   bool is_channels_last = use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/false);
 
   // create memory desc
-  dnnl::memory::desc src_md, weight_md, dst_md;
-  std::tie(src_md, weight_md, dst_md) =
+  auto [src_md, weight_md, dst_md] =
       conv_get_md(diff_src, weight, diff_dst, groups, is_channels_last);
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = bias_defined
@@ -433,7 +430,7 @@ sycl::event convolution_backward_data(
   std::unordered_map<int, dnnl::memory> args;
   size_t scratchpad_size = conv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       conv_backward_data_pd.scratchpad_desc(),
       engine,

@@ -3,10 +3,11 @@ import functools
 import itertools
 
 import torch
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims

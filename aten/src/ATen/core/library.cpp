@@ -61,7 +61,7 @@ void Library::reset() {
 
 Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
-  , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
+  , ns_(ns == "_" ? std::nullopt : std::make_optional(std::move(ns)))
   , dispatch_key_(k.value_or(CatchAll) == CatchAll ? std::optional<c10::DispatchKey>() : k)
   , file_(file)
   , line_(line)

@@ -2,7 +2,7 @@
 
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 using at::NameType;
 using at::Symbol;
@@ -49,7 +49,7 @@ TEST(DimnameTest, createNormalName) {
 static void check_unify_and_match(
     const std::string& dimname,
     const std::string& other,
-    at::optional<const std::string> expected) {
+    std::optional<const std::string> expected) {
   auto dimname1 = Dimname::fromSymbol(Symbol::dimname(dimname));
   auto dimname2 = Dimname::fromSymbol(Symbol::dimname(other));
   auto result = dimname1.unify(dimname2);
@@ -69,5 +69,5 @@ TEST(DimnameTest, unifyAndMatch) {
   check_unify_and_match("a", "*", "a");
   check_unify_and_match("*", "a", "a");
   check_unify_and_match("*", "*", "*");
-  check_unify_and_match("a", "b", c10::nullopt);
+  check_unify_and_match("a", "b", std::nullopt);
 }
