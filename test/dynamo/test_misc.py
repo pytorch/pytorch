@@ -4691,6 +4691,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(res1, 3)
         self.assertEqual(res2, 1)
 
+    def test_set_discard(self):
+        def fn(y):
+            x = set(["bar"])
+            x.discard("bar")
+            x.discard("foo")
+            return y + len(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), x)
+        self.assertEqual(cnts.op_count, 1)
+
     def test_frozenset_torch_func_contains(self):
         funcs = frozenset([torch.add])
 
