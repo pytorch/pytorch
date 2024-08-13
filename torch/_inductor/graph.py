@@ -350,6 +350,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -445,6 +446,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+
+        # Below field is related to printing debug intermediate tensor values info for debugging
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -1726,6 +1730,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
+
+        log.debug(
+            "Finished codegen for all nodes. The list of kernel names available: %s",
+            V.graph.all_codegen_kernel_names,
+        )
+
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
         return result
@@ -1865,4 +1875,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list
