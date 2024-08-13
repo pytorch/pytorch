@@ -3027,6 +3027,7 @@ def is_parameter_freezing():
 
 def get_torch_function_mode_stack():
     from .variables.torch_function import IGNORED_MODES
+
     stack = []
 
     for i in range(_len_torch_function_stack()):
