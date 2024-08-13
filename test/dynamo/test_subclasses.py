@@ -25,6 +25,7 @@ from torch.nested._internal.nested_tensor import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -438,6 +439,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
         _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles)
 
+    @skipIfWindows
     def test_no_call_to_new(self):
         class BadNewTorchFunction(torch.Tensor):
             def __new__(cls, *args, **kwargs):
@@ -497,6 +499,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             f(njt1)
             f(njt2)
 
+    @skipIfWindows
     def test_base_torch_function_tracing(self):
         def fn(x):
             return torch.add(x, 1)
@@ -808,6 +811,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, torch.ones(2) + 10)
 
+    @skipIfWindows
     def test_torch_function_wrapper_class(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -821,6 +825,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
+    @skipIfWindows
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -1052,6 +1057,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch._disable_functionalization()
 
+    @skipIfWindows
     def test_compile_higher_order_with_functionalization(self):
         backend = EagerRecordGraphAndInputs()
         cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
@@ -1725,6 +1731,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((3, 4, 5, 6), 4), None)
         self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
 
+    @skipIfWindows
     def test_binary_does_not_recompile(self):
         def binary(nt1, nt2):
             if nt1.shape == nt2.shape:
@@ -1741,6 +1748,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
 
+    @skipIfWindows
     def test_binary_recompiles(self):
         def binary(nt1, nt2):
             if nt1.shape == nt2.shape:
@@ -1786,6 +1794,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 
+    @skipIfWindows
     def test_subclass_with_mutation_in_graph(self):
         # In this graph, we have an in-graph mutation, i.e. a mutation that is allowed
         # to remain in the graph. Normally this is allowed, but it's not allowed if
