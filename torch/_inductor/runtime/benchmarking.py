@@ -20,10 +20,11 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
-    """Wrapper that logs duration of `fn`, in milliseconds, along with a representation
-    of the function's args and kwargs, if logging is enabled. If logging is disabled,
-    this becomes a no-op.
+def maybe_time(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
+    """Wrapper that logs the duration of `fn`, in milliseconds, along with a representation
+    of the function's args and kwargs, if logging is enabled. It is expected that `fn` is
+    a method of `Benchmarker` or one of its subclasses; typing limitations prevent us from
+    declaring this directly. If logging is disabled, this becomes a no-op.
     """
 
     # no-op if benchmarking-specific logging is disabled
@@ -31,11 +32,12 @@ def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
         return fn
 
     @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         start_t = time.perf_counter()
         result = fn(*args, **kwargs)
         logger.debug(
-            "fn:%s args:[%r, %r] took %f milliseconds.",
+            "Call `benchmarking.%s.%s(*args=%r, **kwargs=%r)` took %f milliseconds.",
+            self.__class__.__name__,
             fn.__name__,
             args,
             kwargs,
@@ -48,8 +50,8 @@ def maybe_time(fn: Callable[P, T]) -> Callable[P, T]:
 
 def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P], T]:
     """Wrapper that increments relevant dynamo counters on `fn` call. It is expected that
-    `fn` is a method of `Benchmarker` or a subclass; typing limitations prevent us from
-    declaring this directly. The counter incrementation follows the formula,
+    `fn` is a method of `Benchmarker` or one of its subclass; typing limitations prevent
+    us from declaring this directly. The counter incrementation follows the formula,
 
     `counters["inductor"]["benchmarking.Foo.bar] += 1`
 
@@ -100,25 +102,26 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
-        for arg_or_kwarg in (fn_args + tuple(fn_kwargs.items())):
+        for arg_or_kwarg in fn_args + tuple(fn_kwargs.items()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
             if inferred_device is None:
                 inferred_device = arg_or_kwarg.device
                 continue
             if arg_or_kwarg.device != inferred_device:
-                raise NotImplementedError(
+                raise ValueError(
                     "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
                 )
         if inferred_device is None:
-            raise NotImplementedError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)
-        if inferred_device == "cpu":
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        if inferred_device == torch.device("cpu"):
             return self.benchmark_cpu(_callable, **kwargs)
-        # TODO(nmacchioni): For non-GPU functions we default to using the GPU-specific benchmarking
-        # implementation, we may want to alternate implementations for other device types.
+        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+        # implementation which was written specifically with CUDA devices in mind, we may want to
+        # explore alternate implementations for other device types.
         return self.benchmark_gpu(_callable, **kwargs)
 
     @maybe_time
@@ -195,13 +198,14 @@ class TritonBenchmarker(Benchmarker):
         this is the requested return mode. Otherwise, this is the median.
         """
 
-        # this may be used as a fallback if other features are disabled, in that case we
-        # need to prune any additional kwargs that are not part of do_bench's signature
-        do_bench_sig = inspect.signature(self.triton_do_bench)
-        if "**kwargs" not in str(do_bench_sig):
-            for kwarg in list(kwargs.keys()):
-                if kwarg not in do_bench_sig.parameters:
-                    del kwargs[kwarg]
+        # this method may be used as a fallback if certain benchmarking features are disabled,
+        # in which case those requests may contain kwargs that are not specific to Triton's
+        # `do_bench_gpu`. as such, we may need to prune out kwargs that do not exists in
+        # `do_bench_gpu`'s signature.
+        do_bench_params = inspect.signature(self.triton_do_bench).parameters
+        for kwarg in list(kwargs.keys()):
+            if kwarg not in do_bench_params:
+                del kwargs[kwarg]
 
         if "quantiles" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)[0]
@@ -211,17 +215,8 @@ class TritonBenchmarker(Benchmarker):
 
 
 def is_feature_enabled(feature_name: str) -> bool:
-    """Generic method to decide if we should enable a feature. A feature can be enabled
-    in various ways, with priority in descending order:
-
-    1. Exporting `TORCHINDUCTOR_BENCHMARKING_{feature_name.upper()}=X`. If `X=1`, the
-    feature will be enabled. If `X=0`, the feature will be disabled.
-    2a. [OSS Only] Setting `torch._inductor.config.benchmarking.{feature_name}.oss_default`.
-    2b. [Internal Only] Feature is gated by JK enablement. The local feature version, hardcoded
-    as `torch._inductor.fb.benchmarking.{feature_name.upper() + "_VERSION"}`, is compared against
-    the JK feature version, `"pytorch/benchmarking:{feature_name.upper()}_VERSION"`. If the
-    local feature version is greater than or equal to the JK feature version, the feature is
-    considered enabled. Otherwise, the feature is disabled.
+    """Method to decide whether or not a feature is enabled. For more context, see the
+    benchmarking configuration section in `torch._inductor.config.benchmarking`.
     """
     feature_config = getattr(benchmarking_config, feature_name)
     if feature_config.env_val is not None:
@@ -244,17 +239,22 @@ def is_feature_enabled(feature_name: str) -> bool:
 def maybe_fallback(
     fn: Callable[Concatenate[Any, P], T]
 ) -> Callable[Concatenate[Any, P], T]:
-    """Wrapper that falls back to the parent class' equivalent method if the caller
-    object's `self.should_fallback` evaluates to `True`.
+    """Wrapper that controls feature fallbacks. It is expected that `fn` is a
+    method of one of `Benchmarker`'s subclasses with a corresponding `feature_name`
+    attribute; typing limitations prevent us from declaring this directly. When
+    `fn` is called, in the form `fn(self, ...)`, we will check that the feature
+    `self.feature_name` is enabled; if the feature `feature_name` is not enabled,
+    we will fallback to the parent class' implementation of `fn`.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         if not is_feature_enabled(self.feature_name):
-            fallback_fn = getattr(super(type(self), self), fn.__name__)
-            log.debug(
-                "benchmarking.%s.%s falls back to benchmarking.%s.%s.",
-                type(self).__name__,
+            fallback_fn = getattr(super(self.__class__, self), fn.__name__)
+            logger.debug(
+                "Feature `%s` is disable, `benchmarking.%s.%s` will fallback to `benchmarking.%s.%s`.",
+                self.feature_name,
+                self.__class__.__name__,
                 fn.__name__,
                 self.__class__.__base__.__name__,
                 fallback_fn.__name__,
@@ -270,7 +270,7 @@ class InductorBenchmarker(TritonBenchmarker):
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
-        """Get the L2 cache size of the current device."""
+        """Get the L2 cache size, in bytes, of the current device."""
         device = torch.cuda.current_device()
         props = torch.cuda.get_device_properties(device)
         return props.L2_cache_size
@@ -313,16 +313,16 @@ class InductorBenchmarker(TritonBenchmarker):
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:
-        - _callable: The callable to benchmark:
+        - _callable: The callable to benchmark.
 
         Keyword Arguments:
-        - estimation_iters: The number of iterations to run `_callable` during
-        runtime estimation.
-        - memory_warmup_iters: The number of iterations to flush the L2 cache
-        before benchmarking.
-        - benchmark_iters: The number of iterations to run `_callable` during
-        benchmarking.
-        - max_benchmark_duration: The maximum duration of the benchmarking,
+        - estimation_iters: Optionally, the number of iterations to run `_callable`
+        during runtime estimation.
+        - memory_warmup_iters: Optionally, the number of iterations to flush the L2
+        cache before starting benchmarking.
+        - benchmark_iters: Optionally, the number of iterations to run `_callable`
+        during the benchmarking.
+        - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
         in milliseconds. An estimated duration is calculated based on the values
         of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
         runtime of `_callable` and various other factors, and we then shrink
