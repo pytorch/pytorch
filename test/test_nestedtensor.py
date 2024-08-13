@@ -48,17 +48,17 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     markDynamoStrictTest,
-    NestedTensorTestCase,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
+    TestCase,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -263,6 +263,20 @@ def convert_jagged_to_nested_tensor(
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
+
+
+# Base TestCase for NT tests; used to define common helpers, etc.
+class NestedTensorTestCase(TestCase):
+    def assertEqualIgnoringNestedInts(self, a, b):
+        # unbinding NJTs allows us to compare them as essentially equal without
+        # caring about exact nested int comparison
+        def _unbind_njts(x):
+            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
+                return x.unbind()
+            else:
+                return x
+
+        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
 
 
 @markDynamoStrictTest
@@ -556,16 +570,9 @@ class TestNestedTensor(NestedTensorTestCase):
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
-    @parametrize(
-        "layout",
-        [torch.strided, torch.jagged],
-        name_fn=lambda l: f"_with_{layout_name(l)}_layout",
-    )
-    def test_to(self, layout):
+    def test_to(self):
         ntensors = 4
-        nt = random_nt_from_dims(
-            (7, None, 10), torch.device("cpu"), torch.float32, layout=layout
-        )
+        nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -639,15 +646,6 @@ class TestNestedTensor(NestedTensorTestCase):
                     )
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
-
-        # Jagged <-> strided
-        new_layout = torch.jagged if layout == torch.strided else torch.strided
-        new_layout_nt = torch.ops.aten._to_copy(nt, layout=new_layout)
-        self.assertIs(new_layout_nt.layout, new_layout)
-        self.assertEqual(new_layout_nt.device, nt.device)
-        self.assertEqual(new_layout_nt.size(2), nt.size(2))
-        self.assertEqual(new_layout_nt.unbind(), nt.unbind())
-        self.assertNotEqual(new_layout_nt.data_ptr(), nt.data_ptr())
 
     def test_copy_(self):
         ntensors = 4
@@ -4296,6 +4294,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
         reduce_dim = 1  # ragged
 
@@ -4515,6 +4514,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             include_list_of_lists=False,
             include_requires_grad=components_require_grad,
             include_inner_dim_size_1=True,  # (B, *, 1)
+            include_2d_tensor=True,  # (B, *)
         )
 
         for tensor_list in tensor_lists:
@@ -6992,40 +6992,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         expected_grad.unbind()[1].add_(1.0)
         torch._dynamo.disable(self.assertEqual)(nt.grad, expected_grad)
 
-    def test_layout_conversion(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        self.assertEqual(strided_nt.unbind(), nt.unbind())
-        self.assertEqual(strided_nt.data_ptr(), nt.data_ptr())
-
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-        self.assertEqual(jagged_nt.unbind(), nt.unbind())
-        self.assertEqual(jagged_nt.data_ptr(), nt.data_ptr())
-
-    def test_layout_conversion_backward(self, device):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 4, device=device),
-                torch.randn(5, 4, device=device),
-                torch.randn(3, 4, device=device),
-            ],
-            layout=torch.jagged,
-            requires_grad=True,
-        )
-        strided_nt = torch.ops.aten._nested_jagged_to_strided(nt)
-        jagged_nt = torch.ops.aten._nested_strided_to_jagged(strided_nt)
-
-        jagged_nt.backward(torch.ones_like(jagged_nt))
-        expected_grad = torch.ones_like(nt)
-        torch._dynamo.disable(self.assertEqual)(expected_grad, nt.grad)
-
 
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===
@@ -7122,6 +7088,17 @@ BACKWARD_FAILURES = {
     "sinc",
     "special.i1",
     "special.i1e",
+    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
+    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
+    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
+    "clone",
+}
+
+COMPILE_FORWARD_FAILURES = {
+    *FORWARD_FAILURES,
+    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
+    # data-dependent error in torch.compile
+    "clone",
 }
 
 
@@ -7183,7 +7160,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads, grads_ref)
 
-    @withXFails(FORWARD_FAILURES)
+    @withXFails(COMPILE_FORWARD_FAILURES)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
