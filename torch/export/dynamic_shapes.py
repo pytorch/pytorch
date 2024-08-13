@@ -928,14 +928,20 @@ def _process_dynamic_shapes(
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 else:
-                    if not (dim is None or dim == True):
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
-                            f"specified at `dynamic_shapes{keystr(path)}` "
-                            f"(expected None, True, an int, or a Dim, but got {dim} instead)",
-                            case_name="dynamic_shapes_validation",
-                        )
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
+                        f"specified at `dynamic_shapes{keystr(path)}` "
+                        f"(expected None, True, an int, or a Dim, but got {dim} instead)",
+                        case_name="dynamic_shapes_validation",
+                    )
+            # create static dim for those unspecified in dictionary
+            for i, val in enumerate(tensor.shape):
+                if i not in shape:
+                    dim = _create_static_dim(tensor, i, val)
+                    check_same_bounds(dim)
+                    constraint = to_constraint(dim, tensor, i)
+                    symbols[dim.__name__].append(constraint)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if dim == True:
@@ -995,7 +1001,7 @@ def _process_dynamic_shapes(
         f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
-        dynamic_shapes = _tree_map(lambda t: None, combined_args)
+        dynamic_shapes = _tree_map_with_path(lambda path, t: None, combined_args)
     elif isinstance(dynamic_shapes, dict):
         got_keys = list(dynamic_shapes.keys())
         expected_arg_names = list(combined_args.keys())

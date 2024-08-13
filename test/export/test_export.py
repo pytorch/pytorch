@@ -1899,7 +1899,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is None, an int, or a Dim)"
+                " where each dimension is None, True, an int, or a Dim)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -6759,7 +6759,6 @@ def forward(self, x, y):
             "y": (dy, None),
         }
         gm, shape_env = _dynamo_export(M2(), inputs, {}, shapes)
-        breakpoint()
 
     def test_process_dyn_auto(self):
         class Foo(torch.nn.Module):
@@ -6803,15 +6802,153 @@ def forward(self, x, y):
                 return x + y[1:]
 
         inputs = (torch.randn(6, 4), torch.randn(7, 4))
-        shapes = {"x": (Dim("dx", min=3, max=16), True), "y": (True, 4)}
+        shapes = {"x": (True, True), "y": (True, 4)}
         # shapes = {"x": True, "y": (True, 4)}
         constraints = torch.export.dynamic_shapes._process_dynamic_shapes(Foo(), inputs, {}, shapes)
-        with torch._dynamo.config.patch(
-            assume_static_by_default=False,
-            automatic_dynamic_shapes=True,
-        ):
-            ep = export(Foo(), inputs, dynamic_shapes=shapes)
-        breakpoint()
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        
+    def test_specs_for_automatic_dynamic_shapes(self):
+        # Run tests on 3 models for automatic dynamic shapes specs, verifying that automatic dynamism
+        # leads to replacement symbols being set for equalities, and inferred relationships being checked
+        # with runtime asserts. Check that we specialize to static values when the program says so.
+
+        def export_and_check_inputs(model, inputs, specs, passing_shapes, failing_shapes):
+            # exports with a given dynamic shapes spec, then tests for pass/fail on list of shapes
+            ep = export(model, inputs, dynamic_shapes=specs)
+            for shapes in passing_shapes:
+                test_inputs = (torch.randn(*shape) for shape in shapes)
+                ep.module()(*test_inputs)
+            for shapes in failing_shapes:
+                test_inputs = (torch.randn(*shape) for shape in shapes)
+                with self.assertRaisesRegex(RuntimeError, ""):
+                    ep.module()(*test_inputs)
+
+        # case 1: direct equality between symbols
+        class SimpleEquality(torch.nn.Module):
+            def forward(self, x, y, z):
+                # all inputs should have shape [s0, s1]
+                return x + y + z
+
+        inputs = tuple(torch.randn(6, 3) for _ in range(3))
+        # fully dynamic
+        export_and_check_inputs(
+            SimpleEquality(), inputs, {"x": (True, True), "y": (True, True), "z": (True, True)},
+            passing_shapes=[
+                ((4, 4), (4, 4), (4, 4)),
+                ((1, 1), (1, 1), (1, 1)),
+                ((0, 9), (0, 9), (0, 9)),
+            ],
+            failing_shapes=[
+                ((4, 4), (4, 4), (4, 3)),
+                ((4, 4), (5, 4), (4, 5)),
+            ]
+        )
+        # static s1
+        export_and_check_inputs(
+            # specifying just one dimension as static should be enough to specialize all s1
+            SimpleEquality(), inputs, {"x": (True, True), "y": (True, True), "z": (True, None)},
+            passing_shapes=[
+                ((4, 3), (4, 3), (4, 3)),
+                ((1, 3), (1, 3), (1, 3)),
+                ((0, 3), (0, 3), (0, 3)),
+            ],
+            failing_shapes=[
+                ((4, 4), (4, 4), (4, 4)),
+                ((1, 1), (1, 1), (1, 1)),
+                ((0, 9), (0, 9), (0, 9)),
+            ]
+        )
+        # fully static
+        export_and_check_inputs(
+            # this should specialize all
+            SimpleEquality(), inputs, {"x": (None, True), "y": (True, True), "z": (True, None)},
+            passing_shapes=[
+                ((6, 3), (6, 3), (6, 3)),
+            ],
+            failing_shapes=[
+                ((6, 4), (6, 4), (6, 4)),
+                ((1, 3), (1, 3), (1, 3)),
+                ((0, 9), (0, 9), (0, 9)),
+            ]
+        )
+
+        # case 2: related by constant: s0 + 4 = s1
+        class OffBy4(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[4:]
+
+        inputs = (torch.randn(6), torch.randn(10))
+        # fully dynamic
+        export_and_check_inputs(
+            OffBy4(), inputs, {"x": (True,), "y": (True,)},
+            passing_shapes=[
+                ((10,), (14,)),
+                ((3,), (7,)),
+                ((2,), (6,)),
+            ],
+            failing_shapes=[
+                ((10,), (13,)),
+            ]
+        )
+        # static s1 should specialize s0
+        export_and_check_inputs(
+            OffBy4(), inputs, {"x": (True,), "y": (None,)},
+            passing_shapes=[
+                ((6,), (10,)),
+            ],
+            failing_shapes=[
+                ((10,), (14,)),
+                ((3,), (7,)),
+                ((2,), (6,)),
+            ],
+        )
+
+        # case 3: linear relation
+        class LinearRel(torch.nn.Module):
+            def forward(self, x, y):
+                # x: [s0], y: [s1]
+                # relation seems to be (s0 + 2) // 4 == s1
+                return x[1::4] + y
+
+        inputs = (torch.randn(21), torch.randn(5))
+        
+        # fully dynamic
+        export_and_check_inputs(
+            LinearRel(), inputs, {"x": (True,), "y": (True,)},
+            passing_shapes=[
+                ((33,), (8,)),
+                ((32,), (8,)),
+                ((31,), (8,)),
+                ((30,), (8,)),
+            ],
+            failing_shapes=[
+                ((34,), (8,)),
+                ((22,), (5,)),
+            ],
+        )
+        # static s1 shouldn't actually specialize s0 (guard: (s0 + 2) // 4 == 5)
+        export_and_check_inputs(
+            LinearRel(), inputs, {"x": (True,), "y": (None,)},
+            passing_shapes=[
+                ((21,), (5,)),
+                ((20,), (5,)),
+                ((19,), (5,)),
+                ((18,), (5,)),
+            ],
+            failing_shapes=[
+                ((33,), (8,)),
+            ],
+        )
+        # but static s0 will definitely specialize s1 (guard: (21 + 2) // 4 == s1 -> 5 == s1)
+        export_and_check_inputs(
+            LinearRel(), inputs, {"x": (None,), "y": (True,)},
+            passing_shapes=[
+                ((21,), (5,)),
+            ],
+            failing_shapes=[
+                ((22,), (5,)),
+            ],
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

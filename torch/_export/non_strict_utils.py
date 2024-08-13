@@ -200,7 +200,6 @@ def make_fake_inputs(
             phantom_symbols=list(phantom_symbols.values()),
             warn_only=False,
         )
-        breakpoint()
         return fake_mode, fake_args, fake_kwargs, equalities_inputs, original_signature
 
 
@@ -299,6 +298,7 @@ def make_constraints(
         num_lifted_inputs: the number of non-user-input placeholder nodes in the graph
         (used only to enumerate the user-input nodes)
     """
+    import sympy
 
     shape_env = fake_mode.shape_env
     assert shape_env is not None
@@ -329,24 +329,30 @@ def make_constraints(
         ):
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
+        """
+        This ordering is actually wrong, on how we process things
+        With kwargs they get flipped. Figure this out later.
+        """
         for i, d in enumerate(node.meta["val"].shape):
-            if isinstance(d, torch.SymInt):
+            if (
+                isinstance(d, torch.SymInt)
+                and isinstance(expr := d.node.expr, sympy.Expr)
+                and not isinstance(expr, sympy.Number)
+            ):
                 # Look up the range constraint for the symbol corresponding to this shape dimension
                 # and store it indexed by the symbolic expression corresponding to it.
-                # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
-                # we want the symbol, not its replacement, which could be an expression. Maybe
-                # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                dim = None if (shape_spec is None or shape_spec == True) else shape_spec[i]
+                dim = None if (shape_spec[i] is None or shape_spec[i] == True) else shape_spec[i]
                 if dim:
-                    range_constraints[d.node.expr] = ValueRanges(
+                    range_constraints[expr] = ValueRanges(
                         lower=dim.min, upper=dim.max
                     )
                 else:
-                    range_constraints[d.node.expr] = shape_env.var_to_range[
-                        d.node._expr
-                    ]
-                input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
-                free_symbols.update(d.node.expr.free_symbols)
+                    # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
+                    # we want the symbol, not its replacement, which could be an expression. Maybe
+                    # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
+                    range_constraints[expr] = shape_env.var_to_range[d.node._expr]
+                input_dims[expr].append(InputDim(input_name=node.name, dim=i))
+                free_symbols.update(expr.free_symbols)
 
     for symbol in free_symbols:
         if symbol not in range_constraints:

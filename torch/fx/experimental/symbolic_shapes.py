@@ -1614,6 +1614,8 @@ class DynamicDimConstraintPrinter(StrPrinter):
     def print_source(self, source) -> str:
         if self.source_name_to_debug_name:
             return source.name()
+        if isinstance(source, torch._dynamo.source.ConstantSource):
+            return source.source_name
         return f"dynamic_dim({source.base.name()}, {source.idx})"
 
     def _print_Symbol(self, expr) -> str:
@@ -1884,7 +1886,8 @@ class DimConstraints:
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
                     if self._is_supported_congruence(congruence):
                         base, divisor = congruence.args
-                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        src_name = self._dcp.symbol_to_source[s][0].name()
+                        tmp_name = f"_{self._dcp.source_name_to_debug_name.get(src_name, src_name)}"
                         tmp = sympy.Symbol(tmp_name, integer=True)
                         from torch._dynamo.source import ConstantSource
                         self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
@@ -4003,7 +4006,6 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
-        breakpoint()
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -4041,7 +4043,6 @@ class ShapeEnv:
             else:
                 sources_tensors_constraints = [(source, t, context.constraint_sizes, context.constraint_strides)]
 
-            breakpoint()
             for src, curr_t, constraint_size, constraint_stride in sources_tensors_constraints:
                 if is_sparse_any(curr_t):
                     for i, ss in enumerate(curr_t.size()):
@@ -4056,7 +4057,6 @@ class ShapeEnv:
                         track_symint(property_source, ss, constraint_stride[i])
                     track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
-        breakpoint()
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
