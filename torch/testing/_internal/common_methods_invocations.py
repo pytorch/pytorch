@@ -6223,6 +6223,7 @@ def error_inputs_flipud(op, device, **kwargs):
 
 def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+    make_integral_arg = partial(make_tensor, dtype=torch.int32, device=device, low=None, high=None, requires_grad=False)
     shape = (S, M, S)
 
     yield SampleInput(make_arg(shape), args=(make_arg(shape), make_arg(shape)))
@@ -6230,6 +6231,9 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
     yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
+    # test type promotion
+    yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
+    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
@@ -12666,6 +12670,11 @@ op_db: List[OpInfo] = [
                             'TestNNCOpInfo',
                             'test_nnc_correctness',
                             dtypes=(torch.bool,)),
+               # MPS does not support float64, while numpy does internal computations in float64.
+               # See https://github.com/pytorch/pytorch/blob/3c1cf03fde145bdbe1f5ffb81765d076c10b4c04/test/test_ops.py#L260-L264
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCommon',
+                            'test_numpy_ref_mps'),
            )),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
