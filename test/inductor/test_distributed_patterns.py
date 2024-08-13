@@ -344,6 +344,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(m1.weight.grad, m2.weight.grad)
         self.assertEqual(m1.bias.grad, m2.bias.grad)
 
+    @skipIfWindows
     def test_module_backward_hooks_inductor(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)
@@ -360,6 +361,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(m1.weight.grad, m2.weight.grad)
         self.assertEqual(m1.bias.grad, m2.bias.grad)
 
+    @skipIfWindows
     def test_module_backward_hooks_multi_layers(self):
         a1, inp1 = init_module_bw_hooks(True)
         b1, _ = init_module_bw_hooks(True)
