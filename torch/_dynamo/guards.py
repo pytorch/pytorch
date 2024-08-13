@@ -2262,12 +2262,15 @@ class CheckFunctionManager:
 
         if config.enable_cpp_guard_manager:
             from .variables.torch_function import IGNORED_MODES
+
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
 
             self.guard_manager.root.add_torch_function_mode_stack_guard(
-                self.torch_function_mode_stack, list(IGNORED_MODES), ["___check_torch_function_mode_stack()"]
+                self.torch_function_mode_stack,
+                list(IGNORED_MODES),
+                ["___check_torch_function_mode_stack()"],
             )
             # Clear references to torch_function modes held in the list
             self.torch_function_mode_stack = None
