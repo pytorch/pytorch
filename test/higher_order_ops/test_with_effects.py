@@ -192,7 +192,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(not SM70OrLater)
+    @unittest.skipIf(not SM70OrLater, "triton")
     def test_compile_inductor(self):
         def f(x):
             torch.ops.aten._print("moo")
