@@ -839,13 +839,11 @@ def forward(self, primals_1):
         def f(x):
             return x.sin().cos()
 
-        a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
+        a = torch.ones(4)
+        a2 = a.clone()
         aa = TwoTensor(a, a2)
-        aa2 = TwoTensor(a3, a4)
-        aaaa = TwoTensor(aa, aa2)
+        aa2 = aa.clone()
+        aaaa = TwoTensor(aa, aa2, requires_grad=True)
         out = f(aaaa)
         self.assertTrue(isinstance(out, TwoTensor))
         self.assertTrue(isinstance(out.a, TwoTensor))
@@ -866,15 +864,15 @@ def forward(self, primals_1):
         def f(x):
             return x.sin().cos()
 
-        a = torch.ones(4, requires_grad=True)
-        a2 = a.clone().detach().requires_grad_()
-        a3 = a.clone().detach().requires_grad_()
-        a4 = a.clone().detach().requires_grad_()
-        new_aa = TwoTensor(a3, a4)
+        a = torch.ones(4)
+        a2 = a.clone()
+        a3 = a.clone()
+        a4 = a.clone()
+        new_aa = TwoTensor(a3, a4, requires_grad=True)
         aa = TwoTensor(a, a2)
 
-        aa2 = aa.clone().detach().requires_grad_()
-        aaaa = TwoTensor(aa, aa2)
+        aa2 = aa.clone()
+        aaaa = TwoTensor(aa, aa2, requires_grad=True)
         out = f(new_aa)
         new_out = out + aaaa
         with self.assertRaisesRegex(
@@ -922,12 +920,12 @@ def forward(self, primals_1):
             res = temp.sum() + temp_plain.sum()
             return x.sin().cos() + res
 
-        x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x = torch.ones(4)
+        x2 = x.clone()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.clone()
 
-        x_nested = TwoTensor(xx, xx2)
+        x_nested = TwoTensor(xx, xx2, requires_grad=True)
         x_nested_compile = x_nested.clone().detach().requires_grad_()
 
         y_nested = x_nested.clone().detach().requires_grad_()
@@ -974,12 +972,12 @@ def forward(self, primals_1):
             y_elem_metadata = y_elem.constant_attribute
             return y * y_elem * y_elem_elem * y_elem_metadata + x
 
-        x = torch.ones(4, requires_grad=True)
-        x2 = x.clone().detach().requires_grad_()
+        x = torch.ones(4)
+        x2 = x.clone()
         xx = TwoTensor(x, x2)
-        xx2 = xx.clone().detach().requires_grad_()
+        xx2 = xx.clone()
 
-        x_nested = TwoTensor(xx, xx2)
+        x_nested = TwoTensor(xx, xx2, requires_grad=True)
         x_nested_compile = x_nested.clone().detach().requires_grad_()
 
         a = torch.ones(4, requires_grad=True)
@@ -5362,14 +5360,14 @@ class TestAOTDispatch(AOTTestCase):
             bb = torch.div(b, 2)
             return aa + bb
 
-        a1_ref = torch.ones(3, 3, requires_grad=True)
-        a2_ref = torch.ones(3, 3, requires_grad=True)
-        a_ref = TwoTensor(a1_ref, a2_ref)
+        a1_ref = torch.ones(3, 3)
+        a2_ref = torch.ones(3, 3)
+        a_ref = TwoTensor(a1_ref, a2_ref, requires_grad=True)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
-        a_test = TwoTensor(a1_test, a2_test)
+        a1_test = a1_ref.clone()
+        a2_test = a2_ref.clone()
+        a_test = TwoTensor(a1_test, a2_test, requires_grad=True)
         b_test = b_ref.clone().detach().requires_grad_(True)
 
         fw_graph_cell = [None]
@@ -5476,14 +5474,14 @@ def forward(self, tangents_1, tangents_2):
             # This would require re-tracing and recompiling the backward.
             return out_subclass, out_reg
 
-        a1_ref = torch.ones(3, 3, requires_grad=True)
-        a2_ref = torch.ones(3, 3, requires_grad=True)
-        a_ref = TwoTensor(a1_ref, a2_ref)
+        a1_ref = torch.ones(3, 3)
+        a2_ref = torch.ones(3, 3)
+        a_ref = TwoTensor(a1_ref, a2_ref, requires_grad=True)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
-        a1_test = a1_ref.clone().detach().requires_grad_(True)
-        a2_test = a2_ref.clone().detach().requires_grad_(True)
-        a_test = TwoTensor(a1_test, a2_test)
+        a1_test = a1_ref.clone()
+        a2_test = a2_ref.clone()
+        a_test = TwoTensor(a1_test, a2_test, requires_grad=True)
         b_test = b_ref.clone().detach().requires_grad_(True)
 
         compiled_f = aot_function(
@@ -5513,14 +5511,14 @@ def forward(self, tangents_1, tangents_2):
         def f(a, b):
             return b.view(b.shape), a * b
 
-        b1_ref = torch.ones(3, 3, requires_grad=True)
-        b2_ref = torch.ones(3, 3, requires_grad=True)
-        b_ref = TwoTensor(b1_ref, b2_ref)
+        b1_ref = torch.ones(3, 3)
+        b2_ref = torch.ones(3, 3)
+        b_ref = TwoTensor(b1_ref, b2_ref, requires_grad=True)
         a_ref = torch.ones(3, 3, requires_grad=True)
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
-        b_test = TwoTensor(b1_test, b2_test)
+        b1_test = b1_ref.clone()
+        b2_test = b2_ref.clone()
+        b_test = TwoTensor(b1_test, b2_test, requires_grad=True)
         a_test = a_ref.clone().detach().requires_grad_(True)
 
         compiled_f = aot_function(
@@ -5549,16 +5547,16 @@ def forward(self, tangents_1, tangents_2):
             b.mul_(3)
             return a + b
 
-        b1_ref = torch.ones(3, 3, requires_grad=True)
-        b2_ref = torch.ones(3, 3, requires_grad=True)
-        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        b1_ref = torch.ones(3, 3)
+        b2_ref = torch.ones(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref, requires_grad=True)
         a_ref_base = torch.ones(3, 3, requires_grad=True)
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
-        b_test_base = TwoTensor(b1_test, b2_test)
+        b1_test = b1_ref.clone()
+        b2_test = b2_ref.clone()
+        b_test_base = TwoTensor(b1_test, b2_test, requires_grad=True)
         a_test_base = a_ref_base.clone().detach().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
@@ -5597,9 +5595,9 @@ def forward(self, tangents_1, tangents_2):
             b.unsqueeze_(0)
             return a + b
 
-        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        b1_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref, requires_grad=True)
         a_ref_base = (
             torch.arange(9, dtype=torch.float32)
             .reshape(3, 3)
@@ -5609,9 +5607,9 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
-        b_test_base = TwoTensor(b1_test, b2_test)
+        b1_test = b1_ref.clone()
+        b2_test = b2_ref.clone()
+        b_test_base = TwoTensor(b1_test, b2_test, requires_grad=True)
         a_test_base = a_ref_base.clone().detach().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
@@ -5652,9 +5650,9 @@ def forward(self, tangents_1, tangents_2):
             b.mul_(3)
             return a + b
 
-        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        b1_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref, requires_grad=True)
         a_ref_base = (
             torch.arange(9, dtype=torch.float32)
             .reshape(3, 3)
@@ -5664,9 +5662,9 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
-        b_test_base = TwoTensor(b1_test, b2_test)
+        b1_test = b1_ref.clone()
+        b2_test = b2_ref.clone()
+        b_test_base = TwoTensor(b1_test, b2_test, requires_grad=True)
         a_test_base = a_ref_base.clone().detach().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
@@ -5702,9 +5700,9 @@ def forward(self, tangents_1, tangents_2):
             b.mul_(3)
             return b.view(b.shape), a + b
 
-        b1_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b2_ref = torch.arange(9, requires_grad=True, dtype=torch.float32).reshape(3, 3)
-        b_ref_base = TwoTensor(b1_ref, b2_ref)
+        b1_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b2_ref = torch.arange(9, dtype=torch.float32).reshape(3, 3)
+        b_ref_base = TwoTensor(b1_ref, b2_ref, requires_grad=True)
         a_ref_base = (
             torch.arange(9, dtype=torch.float32)
             .reshape(3, 3)
@@ -5714,9 +5712,9 @@ def forward(self, tangents_1, tangents_2):
         b_ref = b_ref_base + 1
         a_ref = a_ref_base + 1
 
-        b1_test = b1_ref.clone().detach().requires_grad_(True)
-        b2_test = b2_ref.clone().detach().requires_grad_(True)
-        b_test_base = TwoTensor(b1_test, b2_test)
+        b1_test = b1_ref.clone()
+        b2_test = b2_ref.clone()
+        b_test_base = TwoTensor(b1_test, b2_test, requires_grad=True)
         a_test_base = a_ref_base.clone().detach().requires_grad_(True)
         b_test = b_test_base + 1
         a_test = a_test_base + 1
