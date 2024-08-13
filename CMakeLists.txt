@@ -917,9 +917,8 @@ if(USE_SLEEF_FOR_ARM_VEC256)
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
-# Enable sleef on macOS with Apple silicon by default
-if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
-  message(STATUS "Running on macOS with Apple silicon")
+# Enable sleef on ARM by default
+if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
