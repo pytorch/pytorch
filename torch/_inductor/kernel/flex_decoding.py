@@ -204,6 +204,9 @@ flex_decoding_template = TritonTemplate(
     if HAS_FULL_BLOCKS:
         kv_indices = FULL_KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_hz_offset)
+        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
+        block_n_start = KV_LEN//BLOCK_N - block_n_end
+        block_n_end = block_n_start + TILE_KV_MULTIPLE
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -294,7 +297,7 @@ MAX_SPLIT_KV = 64
 def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    split_k = SM // bh  # Each SM should at least get one block.
+    split_k = (SM * 2) // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
 
     return split_k
