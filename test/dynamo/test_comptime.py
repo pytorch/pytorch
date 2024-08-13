@@ -8,6 +8,7 @@ from io import StringIO
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 # Because we don't support free variables in comptime at the moment,
@@ -70,6 +71,7 @@ set()
 s0""",
         )
 
+    @skipIfWindows
     def test_print_graph(self):
         global FILE
         FILE = StringIO()
@@ -99,6 +101,7 @@ def forward(self, L_x_ : torch.Tensor):
     y = l_x_ * 2;  l_x_ = y = None""",
         )
 
+    @skipIfWindows
     def test_print_disas(self):
         global FILE
         FILE = StringIO()
@@ -136,6 +139,7 @@ def forward(self, L_x_ : torch.Tensor):
         else:
             self.assertIn("BINARY_OP", out)
 
+    @skipIfWindows
     def test_print_value_stack(self):
         global FILE
         FILE = StringIO()
@@ -163,6 +167,7 @@ def forward(self, L_x_ : torch.Tensor):
 """,
         )
 
+    @skipIfWindows
     def test_print_locals(self):
         global FILE
         FILE = StringIO()
@@ -227,6 +232,7 @@ y = TensorVariable()
 
         f(torch.randn(2))
 
+    @skipIfWindows
     def test_print_bt(self):
         global FILE
         FILE = StringIO()
@@ -255,6 +261,7 @@ y = TensorVariable()
         bt = FILE.getvalue()
         self.assertIn("y = g(y)", bt)
 
+    @skipIfWindows
     def test_print_guards(self):
         global FILE
         FILE = StringIO()
