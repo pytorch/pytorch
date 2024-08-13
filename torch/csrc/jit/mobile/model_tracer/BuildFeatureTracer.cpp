@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.h>
 #include <mutex>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 BuildFeatureTracer::BuildFeatureTracer() {
   auto recorder_cb =
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
@@ -26,6 +24,4 @@ c10::Synchronized<BuildFeatureTracer::build_feature_type>& BuildFeatureTracer::
   return build_features;
 }
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile
