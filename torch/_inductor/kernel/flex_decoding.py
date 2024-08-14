@@ -520,11 +520,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Reduction
 
     g_M = lowerings[aten.max](buf_M, dim=1, keepdim=True)[0]
+    # See [Note] Handle fully masked out rows:
+    # g_M Is the global max among split kv blocks.
+    masked_rows = lowerings[aten.eq](g_M, -float("inf"))
+    g_M = lowerings[aten.where](masked_rows, 0.0, g_M)
     adj_M = lowerings[aten.sub](buf_M, g_M)
     alpha = lowerings[aten.exp2](adj_M)
 
     buf_L = lowerings[aten.mul](buf_L, alpha)
     g_L = lowerings[aten.sum](buf_L, axis=1)
+    masked_rows_squeezed = lowerings[aten.squeeze](masked_rows, dim=1)
+    g_L = lowerings[aten.where](masked_rows_squeezed, 1.0, g_L)
     logsumexp = lowerings[aten.log2](g_L)
     logsumexp = lowerings[aten.add](logsumexp, lowerings[aten.squeeze](g_M, dim=1))
 
