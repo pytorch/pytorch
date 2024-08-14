@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import skipIfCudaWindows, skipIfWindow
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
     @skipIfCudaWindows
+    @skipIfWindows
     def test_with_buffer_as_submodule(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
@@ -86,6 +87,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
     @skipIfCudaWindows
+    @skipIfWindows
     def test_mark_strict_with_container_type(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):

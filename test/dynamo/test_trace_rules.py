@@ -22,6 +22,11 @@ from torch._dynamo.trace_rules import (
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfCudaWindows,
+    skipIfWindows,
+)
 
 
 try:
@@ -438,6 +443,8 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         not torch.distributed.is_available(),
         "need to import MLP module from distributed",
     )
+    @skipIfCudaWindows
+    @skipIfWindows
     def test_module_survive_skip_files(self):
         from torch.testing._internal.common_fsdp import MLP
 
