@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
     skipIfWindowsCuda,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -60,6 +61,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_basic(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -92,6 +94,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_clear_fx_graph_cache(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -124,6 +127,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_fx_graph_cache_off(self):
         """
         Should not use cache if FXGraphCache is not enabled
@@ -156,6 +160,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     @dynamo_config.patch("compiled_autograd", True)
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_compiled_autograd_bypass(self):
         def fn(a, b):
             out = a.cos() + b
@@ -180,6 +185,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     @dynamo_config.patch("compiled_autograd", True)
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_inference_graph_cache_hit_with_compiled_autograd_enabled(self):
         def fn(a, b):
             out = a.cos() + b
@@ -204,6 +210,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_autograd_lazy_backward(self):
         """
         Lazily compile the backward, and lazily save to cache
@@ -255,6 +262,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_autograd_function(self):
         """
         Tests autograd cache hits
@@ -398,6 +406,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindowsCuda
+    @skipIfWindows
     def test_nn_module_with_params_global_constant(self):
         class MyMod(torch.nn.Module):
             CONSTANT = torch.tensor([[2, 2], [2, 2]])
