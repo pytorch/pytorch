@@ -20,6 +20,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
       size_t block_size,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
+      HandleType mc_handle,
+      void* mc_addr,
       size_t buffer_size,
       int local_device_idx,
       int rank,
@@ -33,6 +35,9 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void** get_signal_pad_ptrs_dev() override;
   size_t get_buffer_size() override;
   size_t get_signal_pad_size() override;
+
+  bool has_multicast_support() override;
+  void* get_multicast_ptr() override;
 
   at::Tensor get_buffer(
       int rank,
@@ -52,6 +57,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
   size_t block_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
+  HandleType mc_handle_;
+  void* mc_addr_;
   size_t buffer_size_;
   int local_device_idx_;
   int rank_;
@@ -95,6 +102,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) override;
   bool is_rendezvous_completed(void* ptr) override;
+  bool has_multicast_support() override;
 
  private:
   c10::intrusive_ptr<Block> find_block(void* ptr);
