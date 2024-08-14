@@ -1363,6 +1363,10 @@ class TestConverter(TestCase):
         # Trace unrolls the loop.
         # self._check_equal_ts_ep_converter(func3, inp, ["script"])
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Windows does not support qnnpack",
+    )
     def test_ts2ep_convert_quantized_model(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
