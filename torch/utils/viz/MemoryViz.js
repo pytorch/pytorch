@@ -1275,6 +1275,22 @@ function create_trace_view(
   plot.set_delegate(delegate);
 }
 
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    settings_div
+      .append('pre')
+      .text(JSON.stringify(snapshot.allocator_settings, null, 2));
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
+}
+
 function unpickle(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
@@ -1568,6 +1584,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};
