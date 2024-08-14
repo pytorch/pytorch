@@ -202,10 +202,10 @@ int set_verbose(int level) {
 
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::data_ptr"),
+      TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
       TORCH_FN(data_ptr_from_onednn));
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::_nbytes"),
+      TORCH_SELECTIVE_NAME("mkldnn::_nbytes"),
       TORCH_FN(nbytes_from_onednn));
 }
 
