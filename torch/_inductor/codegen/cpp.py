@@ -4252,7 +4252,9 @@ class CppScheduling(BaseScheduling):
                     return False
             return True
 
-        flag_can_alias = can_alias(ctb, template_node.outputs_by_name, epilogue_nodes)
+        flag_can_alias = can_alias(
+            ctb, template_node.outputs_by_name, epilogue_ir_nodes
+        )
         kernel, render = ctb.make_kernel_render(
             ctb,
             flag_can_alias=flag_can_alias,

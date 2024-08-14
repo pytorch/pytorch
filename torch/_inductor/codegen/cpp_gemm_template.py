@@ -723,7 +723,6 @@ class CppPackedGemmTemplate(CppTemplate):
             and template_buffer_node is not None
             and not can_alias
         ):
-
             # TODO: refine the func name
             def copy_epilogue(input_buffer: ir.Buffer):
                 dtype = self.layout.dtype
