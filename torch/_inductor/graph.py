@@ -1785,8 +1785,6 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-        with open(V.debug.filename("output_code.py"), "w") as f:
-            f.write(code)
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)

@@ -668,6 +668,7 @@ class TritonBenchmarkRequest:
             )
         else:
             from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
             return functools.partial(
                 run_method,
                 *input_tensors,

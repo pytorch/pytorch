@@ -25,7 +25,11 @@ def has_triton() -> bool:
     def _return_true(device_interface):
         return True
 
-    triton_supported_devices = {"cuda": cuda_extra_check, "xpu": _return_true, "cpu": _return_true}
+    triton_supported_devices = {
+        "cuda": cuda_extra_check,
+        "xpu": _return_true,
+        "cpu": _return_true,
+    }
 
     def is_device_compatible_with_triton():
         for device, extra_check in triton_supported_devices.items():

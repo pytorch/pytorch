@@ -27,7 +27,11 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
-from .autotune_process import TensorMeta, TritonCPUBenchmarkRequest, TritonGPUBenchmarkRequest
+from .autotune_process import (
+    TensorMeta,
+    TritonCPUBenchmarkRequest,
+    TritonGPUBenchmarkRequest,
+)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (

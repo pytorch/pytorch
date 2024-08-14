@@ -310,13 +310,13 @@ def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterfa
 
 from dataclasses import dataclass
 
+
 @dataclass
 class CpuDeviceProperties:
     multi_processor_count: int
 
 
 class CpuInterface(DeviceInterface):
-
     @staticmethod
     def is_available() -> bool:
         return True
@@ -341,8 +341,10 @@ class CpuInterface(DeviceInterface):
         @staticmethod
         def get_device_properties(device: _device_t = None):
             import multiprocessing
+
             cpu_count = multiprocessing.cpu_count()
             return CpuDeviceProperties(cpu_count)
+
 
 def init_device_reg():
     global _device_initialized
