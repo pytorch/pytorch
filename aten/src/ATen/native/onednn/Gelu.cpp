@@ -33,7 +33,7 @@ namespace at { namespace native {
 
 Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
   if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
+    TORCH_CHECK(onednn_bf16_device_check(),
         "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
@@ -42,7 +42,7 @@ Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+  return new_with_itensor_onednn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
 
@@ -54,7 +54,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
   ideep::tensor gradx;
   ideep::eltwise_backward::compute(x, grady, gradx,
       ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
-  return new_with_itensor_mkldnn(std::move(gradx),
+  return new_with_itensor_onednn(std::move(gradx),
                                  optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                  grad_output.options().device_opt());
 }

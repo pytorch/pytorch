@@ -48,55 +48,55 @@ class TestMkldnn(TestCase):
                               torch.float: [torch.bfloat16, torch.half]}
             # float/bfloat16/half cpu tensor to mkldnn tensortensor.
             for dtype1 in types:
-                mkldnn_tensor = cpu_tensor.to_mkldnn(dtype1)
-                self.assertEqual(mkldnn_tensor.dtype, dtype1)
-                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                onednn_tensor = cpu_tensor.to_mkldnn(dtype1)
+                self.assertEqual(onednn_tensor.dtype, dtype1)
+                cpu_tensor_1 = onednn_tensor.to_dense()
                 # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
-                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                self.assertEqual(onednn_tensor.dtype, cpu_tensor_1.dtype)
                 # mkldnn float/bfloat tensor to cpu float or bfloat tensor
                 for dtype2 in convert_dtypes[dtype1]:
-                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                    cpu_tensor_2 = onednn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
                     atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
                     self.assertEqual(cpu_tensor, cpu_tensor_2.float(), atol=atol, rtol=0)
 
-                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(onednn_tensor.device, torch.device('cpu'))
+                self.assertEqual(onednn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(onednn_tensor.numel(), cpu_tensor.numel())
                 if dtype1 == torch.float:
-                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                    self.assertEqual(onednn_tensor.element_size(), cpu_tensor.element_size())
                 else:
-                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size() / 2)
+                    self.assertEqual(onednn_tensor.element_size(), cpu_tensor.element_size() / 2)
                 self.assertRaisesRegex(RuntimeError,
                                        "Cannot access data pointer of Tensor that doesn't have storage",
-                                       lambda: mkldnn_tensor.data_ptr() != 0)
+                                       lambda: onednn_tensor.data_ptr() != 0)
 
             # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
             for orig_dtype in [torch.half, torch.bfloat16]:
                 cpu_tensor_lower = cpu_tensor.to(dtype=orig_dtype)
                 for dtype1 in convert_dtypes[orig_dtype]:
-                    mkldnn_tensor = cpu_tensor_lower.to_mkldnn(dtype1)
-                    self.assertEqual(mkldnn_tensor.dtype, dtype1)
-                    cpu_tensor_1 = mkldnn_tensor.to_dense()
+                    onednn_tensor = cpu_tensor_lower.to_mkldnn(dtype1)
+                    self.assertEqual(onednn_tensor.dtype, dtype1)
+                    cpu_tensor_1 = onednn_tensor.to_dense()
                     # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
-                    self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                    self.assertEqual(onednn_tensor.dtype, cpu_tensor_1.dtype)
                     # mkldnn float/bfloat/half tensor to cpu float/bfloat/half tensor
                     for dtype2 in convert_dtypes[cpu_tensor_lower.dtype]:
-                        cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                        cpu_tensor_2 = onednn_tensor.to_dense(dtype2)
                         self.assertEqual(cpu_tensor_2.dtype, dtype2)
                         self.assertEqual(cpu_tensor_lower,
                                          cpu_tensor_2.to(dtype=cpu_tensor_lower.dtype), atol=1e-5, rtol=0)
 
-                    self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-                    self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-                    self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                    self.assertEqual(onednn_tensor.device, torch.device('cpu'))
+                    self.assertEqual(onednn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                    self.assertEqual(onednn_tensor.numel(), cpu_tensor.numel())
                     if dtype1 in [torch.bfloat16, torch.half]:
-                        self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size())
+                        self.assertEqual(onednn_tensor.element_size(), cpu_tensor_lower.element_size())
                     else:
-                        self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size() * 2)
+                        self.assertEqual(onednn_tensor.element_size(), cpu_tensor_lower.element_size() * 2)
                     self.assertRaisesRegex(RuntimeError,
                                            "Cannot access data pointer of Tensor that doesn't have storage",
-                                           lambda: mkldnn_tensor.data_ptr() != 0)
+                                           lambda: onednn_tensor.data_ptr() != 0)
 
     def test_conversion_byte_char(self):
         int8_types = [torch.int8, torch.uint8]
@@ -117,18 +117,18 @@ class TestMkldnn(TestCase):
                                device=torch.device('cpu'))[:, :, :, :, :]]:
 
                 cpu_tensor = cpu_tensor.to(dtype=int8_type)
-                mkldnn_tensor = cpu_tensor.to_mkldnn(int8_type)
-                self.assertEqual(mkldnn_tensor.dtype, int8_type)
-                cpu_tensor_1 = mkldnn_tensor.to_dense()
-                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                onednn_tensor = cpu_tensor.to_mkldnn(int8_type)
+                self.assertEqual(onednn_tensor.dtype, int8_type)
+                cpu_tensor_1 = onednn_tensor.to_dense()
+                self.assertEqual(onednn_tensor.dtype, cpu_tensor_1.dtype)
                 self.assertEqual(cpu_tensor, cpu_tensor_1)
-                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-                self.assertEqual(mkldnn_tensor.size(), cpu_tensor.size())
-                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-                self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                self.assertEqual(onednn_tensor.device, torch.device('cpu'))
+                self.assertEqual(onednn_tensor.size(), cpu_tensor.size())
+                self.assertEqual(onednn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(onednn_tensor.element_size(), cpu_tensor.element_size())
                 self.assertRaisesRegex(RuntimeError,
                                        "Cannot access data pointer of Tensor that doesn't have storage",
-                                       lambda: mkldnn_tensor.data_ptr() != 0)
+                                       lambda: onednn_tensor.data_ptr() != 0)
 
     def test_copy(self):
         x = torch.randn(4, 5, dtype=torch.float32)
@@ -310,8 +310,8 @@ class TestMkldnn(TestCase):
                                bias=bias,
                                groups=groups).float()
             x_lower = x.to(dtype=dtype)
-            if (dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()) or \
-               (dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()):
+            if (dtype == torch.bfloat16 and torch.ops.mkldnn._is_onednn_bf16_supported()) or \
+               (dtype == torch.half and torch.ops.mkldnn._is_onednn_fp16_supported()):
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
                 mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                 y = mkldnn_conv(x.to_mkldnn()).to_dense()
@@ -407,11 +407,11 @@ class TestMkldnn(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_conv_nhwc_lower_precision(self, dtype):
-        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        # when torch.ops.mkldnn._is_onednn_bf16_supported() or torch.ops.mkldnn._is_onednn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
         support_checks = {
-            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
-            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported
+            torch.bfloat16: torch.ops.mkldnn._is_onednn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_onednn_fp16_supported
         }
         if support_checks[dtype]():
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=dtype)
@@ -442,11 +442,11 @@ class TestMkldnn(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_conv_transpose_nhwc_lower_precision(self, dtype):
-        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        # when torch.ops.mkldnn._is_onednn_bf16_supported() or torch.ops.mkldnn._is_onednn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
         support_checks = {
-            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
-            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported
+            torch.bfloat16: torch.ops.mkldnn._is_onednn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_onednn_fp16_supported
         }
         if support_checks[dtype]():
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype)
@@ -593,7 +593,7 @@ class TestMkldnn(TestCase):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x_bf16 = x.bfloat16()
         fn = getattr(torch, name)
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             y = fn(x.to_mkldnn()).to_dense()
             y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -629,7 +629,7 @@ class TestMkldnn(TestCase):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x1 = x.clone().to_mkldnn().requires_grad_()
         x2 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             y1 = m(x1).to_dense()
             y2 = m(x2).to_dense()
             loss1 = y1.sum()
@@ -679,7 +679,7 @@ class TestMkldnn(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_prelu_bf16_base(self, size, num_channels):
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             x = torch.randn(size, dtype=torch.float32)
             x_fp32 = x.clone().to_mkldnn().requires_grad_()
             x_bf16 = x.clone().to_mkldnn(torch.bfloat16).requires_grad_()
@@ -760,7 +760,7 @@ class TestMkldnn(TestCase):
                     padding=1,
                     ceil_mode=ceil_mode)
 
-                if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+                if torch.ops.mkldnn._is_onednn_bf16_supported():
                     y = max_pool(input.to_mkldnn()).to_dense()
                     y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
@@ -878,7 +878,7 @@ class TestMkldnn(TestCase):
                 stride=2,
                 padding=1,
                 count_include_pad=count_include_pad)
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            if torch.ops.mkldnn._is_onednn_bf16_supported():
                 y = avg_pool(input.to_mkldnn()).to_dense()
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -949,7 +949,7 @@ class TestMkldnn(TestCase):
         x_bf16 = x.bfloat16()
         adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
 
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.ops.mkldnn._is_onednn_bf16_supported():
             y = adaptive_avg_pool2d(x.to_mkldnn()).to_dense()
             y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -1017,7 +1017,7 @@ class TestMkldnn(TestCase):
         for train in [False]:
             bn = bn_module[dim](channels).float().train(train)
             mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            if torch.ops.mkldnn._is_onednn_bf16_supported():
                 y = bn(input.to_mkldnn().to_dense())
                 y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
@@ -1312,8 +1312,8 @@ class TestMkldnn(TestCase):
                 copy.deepcopy(linear), dtype
             )
             lowp_support = {
-                torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
-                torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+                torch.bfloat16: torch.ops.mkldnn._is_onednn_bf16_supported,
+                torch.half: torch.ops.mkldnn._is_onednn_fp16_supported,
             }
             if lowp_support[dtype]():
                 y = mkldnn_linear(x.to_mkldnn()).to_dense()
@@ -1481,7 +1481,7 @@ class TestMkldnn(TestCase):
 
         params_list = self._lstm_params_list()
         for dtype in types:
-            bf16 = True if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported() else False
+            bf16 = True if dtype == torch.bfloat16 and torch.ops.mkldnn._is_onednn_bf16_supported() else False
             rtol = 1.3e-6
             atol = 1e-5
             if bf16:
@@ -1553,8 +1553,8 @@ class TestMkldnn(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_matmul_lower_precision(self, dtype):
         support_check = {
-            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
-            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+            torch.bfloat16: torch.ops.mkldnn._is_onednn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_onednn_fp16_supported,
         }
 
         def common(self, shape1, shape2, op, dtype):

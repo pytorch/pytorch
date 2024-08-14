@@ -6017,7 +6017,7 @@ Done""",
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
     )
-    def test_gradcheck_multiple_mkldnn_inputs(self):
+    def test_gradcheck_multiple_onednn_inputs(self):
         def check(fast_mode):
             def fn(x, y):
                 return x + y.to_dense()

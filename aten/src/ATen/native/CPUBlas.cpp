@@ -166,7 +166,7 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_ONEDNN_ENABLED()
-   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (onednn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -321,7 +321,7 @@ void gemm(
    }
 #endif
 #if AT_ONEDNN_ENABLED()
-   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (onednn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -340,7 +340,7 @@ void gemm(
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_ONEDNN_ENABLED()
-   if (mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (onednn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif

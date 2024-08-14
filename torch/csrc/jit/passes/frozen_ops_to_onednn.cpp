@@ -241,7 +241,7 @@ Operation createUnaryOp(
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
-    auto a_it = at::native::itensor_from_mkldnn(a);
+    auto a_it = at::native::itensor_from_onednn(a);
     auto mkldnn_raw_data = a_it.get_data_handle();
     auto a_options_with_strided = a.options().layout(c10::kStrided);
 
@@ -261,12 +261,12 @@ Operation createUnaryOp(
       // of the right physical size.
       auto it_empty = ideep::tensor(a_it.get_desc());
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
-      out = at::native::new_with_itensor_mkldnn(
+      out = at::native::new_with_itensor_onednn(
           std::move(it_empty),
           c10::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
-      out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
+      out_raw_data = at::native::itensor_from_onednn(out).get_data_handle();
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -300,7 +300,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   auto input = pop(stack).toTensor();
 
   auto [dst, mean, rstd] =
-      at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
+      at::native::onednn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);
 };
@@ -359,8 +359,8 @@ Operation BroadOp(const Node* node) {
         // We use a very simple heuristic to convert an arg in nchw
         // to the blocked format of the other argument.
         c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-        auto a_it = at::native::itensor_from_mkldnn(exp_a);
-        auto b_it = at::native::itensor_from_mkldnn(exp_b);
+        auto a_it = at::native::itensor_from_onednn(exp_a);
+        auto b_it = at::native::itensor_from_onednn(exp_b);
 
         // `is_public_format` means a tensor's physical layout isn't in MKLDNN
         // blocked layout e.g. nchw or nhwc but not nChw8c
@@ -375,13 +375,13 @@ Operation BroadOp(const Node* node) {
         }
 
         auto a_options = exp_a.options();
-        auto a_out = at::native::new_with_itensor_mkldnn(
+        auto a_out = at::native::new_with_itensor_onednn(
             std::move(a_it),
             c10::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
-        auto b_out = at::native::new_with_itensor_mkldnn(
+        auto b_out = at::native::new_with_itensor_onednn(
             std::move(b_it),
             c10::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
@@ -496,9 +496,9 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
   };
 }
 
-Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
-  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
-  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+Tensor onednn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
+  ideep::tensor& x = at::native::itensor_from_onednn(tensor);
+  ideep::tensor& z = at::native::itensor_from_onednn(out);
   ideep::eltwise_forward::compute(
       x,
       z,
@@ -579,7 +579,7 @@ jit::RegisterOperators reg_fut_ops({
               self.options().device_opt(),
               self.options().pinned_memory_opt());
 
-          mkldnn_tensor_scalar_mul(self, out, other);
+          onednn_tensor_scalar_mul(self, out, other);
           push(stack, out);
         },
         aliasAnalysisFromSchema()),
@@ -590,7 +590,7 @@ jit::RegisterOperators reg_fut_ops({
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
-          mkldnn_tensor_scalar_mul(self, self, other);
+          onednn_tensor_scalar_mul(self, self, other);
           push(stack, self);
         },
         aliasAnalysisFromSchema()),
@@ -606,10 +606,10 @@ const RegisterOperators MKLDNNConstantOp({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-Node* createConstantMKLDNNTensorOp(Graph* g, const Tensor& mkldnn_tensor) {
-  TORCH_INTERNAL_ASSERT(mkldnn_tensor.is_mkldnn());
+Node* createConstantMKLDNNTensorOp(Graph* g, const Tensor& onednn_tensor) {
+  TORCH_INTERNAL_ASSERT(onednn_tensor.is_mkldnn());
   auto op = g->create(prim::ConstantMKLDNNTensor);
-  op->t_(attr::value, mkldnn_tensor);
+  op->t_(attr::value, onednn_tensor);
   return op;
 }
 
@@ -620,32 +620,32 @@ bool supportedMKLDNNWeight(const Tensor& weight) {
 
 void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
   Value* input = n->inputs().at(index);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
-  auto mkldnn_tensor_value =
-      createConstantMKLDNNTensorOp(n->owningGraph(), mkldnn_tensor)
+  auto onednn_tensor = constant_as<Tensor>(input)->to_mkldnn();
+  auto onednn_tensor_value =
+      createConstantMKLDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
-  mkldnn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
-  n->replaceInputWith(input, mkldnn_tensor_value);
+  onednn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
+  n->replaceInputWith(input, onednn_tensor_value);
 }
 
 void replaceInputWithMKLDNNTensor(
     Node* n,
     const std::string& name,
-    const at::Tensor& mkldnn_tensor) {
+    const at::Tensor& onednn_tensor) {
   Value* input = n->namedInput(name);
-  auto mkldnn_tensor_value =
-      createConstantMKLDNNTensorOp(n->owningGraph(), mkldnn_tensor)
+  auto onednn_tensor_value =
+      createConstantMKLDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
-  mkldnn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
-  n->replaceInputWith(input, mkldnn_tensor_value);
+  onednn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
+  n->replaceInputWith(input, onednn_tensor_value);
 }
 
 void replaceInputWithMKLDNNTensor(Node* n, const std::string& name) {
   Value* input = n->namedInput(name);
-  auto mkldnn_tensor = constant_as<Tensor>(input)->to_mkldnn();
-  replaceInputWithMKLDNNTensor(n, name, mkldnn_tensor);
+  auto onednn_tensor = constant_as<Tensor>(input)->to_mkldnn();
+  replaceInputWithMKLDNNTensor(n, name, onednn_tensor);
 }
 
 void moveConvWeightsToMKLDNN(Node* conv) {
