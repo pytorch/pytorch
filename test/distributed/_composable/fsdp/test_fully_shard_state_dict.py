@@ -29,7 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class TestFullyShardStateDictMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_save_load(self):
@@ -157,12 +157,45 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
         self.run_subtests(
-            {"mlp_dim": [2, 3, 4, 5]},
+            {"mlp_dim": [4, 6, 8, 10]},
             functools.partial(self._test_dp_tp_state_dict_save_load, global_mesh),
         )
 
     def _test_dp_tp_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
+        model = parallelize_module(
+            model,
+            device_mesh=tp_mesh,
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=dp_mesh)
+        fully_shard(model, mesh=dp_mesh)
+        self._test_state_dict_save_load(model)
+
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_tp_state_dict_save_load(self):
+        global_mesh = init_device_mesh(
+            "cuda",
+            (2, 2, self.world_size // 4),
+            mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
+        )
+        self.run_subtests(
+            {"mlp_dim": [4, 6, 8, 10]},
+            functools.partial(self._test_hsdp_tp_state_dict_save_load, global_mesh),
+        )
+
+    def _test_hsdp_tp_state_dict_save_load(self, global_mesh: DeviceMesh, mlp_dim: int):
+        dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(mlp_dim) for _ in range(3)])
         model = parallelize_module(

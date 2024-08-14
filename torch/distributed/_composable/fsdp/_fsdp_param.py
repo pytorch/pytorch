@@ -285,26 +285,19 @@ class FSDPParam:
                 2 <= self._spmd_mesh.ndim <= 3
             ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
             self._spmd_placements: Tuple[Placement, ...]
+            dp_shard_tp_placement = (
+                (
+                    _StridedShard(0, split_factor=split_factor)
+                    if split_factor > 1
+                    else Shard(0)
+                ),
+                self._tp_spec.placements[0],
+            )
             if self._spmd_mesh.ndim == 2:
-                self._spmd_placements = (
-                    (
-                        _StridedShard(0, split_factor=split_factor)
-                        if split_factor > 1
-                        else Shard(0)
-                    ),
-                    self._tp_spec.placements[0],
-                )
+                self._spmd_placements = dp_shard_tp_placement
             else:
                 assert self.mesh_info.replicate_mesh_dim == 0
-                self._spmd_placements = (
-                    Replicate(),
-                    (
-                        _StridedShard(0, split_factor=split_factor)
-                        if split_factor > 1
-                        else Shard(0)
-                    ),
-                    self._tp_spec.placements[0],
-                )
+                self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,

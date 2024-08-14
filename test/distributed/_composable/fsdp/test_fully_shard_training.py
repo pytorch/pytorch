@@ -1055,9 +1055,6 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
-        # Prefer to test with >=8 GPUs, but for 2 GPUs, use 2-way TP
-        dp_size = 2 if self.world_size > 2 else 1
-        pp_size = 2 if self.world_size > 4 else 1
         return init_device_mesh(
             "cuda",
             (2, 2, 2),
