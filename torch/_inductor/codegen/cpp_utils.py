@@ -680,13 +680,6 @@ def unify_mask_base_type(
     return new_vars
 
 
-def get_gemm_template_output_and_compute_dtype(input_dtype):
-    if input_dtype == torch.uint8:
-        return (torch.int32, torch.int32)
-    else:
-        return (torch.float32, torch.float32)
-
-
 def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
     assert is_integer_dtype(offset.dtype)
     code.writeline("[&]()")
@@ -712,3 +705,10 @@ def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
             )
     code.writeline("()")
     return code
+
+
+def get_gemm_template_output_and_compute_dtype(input_dtype):
+    if input_dtype == torch.uint8:
+        return (torch.int32, torch.int32)
+    else:
+        return (torch.float32, torch.float32)
