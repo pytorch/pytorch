@@ -20,6 +20,7 @@ bool MPSHooks::hasMPS() const {
 }
 
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
+
   switch (major) {
     case 15:
       if (minor > 0)
