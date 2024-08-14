@@ -224,7 +224,7 @@ class TestAutocastCPU(TestCase):
     def test_autocast_rnn(self):
         if (
             torch.backends.mkldnn.is_available()
-            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            and torch.ops.mkldnn._is_onednn_bf16_supported()
         ):
             x = torch.randn(1, 2, 1)
             hx = torch.randn(2, 2, 1)

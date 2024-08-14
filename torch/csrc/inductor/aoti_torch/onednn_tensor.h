@@ -4,9 +4,9 @@
 
 namespace torch::aot_inductor {
 
-void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor);
+void* data_ptr_from_onednn(at::Tensor* onednn_tensor);
 
-at::Tensor mkldnn_tensor_from_data_ptr(
+at::Tensor onednn_tensor_from_data_ptr(
     void* data_ptr,
     at::IntArrayRef dims,
     at::ScalarType dtype,

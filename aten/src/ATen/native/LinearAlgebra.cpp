@@ -1354,7 +1354,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 #endif
 
 
-static inline int64_t get_mkldnn_matmul_min_dim() {
+static inline int64_t get_onednn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
@@ -1373,7 +1373,7 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
 }
 
 
-static inline int64_t get_mkldnn_matmul_min_size() {
+static inline int64_t get_onednn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
@@ -1392,9 +1392,9 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 }
 
 
-static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
-  const int64_t min_dim = get_mkldnn_matmul_min_dim();
-  const int64_t min_size = get_mkldnn_matmul_min_size();
+static inline bool apply_onednn_matmul_heur(int64_t m, int64_t k, int64_t n) {
+  const int64_t min_dim = get_onednn_matmul_min_dim();
+  const int64_t min_size = get_onednn_matmul_min_size();
   return at::globalContext().userEnabledOnednn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
@@ -1518,7 +1518,7 @@ static void addmm_impl_cpu_(
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    bool apply_heur = apply_onednn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
     if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
         onednn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
@@ -1775,7 +1775,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
-  bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
+  bool apply_heur = apply_onednn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_onednn_matmul(batch1, batch2, self_or_result)) {
     try {
       onednn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
@@ -3567,7 +3567,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   bool dispatched = false;
   if (at::globalContext().userEnabledOnednn()) {
     try {
-      mkldnn_matmul_i8i8i32(self, mat2, result);
+      onednn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
     } catch (const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
