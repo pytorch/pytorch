@@ -322,5 +322,14 @@ Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
       });
 }
 
+Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!other.is_nested(), "eq does not support nested tensor as other value.");
+  return NestedTensor_elementwise_Tensor(
+      self, other, "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
 } // namespace native
 } // namespace at
