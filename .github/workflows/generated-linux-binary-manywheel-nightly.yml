@@ -42,21 +42,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  calculate-manylinux-images:
+  calculate-manylinux-builder-cpu:
+    runs-on: linux.9xlarge.ephemeral
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
-    uses: ./.github/workflows/build-manywheel-images.yml
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: manylinux-builder-cpu
+          docker-build-dir:  .ci/docker/manywheel
+          always-rebuild: true
+          push: true
 
   manywheel-py3_9-cpu-build:
     if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: calculate-manylinux-images
+    needs: calculate-manylinux-builder-cpu
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-images.outputs.build-docker-cpu }}
+      DOCKER_IMAGE: ${{ needs.calculate-manylinux-builder-cpu.result == 'skipped' && 'pytorch/manylinux-builder:cpu-main' || needs.calculate-manylinux-builder-cpu.outputs.docker-image }}
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
