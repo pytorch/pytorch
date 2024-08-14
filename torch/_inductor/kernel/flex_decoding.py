@@ -294,11 +294,16 @@ flex_decoding_template = TritonTemplate(
 MAX_SPLIT_KV = 64
 
 
-def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
+def get_split_k(
+    B: int, H: int, Mk: int, SPARSE_BLOCK_SIZE: int = 128, SM: int = 128
+) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     split_k = (SM * 2) // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
+
+    max_split_k = Mk // SPARSE_BLOCK_SIZE
+    split_k = min(split_k, max_split_k)
 
     return split_k
 
@@ -379,7 +384,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options["SM_SCALE"] = scale
     kernel_options["SPLIT_KV"] = get_split_k(
-        key.get_size()[0], key.get_size()[1], key.get_size()[2]
+        key.get_size()[0], key.get_size()[1], key.get_size()[2], SPARSE_KV_BLOCK_SIZE
     )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
     assert kernel_options["SPLIT_KV"] <= MAX_SPLIT_KV
