@@ -1271,6 +1271,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         dtypes=(torch.int8, torch.uint8, torch.int16),
     ),
     xfail(
+        "linalg.matrix_rank",
+        reason=onnx_test_common.reason_dynamo_does_not_support("linalg_matrix_rank"),
+    ),
+    xfail(
         "where",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),

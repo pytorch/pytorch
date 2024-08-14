@@ -45,7 +45,9 @@ placeholder_prefixes = {
 }
 
 
-def _collect_constant_attrs(graph_signature, constants, mod) -> "ConstantAttrMap":
+def _collect_and_set_constant_attrs(
+    graph_signature, constants, mod
+) -> "ConstantAttrMap":
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
     # and overwrite the new graph signature using the previous program.
@@ -70,6 +72,102 @@ def _collect_constant_attrs(graph_signature, constants, mod) -> "ConstantAttrMap
         setattr(_mod, attr, value)
         constant_attrs.add(value, name)
     return constant_attrs
+
+
+def _overwrite_signature_for_non_persistent_buffers(
+    old_sig: "ExportGraphSignature", new_sig: "ExportGraphSignature"
+):
+    # overwrite signature for non-persistent buffers
+    non_persistent_buffers = {
+        spec.target
+        for spec in old_sig.input_specs
+        if spec.kind == InputKind.BUFFER and not spec.persistent
+    }
+
+    for spec in new_sig.input_specs:
+        if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
+            spec.persistent = False
+    return new_sig
+
+
+def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
+    """
+    Param/buffer metadata needs to be saved before lowering to aten IR
+    because aten IR lifts them, as a result, automatic preservation doesn't work
+    """
+    params_buffers_to_node_meta = {}
+
+    def _getattr(model: torch.fx.GraphModule, attr_name: str):
+        *prefix, field = attr_name.split(".")
+        t = model
+        for item in prefix:
+            t = getattr(t, item, None)  # type: ignore[assignment]
+            assert t is not None
+
+        return getattr(t, field)
+
+    for node in mod.graph.nodes:
+        target = node.target
+        meta = node.meta
+        if node.op == "call_module":
+            submodule = _getattr(mod, target)
+            if isinstance(submodule, torch.nn.Module):
+                for name, _ in submodule.named_parameters(
+                    recurse=True, remove_duplicate=False
+                ):
+                    params_buffers_to_node_meta[target + "." + name] = meta
+
+                for name, _ in submodule.named_buffers(
+                    recurse=True, remove_duplicate=False
+                ):
+                    params_buffers_to_node_meta[target + "." + name] = meta
+
+        if node.op == "get_attr":
+            submodule = _getattr(mod, target)
+            if not isinstance(submodule, torch.fx.GraphModule):
+                params_buffers_to_node_meta[target] = meta
+
+        # If the call_function uses param as input, we also need to update params' meta
+        # with this call_function node's meta.
+        # This is basically the same flow as torch.fx.traceback.preserve_meta()
+        if node.op == "call_function" and not isinstance(
+            node.target, torch._ops.HigherOrderOperator
+        ):
+            for arg in node._input_nodes:
+                if arg.op == "get_attr":
+                    for entry in torch.fx.proxy._COPY_META_FIELDS:
+                        if entry in meta:
+                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+
+    return params_buffers_to_node_meta
+
+
+def _populate_param_buffer_metadata_to_new_gm(
+    params_buffers_to_node_meta: Dict[str, Any],
+    gm: torch.fx.GraphModule,
+    new_sig: "ExportGraphSignature",
+) -> None:
+    """
+    Given that we collected param'buffer metadata before, we put them back in
+    newly traced graph module
+    """
+    # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
+    for metadata in params_buffers_to_node_meta.values():
+        metadata.pop("nn_module_stack", None)
+        metadata.pop("stack_trace", None)
+
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if node.target in new_sig.inputs_to_parameters:
+                param_name = new_sig.inputs_to_parameters[node.target]
+                if param_name in params_buffers_to_node_meta:
+                    for k, v in params_buffers_to_node_meta[param_name].items():
+                        node.meta[k] = v
+            if node.target in new_sig.inputs_to_buffers:
+                buffer_name = new_sig.inputs_to_buffers[node.target]
+                if buffer_name in params_buffers_to_node_meta:
+                    for k, v in params_buffers_to_node_meta[buffer_name].items():
+                        node.meta[k] = v
 
 
 def _get_shape_env_from_gm(gm: torch.fx.GraphModule):

@@ -38,7 +38,9 @@ from torch._export.passes.lift_constants_pass import (
     rewrite_script_object_meta,
 )
 from torch._export.utils import (
+    _collect_param_buffer_metadata,
     _get_shape_env_from_gm,
+    _populate_param_buffer_metadata_to_new_gm,
     placeholder_naming_pass,
     placeholder_prefixes,
 )
@@ -1345,43 +1347,6 @@ def _strict_export_lower_to_aten_ir(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
-    # from the param nodes as they are treated as fresh inputs
-    # Therefore, we manually extract them before calling into aot_export
-    params_buffers_to_node_meta = {}
-    for node in gm_torch_level.graph.nodes:
-        target = node.target
-        meta = node.meta
-        if node.op == "call_module":
-            submodule = getattr(gm_torch_level, target)
-            if isinstance(submodule, torch.nn.Module):
-                for name, _ in submodule.named_parameters(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-                for name, _ in submodule.named_buffers(
-                    recurse=True, remove_duplicate=False
-                ):
-                    params_buffers_to_node_meta[target + "." + name] = meta
-
-        if node.op == "get_attr":
-            submodule = getattr(gm_torch_level, target)
-            if not isinstance(submodule, torch.fx.GraphModule):
-                params_buffers_to_node_meta[target] = meta
-
-        # If the call_function uses param as input, we also need to update params' meta
-        # with this call_function node's meta.
-        # This is basically the same flow as torch.fx.traceback.preserve_meta()
-        if node.op == "call_function" and not isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            for arg in node._input_nodes:
-                if arg.op == "get_attr":
-                    for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
-
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
 
@@ -1405,6 +1370,13 @@ def _strict_export_lower_to_aten_ir(
     gm_torch_level.recompile()
 
     _normalize_nn_module_stack(gm_torch_level, type(mod))
+
+    params_buffers_to_node_meta = _collect_param_buffer_metadata(gm_torch_level)
+
+    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
+    # from the param nodes as they are treated as fresh inputs
+    # Therefore, we manually extract them before calling into aot_export
+    # params_buffers_to_node_meta = _collect_param_buffer_metadata(gm_torch_level)
 
     constant_attrs = _gather_constant_attrs(mod)
     param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
@@ -1434,26 +1406,9 @@ def _strict_export_lower_to_aten_ir(
     export_graph_signature = aten_export_artifact.sig
     constants = aten_export_artifact.constants
 
-    # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
-    for metadata in params_buffers_to_node_meta.values():
-        metadata.pop("nn_module_stack", None)
-        metadata.pop("stack_trace", None)
-
-    # After aot_export, set the param/buffer metadata back into placeholders
-    # Technically, users can still construct this data from param names
-    # without relying on this metadata
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.target in export_graph_signature.inputs_to_parameters:
-                param_name = export_graph_signature.inputs_to_parameters[node.target]
-                if param_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[param_name].items():
-                        node.meta[k] = v
-            if node.target in export_graph_signature.inputs_to_buffers:
-                buffer_name = export_graph_signature.inputs_to_buffers[node.target]
-                if buffer_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[buffer_name].items():
-                        node.meta[k] = v
+    _populate_param_buffer_metadata_to_new_gm(
+        params_buffers_to_node_meta, gm, export_graph_signature
+    )
 
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.

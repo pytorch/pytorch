@@ -39,9 +39,12 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
-    _collect_constant_attrs,
+    _collect_and_set_constant_attrs,
+    _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
     _get_shape_env_from_gm,
+    _overwrite_signature_for_non_persistent_buffers,
+    _populate_param_buffer_metadata_to_new_gm,
 )
 from torch._export.verifier import Verifier
 from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -301,29 +304,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
     # and overwrite the new graph signature using the previous program.
-    constant_attrs = _collect_constant_attrs(ep.graph_signature, ep.constants, mod)
+    constant_attrs = _collect_and_set_constant_attrs(
+        ep.graph_signature, ep.constants, mod
+    )
 
     # get params & buffers after excluding constants
     fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
-    params_buffers_to_node_meta = {}
-    for node in mod.graph.nodes:
-        target = node.target
-        meta = node.meta
-        if node.op == "get_attr":
-            params_buffers_to_node_meta[target] = meta
-
-        # If the call_function uses param as input, we also need to update params' meta
-        # with this call_function node's meta.
-        # This is basically the same flow as torch.fx.traceback.preserve_meta()
-        if node.op == "call_function" and not isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            for arg in node._input_nodes:
-                if arg.op == "get_attr":
-                    for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        if entry in meta:
-                            params_buffers_to_node_meta[arg.target][entry] = meta[entry]
+    params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
         _preserve_ops,
@@ -346,44 +334,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
     gm = aten_export_artifact.gm
     new_graph_signature = aten_export_artifact.sig
 
-    for node in gm.graph.nodes:
-        # nn_module_stack
-        if node.op not in ["placeholder", "output"]:
-            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
-                if isinstance(mod_cls, type):
-                    node.meta["nn_module_stack"][key] = (
-                        fqn,
-                        mod_cls.__module__ + "." + mod_cls.__qualname__,
-                    )
-
-    # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
-    for metadata in params_buffers_to_node_meta.values():
-        metadata.pop("nn_module_stack", None)
-        metadata.pop("stack_trace", None)
-
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.target in new_graph_signature.inputs_to_parameters:
-                param_name = new_graph_signature.inputs_to_parameters[node.target]
-                if param_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[param_name].items():
-                        node.meta[k] = v
-            if node.target in new_graph_signature.inputs_to_buffers:
-                buffer_name = new_graph_signature.inputs_to_buffers[node.target]
-                if buffer_name in params_buffers_to_node_meta:
-                    for k, v in params_buffers_to_node_meta[buffer_name].items():
-                        node.meta[k] = v
+    _populate_param_buffer_metadata_to_new_gm(
+        params_buffers_to_node_meta, gm, new_graph_signature
+    )
 
     # overwrite signature for non-persistent buffers
-    non_persistent_buffers = {
-        spec.target
-        for spec in ep.graph_signature.input_specs
-        if spec.kind == InputKind.BUFFER and not spec.persistent
-    }
-
-    for spec in new_graph_signature.input_specs:
-        if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
-            spec.persistent = False
+    new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
+        ep.graph_signature, new_graph_signature
+    )
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
