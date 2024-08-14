@@ -4,10 +4,8 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/cpu/Utils.h>
 #include <ideep.hpp>
-#if !defined(__s390x__) && !defined(__powerpc__)
-#include <cpuinfo.h>
-#endif
 
 #include <c10/util/CallOnce.h>
 
@@ -433,11 +431,8 @@ inline bool should_use_onednn_quant(
   // TODO Support more OSs.
 #if !defined(__linux__)
   return false;
-#elif defined(__s390x__) || defined(__powerpc__)
-  // Return true since these platforms do not support FBGEMM
-  return true;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+  bool vnni_available = at::cpu::is_cpu_support_avx512_vnni();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
