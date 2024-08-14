@@ -219,7 +219,7 @@ class TestMkldnnFusion(JitTestCase):
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars
                     algorithm = pointwise_info.algorithm
-                    fused = torch.ops.mkldnn._linear_pointwise(
+                    fused = torch.ops.onednn._linear_pointwise(
                         v, mod.linear.weight, mod.linear.bias, attr, scalars, algorithm
                     )
                     self.assertEqual(ref, fused)
@@ -254,7 +254,7 @@ class TestMkldnnFusion(JitTestCase):
                         attr = pointwise_info.attr
                         scalars = pointwise_info.scalars
                         algorithm = pointwise_info.algorithm
-                        fused = torch.ops.mkldnn._convolution_pointwise(
+                        fused = torch.ops.onednn._convolution_pointwise(
                             x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, scalars, algorithm
                         )
@@ -293,13 +293,13 @@ class TestMkldnnFusion(JitTestCase):
                             ref.relu_()
                             unary_attr = "relu"
                         attr = pointwise_name
-                        fused = torch.ops.mkldnn._convolution_pointwise(
+                        fused = torch.ops.onednn._convolution_pointwise(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, None, unary_attr, [], None
                         )
                         # for binary add, we support inplace version.
                         if attr == "add":
-                            fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
+                            fused_inplace = torch.ops.onednn._convolution_pointwise_(
                                 other, x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                                 mod.conv.groups, attr, None, unary_attr, [], None
                             )
@@ -337,7 +337,7 @@ class TestMkldnnFusion(JitTestCase):
                     other = torch.randn(input_shape[:-1] + [out_feature])
                     ref = mod(v, other)
                     attr = pointwise_name
-                    fused = torch.ops.mkldnn._linear_pointwise(
+                    fused = torch.ops.onednn._linear_pointwise(
                         v, other, mod.linear.weight, mod.linear.bias, attr
                     )
                     self.assertEqual(ref, fused)
@@ -374,7 +374,7 @@ class TestMkldnnFusion(JitTestCase):
                         algorithm = pointwise_info.algorithm
 
                         if prepack_weight:
-                            packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
+                            packed_weight = torch.ops.onednn._reorder_convolution_transpose_weight(
                                 mod.conv_transpose.weight,
                                 mod.conv_transpose.padding,
                                 mod.conv_transpose.output_padding,
@@ -387,7 +387,7 @@ class TestMkldnnFusion(JitTestCase):
                                 requires_grad=mod.conv_transpose.weight.requires_grad,
                             )
 
-                        fused = torch.ops.mkldnn._convolution_transpose_pointwise(
+                        fused = torch.ops.onednn._convolution_transpose_pointwise(
                             x,
                             mod.conv_transpose.weight,
                             mod.conv_transpose.bias,
