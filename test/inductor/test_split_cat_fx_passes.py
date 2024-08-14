@@ -1203,8 +1203,10 @@ class TestSplitCatFxPasses(TestCase):
             post_grad_fusion_options={},
         )
         def unbind_cat_to_view(x):
-            x_c = x.view(10, 50, 500)
-            l1_out = torch.unbind(x_c, dim=0)
+            y = x.view(10, 50, 500)
+            z = x.view(10, 50, 500)
+            l1_out = torch.unbind(y, dim=0)
+            l2_out = torch.unbind(z, dim=0)
             item0 = l1_out[0]
             item1 = l1_out[1]
             item2 = l1_out[2]
@@ -1215,6 +1217,19 @@ class TestSplitCatFxPasses(TestCase):
             item7 = l1_out[7]
             item8 = l1_out[8]
             item9 = l1_out[9]
+            item2_0 = l2_out[0]
+            item2_1 = l2_out[1]
+            item2_2 = l2_out[2]
+            item2_3 = l2_out[3]
+            item2_4 = l2_out[4]
+            item2_5 = l2_out[5]
+            item2_6 = l2_out[6]
+            item2_7 = l2_out[7]
+            item2_8 = l2_out[8]
+            item2_9 = l2_out[9]
+            other1 = item7.clone()
+            other2 = item8.clone()
+            other3 = item9.clone()
             cat = torch.cat(
                 [
                     item0,
@@ -1224,10 +1239,23 @@ class TestSplitCatFxPasses(TestCase):
                     item4,
                     item5,
                     item6,
+                    other1,
+                    item2_0,
+                    item2_1,
+                    item2_2,
+                    item2_3,
+                    item2_4,
+                    item2_5,
+                    item2_6,
+                    item2_7,
+                    item2_8,
+                    item2_9,
+                    other2,
+                    other3,
                 ],
                 dim=1,
             )
-            return torch.cat((cat, item7, item8, item9), dim=1)
+            return cat
 
         @torch._inductor.config.patch(
             pre_grad_fusion_options={

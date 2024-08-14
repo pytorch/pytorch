@@ -127,6 +127,7 @@ class ScheduleWithW(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
+        enable_zero_bubble: bool = True,
     ):
         super().__init__(
             stages=stages,

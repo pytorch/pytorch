@@ -610,41 +610,40 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        if full_backward:
+        # Custom backward function
+        if self.dw_builder:
             self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-            logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
-        else:
-            # perform the partial backwards for the inputs
-            # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-            if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
-                bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
-
-            dinputs, param_groups = stage_backward_input(
-                bwd_kwargs["stage_output"],
-                bwd_kwargs["output_grads"],
-                bwd_kwargs["input_values"],
-                self.submod.parameters(),
-            )
-            # TODO: we dont need to save this, add to dw_runner?
-            self.backward_state[bwd_chunk_id] = (
-                dinputs,
-                input_values,
-                param_groups,
-                bwd_kwargs["stage_output"],
-                bwd_kwargs["output_grads"],
-            )
-            self.grads_input = dinputs
-
-            if self.dw_builder:
-                assert bwd_chunk_id not in self.dw_runner, (
-                    f"{self.log_prefix} Attempted to run partial backward for chunk {bwd_chunk_id}"
-                    " repeatedly without calling `backward_weight_one_chunk`"
-                )
-                dw_runner = self.dw_builder()
+            if full_backward:
+                self.dw_builder()()
             else:
-                # create a dw_runner with the `stage_backward_weight` function
-                dw_runner = stage_backward_weight
-            self.dw_runner[bwd_chunk_id] = dw_runner
+                self.dw_runner[bwd_chunk_id] = self.dw_builder()
+        else:
+            if full_backward:
+                self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
+            else:
+                # perform the partial backwards for the inputs with a custom backward function
+                # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
+                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
+
+                dinputs, param_groups = stage_backward_input(
+                    bwd_kwargs["stage_output"],
+                    bwd_kwargs["output_grads"],
+                    bwd_kwargs["input_values"],
+                    self.submod.parameters(),
+                )
+                # TODO: we dont need to save this, add to dw_runner?
+                self.backward_state[bwd_chunk_id] = (
+                    dinputs,
+                    input_values,
+                    param_groups,
+                    bwd_kwargs["stage_output"],
+                    bwd_kwargs["output_grads"],
+                )
+                self.grads_input = dinputs
+                # save a dw_runner with the `stage_backward_weight` function
+                self.dw_runner[bwd_chunk_id] = stage_backward_weight
+        logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
         if self.dw_builder is not None:
@@ -666,8 +665,8 @@ class _PipelineStageBase(ABC):
                     self.submod.parameters(), param_groups
                 )
             else:
-                # TODO: figure out a better way to do this
-                # incase inputs does not require gradient, then the parameter group will not be fully captured
+                # TODO: figure out a better way to do this:
+                # if inputs does not require gradient, then the parameter group will not be fully captured during stage_backward_weight
                 # in this case, we need call grad directly on the parameters
                 torch.autograd.backward(stage_output, grad_tensors=output_grads)
 

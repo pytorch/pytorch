@@ -122,6 +122,7 @@ AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
 AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
+AOTI_TORCH_ITEM_IMPL(complex64, c10::complex<float>)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -144,6 +145,7 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int16, int16_t, Short)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(complex64, c10::complex<float>, ComplexFloat)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {
@@ -196,6 +198,20 @@ AOTITorchError aoti_torch_get_numel(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_numel = t->numel();
+  });
+}
+
+AOTITorchError aoti_torch_get_storage_numel(
+    AtenTensorHandle tensor,
+    int64_t* ret_numel) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    TORCH_INTERNAL_ASSERT(t->has_storage());
+    auto dtype_size = t->dtype().itemsize();
+    size_t nbytes = t->storage().nbytes();
+    TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+    auto numel = nbytes / dtype_size;
+    *ret_numel = numel;
   });
 }
 
