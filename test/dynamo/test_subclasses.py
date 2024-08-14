@@ -1087,7 +1087,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -1111,7 +1111,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -1141,7 +1141,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
@@ -2156,6 +2156,15 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
 
         compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
         compiled(nt)
+
+    def test_inference_tensor(self):
+        with torch.inference_mode():
+            nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(n):
+            return n * 2
+
+        torch.compile(fn, backend="eager")(nt)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):

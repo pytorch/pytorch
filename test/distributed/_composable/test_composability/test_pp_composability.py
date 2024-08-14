@@ -12,7 +12,6 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
-    _PipelineScheduleRuntime,
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleFlexibleInterleaved1F1B,
@@ -209,15 +208,6 @@ class ComposabilityTest(MultiProcessTestCase):
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
-            if use_new_runtime:
-                old_sch = pipeline_schedule
-                pipeline_schedule = _PipelineScheduleRuntime(
-                    stages,
-                    num_microbatches,
-                    loss_fn=loss_fn,
-                    stage_index_to_group_rank=old_sch.stage_index_to_group_rank,
-                )
-                pipeline_schedule._load_actions(old_sch.pipeline_order)
 
         # Run
         pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
