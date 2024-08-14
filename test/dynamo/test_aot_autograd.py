@@ -19,8 +19,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
     skipIfWindows,
+    skipIfWindowsCuda,
 )
-from torch.testing._internal.inductor_utils import skipIfWindowsCuda
 
 
 def maybe_dupe_op(x):

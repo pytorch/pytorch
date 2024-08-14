@@ -1832,7 +1832,7 @@ def skipIfWindowsCuda(func=None, *, msg="test doesn't currently work on the Wind
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if IS_WINDOWS:  # noqa: F821
+            if IS_WINDOWS and torch.cuda.is_available():  # noqa: F821
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
