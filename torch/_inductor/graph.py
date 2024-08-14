@@ -850,7 +850,7 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
-                    not data.is_mkldnn
+                    not data.is_onednn
                     and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
@@ -1372,8 +1372,8 @@ class GraphLowering(torch.fx.Interpreter):
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C._has_mkldnn:
                             need_fixed_layout += [
-                                torch.ops.mkldnn._linear_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.binary,
+                                torch.ops.onednn._linear_pointwise.default,
+                                torch.ops.onednn._linear_pointwise.binary,
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
@@ -1381,10 +1381,10 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.onednn.qlinear_pointwise.binary_tensor,
                             ]
                             need_fixed_channels_last_layout += [
-                                torch.ops.mkldnn._convolution_pointwise.default,
-                                torch.ops.mkldnn._convolution_pointwise.binary,
-                                torch.ops.mkldnn._convolution_pointwise_.binary,
-                                torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                                torch.ops.onednn._convolution_pointwise.default,
+                                torch.ops.onednn._convolution_pointwise.binary,
+                                torch.ops.onednn._convolution_pointwise_.binary,
+                                torch.ops.onednn._convolution_transpose_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                             ]

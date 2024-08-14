@@ -3108,7 +3108,7 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     train = False
     # If batch_first, inp has been permuted in _rnn_helper. Convert to contiguous here.
-    # Same as aten/src/ATen/native/mkldnn/RNN.cpp: mkldnn_rnn: input = input.contiguous();
+    # Same as aten/src/ATen/native/onednn/RNN.cpp: onednn_rnn: input = input.contiguous();
     inp = inp.contiguous()
     hx = hx.contiguous()
     cx = cx.contiguous()
@@ -3426,7 +3426,7 @@ def select_one_layer_lstm_function(input, hx, params):
         * params: the weight and bias tensors of LSTM
     """
 
-    def use_mkldnn(input, hx, params):
+    def use_onednn(input, hx, params):
         if not torch._C._get_mkldnn_enabled():
             return False
 
@@ -3455,7 +3455,7 @@ def select_one_layer_lstm_function(input, hx, params):
 
     # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
     # will expand over the seq_len dim
-    if use_mkldnn(input, hx, params):
+    if use_onednn(input, hx, params):
         return mkldnn_one_layer_lstm
     else:
         return one_layer_lstm

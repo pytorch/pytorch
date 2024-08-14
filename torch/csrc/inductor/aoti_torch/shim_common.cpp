@@ -4,7 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/onednn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
@@ -170,8 +170,8 @@ AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    if (t->is_mkldnn()) {
-      *ret_data_ptr = data_ptr_from_mkldnn(t);
+    if (t->is_onednn()) {
+      *ret_data_ptr = data_ptr_from_onednn(t);
     } else {
       *ret_data_ptr = t->data_ptr();
     }
@@ -381,7 +381,7 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
       c10::Device device = c10_device(device_type, device_index);
       // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
       // which used by later mkldnn op.
-      *ret_new_tensor = new_tensor_handle(mkldnn_tensor_from_data_ptr(
+      *ret_new_tensor = new_tensor_handle(onednn_tensor_from_data_ptr(
           data,
           sizes,
           static_cast<c10::ScalarType>(dtype),

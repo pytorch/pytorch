@@ -51,7 +51,7 @@ class TestCustomPassBase(TestCase):
 
 
 aten = torch.ops.aten
-mkldnn = torch.ops.mkldnn
+onednn = torch.ops.onednn
 
 
 def change_cos_pass(graph):
@@ -62,7 +62,7 @@ def change_cos_pass(graph):
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
     #  mkldnn fusion's pattern_matcher
-    # (torch/_inductor/fx_passes/mkldnn_fusion.py),
+    # (torch/_inductor/fx_passes/onednn_fusion.py),
     # and apply it to custom post_grad_passes.
     def _register_mkldnn_conv_relu_fusion(self, custom_pass_dict):
         # pattern
@@ -70,7 +70,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             return CallFunction(
                 aten.relu,
                 CallFunction(
-                    mkldnn._convolution_pointwise.default,
+                    onednn._convolution_pointwise.default,
                     Arg(),
                     Arg(),
                     Arg(),
@@ -100,7 +100,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             @register_custom_lowering_pattern(pattern, dummy_check, custom_pass_dict)
             def fn(match, *args, **kwargs):
                 computation_args = list(args)[:-3] + ["relu", [], ""]
-                return L[mkldnn._convolution_pointwise.default](*computation_args)
+                return L[onednn._convolution_pointwise.default](*computation_args)
 
             return fn
 

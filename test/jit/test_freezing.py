@@ -2894,7 +2894,7 @@ class TestFrozenOptimizations(JitTestCase):
                 scripted_mod = torch.jit.script(mod)
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check("prim::BroadcastMKLDNNTensors").run(
+                FileCheck().check("prim::BroadcastONEDNNTensors").run(
                     scripted_mod.graph
                 )
                 inp = torch.rand([1, 8, 8, 8])
@@ -3285,8 +3285,8 @@ class TestFrozenOptimizations(JitTestCase):
     def test_hardswish_hardsigmoid(self):
         with set_default_dtype(torch.float):
             op_map = {
-                "prim::MKLDNNHardSwish": F.hardswish,
-                "prim::MKLDNNHardSigmoid": F.hardsigmoid,
+                "prim::ONEDNNHardSwish": F.hardswish,
+                "prim::ONEDNNHardSigmoid": F.hardsigmoid,
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
@@ -3389,7 +3389,7 @@ class TestMKLDNNReinplacing(JitTestCase):
         mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
         FileCheck().check("mkldnn_convolution").check_next(
-            "prim::MKLDNNHardSwish_"
+            "prim::ONEDNNHardSwish_"
         ).check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
