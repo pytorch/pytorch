@@ -516,8 +516,8 @@ struct ConvParams {
       return false;
     }
     if (input.device().is_cpu() &&
-        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
-         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+        ((input.scalar_type() == at::kBFloat16 && onednn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && onednn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -1429,7 +1429,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
       break;
     case ConvBackend::Mkldnn:
     case ConvBackend::MkldnnTranspose:
-      if (mkldnn_conv_use_channels_last(input, weight)) {
+      if (onednn_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
