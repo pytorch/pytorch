@@ -39,7 +39,7 @@ jobs:
         device: ["cuda", "rocm", "xpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.2"
+            rocm_version: "6.1"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
