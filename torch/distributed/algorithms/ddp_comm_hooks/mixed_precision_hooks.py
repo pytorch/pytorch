@@ -34,6 +34,7 @@ def _reducer_allreduce_and_upcast_hook(
     """
     ddp_weakref = hook_state.ddp_weakref
     reducer, process_group = ddp_weakref().reducer, ddp_weakref().process_group
+    gradient_is_bucket_view = ddp_weakref().gradient_as_bucket_view
     # Cast bucket if different than param_dtype.
     if (
         ddp_weakref().mixed_precision.param_dtype
@@ -52,7 +53,8 @@ def _reducer_allreduce_and_upcast_hook(
         ret_fut.set_result(bucket.buffer())
 
         # Upcast parameters and gradients so optimizer step can run in fp32.
-        for p in bucket.parameters():
+        params, grads = bucket.parameters(), bucket.gradients()
+        for p, g in zip(params, grads):
             p.data = p._fp_param
             # free storage for mp param as it will be allocated again in next
             # forward pass.
@@ -68,7 +70,7 @@ def _reducer_allreduce_and_upcast_hook(
         # they may participate in computation. However, they would not be recast
         # by hook above as they don't have a grad hook installed, so cast them
         # back here.
-        for _, p in ddp_weakref().module.named_parameters():
+        for n, p in ddp_weakref().module.named_parameters():
             if hasattr(p, "_ddp_mp_hook_state"):
                 p._ddp_mp_hook_state[1].remove()
                 delattr(p, "_ddp_mp_hook_state")
