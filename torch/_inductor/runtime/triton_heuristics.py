@@ -1026,6 +1026,8 @@ def should_use_remote_autotune_cache(inductor_meta):
         return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
         return False
+    if torch._utils_internal.is_fb_unit_test():
+        return False
     if inductor_meta.get("is_hip"):
         return False
 

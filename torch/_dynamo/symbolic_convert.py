@@ -2706,10 +2706,18 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
+
         if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
-            # if it reaches here, it means Dynamo failed to inline a functorch function
             name = ci.key().name.lower()
-            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            msg = (
+                "If you are reaching here, it means dynamo failed for one of the following reasons:\n"
+                # Calling a torch.compiled function
+                f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
+                f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
+                "For more information, see PyTorch issue #128711."
+                # if it reaches here, it means Dynamo failed to inline a functorch function
+                f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
+            )
             unimplemented(msg)
 
     def get_example_value(self, source: Source):
