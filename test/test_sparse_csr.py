@@ -3507,11 +3507,6 @@ class TestSparseCSR(TestCase):
                 continue
 
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
-            if not torch.cuda.is_available():
-                with self.assertRaisesRegex(RuntimeError, "PyTorch was not built with CUDA support"):
-                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
-                break
-
             if sample.args[0].ndim != 1 and sample.args[0].size(-1) != 1:
                 with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
                     torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
