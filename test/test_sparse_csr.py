@@ -3490,8 +3490,6 @@ class TestSparseCSR(TestCase):
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype):
         # https://github.com/krshrimali/pytorch/blob/f5ee21dd87a7c5e67ba03bfd77ea22246cabdf0b/test/test_sparse_csr.py
 
-        if (device == 'meta') or (device == 'cpu'):
-            self.skipTest("Skipped!")
         try:
             spd = torch.rand(4, 3)
             A = spd.T @ spd
