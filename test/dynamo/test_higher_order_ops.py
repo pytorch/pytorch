@@ -2620,7 +2620,9 @@ class GraphModule(torch.nn.Module):
                 res = torch.add(x[0], x[1]["test"])
                 return res
 
-            res = hints_wrapper(outer_body_fn, ((x, {"test" : y}),), {}, hints={"test": True})
+            res = hints_wrapper(
+                outer_body_fn, ((x, {"test": y}),), {}, hints={"test": True}
+            )
             return res
 
         backend = EagerAndRecordGraphs()

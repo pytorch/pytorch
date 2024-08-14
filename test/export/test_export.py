@@ -6849,7 +6849,6 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
-<<<<<<< HEAD
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -7033,8 +7032,6 @@ def forward(self, x, y):
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
-=======
->>>>>>> df62b097c93 (temporarily disable serde test for hints_wrapper)
     @testing.expectedFailureSerDer  # T195866111
     def test_hints_wrapper(self):
         class M(torch.nn.Module):
