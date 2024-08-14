@@ -4,6 +4,7 @@ import unittest
 from itertools import product
 from functools import partial
 from typing import Optional
+import re
 
 import torch
 
@@ -566,8 +567,8 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_scales = torch.ones(x.shape[0], device=device, dtype=torch.float32)
-        y_scales = torch.ones(y.shape[0], device=device, dtype=torch.float32)
+        x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
+        y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
         x_fp8 = x.to(torch.float8_e4m3fn)
         y_fp8 = y.to(torch.float8_e4m3fn).t()
@@ -597,30 +598,36 @@ class TestFP8MatmulCuda(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "For row-wise scaling, scale_a must be size 1024 but got 1 and scale_b must be size 2048 but got 2",
+            re.escape(
+                "For RowWise scaling, scale_a should be (1024, 1) and scale_b "
+                "should be (1, 2048). Got scale_a.size()=(1, 1) and scale_b.size()=(1, 2)"
+            ),
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((), device="cuda"),
-                scale_b=torch.ones((2), device="cuda"),
+                scale_a=torch.ones((1, 1), device="cuda"),
+                scale_b=torch.ones((1, 2), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "For row-wise scaling, scale_b must have size 2048 but got 2049.",
+            re.escape(
+                " For RowWise scaling, scale_a should be (1024, 1) and scale_b "
+                "should be (1, 2048). Got scale_a.size()=(1024, 1) and scale_b.size()=(1, 2049)"
+            ),
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N + 1), device="cuda"),
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N + 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "Both scale_a and scale_b must be 1-dimensional tensors",
+            re.escape("For non-TensorWise scaling, scale tensors must be 2-dimensional"),
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -632,25 +639,27 @@ class TestFP8MatmulCuda(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Both scale_a and scale_b must be contiguous.",
+            re.escape(
+                "Both scale_a and scale_b must be contiguous for RowWise scaling."
+            ),
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
-                scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N * 2), device="cuda")[::2],
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N * 2), device="cuda")[:, ::2],
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "For row-wise scaling the second input is required to be a float8_e4m3fn dtype.",
+            re.escape("For RowWise scaling the second input is required to be a float8_e4m3fn dtype."),
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8.to(torch.float8_e5m2),
-                scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N), device="cuda"),
+                scale_a=torch.ones((M, 1), device="cuda"),
+                scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
