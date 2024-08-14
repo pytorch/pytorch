@@ -297,8 +297,7 @@ inline void pad_remain_row_col_zero(
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
-inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::Half>, void>
-cpu_flash_attention(
+void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
     const at::Tensor& q,
@@ -560,10 +559,10 @@ cpu_flash_attention(
 }
 
 
-// Half
+// Half/BFloat16
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>
-inline typename std::enable_if_t<std::is_same_v<scalar_t, at::Half>, void>
-cpu_flash_attention(
+inline typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, void>
+cpu_flash_attention_with_pack(
     const Tensor& output,
     const Tensor& logsumexp,
     const at::Tensor& q,
@@ -666,8 +665,8 @@ cpu_flash_attention(
 
   auto lowp_dt = dtype;
 
-  // Whether pack is needed for fp16
-  bool need_pack = at::native::cpublas::need_pack(lowp_dt, lowp_dt);
+  // Whether pack is needed
+  bool need_pack = at::native::cpublas::need_pack(lowp_dt);
 
   // allocate per thread temp buf (accumulate type)
   int64_t size_per_thread =
@@ -744,6 +743,7 @@ cpu_flash_attention(
           if (need_pack) {
             for (int64_t b = 0; b < kvBlockSize; b += packb_size) {
               bool tail = kvBlockSize - b < packb_size;
+              // TODO Use transpose pack when it is supported
               utils::transpose<uint16_t>(
                   tail ? kvBlockSize - b : packb_size,
                   headSize,
@@ -759,7 +759,7 @@ cpu_flash_attention(
                 pad_remain_row_col_zero<scalar_t>(
                     transpose_buffer_ptr,
                     headSize,
-                    kvBlockSize - b,
+                    packb_size,
                     eheadSize,
                     packb_size,
                     packb_size);
@@ -772,7 +772,7 @@ cpu_flash_attention(
                   /* ld_out */ packb_size,
                   /* dt_in */ lowp_dt,
                   /* dt_out */ lowp_dt,
-                  reinterpret_cast<const void*>(transpose_buffer_ptr),
+                  transpose_buffer_ptr,
                   key_reorder_ptr + i * num_head * eheadSize * rkvSize +
                       j * eheadSize * rkvSize + n * eheadSize + b * eheadSize);
             }
@@ -811,7 +811,7 @@ cpu_flash_attention(
                   packb_size,
                   lowp_dt,
                   lowp_dt,
-                  reinterpret_cast<const void*>(v_copy_buffer_ptr),
+                  v_copy_buffer_ptr,
                   value_reorder_ptr +
                       i * num_head * kv_padding_size * rHeadSize +
                       j * kv_padding_size * rHeadSize + n * rHeadSize +
@@ -1401,40 +1401,172 @@ void flash_attention_kernel_impl(
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
   auto q_seq_len = query.size(2);
+  auto k_seq_len = key.size(2);
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
-    if (!attn_mask.has_value()) {
-      if (q_seq_len >= 768) {
-        cpu_flash_attention<scalar_t, scalar_t, 256, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      } else if (q_seq_len >= 192) {
-        cpu_flash_attention<scalar_t, scalar_t, 64, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      } else {
-        cpu_flash_attention<scalar_t, scalar_t, 32, 512>(
-          output, logsumexp, query, key, value,
-          dropout_p, is_causal, attn_mask, scale);
-      }
-    } else {
-      AT_DISPATCH_MASK_TYPES(attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
-        if (q_seq_len >= 768) {
-          cpu_flash_attention<scalar_t, mask_t, 256, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        } else if (q_seq_len >= 192) {
-          cpu_flash_attention<scalar_t, mask_t, 64, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        } else {
-          cpu_flash_attention<scalar_t, mask_t, 32, 512>(
-            output, logsumexp, query, key, value,
-            dropout_p, is_causal, attn_mask, scale);
-        }
-      });
-    }
-  });
+  // When q_seq_len and k_seq_len are long enough,
+  // cpu_flash_attention_with_pack has better performance.
+  if ((query.scalar_type() == kBFloat16 &&
+       at::native::cpublas::need_pack(kBFloat16) && q_seq_len >= 320 &&
+       k_seq_len >= 320) ||
+      (query.scalar_type() == kHalf && at::native::cpublas::need_pack(kHalf) &&
+       q_seq_len >= 128 && k_seq_len >= 128)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        query.scalar_type(), "flash_attention", [&] {
+          if (!attn_mask.has_value()) {
+            if (q_seq_len >= 768) {
+              cpu_flash_attention_with_pack<scalar_t, scalar_t, 256, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            } else if (q_seq_len >= 192) {
+              cpu_flash_attention_with_pack<scalar_t, scalar_t, 64, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            } else {
+              cpu_flash_attention_with_pack<scalar_t, scalar_t, 32, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            }
+          } else {
+            AT_DISPATCH_MASK_TYPES(
+                attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
+                  if (q_seq_len >= 768) {
+                    cpu_flash_attention_with_pack<scalar_t, mask_t, 256, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  } else if (q_seq_len >= 192) {
+                    cpu_flash_attention_with_pack<scalar_t, mask_t, 64, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  } else {
+                    cpu_flash_attention_with_pack<scalar_t, mask_t, 32, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  }
+                });
+          }
+        });
+
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
+          if (!attn_mask.has_value()) {
+            if (q_seq_len >= 768) {
+              cpu_flash_attention<scalar_t, scalar_t, 256, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            } else if (q_seq_len >= 192) {
+              cpu_flash_attention<scalar_t, scalar_t, 64, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            } else {
+              cpu_flash_attention<scalar_t, scalar_t, 32, 512>(
+                  output,
+                  logsumexp,
+                  query,
+                  key,
+                  value,
+                  dropout_p,
+                  is_causal,
+                  attn_mask,
+                  scale);
+            }
+          } else {
+            AT_DISPATCH_MASK_TYPES(
+                attn_mask.value().scalar_type(), "flash_attention_mask", [&]() {
+                  if (q_seq_len >= 768) {
+                    cpu_flash_attention<scalar_t, mask_t, 256, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  } else if (q_seq_len >= 192) {
+                    cpu_flash_attention<scalar_t, mask_t, 64, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  } else {
+                    cpu_flash_attention<scalar_t, mask_t, 32, 512>(
+                        output,
+                        logsumexp,
+                        query,
+                        key,
+                        value,
+                        dropout_p,
+                        is_causal,
+                        attn_mask,
+                        scale);
+                  }
+                });
+          }
+        });
+  }
 }
 
 void flash_attention_backward_kernel_impl(

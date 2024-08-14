@@ -465,10 +465,17 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
     return current;
   }
 
-  static inline bool fp16_device_check() {
-    static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16 ||
-      dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
-    return fp16_support;
+  static inline bool device_check(ScalarType dtype) {
+    if (dtype == ScalarType::Half) {
+      static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16 ||
+        dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+      return fp16_support;
+    } else if (dtype == ScalarType::BFloat16) {
+      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2_vnni_2;
+      return bf16_support;
+    } else {
+      return false;
+    }
   }
 };
 
@@ -487,35 +494,29 @@ struct Pack : public Kernel_Cache<PackKey, pack_t> {
     auto&& pack = fetch_or_create(key, [&]() {
       auto&& p = std::make_shared<pack_t>(
           K, N, ld_in, ld_out, get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
-      if ((*p).need_pack()) {
+      if (need_pack(dt_in)) {
         (*p).generate();
       }
       return std::move(p);
     });
-    if ((*pack).need_pack()) {
+    if (need_pack(dt_in)) {
       (*pack).execute(in, out);
     } else {
       TORCH_CHECK(false, "No need to pack");
     }
   }
 
-  static inline bool need_pack(ScalarType dt_in, ScalarType dt_out) {
-    auto key = PackKey(
-        int64_t(64), int64_t(64), int64_t(64), int64_t(64), dt_in, dt_out);
-    auto&& pack = fetch_or_create(key, [&]() {
-      auto&& p = std::make_shared<pack_t>(
-          int64_t(64),
-          int64_t(64),
-          int64_t(64),
-          int64_t(64),
-          get_dnnl_dtype(dt_in),
-          get_dnnl_dtype(dt_out));
-      if ((*p).need_pack()) {
-        (*p).generate();
-      }
-      return std::move(p);
-    });
-    return (*pack).need_pack();
+    static inline bool need_pack(ScalarType dtype) {
+    if (dtype == ScalarType::Half) {
+      static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16 ||
+        dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+      return fp16_pack;
+    } else if (dtype == ScalarType::BFloat16) {
+      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2_vnni_2;
+      return bf16_pack;
+    } else {
+      return false;
+    }
   }
 };
 
@@ -546,6 +547,21 @@ TORCH_API void brgemm(
     const std::vector<std::pair<int64_t, int64_t>>& offsets,
     float* C);
 
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t bs,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
+    const std::vector<std::pair<int64_t, int64_t>>& offsets,
+    float* C);
+
 // Batch-reduce GEMM
 // Batch size is 1, which means it is equivalent to gemm
 TORCH_API void brgemm(
@@ -559,6 +575,19 @@ TORCH_API void brgemm(
     const float beta,
     const at::Half* A,
     const at::Half* B,
+    float* C);
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
     float* C);
 
 // Release brgemm hardware context
@@ -576,7 +605,7 @@ void pack(
     void* out);
 
 // Whether pack is needed in the platform.
-bool need_pack(ScalarType dt_in, ScalarType dt_out);
+bool need_pack(ScalarType dt_in);
 
 } // namespace at::native::cpublas
 
