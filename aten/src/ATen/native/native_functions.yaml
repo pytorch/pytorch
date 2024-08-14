@@ -8890,6 +8890,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: eq_tensor_nested
   tags: [core, pointwise]
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
