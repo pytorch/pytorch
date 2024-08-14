@@ -217,6 +217,9 @@ class TensorVariable(VariableTracker):
                 )
         return props
 
+    def call_hasattr(self, tx, name):
+        return variables.ConstantVariable.create(hasattr(self.python_type(), name))
+
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
         # For getattrs on tensors without sources,
