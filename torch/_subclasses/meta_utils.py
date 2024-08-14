@@ -305,6 +305,8 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
+        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         r = MetaTensorDesc(
@@ -333,6 +335,11 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
+            nested_int=(
+                _tensor_symint_registry[t].node.nested_int()
+                if t in _tensor_symint_registry
+                else None
+            ),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -465,6 +472,10 @@ class MetaTensorDesc:
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
+    # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
+    # metadata if that offsets is already associated with a nested int.
+    # See test_construct_from_jagged_with_input_offsets_mixed_case.
+    nested_int: Optional[int] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -504,6 +515,7 @@ class MetaTensorDesc:
         "functorch_stack",
         "autograd_meta_from",
         "data",
+        "nested_int",
     ]
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
@@ -1562,6 +1574,12 @@ class MetaConverter:
 
             if t.is_parameter:
                 r._is_param = True
+
+            # See Note: [Creating symbolic nested int]
+            if t.nested_int is not None:
+                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
+                    nt_tensor_id=t.nested_int
+                )
 
             self.set_tensor_memo(t, r)
 

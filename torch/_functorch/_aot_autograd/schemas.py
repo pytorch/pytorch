@@ -353,7 +353,7 @@ class ViewAndMutationMeta:
 
     # Tokens, that were not used in backward are not added as joint outputs to avoid partitioner failures.
     # Filled after tracing joint function.
-    num_backward_out_tokens: Optional[int] = None
+    num_backward_out_tokens: int = 0
 
     # In case when some effect tokens were not used in forward (len(tokens) == 0
     # But were used in backward.
