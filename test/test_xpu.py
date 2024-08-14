@@ -111,8 +111,8 @@ class TestXpu(TestCase):
             device_properties.has_atomic64, device_capability["has_atomic64"]
         )
         self.assertEqual(
-            device_properties.has_bf16_conversion,
-            device_capability["has_bf16_conversion"],
+            device_properties.has_bfloat16_conversions,
+            device_capability["has_bfloat16_conversions"],
         )
         self.assertEqual(
             device_properties.has_subgroup_matrix_multiply_accumulate,

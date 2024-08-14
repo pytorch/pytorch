@@ -139,7 +139,7 @@ namespace c10::xpu {
 #define AT_FORALL_XPU_EXP_CL_ASPECT(_)                                         \
   /* conversion between single-precision 32-bit floating-point values and      \
    * 16-bit bfloat16 values is supported on device. */                         \
-  _(bf16_conversion)                                                           \
+  _(bfloat16_conversions)                                                      \
                                                                                \
   /* specialized hardware to compute MMA is supported on device. */            \
   _(subgroup_matrix_multiply_accumulate)                                       \
