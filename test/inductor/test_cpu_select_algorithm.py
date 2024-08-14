@@ -316,6 +316,65 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (1,))
+    @parametrize("in_features", (16,))
+    @parametrize("image_size", (18,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.bfloat16)
+    def test_linear_with_permute(
+        self, batch_size, in_features, image_size, out_features, bias, dtype
+    ):
+        # Reproducer from the convnext model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
+
+            def forward(self, mul_272, _convolution_pointwise_default_31):
+                out1 = torch.ops.prims.convert_element_type.default(
+                    mul_272, torch.bfloat16
+                )
+                mul_272 = None
+
+                _linear_pointwise_default_131 = self.linear(out1)
+
+                permute_188 = torch.ops.aten.permute.default(
+                    _linear_pointwise_default_131, [0, 3, 1, 2]
+                )
+                mul_273 = torch.ops.aten.mul.Tensor(permute_188, self._frozen_param398)
+                add_187 = torch.ops.aten.add.Tensor(
+                    mul_273, _convolution_pointwise_default_31
+                )
+                convert_element_type_847 = torch.ops.prims.convert_element_type.default(
+                    add_187, torch.bfloat16
+                )
+
+                return convert_element_type_847
+
+        view_12 = torch.randn(batch_size, image_size, image_size, in_features)
+        _convolution_pointwise_default_31 = torch.randn(
+            batch_size, out_features, image_size, image_size
+        ).to(memory_format=torch.channels_last)
+
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (
+                    view_12,
+                    _convolution_pointwise_default_31,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
