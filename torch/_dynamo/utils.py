@@ -302,13 +302,18 @@ def dynamo_timed(
                                 code_gen_time = frame_phase_timing[compile_id].get(
                                     "code_gen", None
                                 )
+                                cudagraphify_time = frame_phase_timing[compile_id].get(
+                                    "cudagraphify", None
+                                )
                             else:
                                 inductor_compile_time = None
                                 code_gen_time = None
+                                cudagraphify_time = None
                             metrics = BwdCompilationMetrics(
                                 compile_id,
                                 inductor_compile_time,
                                 code_gen_time,
+                                cudagraphify_time,
                                 fail_type,
                                 fail_reason,
                             )
@@ -735,6 +740,7 @@ class CompilationMetrics:
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     inductor_compile_time_s: Optional[float]
+    cudagraphify_time_s: Optional[float]
     code_gen_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
@@ -756,6 +762,7 @@ class BwdCompilationMetrics:
     compile_id: str
     inductor_compile_time_s: Optional[float]
     code_gen_time_s: Optional[float]
+    cudagraphify_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
 

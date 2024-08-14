@@ -955,6 +955,9 @@ def _compile(
                 inductor_compile_time = frame_phase_timing[frame_key].get(
                     "inductor_compile", None
                 )
+                cudagraphify_time = frame_phase_timing[frame_key].get(
+                    "cudagraphify", None
+                )
                 code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
@@ -975,6 +978,7 @@ def _compile(
                 entire_frame_compile_time = None
                 backend_compile_time = None
                 inductor_compile_time = None
+                cudagraphify_time = None
                 code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
@@ -1001,6 +1005,7 @@ def _compile(
                 backend_compile_time,
                 inductor_compile_time,
                 code_gen_time,
+                cudagraphify_time,
                 fail_type,
                 fail_reason,
                 fail_user_frame_filename,
