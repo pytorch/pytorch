@@ -24,7 +24,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
 
-#if USE_ROCM
+#if USE_ROCM_AOTRITON
 #include <aotriton/flash.h>
 #endif
 
@@ -208,6 +208,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_ROCM_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -217,6 +218,9 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
@@ -239,6 +243,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
 #if USE_ROCM
+#if USE_ROCM_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -248,6 +253,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#else
+  return false;
+#endif
 #else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
@@ -630,7 +638,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
   constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
-#ifdef USE_ROCM
+#ifdef USE_ROCM_AOTRITON
   constexpr auto aotriton_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #endif
@@ -676,7 +684,11 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
 #ifdef USE_ROCM
+#ifdef USE_ROCM_AOTRITON
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
+#else
+  return false;
+#endif
 #else
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
