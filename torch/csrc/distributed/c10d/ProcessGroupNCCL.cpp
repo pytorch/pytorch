@@ -1595,7 +1595,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
     return c10::str(
         "[PG ID ",
         local_id_,
-        "PG GUID ",
+        " PG GUID ",
         pg_uid_,
         "(",
         pg_desc_,
@@ -1604,7 +1604,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
         "] ");
   }
   return c10::str(
-      "[PG ID ", local_id_, "PG GUID ", pg_uid_, " Rank ", rank_, "] ");
+      "[PG ID ", local_id_, " PG GUID ", pg_uid_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
