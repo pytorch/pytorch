@@ -1563,7 +1563,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @skipIfRocm  # Nested Tensor
+    @skipIfRocm(msg='enable_gqa=True unsupported')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("fused_kernel", [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sdpa_kernel_grouped_query_attention_cuda(self, device, fused_kernel):
@@ -1579,7 +1579,7 @@ class TestSDPAFailureModes(NNTestCase):
                                                    is_causal=False, enable_gqa=True)
 
     @onlyCPU
-    @skipIfRocm  # Nested Tensor
+    @skipIfRocm(msg='enable_gqa=True unsupported')
     def test_invalid_sdpa_kernel_grouped_query_attention_cpu(self, device):
         rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -2897,7 +2897,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False])
+    @parametrize("enable_gqa", [True, False] if not TEST_WITH_ROCM else [False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
