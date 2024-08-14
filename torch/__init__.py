@@ -2590,16 +2590,15 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
 
 
 class DeviceGuard:
-    def __init__(self, device_index: builtins.int, device_type: _Optional[str] = None):
+    def __init__(self, device_index: builtins.int):
         self.idx = device_index
-        self.device_type = device_type
         self.prev_idx = -1
 
     def __enter__(self):
-        self.prev_idx = torch._C._exchange_device(self.idx, self.device_type)
+        self.prev_idx = torch._C._exchange_device(self.idx)
 
     def __exit__(self, type: _Any, value: _Any, traceback: _Any):
-        self.idx = torch._C._maybe_exchange_device(self.prev_idx, self.device_type)
+        self.idx = torch._C._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -2610,15 +2609,13 @@ class StreamGuard:
         self.dst_prev_stream = None
 
     def __enter__(self):
-        self.src_prev_stream = torch.current_stream(None, self.stream.device.type)  # type: ignore[assignment]
+        self.src_prev_stream = torch.current_stream()  # type: ignore[assignment]
 
         # If the stream is not on the current device, then
         # set the current stream on the device
         if self.src_prev_stream.device != self.stream.device:  # type: ignore[attr-defined]
-            with DeviceGuard(self.stream.device.index, self.stream.device.type):
-                self.dst_prev_stream = torch.current_stream(  # type: ignore[assignment]
-                    None, self.stream.device.type
-                )
+            with DeviceGuard(self.stream.device.index):
+                self.dst_prev_stream = torch.current_stream()  # type: ignore[assignment]
         torch.set_stream(self.stream)
 
     def __exit__(self, type: _Any, value: _Any, traceback: _Any):

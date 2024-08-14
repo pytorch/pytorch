@@ -1222,8 +1222,17 @@ PyObject* THPModule_setStream(
   c10::DeviceType device_type = stream.device_type();
   TORCH_CHECK(
       at::isAccelerator(device_type), device_type, " is not an accelerator.");
+  TORCH_CHECK(
+      at::getAccelerator(true).value() == device_type,
+      "stream doesn't match the current accelerator, expect ",
+      at::getAccelerator(true).value(),
+      ", but got ",
+      device_type);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
+  if (impl.getDevice().index() != stream.device_index()) {
+    impl.setDevice(stream.device());
+  }
   impl.setStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
