@@ -30,6 +30,7 @@ from .traced_function_transforms import (
     create_joint,
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
+    handle_effect_tokens_fn,
 )
 from .utils import (
     copy_fwd_metadata_to_bw_nodes,
@@ -99,6 +100,14 @@ def aot_dispatch_base_graph(
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+
+    (fn_to_trace, updated_flat_args_subclasses_desugared) = handle_effect_tokens_fn(
+        fn_to_trace,
+        updated_flat_args_subclasses_desugared,
+        meta=fw_metadata,
+        trace_joint=False,
+    )
+
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
         str(aot_config.aot_id),
@@ -259,6 +268,14 @@ def aot_dispatch_autograd_graph(
 
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
+
+    (joint_fn_to_trace, updated_joint_inputs) = handle_effect_tokens_fn(
+        joint_fn_to_trace,
+        updated_joint_inputs,
+        meta=fw_metadata,
+        trace_joint=True,
+    )
+
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
     # we make aliases of all the inputs to make sure we have a copy that
