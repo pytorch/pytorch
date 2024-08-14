@@ -9,7 +9,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -3236,15 +3236,11 @@ class TilingSelect:
                         len(tiling_indices) == 1
                         and len(itervars) > 0
                         and (
-                            (
-                                tiling_indices[0] >= 0
-                                and tiling_indices[0] < len(itervars)
-                            )
-                            or (
-                                tiling_indices[0] < 0
-                                and tiling_indices[0] + len(itervars) < len(itervars)
-                            )
+                            tiling_indices[0]
+                            if tiling_indices[0] >= 0
+                            else tiling_indices[0] + len(itervars)
                         )
+                        < len(itervars)
                     )
 
                 group, reduction_group = max(
@@ -3264,38 +3260,28 @@ class TilingSelect:
                 # ops may cause overhead with vectorization, like non-contiguous
                 # index_expr, load, store
                 non_contig_indexing_op_counter: Dict[str, int] = {}
-                # op_name to the idx of index parameter
-                op_name_to_index_arg_idx: Dict[str, int] = {
-                    "index_expr": -2,
-                    "load": -1,
-                    "store": 2,
-                }
-                # op_name to func checking if contiguous index
-                op_name_to_stride_func: Dict[str, Callable[[int], bool]] = {
-                    "index_expr": lambda stride: not (
-                        stride == 0 or stride is not None
-                    ),
-                    "load": lambda stride: stride not in [0, 1],
-                    "store": lambda stride: stride != 1,
-                }
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
                             if _node.target in ["index_expr", "load", "store"]:
-                                # Get the index and replace prefix from z to x
+                                # get the index and replace prefix from z to x
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
                                 )[
                                     _node.args[
-                                        op_name_to_index_arg_idx[_node.target]
+                                        1 if _node.target == "index_expr" else 2
                                     ].args[0]
                                 ]
                                 if _is_valid_indices(itervars, tiling_indices):
                                     stride = _try_get_stride(
                                         index, itervars, tiling_factor, tiling_indices
                                     )
-                                    if op_name_to_stride_func[_node.target](stride):
+                                    if (
+                                        stride is None
+                                        if _node.target == "index_expr"
+                                        else stride not in [0, 1]
+                                    ):
                                         _update_negative_op_count(
                                             _node.target, non_contig_indexing_op_counter
                                         )
