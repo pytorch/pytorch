@@ -1,25 +1,26 @@
 #include <filesystem>
-#include <mutex>
-#include <shared_mutex>
 #include <sstream>
-#include <tuple>
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/thread_name.h>
 #include <caffe2/utils/threadpool/WorkersPool.h>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-namespace c10d {
-namespace control_plane {
+namespace c10d::control_plane {
 
 namespace {
 class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
 
-  const std::string& body() override {
+  const std::string& body() const override {
     return req_.body;
+  }
+
+  const std::multimap<std::string, std::string>& params() const override {
+    return req_.params;
   }
 
  private:
@@ -72,15 +73,18 @@ std::string jsonStrEscape(const std::string& str) {
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
-  server_.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-    res.set_content(
-        R"BODY(<h1>torch.distributed.WorkerServer</h1>
+  server_.Get(
+      "/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
+        res.set_content(
+            R"BODY(<h1>torch.distributed.WorkerServer</h1>
 <a href="/handler/">Handler names</a>
 )BODY",
-        "text/html");
-  });
+            "text/html");
+      });
   server_.Get(
-      "/handler/", [](const httplib::Request& req, httplib::Response& res) {
+      "/handler/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
         body << "[";
         bool first = true;
@@ -157,6 +161,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   }
 
   serverThread_ = std::thread([this]() {
+    c10::setThreadName("pt_workerserver");
+
     try {
       if (!server_.listen_after_bind()) {
         throw std::runtime_error("failed to listen");
@@ -182,5 +188,4 @@ WorkerServer::~WorkerServer() {
   }
 }
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

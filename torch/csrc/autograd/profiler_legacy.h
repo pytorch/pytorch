@@ -12,11 +12,7 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch::autograd {
-
-struct Node;
-
-namespace profiler {
+namespace torch::autograd::profiler {
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -336,7 +332,7 @@ TORCH_API void enableProfilerLegacy(
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(
     std::optional<ProfilerDisableOptions> profilerDisableOptions =
-        c10::nullopt);
+        std::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
@@ -377,9 +373,9 @@ struct TORCH_API TLSLegacyProfilerGuard {
   explicit TLSLegacyProfilerGuard(
       const torch::profiler::impl::ProfilerConfig& cfg,
       std::optional<std::function<void(const thread_event_lists&)>>
-          resultCallback = c10::nullopt,
+          resultCallback = std::nullopt,
       std::optional<ProfilerDisableOptions> profilerDisableOptions =
-          c10::nullopt)
+          std::nullopt)
       : cb_(std::move(resultCallback)),
         profilerDisableOptions_(profilerDisableOptions) {
     enableProfilerLegacy(cfg);
@@ -402,5 +398,4 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const std::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-} // namespace profiler
-} // namespace torch::autograd
+} // namespace torch::autograd::profiler

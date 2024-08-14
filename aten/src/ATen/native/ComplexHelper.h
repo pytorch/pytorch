@@ -62,8 +62,8 @@ Tensor view_as_real(const Tensor& self) {
 }
 
 inline SymDimVector computeStrideForViewAsComplex(SymIntArrayRef oldstride) {
-  const int64_t dim = oldstride.size();
-  TORCH_CHECK(oldstride[dim-1] == 1, "Tensor must have a last dimension with stride 1");
+  const auto dim = oldstride.size();
+  TORCH_CHECK(dim > 0 && oldstride[dim - 1] == 1, "Tensor must have a last dimension with stride 1");
 
   SymDimVector res(dim - 1);
   for (const auto i : c10::irange(res.size())) {

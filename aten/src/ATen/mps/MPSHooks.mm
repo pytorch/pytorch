@@ -80,6 +80,10 @@ size_t MPSHooks::getDriverAllocatedMemory() const {
   return at::mps::getIMPSAllocator()->getDriverAllocatedMemory();
 }
 
+size_t MPSHooks::getRecommendedMaxMemory() const {
+  return at::mps::getIMPSAllocator()->getRecommendedMaxMemory();
+}
+
 void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
 }
@@ -118,6 +122,14 @@ bool MPSHooks::queryEvent(uint32_t event_id) const {
 
 double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
   return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
+bool MPSHooks::isPinnedPtr(const void* data) const {
+  return at::mps::isMPSPinnedPtr(data);
+}
+
+Allocator* MPSHooks::getPinnedMemoryAllocator() const {
+  return at::mps::getIMPSAllocator(true);
 }
 
 using at::MPSHooksRegistry;

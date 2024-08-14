@@ -84,8 +84,8 @@ static void autogradBasedTransformSendToNext(
     torch::jit::Stack* stack,
     const Interpreter& interpreter,
     TransformType transform_type,
-    optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode,
+    std::optional<bool> prev_grad_mode,
+    std::optional<bool> prev_fwd_grad_mode,
     bool grad_special_case) {
   auto current_level = interpreter.level();
   if (transform_type == TransformType::Grad) {
@@ -163,11 +163,11 @@ static void autogradBasedTransformSendToNext(
   foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - args_size), static_cast<int64_t>(stack->size()), unwrap);
 
   // See NOTE [grad and vjp interaction with no_grad]
-  optional<c10::AutoGradMode> grad_guard;
+  std::optional<c10::AutoGradMode> grad_guard;
   if (transform_type == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
     grad_guard.emplace(*prev_grad_mode);
   }
-  optional<c10::AutoFwGradMode> fw_grad_guard;
+  std::optional<c10::AutoFwGradMode> fw_grad_guard;
   if (transform_type == TransformType::Jvp &&
       prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
     fw_grad_guard.emplace(*prev_fwd_grad_mode);
@@ -217,7 +217,7 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
       op, stack, *base_,
       TransformType::Grad,
       prevGradMode(),
-      nullopt,
+      std::nullopt,
       grad_special_case);
 }
 
@@ -234,7 +234,7 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
   autogradBasedTransformSendToNext(
       op, stack, *base_,
       TransformType::Jvp,
-      nullopt,
+      std::nullopt,
       prevFwdGradMode(),
       grad_special_case);
 }

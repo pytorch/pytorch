@@ -11,12 +11,13 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
-fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
+fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.
@@ -24,7 +25,7 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 # but it is on by default for aot_eager.
 debug_assert = False
 
-debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
+debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
 # Today, if you are in a situation where there is "false aliasing"
 # (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
@@ -41,8 +42,11 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+
+enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+
 # When AOTAutograd regenerates aliased graph outputs,
-# attempte to use functionalization's view-replay logic
+# attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.
 # This can have some perf implications
 # (although for many models this will not matter).
@@ -59,7 +63,11 @@ cse = True
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
 
-view_replay_for_aliased_outputs = not is_fbcode()
+
+# View replay is currently not compatible with AOTAutogradCache, since
+# FunctionalTensors are not serializable. We'll need to make them
+# serializable before enabling warm cache with this config turned on.
+view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -87,6 +95,9 @@ ban_recompute_not_in_allowlist = True
 # the result of reductions is generally very small but recomputing reductions in
 # a fusion can be expensive.
 ban_recompute_reductions = True
+# Prevents the partitioner from ever saving views (i.e. always recompute them).
+# Generally a good idea since views are free to recompute.
+recompute_views = False
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
@@ -169,14 +180,24 @@ unlift_effect_tokens = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# This controls whether we collect donated buffer. This flag must be set
+# False if a user wants to retain_graph=True for backward.
+donated_buffer = False
+
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
+# Error on BypassAOTAutogradCache instead of just a warning
+# Used for tests
+strict_autograd_cache = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])

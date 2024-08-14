@@ -1,10 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook
+from torch._dynamo.external_utils import (
+    call_backward,
+    call_hook,
+    FakeCompiledAutogradEngine,
+)
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
@@ -25,8 +29,10 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
 
+
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
+
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -66,6 +72,7 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
+        self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -75,22 +82,27 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
-    def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
+    def begin_capture(
+        self,
+        inputs: List[torch.Tensor],
+        sizes: List[int],
+        scalars: List[Union[int, float]],
+    ):
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
-        sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
-        self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
+        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+            self.fx_tracer.create_proxy("placeholder", name, (), {})
+            for name in self.graph_placeholders
+        )
 
         # tensor inputs to fake tensors
         inputs = [
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [args_proxy[i] for i in range(len(inputs))]
-        self.bind_tensors_to_proxies(inputs, proxies)
+        self.bind_tensors_to_proxies(inputs, args_proxy)
 
         # size inputs to symints
         sizes = [
@@ -103,14 +115,35 @@ class AutogradCompilerInstance:
         ]
         self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
+        for idx, val in enumerate(scalars):
+            source = self.source("scalars", idx)
+            if isinstance(val, int):
+                scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
+                    val,
+                    source,
+                    DimDynamic.DYNAMIC,
+                )
+            elif isinstance(val, float):
+                scalars[idx] = self.shape_env.create_symfloatnode(
+                    self.shape_env.create_unspecified_symbol(
+                        val,
+                        source=source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    ),
+                    hint=val,
+                    source=source,
+                )
+            else:
+                raise AssertionError("Unexpected scalar type: ", type(val))
+        self.bind_tensors_to_proxies(scalars, scalars_proxy)
+
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
-        self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
-        return inputs, sizes
+        return inputs, sizes, scalars
 
     def proxy_call_backward(
         self,
@@ -220,9 +253,8 @@ class AutogradCompilerInstance:
         assert nodes[0].target == "inputs"
         inputs = nodes[0]
         inputs_users = list(inputs.users.keys())
-        # the ordering of the nodes should always [inputs, sizes, hooks, getitem, getitem1, ...]
-        # where getitemi accesses inputs[i]
-        first_getitem_idx = 3
+        # input access nodes should immediately follow placeholder nodes
+        first_getitem_idx = len(self.graph_placeholders)
         assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
@@ -255,6 +287,12 @@ class AutogradCompilerInstance:
         return []
 
     def end_capture(self, outputs):
+        self.fx_tracer.create_proxy(
+            "call_function",
+            FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+            (),
+            {},
+        )
         self.stack.close()
         self.fx_tracer.create_node(
             "output",
@@ -272,12 +310,12 @@ class AutogradCompilerInstance:
         )
         set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
         )
         verbose_log.debug(
             "%s",
             lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True
+                "Compiled autograd graph", graph, include_device=True, colored=True
             ),
         )
         trace_structured(
@@ -285,11 +323,16 @@ class AutogradCompilerInstance:
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
 
-        def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
-            for i in runtime_inputs_to_move:
-                inputs[i] = inputs[i].cuda()
+        def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+            global in_compiled_autograd_region
+            try:
+                in_compiled_autograd_region = True
+                for i in runtime_inputs_to_move:
+                    inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-            return compiled_fn(inputs, sizes, hooks)
+                return compiled_fn(inputs, sizes, scalars, hooks)
+            finally:
+                in_compiled_autograd_region = False
 
         return runtime_wrapper, self.compiler_fn(graph)
 
@@ -313,8 +356,11 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_object_proxy(self.fx_tracer)(t).proxy
+        # can it be torch.SymInt as the code used to imply?
+        assert isinstance(t, torch.Tensor)
+        proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
+        assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
+        return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
@@ -338,22 +384,11 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
+# state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
 
-# We may have code like:
-# with enable(compiler_fn):
-#   ...
-#   with disable():
-#     ...
-#   ...
-# The disable() call just want to disable compiled autograd temporarily.
-# But overall the feature is enabled.
-#
-# The code covered by the disable context manager has no way to know if
-# compiled autograd is overall eanbled. Use another variable
-# compiled_autograd_enabled_count to indicate how many times compiled
-# autograd has been enabled in the call stack for this purpose.
-compiled_autograd_enabled_count = 0
+# global flag to check if we are processing graphs produced from a compiled autograd graph
+in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
@@ -363,14 +398,12 @@ def enable(compiler_fn):
     )
     if snapshot_verbose_logging_enabled():
         torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-    global compiled_autograd_enabled, compiled_autograd_enabled_count
+    global compiled_autograd_enabled
     compiled_autograd_enabled = True
-    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
-        compiled_autograd_enabled_count -= 1
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
@@ -392,6 +425,6 @@ def disable():
 # return to starting state of a new process
 def reset() -> None:
     compiled_autograd_enable = False
-    assert compiled_autograd_enabled_count == 0
+    assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

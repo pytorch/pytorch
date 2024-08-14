@@ -59,10 +59,22 @@ on:
         required: false
         type: string
         description: Desired python version
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: prefix for runner label
       runs_on:
         required: true
         type: string
         description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+      use_split_build:
+        description: |
+          [Experimental] Build a libtorch only wheel and build pytorch such that
+          are built from the libtorch wheel.
+        required: false
+        type: boolean
+        default: false
     secrets:
       github-token:
         required: true
@@ -70,7 +82,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
@@ -97,6 +109,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -124,6 +137,7 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"

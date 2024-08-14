@@ -2,7 +2,17 @@
 #include <ATen/DynamicLibrary.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
+#include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
+
+// TODO: Investigate why this is necessary, but fixes build problems in FRL
+#if __has_include("filesystem")
+#include <filesystem>
+namespace fs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#endif
 
 namespace torch::inductor {
 
@@ -45,6 +55,17 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
           model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
+
+  // Hack to find the json file name from the model so file
+  size_t lastindex = model_so_path.find_last_of('.');
+  std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
+
+  if (fs::exists(json_filename)) {
+    proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
+        json_filename, device_str == "cpu");
+    proxy_executor_handle_ =
+        reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,
@@ -153,11 +174,18 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
-  const char* in_spec;
-  const char* out_spec;
+  const char* in_spec = nullptr;
+  const char* out_spec = nullptr;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};
+}
+
+std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+getAOTIModelRunnerRegistry() {
+  static std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
+      aoti_model_runner_registry_;
+  return aoti_model_runner_registry_;
 }
 
 } // namespace torch::inductor

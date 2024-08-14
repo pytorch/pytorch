@@ -11,6 +11,7 @@ from unittest import mock
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
@@ -18,6 +19,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
+
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
@@ -455,7 +457,7 @@ main()
         param = torch.ones(100)
         activ = torch.ones(100) * 2
         inputs = [param, activ]
-        proxies, _ = compiler.begin_capture(inputs=inputs, sizes=[])
+        proxies, _, _ = compiler.begin_capture(inputs=inputs, sizes=[], scalars=[])
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
@@ -497,7 +499,11 @@ main()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
             runtime_wrapper(
-                compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=()
+                compiled_fn=compiled_fn,
+                inputs=[param, activ],
+                sizes=(),
+                scalars=(),
+                hooks=(),
             )
         finally:
             handle.remove()
@@ -787,7 +793,7 @@ main()
         bias_sigmoid_mul_jit = torch.compile(bias_sigmoid_mul)
 
         class ModuleWithJit(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear_1 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=True)
                 self.linear_2 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=False)
@@ -800,7 +806,7 @@ main()
                 return output
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.module_with_jit_1 = ModuleWithJit()
                 self.module_with_jit_2 = ModuleWithJit()
@@ -1308,6 +1314,99 @@ main()
 
         self.check_output_and_recompiles(fn, 1)
 
+    def test_trace_run_with_rng_state(self):
+        def sdpa(xq, xk):
+            return F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
+
+        def g(xq_1, xk_1, xq_2, xk_2):
+            # xq: (bs, n_local_heads, seqlen, head_dim)
+            # xk: (bs, n_local_heads, cache_len + seqlen, head_dim)
+            y1 = sdpa(xq_1, xk_1)
+            y2 = torch.utils.checkpoint.checkpoint(
+                sdpa, xq_2, xk_2, use_reentrant=False
+            )
+            y = torch.mul(y1, y2)
+            z = torch.matmul(y, y)
+            return z
+
+        def f():
+            bs = 1
+            n_local_heads = 1
+            seqlen = 2
+            head_dim = 2
+            cache_len = 2
+            xq_list = [
+                torch.ones(
+                    (bs, n_local_heads, seqlen, head_dim),
+                    requires_grad=True,
+                    device="cpu",
+                )
+                for _ in range(2)
+            ]
+            xk_list = [
+                torch.ones(
+                    (bs, n_local_heads, cache_len + seqlen, head_dim),
+                    requires_grad=True,
+                    device="cpu",
+                )
+                for _ in range(2)
+            ]
+            out = torch.compile(g, fullgraph=True)(
+                xq_list[0], xk_list[0], xq_list[1], xk_list[1]
+            )
+            out.sum().backward()
+            return out, *[x.grad for x in xq_list + xk_list]
+
+        """
+        Walkthrough of what happens with `run_with_rng_state`:
+        1. `run_with_rng_state` only shows up in the backward graph (this op is inserted by the partitioner).
+        2. The Dynamo graph captured by Compiled Autograd looks like:
+        ```
+        ===== __compiled_fn_3 =====
+        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+            def forward(self, L_inputs_ : list):
+                ...
+                run_with_rng_state = torch.ops.higher_order.run_with_rng_state(
+                    getitem_8,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+                    getitem_3, getitem_4, getitem_4, 0.0, True,
+                )
+                ...
+        ```
+        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
+        in `run_with_rng_state` op's py_functionalize_impl.
+        """
+
+        def _run_with_rng_state_op_check(inductor_post_grad_graph):
+            # Checks that `run_with_rng_state` op exists in Compiled Autograd's Inductor post-grad graph.
+            op_set = {node.target for node in inductor_post_grad_graph.nodes}
+            if torch.ops.higher_order.run_and_save_rng_state not in op_set:
+                # This is backward graph, so check existence of `run_with_rng_state` op
+                self.assertTrue(torch.ops.higher_order.run_with_rng_state in op_set)
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=_run_with_rng_state_op_check
+        ):
+            compiler_fn = make_compiler_fn(fullgraph=True)
+
+            def make_compiler_fn_with_op_check():
+                def _compiler_fn(gm):
+                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+                    self.assertTrue(
+                        any(
+                            node.target is torch.ops.higher_order.run_with_rng_state
+                            for node in gm.graph.nodes
+                        )
+                    )
+                    return compiler_fn(gm)
+
+                return _compiler_fn
+
+            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            self.check_output_and_recompiles(
+                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+            )
+
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1477,7 +1576,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     torch::Tensor y = saved_variables[1];
     torch::Tensor fixed = ctx->saved_data["fixed_tensor"].toTensor();
     assert(ctx->saved_data["bool"].isBool());
-    int i = ctx->saved_data["int"].toInt();
+    c10::SymInt i = ctx->saved_data["int"].toSymInt();
     c10::List<c10::IValue> list = ctx->saved_data["list"].toList();
     assert(list.size() == 1);
     assert(list.get(0).toStringRef() == "string");
@@ -1574,9 +1673,125 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we support dynamic shapes
-        # instead of collecting the saved_data's tensor hash
-        self.check_output_and_recompiles(fn, 5)
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_autograd_cpp_node_saved_int(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x,
+      int64_t y) {
+    ctx->save_for_backward({x});
+    ctx->saved_data["int"] = y;
+    ctx->saved_data["symint"] = c10::SymInt(y);
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 1);
+    torch::Tensor x = saved_variables[0];
+    c10::SymInt y = ctx->saved_data["int"].toSymInt();
+    c10::SymInt ys = ctx->saved_data["symint"].toSymInt();
+
+    torch::autograd::variable_list grad_inputs(2);
+    grad_inputs[0] = x + y + ys;
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, int64_t y) {
+  return CustomOpAutogradFunction::apply(x, y);
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_autograd_cpp_node_saved_int",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for y in [1, 2, 3, 1]:
+                x = torch.ones(10, 10, requires_grad=True)
+                out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
+                    x, y
+                )
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 1)
+
+    def test_autograd_cpp_node_saved_float(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x,
+      double z) {
+    ctx->save_for_backward({x});
+    ctx->saved_data["float"] = z;
+    ctx->saved_data["symfloat"] = c10::SymFloat(z);
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 1);
+    torch::Tensor x = saved_variables[0];
+    c10::SymFloat z = ctx->saved_data["float"].toSymFloat();
+    c10::SymFloat zs = ctx->saved_data["symfloat"].toSymFloat();
+
+    torch::autograd::variable_list grad_inputs(2);
+    grad_inputs[0] = x + z + zs;
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, double z) {
+  return CustomOpAutogradFunction::apply(x, z);
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_autograd_cpp_node_saved_float",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for z in [1.1, 2.2, 3.3, 1.1]:
+                x = torch.ones(10, 10, requires_grad=True)
+                out = torch.ops.test_autograd_cpp_node_saved_float.custom_op_backed_by_autograd_fn(
+                    x, z
+                )
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        # compiled autograd and dynamo both support symfloat, but not backend
+        self.check_output_and_recompiles(fn, [1, 3])
 
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
@@ -1625,9 +1840,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     assert(saved_variables.size() == 2);
     torch::Tensor x = saved_variables[0];
     torch::Tensor y = saved_variables[1];
-    assert(ctx->saved_data["bool"].isBool());
-    assert(ctx->saved_data["int"].isInt());
-    int i = ctx->saved_data["int"].toInt();
+    c10::SymInt i = ctx->saved_data["int"].toSymInt();
 
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = x + y + i;
@@ -1766,6 +1979,33 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    def test_callback_graph_break_throws_error(self):
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback_final)
+                torch._dynamo.graph_break()
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "only supported when Compiled Autograd is enabled with fullgraph=True",
+        ):
+            with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+                b = MyFunc.apply(a)
+                b.sum().backward()
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
@@ -2074,7 +2314,7 @@ def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
-        if not callable(fn):
+        if not callable(fn) or name in skipped_tests:
             continue
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
@@ -2110,6 +2350,13 @@ known_failures_re = re.compile(
 )
 
 # Bugs needing investigation:
+skipped_tests = {
+    # These test unconventional usage of saved tensor hooks do not leak or crash
+    # Running these tests succeed, but somehow cause other tests to fail
+    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
+    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
+}
+
 known_failing_tests = {
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
@@ -2121,6 +2368,7 @@ known_failing_tests = {
     "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
+    "test_save_tensor_hook_version_counter_not_shared",  # raise UnsupportedInputs
     "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
     "test_anomaly_grad_warnings",  # "one of the variables needed for gradient computation has been modified by an...
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
@@ -2156,6 +2404,7 @@ known_failing_tests = {
     "test_grad_materialize_grads",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf",  # RuntimeError: compiled_autograd does not support create_graph
     "test_grad_nonleaf_many_outputs",  # RuntimeError: compiled_autograd does not support create_graph
+    "test_gradient_edge_output",  # RuntimeError: trying to backward through the graph a second time
     "test_hessian_vector",  # RuntimeError: compiled_autograd does not support create_graph
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
@@ -2177,7 +2426,6 @@ known_failing_tests = {
     "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable(
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
     "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
-    "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
     "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
     "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
@@ -2223,7 +2471,9 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+    "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
 }
 
 if not HAS_CUDA:

@@ -26,6 +26,7 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
     _broadcast_state_dict,
+    _distribute_state_dict,
     _flatten_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
@@ -52,6 +53,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map_only
+
 
 __all__ = [
     "FQNS_T",
@@ -149,6 +151,9 @@ class StateDictOptions:
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: Dict[
+        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+    ] = field(default_factory=dict)
+    shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
     submodule_prefixes: Set[str] = field(default_factory=set)
@@ -284,13 +289,28 @@ def _verify_options(
     fqn_param_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
+    shared_params_mapping: Dict[
+        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
+    ] = {}
     for name, param in _iterate_valid_model_state(model):
+        if isinstance(param, _EXTRA_STATE):
+            continue
+
         fqns = _get_fqns(model, name)
-        if not isinstance(param, _EXTRA_STATE):
-            fqn_param_mapping[param] = fqns
+        fqn = fqn_param_mapping.get(param, None)
+        if fqn is not None:
+            cast(Set[str], fqn_param_mapping[param]).update(fqns)
+            shared_params_mapping[param] = fqn_param_mapping[param]
+        else:
+            # We need to do copy as _get_fqns is lru_cached
+            fqn_param_mapping[param] = fqns.copy()
         for fqn in fqns:
             if not isinstance(param, _EXTRA_STATE):
                 fqn_param_mapping[fqn] = param
+
+    for param_, fqns_ in list(shared_params_mapping.items()):
+        for fqn in fqns_:
+            shared_params_mapping[fqn] = cast(torch.Tensor, param_)
 
     submodule_prefixes: Set[str] = set()
     if submodules:
@@ -338,6 +358,9 @@ def _verify_options(
             optim_state_dict_config,
         ):
             with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="FSDP.state_dict_type", category=FutureWarning
+                )
                 with FSDP.state_dict_type(
                     module=module,
                     state_dict_type=state_dict_type,
@@ -359,6 +382,7 @@ def _verify_options(
     return _StateDictInfo(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
+        shared_params_mapping=shared_params_mapping,
         submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
         fsdp_modules=cast(List[nn.Module], fsdp_modules),
@@ -424,7 +448,7 @@ def _maybe_full_or_cpu_state_dict(
 ) -> Dict[str, Any]:
     if info.full_state_dict:
         ranks_only = (
-            tuple()
+            ()
             if (not info.cpu_offload or not torch.distributed.is_initialized())
             else (0,)
         )
@@ -437,6 +461,7 @@ def _maybe_full_or_cpu_state_dict(
         return state_dict
 
 
+@torch.no_grad()
 def _get_model_state_dict(
     model: nn.Module, info: _StateDictInfo
 ) -> Dict[str, ValueType]:
@@ -448,7 +473,7 @@ def _get_model_state_dict(
 
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
-        assert len(fqns) == 1
+        assert len(fqns) == 1, (key, fqns)
         fqn = next(iter(fqns))
         if fqn != key:
             # As we only support FSDP, DDP, and TP, the only cases are
@@ -504,6 +529,7 @@ def _get_model_state_dict(
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
+@torch.no_grad()
 def _load_model_state_dict(
     model: nn.Module,
     state_dict: Dict[str, ValueType],
@@ -526,7 +552,7 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    if info.broadcast_from_rank0:
+    if info.broadcast_from_rank0 or info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
@@ -535,9 +561,15 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(
-            state_dict, local_state_dict, device=device, strict=info.strict
-        )
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
+            model.to_empty(device=device)
+        if info.broadcast_from_rank0:
+            _broadcast_state_dict(
+                state_dict, local_state_dict, device=device, strict=info.strict
+            )
+        elif info.full_state_dict:
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -697,6 +729,7 @@ def _unflatten_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _get_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -795,6 +828,19 @@ def _split_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for loaded_param_group in cast(
+                        ListDictValueType, optim_state_dict[_PG]
+                    ):
+                        if fqn in cast(List[str], loaded_param_group[_PARAMS]):
+                            in_params = True
+                            break
+                else:
+                    in_params = True
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)
                 params.append(fqn)
@@ -803,9 +849,7 @@ def _split_optim_state_dict(
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
-                    params = loaded_param_group[_PARAMS]
-                    assert isinstance(params, list)
-                    if fqn in params:
+                    if fqn in cast(List[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
@@ -821,6 +865,7 @@ def _split_optim_state_dict(
     return return_osd
 
 
+@torch.no_grad()
 def _load_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer, ...],
@@ -872,7 +917,7 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
-        elif info.broadcast_from_rank0:
+        elif info.full_state_dict:
             info.full_state_dict = False
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
@@ -891,7 +936,10 @@ def _load_optim_state_dict(
             assert device is not None
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
-            _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            if info.broadcast_from_rank0:
+                _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            else:
+                _distribute_state_dict(flatten_osd, flatten_local_osd, device=device)
             # The modifications listed seek to address the problem where optim might possess
             # dissimilar parameters in comparison to optim_state_dict. This is achieved by
             # incorporating differential parameters within local, which may result in optim
@@ -938,7 +986,7 @@ def get_model_state_dict(
     with _gc_context():
         info = _verify_options(
             model,
-            tuple(),
+            (),
             optim_only=False,
             submodules=submodules,
             options=options,
@@ -1148,7 +1196,7 @@ def set_model_state_dict(
         model, model_state_dict
     )
     with _gc_context():
-        info = _verify_options(model, tuple(), optim_only=False, options=options)
+        info = _verify_options(model, (), optim_only=False, options=options)
 
         _verify_state_dict(model_state_dict, {}, info)
         return _load_model_state_dict(model, model_state_dict, info)

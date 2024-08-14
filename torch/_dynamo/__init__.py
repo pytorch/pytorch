@@ -1,4 +1,5 @@
 import torch
+
 from . import convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
@@ -31,6 +32,7 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
+
 
 __all__ = [
     "allow_in_graph",
@@ -84,6 +86,8 @@ def reset() -> None:
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        torch._dynamo.utils.warn_once_cache.clear()
+        torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 
 def reset_code_caches() -> None:
