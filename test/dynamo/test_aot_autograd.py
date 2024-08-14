@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
     skipIfWindows,
 )
+from torch.testing._internal.inductor_utils import skipIfWindowsCuda
 
 
 def maybe_dupe_op(x):
@@ -1062,6 +1063,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 ),
             )
 
+    @skipIfWindowsCuda
     def test_aot_autograd_raises_invalid_leaf_set(self):
         @torch.compile
         def f(x):
@@ -1273,6 +1275,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer4(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1304,6 +1307,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[0]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer5(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
@@ -1335,6 +1339,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer_with_retain_or_create_graph1(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
@@ -1352,6 +1357,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             mod(inp).sum().backward()
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer_with_retain_or_create_graph2(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
@@ -1371,6 +1377,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         out.backward()
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer_with_retain_or_create_graph3(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
@@ -1391,6 +1398,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         out.backward()
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @skipIfWindowsCuda
     def test_donated_buffer_with_retain_or_create_graph4(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):

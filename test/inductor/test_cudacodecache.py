@@ -10,6 +10,7 @@ from torch._inductor.codecache import CUDACodeCache
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.inductor_utils import skipIfWindowsCuda
 
 
 _SOURCE_CODE = r"""
@@ -37,6 +38,7 @@ int saxpy(int n, float a, float *x, float *y) {
 
 
 @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
+@skipIfWindowsCuda
 class TestCUDACodeCache(InductorTestCase):
     def test_cuda_load(self):
         # Test both .o and .so compilation.
