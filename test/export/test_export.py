@@ -4160,6 +4160,16 @@ def forward(self, x):
         dim0 = torch.export.Dim("dim0", min=3)
         inp = torch.ones(6, 4)
         ep = export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0}})
+        cond_node = [
+            node
+            for node in ep.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ][0]
+        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1] output""",
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
@@ -5549,6 +5559,16 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
         )
+        cond_node = [
+            node
+            for node in ep.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ][0]
+        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",
+        )
 
         cond_top_level_nn_module_stack = [
             node.meta["nn_module_stack"]
@@ -5588,6 +5608,14 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         inp = (torch.randn(4, 4),)
         ep = torch.export.export(CondExport(), inp, strict=False)
+
+        cond_node = [
+            node
+            for node in ep.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ][0]
+        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
+        self.assertExpectedInline(str(schema), """""")
 
         cond_top_level_nn_module_stack = [
             node.meta["nn_module_stack"]
@@ -5633,6 +5661,17 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 pre_dispatch=True,
                 strict=False,
             )
+
+        cond_node = [
+            node
+            for node in exported_program.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ][0]
+        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.code.strip()),
@@ -6118,6 +6157,14 @@ def forward(self, x):
                 (torch.randn(4), torch.randn(4), torch.randn(4)),
                 pre_dispatch=True,
             )
+
+        cond_node = [
+            node
+            for node in ep.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ][0]
+        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
+        self.assertExpectedInline(str(schema), """""")
         # test cond subgraph
         expected_names_and_ops = [
             ("mul_2", "placeholder"),

@@ -37,6 +37,17 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     return combined_leaves
 
 
+class AssociativeScanOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("associative_scan")
+
+    def __call__(self, combine_fn, input, dim):
+        return super().__call__(combine_fn, input, dim)
+
+
+associative_scan_op = AssociativeScanOp()
+
+
 def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     input: pytree.PyTree,
@@ -100,9 +111,6 @@ def associative_scan(
     result_flat = associative_scan_op(combine_fn, leaves, dim)
 
     return pytree.tree_unflatten(result_flat, spec)
-
-
-associative_scan_op = HigherOrderOperator("associative_scan")
 
 
 def trace_associative_scan(
