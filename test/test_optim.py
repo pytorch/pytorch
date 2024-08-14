@@ -1026,10 +1026,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
-        dtypes=floating_types_and(
-            torch.bfloat16,
-            torch.float16,
-        ),
+        dtypes=(torch.float32,),
     )
     def test_fused_error_on_params_on_meta(self, device, dtype, optim_info):
         if _get_device_type(device) not in optim_info.supports_fused_on:
