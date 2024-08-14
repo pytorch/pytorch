@@ -43,7 +43,7 @@ def clip_grad_norm_(
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
-    The norm is computed over the norms of the individual gradients of all parameters, 
+    The norm is computed over the norms of the individual gradients of all parameters,
     as if the norms of the individual gradients were concatenated into a single vector.
     Gradients are modified in-place.
 
