@@ -239,13 +239,14 @@ def get_op_name(layout):
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_dense_to_nested_tensor(values):
-    offsets = torch.arange(
-        0, values.shape[0] * values.shape[1] + 1, values.shape[1], device=values.device
-    )
-    metadata_cache = {"max_seqlen": values.shape[1], "min_seqlen": 1}
-    nt = ViewNestedFromBuffer.apply(
-        values.view(-1, values.shape[-1]), offsets, metadata_cache
-    )
+    # offsets = torch.arange(
+    #     0, values.shape[0] * values.shape[1] + 1, values.shape[1], device=values.device
+    # )
+    # metadata_cache = {"max_seqlen": values.shape[1], "min_seqlen": 1}
+    # nt = ViewNestedFromBuffer.apply(
+    #     values.view(-1, values.shape[-1]), offsets, metadata_cache
+    # )
+    nt = torch.nested.as_nested_tensor(values, layout=torch.jagged)
     return nt
 
 
@@ -254,15 +255,20 @@ def convert_dense_to_nested_tensor(values):
 def convert_jagged_to_nested_tensor(
     values: torch.Tensor, offsets: torch.Tensor, max_length: int
 ) -> torch.Tensor:
-    metadata_cache = {"max_seqlen": max_length, "min_seqlen": 1}
-    nt = ViewNestedFromBuffer.apply(values, offsets, metadata_cache)
+    # metadata_cache = {"max_seqlen": max_length, "min_seqlen": 1}
+    # nt = ViewNestedFromBuffer.apply(values, offsets, metadata_cache)
+	
+    nt = torch.nested.nested_tensor_from_jagged(
+        values, offsets, lengths=None, min_seqlen=1, max_seqlen=max_length
+    )
     return nt
 
 
 # Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
-    return buffer_from_jagged(nt)
+    # return buffer_from_jagged(nt)
+    return nt.values()
 
 
 @markDynamoStrictTest
