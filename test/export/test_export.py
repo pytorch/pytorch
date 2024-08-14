@@ -356,6 +356,37 @@ graph():
     return (x_0,)""",
         )
 
+    def test_not_registered_parameter(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.params = {"foo": torch.nn.Parameter(torch.ones(3, 3))}
+
+            def forward(self, x):
+                return x + self.params["foo"]
+
+        f = Basic()
+        args = (torch.randn(1, 3),)
+        # strict-mode will error out because foo is registered as parameter
+        # in dynamo (a behavior that's different from eager). We decided to
+        # follow eager behavior.
+        ep = export(f, args, strict=False)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        # check foo is not a parameter in the final graph
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %lifted_tensor_0 : [num_users=1] = get_attr[target=lifted_tensor_0]
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
+    return (add,)""",
+        )
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -3386,6 +3417,7 @@ def forward(self, x):
     bn_bias = self.bn.bias
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
+    bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
@@ -4133,7 +4165,6 @@ def forward(self, b_a_buffer, x):
         ):
             graph_module.eval()
 
-    @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -4167,9 +4198,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureRetraceability  # T183144788
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193701164
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -5827,9 +5855,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    # original input names aren't retraceable:
-    # compilation will succeed, but names won't match forward() signature.
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -6012,14 +6037,14 @@ def forward(self, x):
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
+    ge_1 = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
-    gt = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u1 on node 'gt'");  gt = _assert_scalar_default_2 = None
-    lt = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u1 < 6 on node 'lt'");  lt = _assert_scalar_default_3 = None
+    gt_1 = item > 2
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
+    lt_1 = item < 6
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return (foo_unbacked,)""",
         )
@@ -6681,11 +6706,13 @@ def forward(self, q, k, v):
     def test_primitive_constant_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
-                return y * x
+                with torch.no_grad():
+                    return y * x, "moo"
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
         res = ep.module()(torch.tensor(4), 5)
-        self.assertEqual(res, torch.tensor(20))
+        self.assertEqual(res[0], torch.tensor(20))
+        self.assertEqual(res[1], "moo")
 
         class B(torch.nn.Module):
             def forward(self, x, y):

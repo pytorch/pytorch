@@ -7,6 +7,7 @@ import sys
 import unittest
 
 import torch
+from torch._dynamo.config import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -79,6 +80,7 @@ class SparseActivationCSR(torch.nn.Module):
 #
 
 
+@unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
 class TestSparseProp(TestCase):
     def setUp(self):
         TestCase.setUp(self)

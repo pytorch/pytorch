@@ -110,7 +110,7 @@ __all__ = [
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
-    "rebind_unbacked", "resolve_unbacked_bindings",
+    "rebind_unbacked", "resolve_unbacked_bindings", "is_accessor_node",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -336,6 +336,32 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
             assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
             # Reuse the OLD symbol name
             shape_env._rename_unbacked_to(raw_u1, raw_u0)
+
+# NB: You could try to expand this to cover more cases by simply
+# detecting whenever you have an int output, but this is a bit
+# dangerous in case someone adds a function that returns an int but is
+# mutating.  So manually whitelist for now.
+def is_accessor_node(node: torch.fx.Node) -> bool:
+    # Dynamo only exercised condition
+    if (
+        node.op == "call_method"
+        and isinstance(node.args[0].meta.get("example_value"), torch.Tensor)
+        and node.target in ["size", "stride", "storage_offset", "item"]
+    ):
+        return True
+    if node.op == "call_function" and node.target in [
+        torch.ops.aten.sym_size,
+        torch.ops.aten.sym_size.default,
+        torch.ops.aten.sym_size.int,
+        torch.ops.aten.sym_stride,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.sym_stride.int,
+        torch.ops.aten.sym_storage_offset,
+        torch.ops.aten.sym_storage_offset.default,
+        torch.ops.aten.sym_numel.default,
+    ]:
+        return True
+    return False
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le

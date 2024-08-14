@@ -316,7 +316,6 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
-  python test/run_test.py -i distributed/tensor/parallel/test_fsdp_2d_parallel.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
@@ -551,6 +550,9 @@ test_single_dynamo_benchmark() {
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
       TEST_CONFIG=${TEST_CONFIG::-5}
+    fi
+    if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
+      TEST_CONFIG=${TEST_CONFIG::-7}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \

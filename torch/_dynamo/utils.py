@@ -742,6 +742,7 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: bool
+    possibly_missed_reinplacing_opportunities: Optional[int]
 
 
 @dataclasses.dataclass
@@ -2922,3 +2923,18 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
+# To avoid ref cycles, it's important that no tensors are present here, so leave those out.
+def _extract_tensor_dict(t):
+    KEYS_TO_COPY = [
+        "_dynamo_static_input_type",
+        "tag",
+    ]
+
+    tensor_dict = {
+        key: copy.copy(t.__dict__[key]) for key in KEYS_TO_COPY if key in t.__dict__
+    }
+
+    return tensor_dict

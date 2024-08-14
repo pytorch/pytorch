@@ -330,7 +330,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
             sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
             cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
@@ -368,7 +368,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 1]"):
             view: "f32[3]" = l_x_.view(3);  l_x_ = None
             add: "f32[3]" = view + 0.5;  view = None
@@ -388,7 +388,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[s0, 1]", size: "Sym(s0)"):
             view: "f32[s0]" = l_x_.view(size);  l_x_ = size = None
             add: "f32[s0]" = view + 0.5;  view = None
@@ -1850,7 +1850,7 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[3]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
             child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
@@ -2049,7 +2049,7 @@ class GraphModule(torch.nn.Module):
         add: "f32[2, 3]" = a + b;  a = b = None
         return (add,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
             child: "f32[2, 3]" = l_x_.sin()
             child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
@@ -2084,7 +2084,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
             child: "f32[3]" = -l_x_;  l_x_ = None
             return (child,)

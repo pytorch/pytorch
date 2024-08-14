@@ -1,9 +1,6 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
 import os
-
-from model_registry import MLPModule
 
 import torch
 import torch.nn as nn
@@ -36,6 +33,21 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
+
+
+# MLP Layer
+class MLPModule(torch.nn.Module):
+    def __init__(self, d_hid: int):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        return x
 
 
 class ComposabilityTest(MultiProcessTestCase):
@@ -248,30 +260,3 @@ instantiate_parametrized_tests(ComposabilityTest)
 
 if __name__ == "__main__":
     run_tests()
-    # # Check if GPU and NCCL are available
-    # if not (
-    #     dist.is_available()
-    #     and dist.is_nccl_available()
-    #     and torch.cuda.device_count() >= 4
-    # ):
-    #     print(
-    #         "Composability test requires at least 4 GPUs, but not enough found, skipping",
-    #         file=sys.stderr,
-    #     )
-    #     sys.exit(0)
-
-    # rank = int(os.getenv("RANK", -1))
-    # world_size = int(os.getenv("WORLD_SIZE", 4))
-
-    # if rank != -1:
-    #     # Launched with torchrun or other multi-proc launchers. Directly run the test.
-    #     ComposabilityTest.run_rank(rank, world_size)
-    # else:
-    #     # Launched as a single process. Spawn subprocess to run the tests.
-    #     # Also need a rendezvous file for `init_process_group` purpose.
-    #     rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-    #     torch.multiprocessing.spawn(
-    #         ComposabilityTest.run_rank,
-    #         nprocs=world_size,
-    #         args=(world_size, rdvz_file),
-    #     )
