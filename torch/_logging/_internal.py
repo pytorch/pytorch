@@ -995,10 +995,8 @@ class LazyTraceHandler(logging.StreamHandler):
 
     def emit(self, record):
         if self.stream is None:
-            ok = False
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
-                open_func = self._builtin_open
 
                 import torch.version as torch_version
 
