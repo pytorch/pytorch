@@ -1770,8 +1770,8 @@ def device_count() -> _int: ...  #THPModule_deviceCount
 def set_device(device: Union[_device, str, _int, None]) -> None: ...  #THPModule_setDevice
 def current_device() -> _int: ...  #THPModule_getDevice
 def set_stream(stream: Stream) -> None: ...  #THPModule_setStream
-def current_stream(device: Union[_device, str, _int, None]) -> Stream: ...  #THPModule_getStream
-def synchronize(device: Union[_device, str, _int, None]) -> None: ...  #THPModule_syncStreamsOnDevice
+def current_stream(device: Union[_device, str, _int, None] = None) -> Stream: ...  #THPModule_getStream
+def synchronize(device: Union[_device, str, _int, None] = None) -> None: ...  #THPModule_syncStreamsOnDevice
 def _exchange_device(device_index: _int) -> _int: ...  #THPModule_exchangeDevice
 def _maybe_exchange_device(device_index: _int) -> _int: ...  #THPModule_maybeExchangeDevice
 
