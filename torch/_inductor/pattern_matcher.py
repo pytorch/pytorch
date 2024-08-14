@@ -1669,7 +1669,7 @@ def get_mutation_region_id(
         return n.meta["mutation_region_id"]
     if "alias_info" not in graph.owning_module.meta:
         # alias info nonexistent, do a full recompute
-        compute_mutation_region_ids(graph.owning_module)
+        compute_mutation_region_ids(graph)
         return n.meta["mutation_region_id"]
 
     # Backtrack to the first prev node that has a mutation_region_id
@@ -1700,14 +1700,14 @@ def get_mutation_region_id(
     return n.meta["mutation_region_id"]
 
 
-def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
+def should_compute_mutation_region_ids(graph: torch.fx.Graph) -> bool:
     return (
         "mutation_region_id" not in next(iter(graph.nodes)).meta
         or "alias_info" not in graph.owning_module.meta
     )
 
 
-def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
+def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
     """Given a graph, compute mutation region ids for each node.
 
     See get_mutation_region_id for more details.
