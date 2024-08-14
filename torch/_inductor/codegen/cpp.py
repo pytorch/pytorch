@@ -2075,7 +2075,7 @@ class CppVecKernel(CppKernel):
         dtype: torch.dtype,
         buffer: Optional[IndentedBuffer] = None,
         store_value: Optional[Union[str, CppCSEVariable]] = None,
-        accu: bool = False,
+        accu_store: bool = False,
     ) -> Optional[CppCSEVariable]:
         """
         Load or store a vector in a non-contiguous way. The vector is initialized from an array that is
@@ -2090,11 +2090,11 @@ class CppVecKernel(CppKernel):
         :param dtype: data type of `var` or `index` if `var` is None.
         :param buffer: the code buffer to write the generated code to. If None, we write to `self.loads`.
         :param store_value: the value to store. If None, we load the vector.
-        :param accu: whether accumulate the store_value to store_ptr. If True, a store_value should be provided
+        :param accu_store: whether accumulate the store_value to store_ptr. If True, a store_value should be provided
         :return: a CppCSEVariable that represents the loaded vector or None if it is a store.
         """
         assert not store_value or var is not None, "store var must be provided"
-        if accu:
+        if accu_store:
             assert store_value
         if buffer is None:
             buffer = self.loads
@@ -2182,7 +2182,7 @@ class CppVecKernel(CppKernel):
                     code.writeline(f"if ({load_mask})")
                     stack.enter_context(code.indent())
                 if store_value:
-                    conjunction = "+=" if accu else "="
+                    conjunction = "+=" if accu_store else "="
                     code.writeline(f"{rhs} {conjunction} tmpbuf[{itervar_inner}];")
                 else:
                     code.writeline(f"tmpbuf[{itervar_inner}] = {rhs};")
@@ -2229,7 +2229,7 @@ class CppVecKernel(CppKernel):
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
-        accu: bool = False,
+        accu_store: bool = False,
     ):
         """
         Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
@@ -2254,7 +2254,7 @@ class CppVecKernel(CppKernel):
                 code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
         else:
             self._load_or_store_non_contiguous(
-                var, index, dtype, buffer=code, store_value=value, accu=accu
+                var, index, dtype, buffer=code, store_value=value, accu_store=accu_store
             )
         return code
 
@@ -2277,7 +2277,7 @@ class CppVecKernel(CppKernel):
                     var,
                     index,
                     V.graph.get_dtype(name),
-                    accu=True,
+                    accu_store=True,
                 )
                 self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
             else:
