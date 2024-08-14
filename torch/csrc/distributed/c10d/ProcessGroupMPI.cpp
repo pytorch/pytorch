@@ -673,7 +673,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
         "mpi:scatter",
         !inputTensors.empty()
             ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
-            : c10::nullopt);
+            : std::nullopt);
   } else {
     auto entry = std::make_unique<WorkEntry>(
         nullptr, &outputTensors, std::move(runFunc));
@@ -682,7 +682,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
         "mpi:scatter",
         !inputTensors.empty()
             ? std::optional<std::vector<at::Tensor>>(inputTensors[0])
-            : c10::nullopt);
+            : std::nullopt);
   }
 }
 
@@ -932,7 +932,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
       };
   auto entry =
       std::make_unique<WorkEntry>(nullptr, nullptr, std::move(runFunc));
-  return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
+  return enqueue(std::move(entry), "mpi:barrier", std::nullopt);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(

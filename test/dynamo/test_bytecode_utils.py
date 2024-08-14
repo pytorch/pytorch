@@ -17,7 +17,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         def fn():
             a = 10
             b = 20
-            c = a + b
+            # prevent LOAD_FAST_LOAD_FAST in 3.13 by wrapping b with g()
+            c = a + g(b)
             f = "linetable_writer"
             return f"Test if {f} generates correct co_linetable: {c}"
 
@@ -132,7 +133,6 @@ def fn():
     @skipIfNotPy311
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
-        load_global = bytecode_transformation.create_load_global
         consts = (None, 1, 2, 3, 4)
 
         def create_test_code(jump_opname, target_idx):
@@ -159,12 +159,12 @@ def fn():
                 new_inst("RESUME", arg=0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
-                load_global("print", False),
+                new_inst("LOAD_GLOBAL", arg=0, argval="print"),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
                 new_inst("LOAD_CONST", argval=2),
-                load_global("print", False),
+                new_inst("LOAD_GLOBAL", arg=0, argval="print"),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],

@@ -28,6 +28,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -100,7 +101,7 @@ def update_pointwise_example_value(pointwise_node, input, other, op):
 
 
 class GroupBatchFusionBase:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.graph_search_options = kwargs.pop(
             "graph_search_options", default_graph_search_options
         )
@@ -112,8 +113,8 @@ class GroupBatchFusionBase:
         raise NotImplementedError("fuse called on base")
 
 
-PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
-POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
+PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
+POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = {}
 
 
 def register_fusion(name: str, pre_grad=True):
@@ -168,7 +169,7 @@ class BatchFusion(GroupBatchFusionBase):
 
 
 class BatchPointwiseOpsFusionFactory(BatchFusion):
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(**kwargs)
         self.op = op
 
@@ -387,7 +388,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
     Batch pointwise math operator (e.g., add, mul) in post grad pass.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -562,11 +563,23 @@ class BatchLinearLHSFusion(BatchFusion):
 
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]):
-    if node is None:
+    return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# Poor person's check for if a node in the graph mutates its input.
+# (the graph is torch IR, so we will see torch fns and python operators)
+def _is_mutable_node(tgt):
+    if str(tgt).endswith("_"):
+        # e.g. torch.mul_, torch.Tensor.mul_
         return True
-    if "example_value" not in node.meta and "val" not in node.meta:
-        return False
-    return True
+    if (
+        hasattr(tgt, "__module__")
+        and tgt.__module__ == "_operator"
+        and tgt.__name__.startswith("i")
+    ):
+        # e.g. operator.iand, operator.imul
+        return True
+    return False
 
 
 def is_linear_node_can_be_fused(node: torch.fx.Node):
@@ -578,6 +591,10 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
         and is_node_meta_valid(weight)
         and len(input.meta["example_value"].shape) == 2
         and len(weight.meta["example_value"].shape) == 2
+        # the mm -> bmm transform adds an unbind() op,
+        # which is not safe for autograd when the output of the mm is mutated.
+        # don't pattern match if any users of the mm mutate the input.
+        and not any(_is_mutable_node(user.target) for user in node.users)
     )
 
 
@@ -853,7 +870,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -899,13 +916,23 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                     args=(stack_inputs,),
                     kwargs={"inplace": subset[0].kwargs.get("inplace", False)},
                 )
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"],
+                    inplace=subset[0].kwargs.get("inplace", False),
+                )
             else:
                 batch_op = graph.call_function(
                     self.op,
                     args=(stack_inputs,),
                 )
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"]
+                )
             unbind_op = graph.call_function(
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}
+            )
+            unbind_op.meta["example_value"] = torch.unbind(
+                batch_op.meta["example_value"], dim=0
             )
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(unbind_op):
@@ -922,7 +949,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
     The introduced stack node may be merged in split cat.
     """
 
-    def __init__(self, op, **kwargs):
+    def __init__(self, op, **kwargs) -> None:
         super().__init__(op, **kwargs)
         self.op = op
 
@@ -975,75 +1002,75 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
 @register_fusion("batch_tanh")
 class BatchTanhPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.tanh, **kwargs)
 
 
 @register_fusion("batch_sigmoid")
 class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.sigmoid, **kwargs)
 
 
 @register_fusion("batch_relu")
 class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(torch.nn.functional.relu, **kwargs)
 
 
 @register_fusion("batch_aten_tanh", pre_grad=False)
 class BatchTanhPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.tanh.default, **kwargs)
 
 
 @register_fusion("batch_aten_sigmoid", pre_grad=False)
 class BatchSigmoidPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.sigmoid.default, **kwargs)
 
 
 @register_fusion("batch_aten_relu", pre_grad=False)
 class BatchReLuPostGradFusion(BatchPointwiseOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.relu.default, **kwargs)
 
 
 @register_fusion("batch_aten_add", pre_grad=False)
 class BatchAddPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.add.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_sub", pre_grad=False)
 class BatchSubPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.sub.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_div", pre_grad=False)
 class BatchDivPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.div.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_mul", pre_grad=False)
 class BatchMulPostGradFusion(BatchPointwiseMathOpsPostGradFusion):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         super().__init__(aten.mul.Tensor, **kwargs)
 
 
 class _OrderedSet:
-    def __init__(self, param=None):
+    def __init__(self, param=None) -> None:
         if param:
             self.rep = OrderedDict(dict.fromkeys(param))
         else:
             self.rep = OrderedDict()
 
-    def __contains__(self, o):
+    def __contains__(self, o) -> bool:
         return o in self.rep
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.rep.__len__()
 
     def append(self, o):

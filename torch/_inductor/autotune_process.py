@@ -28,7 +28,6 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
-
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
@@ -38,6 +37,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
 )
 
+
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
     from multiprocessing.queues import Queue
@@ -46,8 +46,9 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .runtime.runtime_utils import do_bench_cpu, do_bench_gpu
+from .runtime.benchmarking import benchmarker
 from .virtualized import V
+
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 EXIT_HANDLER_REGISTERED = False
@@ -481,7 +482,7 @@ class BenchmarkRequest:
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
-    ):
+    ) -> None:
         # the kernel name defined in the module
         self.kernel_name = kernel_name
 
@@ -594,7 +595,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = do_bench_gpu(fn)
+            out = benchmarker.benchmark_gpu(fn)
             torch.cuda.synchronize()  # shake out any CUDA errors
 
         return out
@@ -615,7 +616,7 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
         self.module_cache_key = module_cache_key
@@ -687,7 +688,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
@@ -800,7 +801,7 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
-        return do_bench_cpu(fn)
+        return benchmarker.benchmark_cpu(fn)
 
 
 class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
@@ -814,7 +815,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
-    ):
+    ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.hash_key = get_hash(source_code)
@@ -841,7 +842,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
             self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
-        run_method.argtypes = [ctypes.c_ulonglong] * len(args)
+        # Assume only size with type ctypes.c_ulonglong in extra_args
+        assert all(isinstance(arg, ctypes.c_ulonglong) for arg in self.extra_args)
+        run_method.argtypes = [ctypes.c_ulonglong] * (
+            len(args) + len(list(self.extra_args))
+        )
 
         # Generate partial function.
         return functools.partial(
@@ -852,7 +857,11 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
-            self.DLL.close()
+            """
+            Check close attr due to it crash on Windows.
+            """
+            if hasattr(self.DLL, "close"):
+                self.DLL.close()
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}"

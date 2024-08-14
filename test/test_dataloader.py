@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_NUMPY,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -61,14 +62,15 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
     err_msg = (
         "psutil not found. Some critical data loader tests relying on it "
         "(e.g., TestDataLoader.test_proper_exit) will not run."
     )
     if IS_CI:
-        raise ImportError(err_msg) from None
+        raise ModuleNotFoundError(err_msg) from None
     else:
         warnings.warn(err_msg)
 
@@ -77,16 +79,24 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_NUMPY = False
+    np = None
 skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-if TEST_CUDA:
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+TEST_CUDA_IPC = (
+    torch.cuda.is_available()
+    and sys.platform != "darwin"
+    and sys.platform != "win32"
+    and not IS_JETSON
+    and not TEST_WITH_ROCM
+)  # https://github.com/pytorch/pytorch/issues/90940
+
+TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
@@ -468,7 +478,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -497,7 +507,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_raises_index_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -519,7 +529,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_value_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -1352,7 +1362,7 @@ except RuntimeError as e:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
-    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_multiple_dataloaders(self):
         for multiprocessing_context in supported_multiprocessing_contexts:
             loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
@@ -1830,7 +1840,7 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(IS_MACOS, "Not working on macos")
-    @unittest.skipIf(IS_MACOS or IS_JETSON, "Not working on macos or Jetson")
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
@@ -1919,13 +1929,13 @@ except RuntimeError as e:
                 )
 
     @skipIfNoNumpy
-    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_multiprocessing_iterdatapipe(self):
         self._test_multiprocessing_iterdatapipe(with_dill=False)
 
     @unittest.expectedFailure
     @skipIfNoNumpy
-    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     @skipIfNoDill
     def test_multiprocessing_iterdatapipe_with_dill(self):
         self._test_multiprocessing_iterdatapipe(with_dill=True)
@@ -2878,6 +2888,7 @@ class TestDataLoaderDeviceType(TestCase):
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
     )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
@@ -2981,7 +2992,7 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
 
 
 class StringDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.s = "12345"
 
     def __len__(self):
@@ -3018,9 +3029,7 @@ class DictDataset(Dataset):
     def __getitem__(self, ndx):
         return {
             "a_tensor": torch.empty(4, 2).fill_(ndx),
-            "another_dict": {
-                "a_number": ndx,
-            },
+            "another_dict": {"a_number": ndx},
         }
 
 
@@ -3094,7 +3103,7 @@ class TestDictDataLoader(TestCase):
 
 
 class DummyDataset(torch.utils.data.Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = list(range(10))
 
     def __len__(self):
@@ -3474,7 +3483,7 @@ class TestSetAffinity(TestCase):
 
 
 class ConvDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = torch.ones(1, 1, 24000)
         # Call convolution on parent process
         self[0]

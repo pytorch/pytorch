@@ -308,6 +308,8 @@ public:
   // total GPU memory allocated in the process by Metal driver; including
   // implicit allocations from MPS/MPSGraph frameworks and MPSHeapAllocatorImpl.
   size_t getDriverAllocatedMemory() const { return current_allocated_size(); }
+  // recommended Max memory for Metal
+  size_t getRecommendedMaxMemory() const { return max_device_size(); }
   // (see enum DebugVerbosity for description)
   uint32_t getDebugVerbosity() const { return m_debug_verbosity; }
   // returns the device that we allocate from

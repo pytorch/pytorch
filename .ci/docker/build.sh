@@ -373,6 +373,13 @@ case "$image" in
     CONDA_CMAKE=yes
     EXECUTORCH=yes
     ;;
+  pytorch-linux-jammy-py3.12-halide)
+    CUDA_VERSION=12.4
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    CONDA_CMAKE=yes
+    HALIDE=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
@@ -399,6 +406,22 @@ case "$image" in
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
+    ;;
+  pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    ACL=yes
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    CONDA_CMAKE=yes
+    # snadampal: skipping sccache due to the following issue
+    # https://github.com/pytorch/pytorch/issues/121559
+    SKIP_SCCACHE_INSTALL=yes
+    # snadampal: skipping llvm src build install because the current version
+    # from pytorch/llvm:9.0.1 is x86 specific
+    SKIP_LLVM_SRC_BUILD_INSTALL=yes
+    INDUCTOR_BENCHMARKS=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -490,6 +513,7 @@ docker build \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
+       --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \

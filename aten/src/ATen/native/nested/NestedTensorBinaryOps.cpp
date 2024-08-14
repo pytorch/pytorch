@@ -167,13 +167,10 @@ Tensor NestedTensor_elementwise_Tensor(
         ".");
   }
 
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-
   self_contiguous = supports_striding ? self.contiguous() : self;
   other_contiguous = supports_striding ? other.contiguous() : other;
 
-  std::tie(self_impl, other_impl) =
+  auto [self_impl, other_impl] =
       get_elementwise_nested_tensor_impl(self_contiguous, other_contiguous, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
@@ -257,9 +254,7 @@ Tensor& NestedTensor_elementwise__Tensor(
     f(self_impl->get_buffer(), other);
     return self;
   }
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-  std::tie(self_impl, other_impl) =
+  auto [self_impl, other_impl] =
       get_elementwise_nested_tensor_impl(self, other, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);

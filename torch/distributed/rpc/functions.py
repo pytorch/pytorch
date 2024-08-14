@@ -159,9 +159,11 @@ def async_execution(fn):
         >>> ret = rref.remote().static_async_add("worker2", torch.ones(2), 1, 2).to_here()
         >>> print(ret)  # prints tensor([4., 4.])
     """
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
+
     # Can't declare and use attributes of function objects (mypy#2087)
     wrapper._wrapped_async_rpc_function = fn  # type: ignore[attr-defined]
     return wrapper

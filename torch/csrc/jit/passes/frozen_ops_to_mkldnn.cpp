@@ -44,8 +44,7 @@
 
 // clang-format on
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -1105,7 +1104,7 @@ class MKLDNNSubgraphSlicer {
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 
     if (!canMerge) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
@@ -1179,5 +1178,4 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 
 #endif
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

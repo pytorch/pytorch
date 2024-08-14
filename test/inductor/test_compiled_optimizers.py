@@ -4,19 +4,15 @@ import sys
 import unittest
 import weakref
 from contextlib import ExitStack
-
 from copy import deepcopy
 from typing import NamedTuple
 
 import torch
-
 import torch._inductor
 import torch._inductor.cudagraph_trees
 import torch.optim.lr_scheduler
 from torch._inductor import config
-
 from torch._inductor.test_case import TestCase
-
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -31,7 +27,6 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
-
 from torch.optim.lr_scheduler import (
     ChainedScheduler,
     ConstantLR,
@@ -48,18 +43,15 @@ from torch.optim.lr_scheduler import (
     ReduceLROnPlateau,
     StepLR,
 )
-
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
 )
-
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     optims,
 )
-
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
@@ -141,16 +133,12 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 3,
-    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
-    "test_adagrad_weight_decay_foreach_cuda": 3,
-    "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
     "test_adagrad_tensor_lr_cpu": 6,
     "test_adagrad_tensor_lr_cuda": 6,
     "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 8,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 9,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
@@ -163,13 +151,13 @@ KERNEL_COUNT_OVERRIDES = {
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=11),
+    NAdam: KernelCounts(multitensor=2, singletensor=8),
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=11),
+    ASGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -580,13 +568,13 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01, kernel_count=2)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=11, lr=0.01, foreach=False
+        ASGD, kernel_count=8, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(

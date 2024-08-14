@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 """
 Python polyfills for common builtins.
@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in enumerate(list(iterator))[start:end]:
+    for i, elem in list(enumerate(iterator))[start:end]:
         if item == elem:
             return i
     # This will not run in dynamo
@@ -63,6 +63,30 @@ def set_isdisjoint(set1, set2):
     return True
 
 
+def set_intersection(set1, set2):
+    intersection_set = set()
+    for x in set1:
+        if x in set2:
+            intersection_set.add(x)
+    return intersection_set
+
+
+def set_union(set1, set2):
+    union_set = set1.copy()
+    for x in set2:
+        if x not in union_set:
+            union_set.add(x)
+    return union_set
+
+
+def set_difference(set1, set2):
+    difference_set = set()
+    for x in set1:
+        if x not in set2:
+            difference_set.add(x)
+    return difference_set
+
+
 def dropwhile(predicate, iterable):
     # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
     iterable = iter(iterable)
@@ -71,3 +95,39 @@ def dropwhile(predicate, iterable):
             yield x
             break
     yield from iterable
+
+
+def zip_longest(*iterables, fillvalue=None):
+    # Create a list of iterators from the input iterables
+    iterators = [iter(it) for it in iterables]
+    result = []
+    while True:
+        row = []
+        active = False
+        for it in iterators:
+            try:
+                # Try to get the next item from the iterator
+                value = next(it)
+                row.append(value)
+                active = True
+            except StopIteration:
+                # If the iterator is exhausted, use the fillvalue
+                row.append(fillvalue)
+        if not active:
+            break
+        result.append(tuple(row))
+    return result
+
+
+def getattr_and_trace(*args, **kwargs):
+    wrapper_obj = args[0]
+    attr_name = args[1]
+    fn = getattr(wrapper_obj, attr_name)
+    return fn(*args[2:], **kwargs)
+
+
+def mapping_get(obj, key, value=None):
+    try:
+        return obj.__getitem__(key)
+    except KeyError:
+        return value

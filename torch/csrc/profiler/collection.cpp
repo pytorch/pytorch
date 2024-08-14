@@ -200,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       if (io_type == tagToIOType(tag)) {
         out.emplace_back(std::move(input));
       } else {
-        out.emplace_back(c10::nullopt);
+        out.emplace_back(std::nullopt);
       }
     };
 
@@ -223,7 +223,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             arg.emplace_back(decode_tensor());
           }
           if (found_undefined) {
-            push_value(*tag_it, c10::nullopt);
+            push_value(*tag_it, std::nullopt);
           } else {
             push_value(Tag::TensorListBegin, std::move(arg));
           }
@@ -236,7 +236,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          push_value(*tag_it, c10::nullopt);
+          push_value(*tag_it, std::nullopt);
           break;
 
         case Tag::TERMINATOR:
@@ -314,6 +314,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
+    torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
     torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
@@ -397,8 +398,11 @@ struct StealOrDefault {
 };
 } // namespace
 
+std::string profilerStepString = "ProfilerStep#";
+
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
+    std::vector<ProfilerStepInfo>& step_info,
     const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
@@ -437,6 +441,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
   auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
+  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
   auto gpu_fallback =
       StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
@@ -451,10 +456,17 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         extra_meta(),
+        kwinputs(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
+    if (e.name_.find(profilerStepString) != std::string::npos) {
+      step_info.emplace_back(
+          time_converter(event->start_time_),
+          time_converter(event->end_time_),
+          out.size());
+    }
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -687,13 +699,13 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
+#ifdef USE_KINETO
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
   return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
 }
 
-#ifdef USE_KINETO
 void generateForwardBackwardLink(
     const Result& profiler_result,
     uint64_t& fwd_bwd_link_id,
@@ -1363,8 +1375,18 @@ RecordQueue::getRecords(
         ? std::numeric_limits<c10::time_t>::min()
         : time_converter(t);
   };
+
+  // Lambda that checks that only the right side of the base intersects with
+  // ev_start and ev_end
+  auto right_intersection_only =
+      [&](ProfilerStepInfo base, int64_t ev_start, int64_t ev_end) {
+        return (base.start_time_ns < ev_start) &&
+            (base.end_time_ns <= ev_end && base.end_time_ns > ev_start);
+      };
   std::vector<std::shared_ptr<Result>> out;
   std::vector<python_tracer::CompressedEvent> python_enters;
+  std::vector<ProfilerStepInfo> step_info;
+  long unsigned int step_idx = 0;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
@@ -1387,7 +1409,7 @@ RecordQueue::getRecords(
     };
 
     queue.torch_ops_.materialize(
-        out, converter, queue.tid(), queue.kineto_info());
+        out, step_info, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
     materialize_vulkan(
         out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
@@ -1419,7 +1441,26 @@ RecordQueue::getRecords(
       torch::profiler::impl::kineto::stopTrace();
       throw;
     }
+    // Placeholder for if we run out of ProfilerStep annotations
+    ProfilerStepInfo defaultStep = {LLONG_MAX, LLONG_MAX, 0};
+    ProfilerStepInfo step =
+        step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
+      // If event has start time after step end time we can continue to the next
+      // step
+      while (i->start_time_ns_ > step.end_time_ns) {
+        step_idx++;
+        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      }
+      // If Step annotation starts before event and ends before event ends with
+      // intersection then we move the lefthand side of the step annotation to
+      // the event start time
+      if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+        auto currStepRes = out[step.out_idx];
+        currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+        step_idx++;
+        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      }
       out.push_back(i);
     }
     python_tracer_.reset();

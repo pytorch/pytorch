@@ -1,20 +1,21 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Dict, Optional, Protocol, Tuple
+from typing import Any, Dict, Optional, Protocol, Tuple, Union
 
 import torch
-
 from torch._library.utils import parse_namespace
+
 
 log = logging.getLogger(__name__)
 
 
 class FakeScriptObject:
-    def __init__(self, wrapped_obj: Any, script_class_name: str):
+    def __init__(self, wrapped_obj: Any, script_class_name: str, x: torch.ScriptObject):
         self.wrapped_obj = wrapped_obj
 
         # The fully qualified name of the class of original script object
         self.script_class_name = script_class_name
+        self.real_obj = x
 
 
 class FakeScriptMethod:
@@ -41,7 +42,7 @@ class HasStaticMethodFromReal(Protocol):
 
 
 class FakeClassRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         self._registered_class: Dict[str, Any] = {}
 
     def has_impl(self, full_qualname: str) -> bool:
@@ -54,7 +55,7 @@ class FakeClassRegistry:
     def register(self, full_qualname: str, fake_class=None) -> None:
         if self.has_impl(full_qualname):
             log.warning(
-                "%s is already registered. Previous fake class is overrided with  %s.",
+                "%s is already registered. Previous fake class is overridden with  %s.",
                 full_qualname,
                 fake_class,
             )
@@ -98,10 +99,34 @@ def _check_valid_flat_script_obj(flat_x):
             )
 
 
-def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
-    import torch.utils._pytree as pytree
+def tracing_with_real(x: torch.ScriptObject) -> bool:
+    if not hasattr(x, "tracing_mode"):
+        return False
 
-    flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    assert x.tracing_mode() in [
+        "real",
+        "fake",
+    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    return x.tracing_mode() == "real"
+
+
+def maybe_to_fake_obj(
+    fake_mode, x: torch.ScriptObject
+) -> Union[FakeScriptObject, torch.ScriptObject]:
+    import torch.utils._pytree as pytree
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    # When tracing with real mode, people should implement meta kernels that can
+    # handle the case of real script object + fake tensor inputs.
+    if tracing_with_real(x):
+        return x
+
+    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+    # want to call these ops in surrounding dispatch modes when executing it.
+    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+    # script obeject execute some operations like clone if allow_non_fake_input flag is set.
+    with _disable_current_modes():
+        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
     _check_valid_flat_script_obj(flat_x)
 
@@ -113,7 +138,7 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
 
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
@@ -134,7 +159,9 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            log.warning("fake object of %s doesn't implement method %s.", x, name)
+            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            if name not in override_skip_list:
+                log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped
 
 
@@ -288,6 +315,6 @@ def _fake_obj_from_real(fake_mode, x) -> Any:
         )
 
     # from_real defined by user need the ctx to fakify the tensor states.
-    ctx = torch._library.abstract_impl.AbstractImplCtx(fake_mode, None)
-    with torch._library.abstract_impl.set_ctx_getter(lambda: ctx):
+    ctx = torch._library.fake_impl.FakeImplCtx(fake_mode, None)
+    with torch._library.fake_impl.set_ctx_getter(lambda: ctx):
         return fake_class.from_real(x)

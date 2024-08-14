@@ -31,8 +31,9 @@ import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
-from .utils import generate_assert
 
+from .sizevars import evaluate_expr
+from .utils import generate_assert
 from .virtualized import V
 
 
@@ -43,6 +44,10 @@ def _is_constant(val: _ExprType):
     if isinstance(val, sympy.Basic):
         return val.is_number
     return isinstance(val, (int, float, bool))
+
+
+def upper_bound(val: _ExprType):
+    return bound_sympy(val).upper if isinstance(val, sympy.Expr) else val
 
 
 @dataclass
@@ -82,7 +87,10 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
 
@@ -185,12 +193,14 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
+    def __init__(
+        self,
+        inner: Any,
+        iter_ranges: Dict[sympy.Symbol, sympy.Expr],
+        indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
+    ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
-
-        def upper_bound(v):
-            return bound_sympy(v).upper if isinstance(v, sympy.Expr) else v
 
         var_to_range = {
             k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
@@ -198,6 +208,9 @@ class IndexPropagation:
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
         )
+        # NOTE: this is intentionally kept as a reference so the caller can
+        # update it in-place
+        self.indirect_var_ranges = indirect_var_ranges
 
         axioms = []
         for x, s in iter_ranges.items():
@@ -305,15 +318,21 @@ class IndexPropagation:
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
-        evaluated = self.shape_env._maybe_evaluate_static(
-            e,
-            axioms=self.axioms,
-            var_to_range=self.var_to_range,
+        var_to_range = (
+            *self.var_to_range,
+            *(
+                (k, ValueRanges(0, upper_bound(v) - 1))
+                for k, v in self.indirect_var_ranges.items()
+            ),
         )
-        return bool(evaluated)
+        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
-        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+        self,
+        index: Union[Any, IndexPropVar],
+        size: Any,
+        check: bool = True,
+        wrap_neg=True,
     ) -> Any:
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
@@ -338,7 +357,8 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-            expr = wrap_expr(expr)
+            if wrap_neg:
+                expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
                     "check_bounds",
@@ -346,4 +366,8 @@ class IndexPropagation:
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
             return expr
-        return self.fallback("indirect_indexing", (index, size, check), {}).value
+
+        indirect_var = self.fallback(
+            "indirect_indexing", (index, size, check, wrap_neg), {}
+        ).value
+        return indirect_var

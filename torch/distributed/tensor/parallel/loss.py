@@ -9,14 +9,15 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
-from torch.distributed._tensor.ops.math_ops import (
+from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
+from torch.distributed._tensor.ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
+
 
 aten = torch.ops.aten
 
@@ -199,7 +200,8 @@ def _nll_loss_forward(
     local_weight: Optional[Tensor],
     reduction: int,
     ignore_index: int,
-    channel_dim_size: int,
+    input_shape: torch.Size,
+    channel_dim: int,
     mesh: DeviceMesh,
     mesh_dim: int,
 ) -> Tuple[Tensor, Tensor]:
@@ -229,7 +231,7 @@ def _nll_loss_forward(
 
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-    partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target_partial_ = partial_placement._partition_value(
         safe_target_, mesh, mesh_dim
     )
@@ -316,7 +318,8 @@ def _nll_loss_forward_handler(
         local_weight,
         reduction,
         ignore_index,
-        channel_dim_size,
+        x.shape,
+        channel_dim,
         spec.mesh,
         mesh_dim,
     )
@@ -347,7 +350,8 @@ def _nll_loss_and_log_softmax_backward(
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,
-    channel_dim_size: int,
+    input_shape: torch.Size,
+    channel_dim: int,
     mesh: DeviceMesh,
     mesh_dim: int,
 ) -> Tensor:
@@ -361,12 +365,12 @@ def _nll_loss_and_log_softmax_backward(
 
     # The following code block is a distributed version of
     # grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
-    partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target = safe_target.squeeze(channel_dim).flatten()
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked
     assert partial_placement.mask_buffer.data is not None
-    grad_update = partial_placement.mask_buffer.data.float() - 1.0
+    grad_update = partial_placement.mask_buffer.data.to(grad_input.dtype) - 1.0
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device
     )
@@ -421,7 +425,6 @@ def _nll_loss_backward_handler(
     total_weight = cast(Tensor, args[6])
 
     channel_dim = 1 if x.dim() >= 2 else 0
-    channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
@@ -448,7 +451,8 @@ def _nll_loss_backward_handler(
         reduction,
         ignore_index,
         total_weight,
-        channel_dim_size,
+        x.shape,
+        channel_dim,
         spec.mesh,
         mesh_dim,
     )
