@@ -1,5 +1,6 @@
 import time
 from functools import cached_property, wraps
+from itertools import chain
 from statistics import median
 from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
@@ -78,7 +79,7 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
-        for arg_or_kwarg in fn_args + tuple(fn_kwargs.items()):
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
             if inferred_device is None:
