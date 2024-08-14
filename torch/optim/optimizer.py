@@ -32,6 +32,7 @@ from torch.utils._foreach_utils import (
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
+    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
 
@@ -39,7 +40,6 @@ from torch.utils.hooks import RemovableHandle
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
-TensorListList: TypeAlias = List[List[torch.Tensor]]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
 
 

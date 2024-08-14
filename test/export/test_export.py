@@ -2292,6 +2292,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[],  # nothing to fix!
         )
 
+    def test_no_suggested_fixes_for_data_dependent_errors(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y):
+                # y.item() is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):

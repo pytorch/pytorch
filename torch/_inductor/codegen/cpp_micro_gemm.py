@@ -92,6 +92,7 @@ inline void {{kernel_name}}(
             "torch": torch,
             "kernel_name": self.name,
             "input_dtype": self.input_dtype,
+            "input2_dtype": self.input2_dtype,
             "output_dtype": self.output_dtype,
             "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
@@ -288,6 +289,14 @@ class CppMicroGemmRef(CppMicroGemm):
         output_dtype=torch.float,
     ),
     *generate_gemm_config(
+        VecAVX512,
+        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
         VecAVX2,
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.float,
@@ -304,11 +313,21 @@ class CppMicroGemmRef(CppMicroGemm):
         input_dtype=torch.half,
         output_dtype=torch.float,
     ),
+    *generate_gemm_config(
+        VecAVX2,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
     """
     This class generates the code for micro gemm using fp32 vec instructions for compute.
     It supports input types of torch.float, torch.bfloat16, and torch.half with fp32 output.
+    The output of the microkernel is in FP32, but it would be converted to BF16/FP16 in the template,
+    if the desired output is BF16/FP16.
     """
 
     TEMPLATE_ENTRY = r"""
@@ -357,7 +376,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* {{restrict_keyword}} A,
-    const {{input_t}}* {{restrict_keyword}} B,
+    const {{input2_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
@@ -398,9 +417,13 @@ inline void {{kernel_name}}_kernel(
         }
 
         if constexpr (row == 0) {
-            {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
+            {%- if input2_dtype in [torch.bfloat16, torch.float16] %}
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
+            {%- elif input2_dtype == torch.int8 %}
+            // Convert VLEN int8 elements to int32, and then fp32
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
             {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
             {%- endif %}
@@ -410,7 +433,6 @@ inline void {{kernel_name}}_kernel(
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < K; ++k) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
@@ -451,6 +473,15 @@ def check_amx_extra(config, m, n, k, alpha, num_threads):
 
 
 @register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_amx_extra,
+    ),
     *generate_gemm_config(
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
@@ -570,6 +601,38 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         zero_c();
     }
 
+    {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+    // create a buffer for tiles of B.
+    // TODO: loop-unrolling of the "compute" lambda may result in incorrect output
+    // as this buffer would be used, so maybe 4 of these should be used?
+    // Since UT output is correct, looks like loop unrolling isn't actually happening.
+    alignas(64) {{input_t}} bf16_weights_buf[512];
+
+    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
+    int b_tile_ptr_stride = ldb * {{vnni_size}};
+
+    // TODO: verify whether or not these lambdas inline
+    auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
+        {{kernel.unroll_pragma(2)}}
+        for (int i = 0; i < 2; i++) {
+            // int8 -> int32 -> fp32 -> bf16
+            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
+            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
+            b_bf16.store(dst + i * 16);
+         }
+    };
+
+    auto load_B_in_buf = [&]({{input2_t}}* B_ptr) {
+        {{kernel.unroll_pragma(8)}}
+        for (int i = 0; i < num_b_rows; i++) {
+            load_B_row(
+                B_ptr + i * b_tile_ptr_stride,
+                bf16_weights_buf + i * 32
+            );
+        }
+    };
+    {%- endif %}
+
     auto compute = [&](int k) {
     {%- set tile_offset_a = num_rows // 16 * num_columns %}
     {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
@@ -582,7 +645,12 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
+        {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+        load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
+        _tile_loadd({{tile_idx_b}}, bf16_weights_buf, 64);
+        {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
+        {%- endif %}
         {%- endif %}
         {%- if int8_gemm %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
@@ -719,9 +787,14 @@ def create_micro_gemm(
                 continue
             if (
                 config.input_dtype == input_dtype
-                and config.output_dtype == output_dtype
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
+                and config.output_dtype == output_dtype
+                # The output_dtype here is the output dtype of the micro-kernel.
+                # In some cases, the actual output dtype of the op for which the micro-kernel
+                # is being created would be same as that of the activation, but the micro-kernels
+                # compute output in Float/int32, which is converted in the GEMM template. This is
+                # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
                     config, m, n, k, alpha, num_threads
