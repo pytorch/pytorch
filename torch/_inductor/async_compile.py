@@ -36,7 +36,6 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
-from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
@@ -128,6 +127,11 @@ class AsyncCompile:
         return ThreadPoolExecutor(config.compile_threads)
 
     @staticmethod
+    def _get_ready():
+        """No-op function to help mark when the subprocess pool is ready."""
+        return "ready"
+
+    @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert config.compile_threads > 1
@@ -149,6 +153,8 @@ class AsyncCompile:
             # kill the worker thread that sends the shutdown message to the workers...
             multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
+        # Set an attribute we can check to see if the pool is ready.
+        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
         _pool_set.add(pool)
         return pool
 
@@ -166,13 +172,19 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
+    def _use_process_pool(self):
+        return (
+            config.compile_threads > 1
+            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+        )
+
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
         _compile_start()
         _set_triton_ptxas_path()
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
+        if self._use_process_pool():
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -262,14 +274,3 @@ class AsyncCompile:
                     pbar.update(1)
 
         _compile_end()
-
-
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-    # The subprocess pool is only used for the Triton backend
-    or not has_triton_package()
-):
-    pass
-else:
-    AsyncCompile.warm_pool()
