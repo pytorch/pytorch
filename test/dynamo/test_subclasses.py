@@ -24,6 +24,7 @@ from torch.nested._internal.nested_tensor import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NestedTensorTestCase,
     parametrize,
     subtest,
 )
@@ -1700,7 +1701,7 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(SubclassTests)
 
 
-class TestNestedTensor(torch._dynamo.test_case.TestCase):
+class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
     def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
         return get_jagged_tensor(nested_size, offsets, requires_grad)
 
@@ -1753,6 +1754,417 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    def _validate_compile(self, fn, arg_fn):
+        def _gen_grad_outputs(out_val):
+            if isinstance(out_val, (list, tuple)):
+                return tuple(torch.ones_like(c) for c in out_val)
+            else:
+                return (torch.ones_like(out_val),)
+
+        with self.branch_nested_state():
+            from torch.nested._internal.nested_tensor import _tensor_symint_registry
+
+            # Validate that compilation does not modify eager state
+            registry_before = list(_tensor_symint_registry.items())
+            count_before = torch.nested._internal.nested_tensor._tensor_id_counter
+
+            guards_exported = []
+            guards_failed = []
+
+            def append_guard_export(guards):
+                for g in guards:
+                    if g.code_list is not None:
+                        guards_exported.append(g.code_list[0])
+
+            def append_guard_fail(guards):
+                guards_failed.extend(guards)
+
+            compiled = torch._dynamo.optimize(
+                nopython=True,
+                backend="aot_eager",
+                guard_export_fn=append_guard_export,
+                guard_fail_fn=append_guard_fail,
+            )(fn)
+            registry_after = list(_tensor_symint_registry.items())
+            count_after = torch.nested._internal.nested_tensor._tensor_id_counter
+            self.assertEqual(registry_before, registry_after)
+            self.assertEqual(count_before, count_after)
+
+            args = arg_fn()
+            compile_out = compiled(*args)
+            compile_grads = []
+            g_args = [arg for arg in args if arg.requires_grad]
+            if len(g_args) > 0:
+                compile_grad_outputs = _gen_grad_outputs(compile_out)
+                compile_grads = torch.autograd.grad(
+                    compile_out, inputs=g_args, grad_outputs=compile_grad_outputs
+                )
+
+        with self.branch_nested_state():
+            args = arg_fn()
+            ref_out = fn(*args)
+            ref_grads = []
+            g_args = [arg for arg in args if arg.requires_grad]
+            if len(g_args) > 0:
+                ref_grad_outputs = _gen_grad_outputs(ref_out)
+                ref_grads = torch.autograd.grad(
+                    ref_out, inputs=g_args, grad_outputs=ref_grad_outputs
+                )
+
+        # Validate correctness forward
+        if isinstance(compile_out, (list, tuple)):
+            # TODO: Fix assertEqual() to support NJTs so this isn't necessary
+            self.assertEqual(len(compile_out), len(ref_out))
+            for c, r in zip(compile_out, ref_out):
+                self.assertEqualIgnoringNestedInts(c, r)
+        else:
+            self.assertEqualIgnoringNestedInts(compile_out, ref_out)
+
+        # Validate correctness backward
+        for compile_grad, ref_grad in zip(compile_grads, ref_grads):
+            self.assertEqualIgnoringNestedInts(compile_grad, ref_grad)
+
+        return guards_exported, guards_failed
+
+    # Note: [What kind of guards are involved in nested tensor compilation]
+    #
+    # Until we implement UnionFind, dynamic shapes guards are not involved.
+    # we rely only on dynamo's tensor aliasing guards.
+    #
+    # This is possible because dynamo able to generate tensor aliasing guards
+    # not only for the outer tensor, but also for the inner tensor.
+    #
+    # The case where dynamic shapes guards would eventually come into play is
+    # when my inputs are (1) two non-aliased tensors, but (2) declared as
+    # equal using a "trust me assert equal" API.
+
+    # Note: [Compiling nested tensor global state]
+    #
+    # Today there are two pieces of global eager state that NJTs deals with:
+    # - tensor_id_counter: a global counter that assigns unique ids to tensors
+    # - tensor_symint_registry: maps tensor to nested int
+    #   - this is used in eager only (we should get rid of this because it is
+    #     not necessary to cache nested int in eager)
+    #   - during tracing, we DO need to cache nested int, but we do so on
+    #     the FakeTensor.
+    #
+    # Ideally we would like to satisfy the following:
+    # - (1) The eager state is not mutated during tracing
+    # - (2) Running the compiled function should mutate the eager state in the
+    #       same way that running the eager function would
+    #       (a) The global counter should be incremented
+    #       (b) The registry is updated in the same way
+    #
+    # Today we can satisfy (1) and (2a) but cannot satisfy (2b)
+    #
+    # Today, (1) is satisfied because we maintain a separate counter during
+    # tracing, and cache nested int on FakeTensor instead of relying on
+    # tensor_symint_registry.
+    #
+    # (2) is cannot be completely satisfied because we trace away the
+    # side-effectful operations (which we can fix this by wrapping the
+    # side-effectful operations in a custom op, and threading through effect
+    # tokens.) The current plan is to do that in the UnionFind impl.
+    #
+    # Interestingly, despite this, the state is mutated in a way that is somewhat
+    # close to what we want, e.g. if I construct a nested tensor using an
+    # offsets in the compiled region and return it, AOTAutograd runtime wrapper
+    # must rewrap the inner->inner graph outputs back into subclass. This
+    # triggers the eager logic to run, updating the counter and registry.
+    #
+    # Notably however, compile differs in two ways from eager:
+    # (1) The order in which the offsets are assigned ids is differnet
+    #     the registry would be set in the order the offsets are returned
+    #     which is not necessarily the same order as they were constructed.
+    # (2) If a NestedTensor is not returned, then the AOTAutograd wrapping
+    #     logic will not be triggered.
+    #
+    # I claim that correctness is not affected by these differences today.
+    # e.g. there is never the case where two distinct offsets silently share
+    # the same id.
+    #
+    # (1) is clearly not a problem, and (2) should only be a problem if
+    # the nested int is returned on its own, without the corresponding NJT
+    # being returned. This is not a problem in the current implementation
+    # because returning only a shape is not supported!
+
+    # Note: [Creating symbolic nested int]
+    #
+    # We must create a symbolic nested int when we construct a nested tensor
+    # from a tensor. There are two main cases:
+    #
+    # 1. The offsets has NOT been used to construct a NJT
+    #    - Create a new plain nested int with current val of fake nt id counter
+    #    - Increment the fake nt id counter
+    #    - Create a new symint with plain nested int as hint
+    # 2. The offsets HAS been used to construct a NJT
+    #    - Create a new symint with plain nested int as hint
+    #
+    # More details on case 2:
+    # - During fakification of the offsets, we check the eager registry, and
+    #   if the tensor HAS been used to construct a NJT,
+    #   we create a symint, with the existing nested int as hint, and cache
+    #   it on to the FakeTensor.
+    #
+    # [ Always use ephemeral source ]
+    #
+    # We create the new symint ALWAYS with ephemeral source whether that is
+    # in case (1) or (2) even though we could've had a proper source for case (2).
+    # Using a proper source would enable a few more (edge) cases, but since
+    # we plan to handle things more holistically in the future anyway, we don't
+    # bother doing so today.
+    #
+    # Using an ephemeral source has some consequences. But we are happy if
+    # - We do not silently miss recompiles, e.g. we guard when necessary.
+    #   We know that this is true, because dynamo guards alone are already
+    #   sufficient.
+    # - We are not producing errors for the cases we care about
+    #
+    # The main case we care about is when we guard that two shapes are equal.
+    # In this case, the replacements logic would simplify away the ephemeral
+    # symbol, and there is no error produced.
+    # The unsupported case is when we guard that two shapes are not equal, in
+    # which, we will try and fail to generate a guard.
+
+    #
+    # Case 1: in-graph construction where the offsets are passed as inputs
+    #
+    def test_in_graph_construction_from_input(self):
+        # The offsets is passed as an input
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets) * 2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+        # Do not specialize on the offsets
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_offsets = torch.tensor([0, 1, 5, 10], dtype=torch.int64)
+            self._validate_compile(fn, arg_fn=lambda: (values, different_offsets))
+
+    def test_in_graph_construction_from_input_2(self):
+        # Construct two NJTs, both are passed as inputs
+        def fn(values, offsets1, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets1)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt2, nt1
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+        # 1. Offsets are different
+        guards_exported, guards_failed = self._validate_compile(
+            fn, arg_fn=lambda: (values, offsets, offsets2)
+        )
+        self.assertEqual(len(guards_failed), 0)
+        self.assertNotIn("L['offsets1'] is L['offsets2']", guards_exported)
+
+        # TODO
+        # 2. Offsets are the same
+        new_guards_exported, _ = self._validate_compile(
+            fn, arg_fn=lambda: (values, offsets, offsets)
+        )
+        self.assertTrue(any("Duplicate tensors found" in g for g in guards_failed))
+        self.assertIn("L['offsets1'] is L['offsets2']", new_guards_exported)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            offsets3 = offsets.clone()
+            self._validate_compile(fn, arg_fn=lambda: (values, offsets3, offsets3))
+
+        # Do a binary op
+        def fn(values, offsets, offsets2):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets2)
+            return nt1 * nt2
+
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
+
+    def test_in_graph_construction_from_input_4(self):
+        # The offsets is taken from an NJT input
+        def fn(nt, other_values):
+            nt2 = torch.nested.nested_tensor_from_jagged(other_values, nt.offsets())
+            return nt + nt2
+
+        values = torch.randn(9, 5, requires_grad=True)
+        other_values = torch.randn(9, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
+
+        def arg_fn(values=values, other_values=other_values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, other_values
+
+        self._validate_compile(fn, arg_fn=arg_fn)
+
+        # Do not specialize on the offsets
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_offsets = offsets.clone()
+
+            def arg_fn(
+                values=values, other_values=other_values, offsets=different_offsets
+            ):
+                nt = torch.nested.nested_tensor_from_jagged(values, different_offsets)
+                return nt, other_values
+
+            self._validate_compile(fn, arg_fn=arg_fn)
+
+    def test_in_graph_construction_from_input_5(self):
+        # Construct from lengths instead of offsets
+        def fn(values, lengths):
+            nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+            return nt.sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+    #
+    # Case 2: in-graph construction where offsets are graph intermediates
+    #
+    def test_in_graph_construction_from_intermediate(self):
+        # offsets is an intermediate computed from lengths
+        def fn(values, lengths):
+            offsets = torch.cat([lengths.new_zeros(1), lengths.cumsum(0)])
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt * nt2).sin()
+
+        values = torch.randn(9, 5, requires_grad=True)
+        lengths = torch.tensor([2, 4, 3])
+        self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+        # Do not specialize on the lengths
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            different_lengths = lengths.clone()
+            self._validate_compile(fn, arg_fn=lambda: (values, different_lengths))
+
+    def test_in_graph_construction_from_intermediate_2(self):
+        def fn(values, offsets):
+            return torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone())
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+    def test_in_graph_construction_from_intermediate_3(self):
+        # Note that due to CSE, clone is not necessarily called twice!
+        def fn(values, offsets):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets.clone())
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets.clone())
+            return nt2, nt1
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
+    def test_in_graph_construction_from_intermediate_4(self):
+        # Shared intermediate (should be same as case #1)
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5).requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
+    @unittest.expectedFailure
+    def test_in_graph_construction_from_intermediate_5(self):
+        # non-shared intermediate
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets.clone())
+            if nt2.shape[1] != nt.shape[1]:
+                return nt * 2
+            else:
+                return nt * 3
+
+        values = torch.randn(10, 5).requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
+    #
+    # Case 3: in-graph construction where offsets are both direct graph inputs
+    #         and passed in as part of an NJT's offsets.
+    #
+    def test_in_graph_construction_mixed(self):
+        def fn(nt, values, offsets):
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, values, offsets
+
+        self._validate_compile(fn, arg_fn)
+
+    # See Note: [Creating symbolic nested int]
+    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
+    @unittest.expectedFailure
+    def test_in_graph_construction_mixed_2(self):
+        def fn(nt, values, offsets, nt2):
+            # Intermediate offsets has ephemeral source
+            intermediate_nt = torch.nested.nested_tensor_from_jagged(
+                values, offsets.clone()
+            )
+            # This creates a dynamic shapes neq guard
+            if nt2.shape[1] != intermediate_nt.shape[1]:
+                # We should always go here.
+                nt = nt * 2
+            return nt
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets, offsets2=offsets2):
+            # Values is shared, but it shouldn't matter
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets2)
+            return nt, values, offsets, nt2
+
+        self._validate_compile(fn, arg_fn)
+
+    def test_in_graph_construction_mixed_3(self):
+        # More involved mixed case
+        def fn(nt, values, offsets):
+            nt1 = torch.nested.nested_tensor_from_jagged(values * 2, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values * 3, offsets)
+            return nt1 + nt2 + nt
+
+        values = torch.randn(9, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 9], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return nt, values, offsets
+
+        self._validate_compile(fn, arg_fn)
+
+    def test_return_shape(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(nt):
+            return (nt * 2).shape
+
+        compiled = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled(nt)
+
+    def test_inference_tensor(self):
+        with torch.inference_mode():
+            nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+
+        def fn(n):
+            return n * 2
+
+        torch.compile(fn, backend="eager")(nt)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
@@ -1909,8 +2321,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                     guard_str,
                     """\
 Eq(s5 - 1, s2)
-Eq(s11 - 1, s6)
-Eq(s10, s8)""",
+Eq(s12 - 1, s7)
+Eq(s11, s9)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
@@ -1922,8 +2334,8 @@ Eq(s10, s8)""",
                     guard_str,
                     """\
 Eq(s4 - 1, s1)
-Eq(s12 - 1, s7)
-Eq(s11, s9)""",
+Eq(s13 - 1, s8)
+Eq(s12, s10)""",
                 )
             return gm
 
