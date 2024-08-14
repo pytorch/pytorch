@@ -70,7 +70,7 @@ class QConvUnpackWeightsInt8 final {
     }
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return packed_weight->unpack();
     }
@@ -108,7 +108,7 @@ class QConv1dUnpackWeightsInt8 final {
     }
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
