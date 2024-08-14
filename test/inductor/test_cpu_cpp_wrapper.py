@@ -209,8 +209,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise_binary.call"],
-                ["op_mkldnn__convolution_pointwise__binary.call"],
+                ["op_onednn__convolution_pointwise_binary.call"],
+                ["op_onednn__convolution_pointwise__binary.call"],
             ],
         ),
         BaseTest(
@@ -219,8 +219,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise__binary.call"],
-                ["op_mkldnn__convolution_pointwise_binary.call"],
+                ["op_onednn__convolution_pointwise__binary.call"],
+                ["op_onednn__convolution_pointwise_binary.call"],
             ],
         ),
         BaseTest(
