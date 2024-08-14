@@ -15,6 +15,7 @@ from torch.distributed._tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed._tensor._utils import normalize_to_torch_size
 from torch.distributed._tensor.ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -22,7 +23,6 @@ from torch.distributed._tensor.ops.utils import (
     is_tensor_evenly_shardable,
     normalize_dim,
     normalize_dims,
-    normalize_to_torch_size,
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
@@ -467,7 +467,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
 
     output_strategy = OpStrategy([])
-    for input_placement_strategy in input_strategy.strategies:
+    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         redistribute_costs = []
         input_src_spec = input_placement_strategy.output_spec
 
@@ -1030,6 +1030,8 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 )
 def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    k = cast(int, op_schema.args_schema[1])
+    input_shape = input_strategy.shape
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )
