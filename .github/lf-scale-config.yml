@@ -223,6 +223,18 @@ runner_types:
     variants:
       amz2023:
         ami: al2023-ami-2023.5.20240701.0-kernel-6.1-arm64
+  lf.windows.g4dn.xlarge:
+    disk_size: 256
+    instance_type: g4dn.xlarge
+    is_ephemeral: true
+    max_available: 100
+    os: windows
+  lf.windows.g4dn.xlarge.nonephemeral:
+    disk_size: 256
+    instance_type: g4dn.xlarge
+    is_ephemeral: false
+    max_available: 100
+    os: windows
   lf.windows.4xlarge:
     disk_size: 256
     instance_type: c5d.4xlarge

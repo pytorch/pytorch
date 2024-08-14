@@ -1957,18 +1957,6 @@
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
-- name: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad.values().view_as(at::_nested_get_values(self)),
-          at::_nested_get_offsets(self),
-          at::_nested_get_jagged_dummy(self),
-          at::_nested_get_lengths(self),
-          at::_nested_get_ragged_idx(self),
-          at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt,
-          at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
-
-- name: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
-  self: at::_nested_jagged_to_strided(grad)
-
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
 - name: _values(Tensor(a) self) -> Tensor(a)
@@ -2857,6 +2845,7 @@
 # Transformer
 - name:  _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self.scalar_type())
+  result: result * (self_t - safe_logsumexp_jvp(self_p, self_t, {dim}, true))
 
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   output_differentiability: [True, False, False, False]
