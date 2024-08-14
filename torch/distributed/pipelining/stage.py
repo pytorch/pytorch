@@ -666,7 +666,8 @@ class _PipelineStageBase(ABC):
                 )
             else:
                 # TODO: figure out a better way to do this:
-                # if inputs does not require gradient, then the parameter group will not be fully captured during stage_backward_weight
+                # if inputs does not require gradient,
+                # then the parameter group will not be fully captured during stage_backward_weight
                 # in this case, we need call grad directly on the parameters
                 torch.autograd.backward(stage_output, grad_tensors=output_grads)
 

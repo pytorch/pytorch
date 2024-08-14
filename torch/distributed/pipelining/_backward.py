@@ -3,10 +3,10 @@
 import collections
 import logging
 import weakref
-from typing import Any, Deque, Dict, Iterator, List, Optional, Set
+from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 import torch
-from torch.autograd.graph import GradientEdge
+from torch.autograd.graph import GradientEdge, Node
 from torch.nn import Parameter
 
 from ._debug import map_debug_info
@@ -15,26 +15,34 @@ from ._debug import map_debug_info
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor):
+def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
-        return t.view_as(t).grad_fn.next_functions[0][0]
+        viewed_t = t.view_as(t)
+        grad_fn = viewed_t.grad_fn
+        if grad_fn is not None:
+            return grad_fn.next_functions[0][0]
+        else:
+            raise RuntimeError("grad_fn after adding view is None")
     else:
         return t.grad_fn
 
 
-def reverse_closure(roots: List[torch.Tensor], target_nodes: Set[torch.Tensor]):
+def reverse_closure(
+    roots: List[Node], target_nodes: Set[Node]
+) -> Tuple[Set[Node], set[Node]]:
     # Recurse until we reach a target node
-    closure = set()
+    closure: Set[Node] = set()
     actual_target_nodes = set()
-    q: Deque[torch.Tensor] = collections.deque()
+    q: Deque[Node] = collections.deque()
     for node in roots:
         if node is not None and node not in closure:
             closure.add(node)
             q.append(node)
     while q:
         node = q.popleft()
-        reverse_edges = node.metadata.get("reverse_edges", [])
+        metadata = cast(Dict[str, List], node.metadata)
+        reverse_edges = metadata.get("reverse_edges", [])
         for holder_ref, idx in reverse_edges:
             ref = holder_ref()
             if ref is None:
@@ -54,14 +62,14 @@ def reverse_closure(roots: List[torch.Tensor], target_nodes: Set[torch.Tensor]):
 
 # Enable weak pointer
 class Holder:
-    def __init__(self, node: torch.Tensor):
+    def __init__(self, node: Node):
         self.node = node
 
 
 # TODO: use weak references to avoid reference cycle
-def construct_reverse_graph(roots: List[torch.Tensor]) -> List[Holder]:
-    q: Deque[torch.Tensor] = collections.deque()
-    root_seen: Set[torch.Tensor] = set()
+def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
+    q: Deque[Node] = collections.deque()
+    root_seen: Set[Node] = set()
     reverse_graph_refs: List[Holder] = []
     for node in roots:
         if node is not None and node not in root_seen:
@@ -72,25 +80,24 @@ def construct_reverse_graph(roots: List[torch.Tensor]) -> List[Holder]:
         for fn, idx in node.next_functions:
             if fn is not None:
                 # Don't necessarily need to store on the graph
-                reverse_edges = fn.metadata.get("reverse_edges", [])
+                metadata = cast(Dict[str, List], fn.metadata)
+                reverse_edges = metadata.get("reverse_edges", [])
                 if len(reverse_edges) == 0:
                     q.append(fn)
                 holder = Holder(node)
                 holder_ref = weakref.ref(holder)
                 reverse_graph_refs.append(holder)
                 reverse_edges.append((holder_ref, idx))
-                fn.metadata["reverse_edges"] = reverse_edges
+                metadata["reverse_edges"] = reverse_edges
     return reverse_graph_refs
 
 
-def get_param_groups(
-    inputs: List[torch.Tensor], params: List[torch.Tensor]
-) -> List[Dict[str, Any]]:
+def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, Any]]:
     inputs_closure, _ = reverse_closure(inputs, set())
-    param_groups = dict()  # keyed on intermediates
+    param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
     for i, param in enumerate(params):
         closure, intersected = reverse_closure([param], inputs_closure)
-        param_group: dict[str, set] = {
+        param_group: Dict[str, Set] = {
             "params": {param},
             "intermediates": intersected,
         }
@@ -106,8 +113,8 @@ def get_param_groups(
                 param_groups[input_node] = param_group
 
     # Sanity check: union of all param_groups params should be equal to all params
-    union_params = set()
-    seen_ids = set()
+    union_params: Set[Node] = set()
+    seen_ids: Set[int] = set()
     unique_param_groups = []
     for param_group in param_groups.values():
         if id(param_group) not in seen_ids:
@@ -115,6 +122,8 @@ def get_param_groups(
             unique_param_groups.append(param_group)
             union_params = union_params.union(param_group["params"])
 
+    # The assert will only be true if the input tensor requires gradients,
+    # otherwise the autograd graph will miss the first layer of inputs
     # assert union_params == set(params)
     return unique_param_groups
 
@@ -128,9 +137,15 @@ def stage_backward_input(
     """
     compute the gradients for only the stage inputs with respect to the stage outputs
     """
-    stage_output_grad_fns = list(map(_get_grad_fn_or_grad_acc, stage_outputs))
-    stage_input_grad_fns = list(map(_get_grad_fn_or_grad_acc, stage_inputs))
-    weight_grad_fns = list(map(_get_grad_fn_or_grad_acc, weights))
+    stage_output_grad_fns: List[Node] = list(
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
+    )
+    stage_input_grad_fns: List[Node] = list(
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_inputs))
+    )
+    weight_grad_fns: List[Node] = list(
+        filter(None, map(_get_grad_fn_or_grad_acc, weights))
+    )
 
     reverse_graph_refs = construct_reverse_graph(stage_output_grad_fns)
     param_groups = get_param_groups(stage_input_grad_fns, weight_grad_fns)
@@ -176,7 +191,6 @@ def stage_backward_input(
                 inp.grad += dinputs[i]
     else:
         dinputs = None
-    # print(f"{dinputs=}")
     return dinputs, param_groups
 
 
