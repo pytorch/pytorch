@@ -1195,8 +1195,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention)
 
-    def test_non_pow_2_headdim(self):
-        head_dim = 96
+    @supported_platform
+    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    def test_non_pow_2_headdim(self, head_dim):
         self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
 
     @supported_platform
