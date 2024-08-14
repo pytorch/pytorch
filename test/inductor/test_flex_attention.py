@@ -1195,6 +1195,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention)
 
+    def test_non_pow_2_headdim(self):
+        head_dim = 96
+        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+
     @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
