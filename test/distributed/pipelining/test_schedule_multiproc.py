@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     ScheduleFlexibleInterleaved1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
+    ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -347,7 +348,10 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleInterleavedZeroBubble],
+    )
     def test_grad_with_manual_interleaved(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size

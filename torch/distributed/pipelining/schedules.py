@@ -27,6 +27,7 @@ __all__ = [
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
+    "ScheduleInterleavedZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -1847,6 +1848,35 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
         return result
 
 
+class ScheduleInterleavedZeroBubble(ScheduleFlexibleInterleaved1F1B):
+    """
+    The Interleaved Zero Bubble schedule.
+    See https://arxiv.org/pdf/2401.10241 for details.
+    Will perform one forward and one backward on inputs for the microbatches in steady
+    state and supports multiple stages per rank. Uses the backward for weights to fill in
+    the pipeline bubble.
+    """
+
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    ):
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            enable_zero_bubble=True,
+        )
+
+
 def get_schedule_class(schedule_name: str):
     """
     Maps a schedule name to its corresponding class object.
@@ -1860,6 +1890,7 @@ def get_schedule_class(schedule_name: str):
         "GPipe": ScheduleGPipe,
         "FlexibleInterleaved1F1B": ScheduleFlexibleInterleaved1F1B,
         "LoopedBFS": ScheduleLoopedBFS,
+        "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
     }
