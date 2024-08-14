@@ -2094,7 +2094,7 @@ def constrain_to_fx_strides(fx_node, *args, ignore_mutated_args_FIXME=False, **k
                 new_kwargs[key] = arg
             else:
                 new_kwargs[key] = apply_constraint(arg, fx_arg)
-        return tuple(args), kwargs
+        return tuple(new_args), new_kwargs
 
     args = tuple(
         apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
