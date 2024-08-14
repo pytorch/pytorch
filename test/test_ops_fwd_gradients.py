@@ -88,6 +88,8 @@ class TestFwdGradients(TestGradients):
         platform.machine() == "s390x",
         reason="Different precision of openblas functions: https://github.com/OpenMathLib/OpenBLAS/issues/4194",
     )
+    @skipIfWindows
+    @skipIfCudaWindows
     def test_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
