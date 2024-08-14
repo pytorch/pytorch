@@ -8,6 +8,10 @@
 #include <cusolver_common.h>
 #endif
 
+#if defined(USE_CUDSS)
+#include <cudss.h>
+#endif
+
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
@@ -73,6 +77,33 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 " when calling `" #EXPR "`");                   \
   } while (0)
 
+#if defined(USE_CUDSS)
+namespace at::cuda::cudss {
+C10_EXPORT const char* cudssGetErrorMessage(cudssStatus_t error);
+} // namespace at::cuda::solver
+
+#define TORCH_CUDSS_CHECK(EXPR)                                         \
+  do {                                                                  \
+    cudssStatus_t __err = EXPR;                                         \
+    if (__err == CUDSS_STATUS_EXECUTION_FAILED) {                       \
+      TORCH_CHECK_LINALG(                                               \
+          false,                                                        \
+          "cudss error: ",                                              \
+          at::cuda::cudss::cudssGetErrorMessage(__err),                 \
+          ", when calling `" #EXPR "`",                                 \
+          ". This error may appear if the input matrix contains NaN. ");\
+    } else {                                                            \
+      TORCH_CHECK(                                                      \
+          __err == CUDSS_STATUS_SUCCESS,                                \
+          "cudss error: ",                                              \
+          at::cuda::cudss::cudssGetErrorMessage(__err),                 \
+          ", when calling `" #EXPR "`. ");                              \
+    }                                                                   \
+  } while (0)
+#else
+#define TORCH_CUDSS_CHECK(EXPR) EXPR
+#endif
+
 // cusolver related headers are only supported on cuda now
 #ifdef CUDART_VERSION
 
@@ -112,27 +143,8 @@ constexpr const char* _cusolver_backend_suggestion =            \
           at::cuda::solver::_cusolver_backend_suggestion);              \
     }                                                                   \
   } while (0)
-
-#define TORCH_CUDSS_CHECK(EXPR)                                      \
-  do {                                                                  \
-    cudssStatus_t __err = EXPR;                                      \
-    if (__err == CUDSS_STATUS_EXECUTION_FAILED) {                     \
-      TORCH_CHECK_LINALG(                                               \
-          false,                                                        \
-          "cudss error: ",                                           \
-          ", when calling `" #EXPR "`",                                 \
-          ". This error may appear if the input matrix contains NaN. ");              \
-    } else {                                                            \
-      TORCH_CHECK(                                                      \
-          __err == CUDSS_STATUS_SUCCESS,                             \
-          "cudss error: ",                                           \
-          ", when calling `" #EXPR "`. ");              \
-    }                                                                   \
-  } while (0)
-
 #else
 #define TORCH_CUSOLVER_CHECK(EXPR) EXPR
-#define TORCH_CUDSS_CHECK(EXPR) EXPR
 #endif
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
