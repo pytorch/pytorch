@@ -2577,19 +2577,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
-    def test_wmse_loss(self):
+    def test_weighted_mse_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
         weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        loss = F.wmse_loss(inputs, targets, weights, reduction='mean')
+        loss = F.mse_loss(inputs, targets, weights=weights, reduction='mean')
         expected_loss = torch.tensor(0.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
-    def test_wmae_loss(self):
+    def test_weighted_mae_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
         weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        loss = F.wmae_loss(inputs, targets, weights, reduction='mean')
+        loss = F.wmae_loss(inputs, targets, weights=weights, reduction='mean')
         expected_loss = torch.tensor(1.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
@@ -2597,7 +2597,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
         weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        loss = F.weighted_huber_loss(input=inputs, target=targets, weights=weights, reduction='mean', delta=1.0)
+        loss = F.huber_loss(input=inputs, target=targets, weights=weights, reduction='mean', delta=1.0)
         expected_loss = torch.tensor(0.25)
         print(torch.isclose(loss, expected_loss, atol=1e-6), f"Expected {expected_loss}, but got {loss}")
 
