@@ -1015,6 +1015,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             itertools.zip_longest(list1, list2, list3, fillvalue=None)
         )
 
+    def test_torch_size_as_dict_key(self):
+        def fn(x, cached):
+            if x.shape not in cached:
+                cached[x.shape] = x
+            return x + cached[x.shape]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x1 = torch.randn(2, 3)
+        x2 = torch.randn(2, 3)
+        cached = {}
+        ref1 = fn(x1, cached)
+        ref2 = fn(x2, cached)
+        cached = {}
+        res1 = opt_fn(x1, cached)
+        res2 = opt_fn(x2, cached)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
 
