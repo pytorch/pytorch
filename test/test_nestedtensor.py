@@ -52,6 +52,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
+    skipIfWindows,
+    skipIfWindowsCuda,
     subtest,
     TEST_WITH_ROCM,
     TestCase,
@@ -6082,6 +6084,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             else [torch.float16, torch.float32]
         )
     )
+    @skipIfWindows
+    @skipIfWindowsCuda
     def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 128
@@ -6535,6 +6539,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
+    @skipIfWindowsCuda
+    @skipIfWindows
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
