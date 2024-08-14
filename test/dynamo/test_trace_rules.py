@@ -22,11 +22,7 @@ from torch._dynamo.trace_rules import (
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfCudaWindows,
-    skipIfWindows,
-)
+from torch.testing._internal.common_utils import skipIfCudaWindows, skipIfWindows
 
 
 try:
