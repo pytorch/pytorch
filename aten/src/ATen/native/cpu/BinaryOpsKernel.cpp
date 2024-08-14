@@ -243,29 +243,6 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
   }
 }
 
-template <typename scalar_t>
-inline Vectorized<scalar_t> div_floor_floating_vec(
-    const Vectorized<scalar_t>& a,
-    const Vectorized<scalar_t>& b) {
-  using vec_t = Vectorized<scalar_t>;
-  const auto basic_div = a / b;
-  vec_t inf(std::numeric_limits<scalar_t>::infinity());
-  auto mod = a.fmod(b);
-  // Fixup for a case that isn't properly handled by Sleef_fmod
-  auto floor = vec_t::blendv(a - mod, a, (basic_div.abs() == inf) & (a.abs() != inf));
-  auto div = floor / b;
-  const auto zero = vec_t(0);
-  auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-  const auto one = vec_t(1);
-  div = vec_t::blendv(div, div - one, mask);
-  auto floordiv = div.floor();
-  mask = (div - floordiv) > vec_t(0.5);
-  floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-  floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
-  floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
-  return floordiv;
-};
-
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -298,7 +275,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
                 [=](Vectorized<scalar_t> a) {
                   return binary_op_scalar(
                       a, b, [](const vec_t& x, const vec_t& y) {
-                        return div_floor_floating_vec(x, y);
+                        return at::vec::div_floor_floating_vec(x, y);
                       });
                 });
           });
@@ -312,7 +289,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
                   return c10::div_floor_floating(a, b);
                 },
                 [](vec_t a, vec_t b) -> vec_t {
-                  return div_floor_floating_vec(a, b);
+                  return at::vec::div_floor_floating_vec(a, b);
                 });
           });
     }
@@ -733,7 +710,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
-    const float beta_val(beta);
+    const float beta_val(static_cast<float>(beta));
     const Vectorized<float> beta_val_vec(beta_val);
     const Vectorized<float> point_five_vec(static_cast<float>(0.5));
     cpu_kernel_vec(
