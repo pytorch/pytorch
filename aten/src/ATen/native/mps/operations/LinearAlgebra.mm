@@ -263,7 +263,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   // And crashes if its a view of matrix with dimensions larger than 2**15
   // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
   // In such cases, fallback to naive but accurate metal shader
-  if (use_metal_mm(self, other, output) && !is_macOS_15_0_or_newer) {
+  if (use_metal_mm(self, other, output)) {
     return do_metal_mm(self, other, output);
   }
 
