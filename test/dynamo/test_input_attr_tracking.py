@@ -10,6 +10,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch.testing._internal.common_utils import skipIfWindowsCuda
 
 
 class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
@@ -129,6 +130,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         compile_result_tensor = fn(x_, y)
         self.assertEqual(compile_result_tensor, x_ * y)
 
+    @skipIfWindowsCuda
     def test_guards_correctly_property_assigned_on_tensor_type_change_inductor(self):
         def fn(x, y):
             x.y = y
@@ -283,6 +285,7 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         # call_function  mul_1   <built-in function mul>  (l_x_, 6)        {}
         # output         output  output                   ((mul_1, mul),)  {}
 
+    @skipIfWindowsCuda
     def test_set_data_on_input_tensor(self):
         def fn(x, y):
             x.data = y.data
@@ -336,6 +339,7 @@ class GraphModule(torch.nn.Module):
     # Note - this does not actually get captured in the graph yet.
     # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
     # in the fx graph, and let aot_autograd handle it.
+    @skipIfWindowsCuda
     def test_set_data_on_scoped_tensor(self):
         def fn(x):
             z = torch.zeros([4, 4])
