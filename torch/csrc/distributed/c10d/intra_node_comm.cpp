@@ -178,7 +178,7 @@ bool IntraNodeComm::rendezvous() {
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
 
-#if defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(USE_ROCM)
   auto ret = rsmi_init(0);
   if (ret != RSMI_STATUS_SUCCESS) {
     LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
