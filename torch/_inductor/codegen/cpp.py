@@ -2266,8 +2266,9 @@ class CppVecKernel(CppKernel):
             value = self.broadcast(value)
         var = self.args.output(name)
         index = self.rename_indexing(index)
+        dtype = V.graph.get_dtype(name)
         if mode is None:
-            code = self._get_store_line(value, var, index, V.graph.get_dtype(name))
+            code = self._get_store_line(value, var, index, dtype)
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
@@ -2276,13 +2277,16 @@ class CppVecKernel(CppKernel):
                     f"({load_var} + {value})",
                     var,
                     index,
-                    V.graph.get_dtype(name),
+                    dtype,
                     accu_store=True,
                 )
                 self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
             else:
+                n_src = self._get_num_vectors(dtype)
+                n_idx = self._get_num_vectors(torch.int64)
+                cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64)
-                line = f"atomic_add_vec({var}, {index}, {value});"
+                line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
             raise NotImplementedError(f"store mode={mode}")

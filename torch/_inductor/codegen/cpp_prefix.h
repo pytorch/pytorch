@@ -592,10 +592,10 @@ atomic_add(volatile T *addr, T offset) {
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, int N>
-void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, N> index, at::vec::Vectorized<T> offset) {
-  constexpr int len = at::vec::VectorizedN<int64_t, N>::size();
-  static_assert(len <= at::vec::Vectorized<T>::size());
+template <typename T, int NI, int NV>
+void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::VectorizedN<T, NV> offset) {
+  constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
+  static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data());
