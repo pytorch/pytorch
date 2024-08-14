@@ -1726,7 +1726,7 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
 def _update_mutation_region_id(
     graph_meta: Dict[str, Any], node: torch.fx.Node
 ) -> MutationRegionId:
-    def update(
+    def update_ids(
         node: torch.fx.Node,
         barrier_id: Optional[int] = None,
         reinplace_id: Optional[int] = None,
@@ -1741,16 +1741,13 @@ def _update_mutation_region_id(
         )
         node.meta["mutation_region_id"] = new_mutation_region_id
 
-    if node.target is torch.ops.higher_order.auto_functionalized:
-        # Get all nodes that are aliases of all reinplacing candidates
-        mutable_op = node.args[0]
-        assert isinstance(mutable_op, torch._ops.OpOverload)
-        mutable_args_names = (
-            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
-        )
+    def update_reinplace_id(
+        kwargs: Dict[str, Any], names_of_reinplace_targets: List[str]
+    ) -> None:
         aliased_nodes = []
-        for name in mutable_args_names:
-            arg = node.kwargs[name]
+        # Get all nodes that are aliases of all reinplacing candidates
+        for name in names_of_reinplace_targets:
+            arg = kwargs[name]
             if isinstance(arg, list):
                 for a in arg:
                     if a is not None:
@@ -1760,16 +1757,25 @@ def _update_mutation_region_id(
                     aliased_nodes.extend(graph_meta["alias_info"].find_aliases(arg))
         assert len(aliased_nodes) >= 1, "must at least alias self"
 
+        # Give all of them the same reinplace_counter
         for node_ref in aliased_nodes:
             actual_node = node_ref()
             if actual_node is None:
                 continue
-            update(actual_node, reinplace_id=graph_meta["reinplace_counter"])
+            update_ids(actual_node, reinplace_id=graph_meta["reinplace_counter"])
         graph_meta["reinplace_counter"] += 1
+
+    if node.target is torch.ops.higher_order.auto_functionalized:
+        mutable_op = node.args[0]
+        assert isinstance(mutable_op, torch._ops.OpOverload)
+        names_of_reinplace_targets = (
+            torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
+        )
+        update_reinplace_id(node.kwargs, names_of_reinplace_targets)
 
     if is_mutation_op(node):
         graph_meta["barrier_counter"] += 1
-    update(node, barrier_id=graph_meta["barrier_counter"])
+    update_ids(node, barrier_id=graph_meta["barrier_counter"])
     return node.meta["mutation_region_id"]
 
 
