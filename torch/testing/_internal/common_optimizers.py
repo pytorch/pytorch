@@ -1262,6 +1262,13 @@ optim_db: List[OptimizerInfo] = [
         supports_complex=False,
         skips=(
             DecorateInfo(
+                unittest.skip("See #133268 regarding dtype being None"),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+                active_if=lambda kwargs: kwargs.get("use_closure", False),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo("See #133268 regarding dtype being None"),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
