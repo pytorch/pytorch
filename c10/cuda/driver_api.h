@@ -31,10 +31,14 @@
   _(cuMemImportFromShareableHandle) \
   _(cuGetErrorString)
 
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_12030(_) \
   _(cuMulticastAddDevice)               \
   _(cuMulticastBindMem)                 \
   _(cuMulticastCreate)
+#else
+#define C10_LIBCUDA_DRIVER_API_12030(_)
+#endif
 
 #define C10_NVML_DRIVER_API(_)           \
   _(nvmlInit_v2)                         \
