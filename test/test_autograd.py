@@ -5670,7 +5670,7 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.onednn.is_available(), "MKL-DNN build is disabled"
     )
     def test_gradcheck_validates_input_mkldnn(self):
         # when mkldnn inputs, forward mode testing is not allowed
@@ -5710,7 +5710,7 @@ Done""",
                 )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.onednn.is_available(), "MKL-DNN build is disabled"
     )
     def test_gradcheck_test_outputs(self):
         def check(fast_mode):
@@ -6015,7 +6015,7 @@ Done""",
         check(fast_mode=False)
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.onednn.is_available(), "MKL-DNN build is disabled"
     )
     def test_gradcheck_multiple_onednn_inputs(self):
         def check(fast_mode):

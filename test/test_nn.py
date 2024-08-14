@@ -10590,7 +10590,7 @@ class TestNNDeviceType(NNTestCase):
         x1 = x.clone().requires_grad_(True)
         x2 = x.clone().requires_grad_(True)
 
-        torch._C._set_mkldnn_enabled(False)
+        torch._C._set_onednn_enabled(False)
         out1, _ = Net(x1)
         der_out1 = torch.autograd.grad(out1, x1,
                                        grad_outputs=torch.ones_like(out1),
@@ -10599,7 +10599,7 @@ class TestNNDeviceType(NNTestCase):
         loss1 = der_out1.sum()
         loss1.backward(retain_graph=True)
 
-        torch._C._set_mkldnn_enabled(True)
+        torch._C._set_onednn_enabled(True)
         out2, _ = Net(x2)
         der_out2 = torch.autograd.grad(out2, x2,
                                        grad_outputs=torch.ones_like(out2),

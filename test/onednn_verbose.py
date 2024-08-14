@@ -16,7 +16,7 @@ class Module(torch.nn.Module):
 def run_model(level):
     m = Module().eval()
     d = torch.rand(1, 1, 112, 112)
-    with torch.backends.mkldnn.verbose(level):
+    with torch.backends.onednn.verbose(level):
         m(d)
 
 

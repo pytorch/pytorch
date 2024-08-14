@@ -142,8 +142,8 @@ class CPUReproTests(TestCase):
                         # For CPU and mkldnn enable, we always using channles last
                         nonlocal fmt
                         if (
-                            torch.backends.mkldnn.enabled
-                            and torch.backends.mkldnn.is_available()
+                            torch.backends.onednn.enabled
+                            and torch.backends.onednn.is_available()
                         ):
                             fmt = torch.channels_last
                         test_self.assertTrue(args[0].is_contiguous(memory_format=fmt))
@@ -189,7 +189,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
         options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
@@ -215,7 +215,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
@@ -241,7 +241,7 @@ class CPUReproTests(TestCase):
             ):
                 compiled_m(input)
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -263,7 +263,7 @@ class CPUReproTests(TestCase):
                 (x,),
             )
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -366,7 +366,7 @@ class CPUReproTests(TestCase):
             example_inputs = (torch.rand(1, 10),)
             self.common(Model(), example_inputs)
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
         dtypes = []
@@ -389,7 +389,7 @@ class CPUReproTests(TestCase):
                     (v.to(dtype),),
                 )
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed_cpu(self):
         options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
@@ -3464,7 +3464,7 @@ class CPUReproTests(TestCase):
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
     def test_linear_with_no_default_contiguous_input(self):

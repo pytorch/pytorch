@@ -478,8 +478,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
+            torch.backends.onednn.enabled
+            and torch.backends.onednn.is_available()
             and all(
                 n.args[idx].meta["val"].device == torch.device("cpu")
                 for n in conv_nodes

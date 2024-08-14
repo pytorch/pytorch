@@ -8749,9 +8749,9 @@ class TestNNMPS(NNTestCase):
         weight = torch.arange(0, 1.0, 1 / 2.0 ** 10).reshape(32, 16, 1, 2)[:, :, :, ::2]
         self.assertFalse(weight.is_contiguous())
         y = torch.nn.functional.conv2d(x, weight, None)
-        if torch.backends.mkldnn.is_available():
+        if torch.backends.onednn.is_available():
             # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 y_ = torch.nn.functional.conv2d(x, weight, None)
                 self.assertEqual(y, y_)
         self.assertEqual(y.sum(), 4186112.)
