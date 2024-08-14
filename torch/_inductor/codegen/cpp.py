@@ -4231,8 +4231,11 @@ class CppScheduling(BaseScheduling):
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
 
+        # TODO: improve the name of the function
         def can_alias(template_buffer, outputs_by_name, epilogue_nodes):
             # TODO: check the not epilogue_nodes and return True here
+            # If there's no epilogue_nodes, copy = L.copy(dst, src).data.data
+            # in store_output will guarantee that we will have a global template_buffer
             if not epilogue_nodes:
                 return True
             assert template_buffer.get_name() in outputs_by_name

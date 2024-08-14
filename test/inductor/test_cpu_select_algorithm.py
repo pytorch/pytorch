@@ -342,7 +342,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         image_size,
         out_features,
         bias,
-        can_alias,
+        can_alias,  # TODO: change the naming here
         dtype,
     ):
         # Reproducer from the convnext model in timm

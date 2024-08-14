@@ -14,7 +14,7 @@ from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import V
+from ..virtualized import ops, V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
@@ -715,13 +715,16 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogue_creators.append(_bias_add_epilogue)
 
         # TODO: can_alis is None when there's no template_buffer_node
+        # TODO: add comment for the condition here
         if (
             inp is None
             and self.epilogue_creator is None
             and use_local_acc
+            and template_buffer_node is not None
             and not can_alias
         ):
 
+            # TODO: refine the func name
             def copy_epilogue(input_buffer: ir.Buffer):
                 dtype = self.layout.dtype
                 input_loader = input_buffer.make_loader()
