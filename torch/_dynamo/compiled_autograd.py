@@ -348,28 +348,60 @@ class AutogradCompilerInstance:
             return
 
         def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
-            return a.op == b.op and a.target == b.target and a.type == b.type
+            if callable(a.target) and callable(b.target):
+                target_match = a.target.__qualname__ == b.target.__qualname__
+            else:
+                target_match = a.target == b.target
+
+            return (
+                a.op == b.op
+                and a.type == b.type
+                and len(a.all_input_nodes) == len(b.all_input_nodes)
+                and target_match
+            )
 
         for nodecall_index, info in self.aot_graph_infos.items():
             ca_node_start_idx = info["ca_node_start_idx"]
             aot_id = info["aot_id"]
             aot_graph = info["aot_gm"].graph
 
-            # 1. Find the first user op in the AOT graph
-            aot_node = next(iter(aot_graph.nodes))
+            # 1. Find the first op from user code in the AOT graph
+            aot_it = iter(aot_graph.nodes)
+            aot_node = next(aot_it)
             assert aot_node is not None
-            while aot_node.op != "call_function" or aot_node.stack_trace is None:
-                aot_node = aot_node.next
+            while aot_node.op != "call_function":
+                aot_node = next(aot_it)
 
             # 2. Find the first op in the compiled autograd graph segment
             ca_it = iter(self.fx_tracer.graph.nodes)
             for _ in range(ca_node_start_idx):
                 next(ca_it)
             ca_node = next(ca_it)
+
             try:
-                while ca_node and not is_similar(ca_node, aot_node):
+                # Graphs should all end with output node
+                while ca_node.op != "output" and not is_similar(ca_node, aot_node):
                     # The compiled autograd graph may contain lazily inserted ops
-                    # We skip those when aligning nodes from both graphs
+                    # We skip those when aligning nodes
+                    ca_node = next(ca_it)
+
+                # 3. Keep alligned and rename nodes
+                while aot_node.op != "output" and ca_node.op != "output":
+                    if not ca_node.users:
+                        # TODO: DCE for compiled autograd graph
+                        ca_node = next(ca_it)
+                        continue
+
+                    if not is_similar(aot_node, ca_node):
+                        # There should be no lazily inserted ops in the middle of a match
+                        # So any deviation is an error
+                        raise StopIteration
+
+                    ca_node.name = f"aot{aot_id}_{aot_node.name}"
+                    for i, inp in enumerate(aot_node.all_input_nodes):
+                        ca_node.all_input_nodes[i].name = f"aot{aot_id}_{inp.name}"
+
+                    aot_node = next(aot_it)
                     ca_node = next(ca_it)
             except StopIteration:
                 verbose_log.debug(
@@ -379,18 +411,6 @@ class AutogradCompilerInstance:
                     nodecall_index,
                     aot_id,
                 )
-                continue
-
-            while aot_node and ca_node and is_similar(aot_node, ca_node):
-                ca_node.name = f"aot{aot_id}_{aot_node.name}"
-
-                aot_inputs = aot_node.all_input_nodes
-                ca_inputs = ca_node.all_input_nodes
-                for i, inp in enumerate(aot_inputs):
-                    ca_inputs[i].name = f"aot{aot_id}_{inp.name}"
-
-                aot_node = aot_node.next
-                ca_node = ca_node.next
 
     def reorder_accumulate_grad_nodes(self):
         """
