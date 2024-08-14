@@ -13447,19 +13447,158 @@ add_docstr(
     r"""
 has_accelerator(device_type=None) -> bool
 
-Check if the desired device type of accelerator is available.
+Check if the desired accelerator is available.
 
 Arguments:
-    device_type (str, optional): the desired device type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
 
 Returns:
-    bool: A boolean indicating if the desired device type of accelerator is available.
+    bool: A boolean indicating if the desired accelerator is available.
 
 Example::
 
-    >>> assert torch.has_accelerator() "No available accelerator detected."
+    >>> assert torch.has_accelerator() "No available accelerators detected."
 """,
 )
+
+
+add_docstr(
+    torch.current_accelerator,
+    r"""
+current_accelerator() -> (str, optional)
+
+Return the device type of current :ref:`accelerator<accelerators>`.
+
+Returns:
+    str: the device type of current accelerator.
+
+Example::
+
+    >>> if torch.current_accelerator() == 'cuda':
+    >>>     stream = torch.cuda.default_stream()
+    >>> else:
+    >>>     stream = torch.Stream()
+""",
+)
+
+
+add_docstr(
+    torch.device_count,
+    r"""
+device_count(device_type=None) -> int
+
+Return the number of desired accelerators available.
+
+Arguments:
+    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+
+Returns:
+    int: the number of the desired accelerators available.
+
+Example::
+
+    >>> num = torch.device_count()
+""",
+)
+
+
+add_docstr(
+    torch.current_device,
+    r"""
+current_device(device_type=None) -> int
+
+Return the index of a currently selected device for the desired accelerator type.
+
+Arguments:
+    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+
+Returns:
+    int: the index of a currently selected device.
+
+Example::
+
+    >>> torch.set_device(1)
+    >>> assert torch.current_device() == 1
+""",
+)
+
+
+add_docstr(
+    torch.set_device,
+    r"""
+set_device(int device_index, device_type=None) -> None
+
+Set the current device for the desired accelerator type.
+
+Arguments:
+    device_index (int, :class:`torch.device`): selected devie. This function is a no-op if this argument is negative.
+    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+
+Example::
+
+    >>> torch.set_device(1)
+    >>> assert torch.current_device() == 1
+""",
+)
+
+
+add_docstr(
+    torch.current_stream,
+    r"""
+current_stream(device=None, device_type=None) -> torch.Stream
+
+Return the currently selected Stream for a given device.
+
+Arguments:
+    device (torch.device or int, optional): selected device. If not given, use current_device() by default.
+    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+
+Returns:
+    torch.Stream: the currently selected Stream for a given device.
+    
+Example::
+
+    >>> torch.set_device(1)
+    >>> assert torch.current_device() == 1
+""",
+)
+
+
+add_docstr(
+    torch.set_stream,
+    r"""
+set_stream(stream) -> None
+
+Set the current stream.
+
+Arguments:
+    stream (torch.Stream): selected stream.
+    
+Example::
+
+    >>> torch.set_device(1)
+    >>> assert torch.current_device() == 1
+""",
+)
+
+
+add_docstr(
+    torch.synchronize,
+    r"""
+synchronize(device) -> None
+
+Wait for all kernels in all streams on the given device to complete.
+
+Arguments:
+    device (torch.Device, int): device for which to synchronize. If not given, use current_device() by default.
+    
+Example::
+
+    >>> torch.set_device(1)
+    >>> assert torch.current_device() == 1
+""",
+)
+
 
 add_docstr(
     torch.Generator,
