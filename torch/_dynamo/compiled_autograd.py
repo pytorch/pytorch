@@ -90,7 +90,7 @@ class AutogradCompilerInstance:
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
-        self.aot_graph_infos: Dict[str, Dict[str, Any]] = {}
+        self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
@@ -303,7 +303,7 @@ class AutogradCompilerInstance:
             {},
         )
         self.rename_aot_dispatcher_nodes()
-        self.reorder_accumulate_grad_nodes()
+        # self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -347,33 +347,42 @@ class AutogradCompilerInstance:
         if self.aot_graph_cls_name is None:
             return
 
-        for aot_id, info in self.aot_graph_infos.items():
-            aot_graph = info["aot_graph"].graph
-            node_start_idx = info["node_start_idx"]
+        def seek(it, idx):
+            for _ in range(idx):
+                next(it)
+            return it
 
-            # match both graphs by finding first non-placeholder
+        def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
+            return a.op == b.op and a.target == b.target and a.type == b.type
+
+        for nodecall_index, info in self.aot_graph_infos.items():
+            ca_node_start_idx = info["ca_node_start_idx"]
+            aot_id = info["aot_id"]
+            aot_graph = info["aot_gm"].graph
+
+            # 1. Find the first op in the AOT graph
             aot_it = iter(aot_graph.nodes)
             aot_node = next(aot_it)
             assert aot_node is not None
             while aot_node.op != "call_function":
                 aot_node = next(aot_it)
 
-            def seek(it, idx):
-                for _ in range(idx):
-                    next(it)
-                return it
+            # 2. Find the first op in the compiled autograd graph segment
+            ca_node = next(seek(iter(self.fx_tracer.graph.nodes), ca_node_start_idx))
+            while ca_node and not is_similar(ca_node, aot_node):
+                # The compiled autograd graph may contain lazily inserted ops
+                # We skip those when aligning nodes from both graphs
+                ca_node = ca_node.next
 
-            ca_it = seek(iter(self.fx_tracer.graph.nodes), node_start_idx)
-            ca_node = next(ca_it)
-            if "aten::clone" != aot_node.target.name():
-                # aot backward inserts clones to make contiguous sometimes
-                while ca_node and "aten::clone" in ca_node.target.name():
-                    ca_node = next(ca_it)
-
-            assert ca_node is not None
-
-            def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
-                return a.op == b.op and a.target == b.target and a.type == b.type
+            if not ca_node:
+                verbose_log.debug(
+                    "Failed to match %s%s (NodeCall %s) nodes with AOT backward graph %s nodes",
+                    self.aot_graph_cls_name,
+                    aot_id,
+                    nodecall_index,
+                    aot_id,
+                )
+                continue
 
             while aot_node and ca_node and is_similar(aot_node, ca_node):
                 ca_node.name = f"aot{aot_id}_{aot_node.name}"
@@ -426,21 +435,25 @@ class AutogradCompilerInstance:
         return bw_state
 
     def set_node_origin(
-        self, node_name: str, node_index: int, pyobj: Optional[torch.autograd.Function]
+        self,
+        node_name: str,
+        nodecall_index: int,
+        pyobj: Optional[torch.autograd.Function],
     ):
         maybe_aot_id = ""
         if pyobj is not None:
-            maybe_aot_id = getattr(
-                pyobj._forward_cls, "_aot_id", ""  # type: ignore[attr-defined]
-            )  # iff it is from AOTAutograd's CompiledFunction
-            if maybe_aot_id != "":
+            forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
+            if hasattr(forward_cls, "_aot_id"):
+                # backward was created by AOT Dispatcher
                 self.aot_graph_cls_name = node_name
-                self.aot_graph_infos[maybe_aot_id] = {
-                    "aot_graph": pyobj._forward_cls._lazy_backward_info.bw_module,  # type: ignore[attr-defined]
-                    "node_start_idx": len(self.fx_tracer.graph.nodes),
+                maybe_aot_id = forward_cls._aot_id
+                self.aot_graph_infos[nodecall_index] = {
+                    "ca_node_start_idx": len(self.fx_tracer.graph.nodes),
+                    "aot_id": maybe_aot_id,
+                    "aot_gm": forward_cls._lazy_backward_info.bw_module,
                 }
-        new_code = f"{node_name}{maybe_aot_id} (NodeCall {node_index})"
 
+        new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]
         new_stack_trace = raw_stack_trace.replace(
             "raw_stack_trace = CapturedTraceback.extract().format()[-1]", new_code
