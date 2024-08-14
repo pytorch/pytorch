@@ -207,4 +207,8 @@ select = [
 ]
 
 [tool.ruff.lint.flake8-comprehensions]
-allow-dict-calls-with-keyword-arguments = true
+# We want to use dict calls instead of dict literals because we like the
+# `call(func, args=(1, 2), kwargs=dict(foo=3, bar=4))` style rather than the
+# `call(func, args=(1, 2), kwargs={'foo': 3, 'bar': 4})` style. This is more
+# consistant with `func(1, 2, foo=3, bar=4)` style.
+allow-dict-calls-with-keyword-arguments = true  # new in ruff which is not in flake8-comprehensions
