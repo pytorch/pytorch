@@ -15,8 +15,6 @@ REPO_DIR = SCRIPT_DIR.parent.parent
 
 def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
-    if device == "rocm":
-        triton_file = "triton-rocm.txt"
     elif device == "xpu":
         triton_file = "triton-xpu.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
