@@ -421,16 +421,9 @@ inline void {{kernel_name}}_kernel(
             auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
             vb[col] = at::vec::convert<{{compute_t}}>(b);
             {%- elif input2_dtype == torch.int8 %}
-            // Load 64 int8 elements & convert them into 16 FP32 elements each in 4 vector registers
-            if constexpr (col % 4 == 0) {
-                constexpr auto remaining = std::min<int>(4, COLS - col);
-                {{kernel.unroll_pragma(4)}}
-                for (int idx = 0; idx < remaining; idx++) {
-                    // Convert 16 int8 elements to int32, and then fp32
-                    auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN + idx * 16);
-                    vb[col + idx] = at::vec::convert<float>(b32);
-                }
-            }
+            // Convert VLEN int8 elements to int32, and then fp32
+            auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            vb[col] = at::vec::convert<float>(b32);
             {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
             {%- endif %}
@@ -440,7 +433,6 @@ inline void {{kernel_name}}_kernel(
         vc[idx] = at::vec::fmadd(va, vb[col], vc[idx]);
     };
 
-    {{kernel.unroll_pragma(4)}}
     for (int k = 0; k < K; ++k) {
         c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
     }
