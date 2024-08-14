@@ -1015,6 +1015,8 @@ class PositiveDefiniteTransform(Transform):
 
     domain = constraints.independent(constraints.real, 2)
     codomain = constraints.positive_definite  # type: ignore[assignment]
+    bijective = True
+    sign = +1
 
     def __eq__(self, other):
         return isinstance(other, PositiveDefiniteTransform)
@@ -1026,6 +1028,10 @@ class PositiveDefiniteTransform(Transform):
     def _inverse(self, y):
         y = torch.linalg.cholesky(y)
         return LowerCholeskyTransform().inv(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        K = x.shape[-1]
+        return K * math.log(2.0) + (torch.arange(K + 1, 1, -1) * x.diagonal(dim1=-2, dim2=-1)).sum(dim=-1)
 
 
 class CatTransform(Transform):
