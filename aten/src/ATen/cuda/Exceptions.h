@@ -143,6 +143,7 @@ constexpr const char* _cusolver_backend_suggestion =            \
           at::cuda::solver::_cusolver_backend_suggestion);              \
     }                                                                   \
   } while (0)
+
 #else
 #define TORCH_CUSOLVER_CHECK(EXPR) EXPR
 #endif

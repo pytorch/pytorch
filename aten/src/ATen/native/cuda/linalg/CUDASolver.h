@@ -8,6 +8,7 @@
 #endif
 
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
+
 namespace at {
 namespace cuda {
 namespace solver {
