@@ -68,9 +68,6 @@
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
-#   USE_QNNPACK=0
-#     disables QNNPACK build (quantized 8-bit operators)
-#
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
@@ -365,7 +362,6 @@ def get_submodule_folders():
             "gloo",
             "cpuinfo",
             "onnx",
-            "QNNPACK",
             "fbgemm",
             "cutlass",
         ]
