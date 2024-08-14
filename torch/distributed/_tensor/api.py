@@ -219,37 +219,19 @@ class _FromTorchTensor(torch.autograd.Function):
 class DTensor(torch.Tensor):
     """
     ``DTensor`` (Distributed Tensor) is a subclass of ``torch.Tensor`` that provides single-device like
-    abstraction to program with multi-device ``torch.Tensor``. It offers simple and flexible tensor
-    sharding primitives that transparently handles distributed logic, including sharded storage, operator
-    computation and collective communications across devices/hosts.
+    abstraction to program with multi-device ``torch.Tensor``. It describes the distributed tensor sharding
+    layout (DTensor Layout) through the :class:`DeviceMesh` and following types of :class:`Placement`:
 
-    ``DTensor`` follows the SPMD (single program, multiple data) programming model to empower users to
-    write distributed program as if it's a single-device program with the same convergence property. It
-    provides a uniform tensor sharding layout (DTensor Layout) through specifying the :class:`DeviceMesh`
-    and :class:`Placement`:
+    * :class:`Shard`: Tensor sharded on the tensor dimension ``dim`` on the devices of the ``DeviceMesh`` dimension
+    * :class:`Replicate`: Tensor replicated on the devices of the ``DeviceMesh`` dimension
+    * :class:`Partial`: Tensor is pending reduction on the devices of the ``DeviceMesh`` dimension
 
-    * :class:`DeviceMesh` represents the device topology and the communicators of the cluster using
-    an n-dimensional array.
-    * :class:`Placement` describes the sharding layout of the logical tensor on the :class:`DeviceMesh`.
-    DTensor supports three types of placements: :class:`Shard`, :class:`Replicate` and :class:`Partial`.
+    When calling PyTorch operators, ``DTensor`` overrides the PyTorch operators to perform sharded computation or issue
+    communications when necessary. Along with the operator computation, ``DTensor`` will transform or propagate the
+    placements (DTensor Layout) properly (based on the operator semantic itself) and generate new ``DTensor`` outputs.
 
-    There're three ways to construct a :class:`DTensor`:
-
-    1. :meth:`distribute_tensor` creates a :class:`DTensor` from a logical or "global" ``torch.Tensor`` on
-    each rank. This could be used to shard the leaf ``torch.Tensor`` s (i.e. model parameters/buffers
-    and inputs).
-    2. :meth:`from_local` creates a :class:`DTensor` from a local ``torch.Tensor`` on each rank, which can
-    be used to create :class:`DTensor` from a non-leaf ``torch.Tensor`` s (i.e. intermediate activation
-    tensors during forward/backward).
-    3. DTensor provides dedicated tensor factory methods (e.g. :meth:`empty`, :meth:`ones`, :meth:`randn`, etc.)
-    to allow different :class:`DTensor` creations by directly specifying the :class:`DeviceMesh` and
-    :class:`Placement`
-
-    ``DTensor`` overrides the PyTorch operators to perform sharded computation or issue communications when necessary.
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
-    requires every Tensor argument of the operator be DTensor. The operator would also produce DTensor outputs with the
-    proper sharding layout (determined by the operator semantic itself), which propagates the sharding layout to the next
-    operator call, so user only need to specify the leaf tensor's sharding layout in the beginning of the computation.
+    requires every Tensor argument of the operator be DTensor.
 
     """
 
@@ -507,6 +489,7 @@ class DTensor(torch.Tensor):
         3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
         4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
         5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
+
 
         ``redistribute`` would correctly figure out the necessary redistribute steps for DTensors
         that are created either on 1-D or N-D DeviceMesh.
