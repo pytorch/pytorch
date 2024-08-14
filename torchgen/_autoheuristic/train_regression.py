@@ -34,7 +34,7 @@ class AHTrainRegressionTree(AHTrain):
     def __init__(self):
         super().__init__()
 
-    def main(self, log_path, other_datasets, nrows, heuristic_name):
+    def main(self, log_path, other_datasets, nrows, heuristic_name, save_dot=False):
         """
         Main function that trains a decision tree and generates a heuristic.
         """
@@ -46,7 +46,7 @@ class AHTrainRegressionTree(AHTrain):
         self.add_real_datasets(datasets, other_datasets, cat_feature2cats)
 
         # We will do a grid search over the values
-        max_depths = [5, 10, 13, 15, 17, 20, 23, None]
+        max_depths = [5, 10]
         min_samples_leafs = [1, 2, 5, 10]
         choice_columns = [f"{CHOICE_COL}_{choice}" for choice in choices]
         (results_df, best_model, threshold) = self.train_and_evaluate_models(
@@ -381,6 +381,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import AHContext, AHMetad
 from torch._inductor.autoheuristic.learnedheuristic_interface import (
     LearnedHeuristicRegression,
 )
+
 
 class {heuristic_name}(LearnedHeuristicRegression):
 
