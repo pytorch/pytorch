@@ -1825,6 +1825,23 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
         return dec_fn(func)
     return dec_fn
 
+
+def skipIfWindowsCuda(func=None, *, msg="test doesn't currently work on the Windows cuda stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindowsCuda: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
 def setLinalgBackendsToDefaultFinally(fn):

@@ -3,7 +3,7 @@ import unittest
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import skipIfNNModuleInlined, skipIfWindows
+from torch.testing._internal.common_utils import skipIfNNModuleInlined, skipIfWindows, skipIfWindowsCuda
 
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
@@ -44,21 +44,21 @@ inner(torch.randn(20, 20).to("{device}"))
             "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
-    @skipIfWindows
+    @skipIfWindowsCuda
     @requires_cuda
     def test_after_dynamo_cuda_compile_error(self):
         self._test_after_dynamo(
             "cuda", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
-    @skipIfWindows
+    @skipIfWindowsCuda
     @requires_cuda
     def test_after_dynamo_cuda_runtime_error(self):
         self._test_after_dynamo(
             "cuda", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
-    @skipIfWindows
+    @skipIfWindowsCuda
     @requires_cuda
     def test_after_dynamo_cuda_accuracy_error(self):
         self._test_after_dynamo(
