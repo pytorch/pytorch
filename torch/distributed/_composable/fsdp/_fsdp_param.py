@@ -11,7 +11,12 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+from torch.distributed._tensor.placement_types import (
+    _StridedShard,
+    DTensorSpec,
+    Placement,
+    TensorMeta,
+)
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -118,6 +123,10 @@ nn.Parameter in order to see the result of .set_.
 def set__functionalize(tensor, data):
     torch._sync(tensor)
     torch._sync(data)
+    # AOTDispatcher needs to know if any inputs had their storages mutated.
+    # (Why? It sometimes detaches inputs before sending them into the graph,
+    #  when it sees that they do not need to have any gradients computed)
+    torch._functionalize_set_storage_changed(tensor)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     with torch._C._ExcludeDispatchKeyGuard(
@@ -257,8 +266,8 @@ class FSDPParam:
             ):
                 raise NotImplementedError("Using TP with HSDP is not supported")
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            dp_global_mesh = _mesh_resources.get_parent_mesh(dp_mesh)
-            tp_global_mesh = _mesh_resources.get_parent_mesh(tp_mesh)
+            dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
+            tp_global_mesh = _mesh_resources.get_root_mesh(tp_mesh)
             if dp_global_mesh != tp_global_mesh or (
                 dp_global_mesh is None or tp_global_mesh is None
             ):
@@ -277,8 +286,13 @@ class FSDPParam:
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
+            split_factor = self._tp_spec.num_shards_map[0]
             self._spmd_placements: Tuple[Placement, ...] = (
-                Shard(0),
+                (
+                    _StridedShard(0, split_factor=split_factor)
+                    if split_factor > 1
+                    else Shard(0)
+                ),
                 self._tp_spec.placements[0],
             )
             self._sharding_spec = DTensorSpec(
@@ -286,6 +300,18 @@ class FSDPParam:
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
             )
+            # NOTE: FSDP+TP does not support uneven sharding for now
+            # TODO: enable uneven sharding for FSDP+TP
+            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
+                num_shards = self._sharding_spec.num_shards_map[0]
+                tensor_size_dim_0 = self._sharding_spec.shape[0]
+                if tensor_size_dim_0 % num_shards != 0:
+                    raise NotImplementedError(
+                        "FSDP+TP sharding does not support uneven sharding for now: "
+                        f"tensor dim 0 has size {tensor_size_dim_0} which cannot be "
+                        f"evenly sharded into {num_shards} shards."
+                    )
+
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
@@ -692,6 +718,9 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+
+    def __repr__(self):
+        return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

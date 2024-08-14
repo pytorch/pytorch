@@ -993,7 +993,9 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                "mlp_dim": [3, 16, 17],
+                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
+                # is supported for FSDP+TP
+                "mlp_dim": [4, 16, 20],
                 "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
@@ -1129,7 +1131,7 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
         """Based on https://github.com/pytorch/pytorch/issues/109385"""
 
         class VisionTransformer(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.patch_proj = nn.Conv2d(3, 1024, kernel_size=14, stride=14)
 
@@ -1140,7 +1142,7 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
                 return self.forward_features(imgs).sum(dim=1)
 
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.vit, self.projector = VisionTransformer(), nn.Linear(1024, 256)
 
