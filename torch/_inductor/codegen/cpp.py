@@ -4140,9 +4140,29 @@ class CppScheduling(BaseScheduling):
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+
+        def can_alias(template_buffer, outputs_by_name, epilogue_nodes):
+            # TODO: check the not epilogue_nodes and return True here
+            if not epilogue_nodes:
+                return True
+            assert template_buffer.get_name() in outputs_by_name
+            users = outputs_by_name[template_buffer.get_name()].users
+            for user in users:
+                if not isinstance(user.node, BaseSchedulerNode):
+                    breakpoint()
+                assert isinstance(user.node, BaseSchedulerNode)
+                computed_buffer = user.node.node
+                # If template_buffer is used by nodes other than the epilogue nodes,
+                # we can't set template_buffer and Y as alias.
+                # Both template_buffer and Y need to be kept.
+                if computed_buffer not in epilogue_nodes:
+                    return False
+            return True
+
+        flag_can_alias = can_alias(ctb, template_node.outputs_by_name, epilogue_nodes)
         kernel, render = ctb.make_kernel_render(
             ctb,
-            template_buffer_outputs_by_name=template_node.outputs_by_name,
+            flag_can_alias=flag_can_alias,
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:

@@ -10,7 +10,6 @@ from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
-from ..scheduler import SchedulerBuffer
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
@@ -327,7 +326,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         make_kernel_render: Callable[
             [
                 ir.CppTemplateBuffer,
-                Dict[str, SchedulerBuffer],
+                bool,
                 Optional[List[ir.IRNode]],
             ],
             str,
