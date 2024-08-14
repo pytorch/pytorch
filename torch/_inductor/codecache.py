@@ -1308,8 +1308,10 @@ class FxGraphCache:
                     dist.distributed_c10d.is_initialized()
                     and (time_taken_ns := compiled_graph._time_taken_ns) is not None
                 ):
+                    increased_timeout_sec = time_taken_ns // 1e9  # convert to seconds
+                    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
                     dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                        timedelta(seconds=time_taken_ns // 1e9)  # Convert to seconds
+                        timedelta(seconds=increased_timeout_sec)
                     )
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:

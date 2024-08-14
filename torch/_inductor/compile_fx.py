@@ -704,6 +704,7 @@ def fx_codegen_and_compile(
     if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
         import time
 
+        log.warning("Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec)
         time.sleep(sleep_sec)
 
     with dynamo_utils.preserve_rng_state():
