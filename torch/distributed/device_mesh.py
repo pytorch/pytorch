@@ -510,15 +510,15 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
+            it = iter(self.mesh_dim_names)
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
-                mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
+                mesh_dim_name in it for mesh_dim_name in mesh_dim_names
             ):
                 raise KeyError(
                     f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                    "Valid mesh_dim_names should be a subsequence of valid"
-                    f"mesh_dim_names from {self.mesh_dim_names}."
+                    f"Valid mesh_dim_names should be a subsequence of {self.mesh_dim_names}."
                 )
 
             submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
