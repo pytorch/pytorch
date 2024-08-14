@@ -774,6 +774,25 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
+    @requires_cuda
+    def test_S429861(self):
+        # Just verify we can compile this function without error
+        try:
+            from . import s429861_repro
+        except ImportError:
+            import s429861_repro
+
+        forward = s429861_repro.forward
+
+        import torch._dynamo
+        import torch._inductor
+        from torch._dynamo.debug_utils import aot_graph_input_parser
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache():
+            kwargs = aot_graph_input_parser(forward)
+            torch.compile(forward)(**kwargs)
+
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(
