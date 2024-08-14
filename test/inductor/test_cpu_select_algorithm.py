@@ -714,6 +714,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(16)
     @parametrize("batch_size", (2,))
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (2,))
@@ -835,6 +836,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
     )
+    test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

@@ -594,6 +594,7 @@ atomic_add(volatile T *addr, T offset) {
 
 void mm_get_thread_blocking(
     int num_threads,
+    int max_k_slices,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -625,15 +626,16 @@ void mm_get_thread_blocking(
     return std::make_tuple(std::move(factors), count);
   };
 
-  auto get_blocking = [](int64_t num_threads,
-                         int64_t factor,
+  auto get_blocking = [](int64_t m_factor,
+                         int64_t n_factor,
+                         int64_t k_factor,
                          int64_t m_blocks,
                          int64_t n_blocks,
                          int64_t k_blocks) {
-    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
-    int64_t cofactor = num_threads / factor;
-    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
-    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+    int64_t thread_block_k = (k_blocks + k_factor - 1) / k_factor;
+    int64_t thread_block_n = (n_blocks + n_factor - 1) / n_factor;
+    int64_t thread_block_m = (m_blocks + m_factor - 1) / m_factor;
+    return std::make_tuple(thread_block_m, thread_block_n, thread_block_k);
   };
 
   auto is_better_blocking = [=](int64_t Mt_,
@@ -642,7 +644,7 @@ void mm_get_thread_blocking(
                               int64_t Mt,
                               int64_t Nt,
                               int64_t Kt) {
-    return Mt == 0 || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
+    return Mt == 0 || Kt_ < Kt || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
   };
 
   int64_t m_blocks = (M + Mr - 1) / Mr;
@@ -653,11 +655,11 @@ void mm_get_thread_blocking(
   assert(count > 0);
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    if (n_blocks >= factor &&
-        m_blocks >= num_threads / factor) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor && m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
@@ -669,11 +671,33 @@ void mm_get_thread_blocking(
   }
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    int64_t cofactor = num_threads / factor;
-    if (n_blocks >= factor || m_blocks >= cofactor) {
+    int64_t k_factor = factors[i];
+    if (k_blocks >= k_factor && (max_k_slices == 0 || k_factor <= max_k_slices)) {
+      auto [mxn_factors, mxn_count] = get_factors(num_threads / k_factor);
+      for (int j = 0; j < mxn_count; ++j) {
+        int64_t n_factor = mxn_factors[j];
+        int64_t m_factor = num_threads / (k_factor * n_factor);
+        if (n_blocks >= n_factor && m_blocks >= m_factor) {
+          auto [Mt_, Nt_, Kt_] = get_blocking(
+              m_factor, n_factor, k_factor, m_blocks, n_blocks, k_blocks);
+          if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+            std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+          }
+        }
+      }
+    }
+  }
+
+  if (Mt != 0) {
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor || m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
