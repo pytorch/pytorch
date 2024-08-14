@@ -1224,11 +1224,18 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+"""
+    Difference between is_safe_constant and common_constant_types.
+    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
+                             as ConstantVariable.
+    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
+"""
+
 
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type)) or istype(
+    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
         v,
         common_constant_types | {slice},
     )

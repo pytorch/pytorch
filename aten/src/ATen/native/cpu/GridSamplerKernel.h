@@ -9,7 +9,7 @@ namespace at {
 class TensorBase;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using forward_2d_fn = void (*) (
     const TensorBase &output,
@@ -31,4 +31,4 @@ using backward_2d_fn = void (*) (
 DECLARE_DISPATCH(forward_2d_fn, grid_sampler_2d_cpu_kernel);
 DECLARE_DISPATCH(backward_2d_fn, grid_sampler_2d_backward_cpu_kernel);
 
-}}  // namespace at::native
+} // namespace at::native

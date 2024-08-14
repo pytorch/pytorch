@@ -51,7 +51,6 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .debug_utils import DebugPrinterManager
 from .multi_kernel import MultiKernel
 
 
@@ -1402,19 +1401,19 @@ class SIMDScheduling(BaseScheduling):
             config.aot_inductor.debug_intermediate_value_printer
             and not isinstance(final_kernel, MultiKernel)
         )
-        _, call_args, _, arg_types = (
+        _, call_args, arg_signatures, _ = (
             final_kernel.args.python_argdefs()
             if not isinstance(final_kernel, MultiKernel)
-            else None,
-            [],
-            None,
-            None,
+            else [None, [], None, None]
         )
         call_args: List[str]
-        arg_types: Optional[List[type]]
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, final_kernel, arg_types
-        ):
+        arg_signatures: Optional[List[type]]
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.enable_debug_printer = enable_debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, final_kernel
+        )
+        with debug_printer_manager:
             final_kernel.call_kernel(final_kernel.kernel_name)
 
         if config.nan_asserts:
@@ -1540,11 +1539,12 @@ class SIMDScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
 
         # debug printing values of intermediate tensors
-        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
-        _, call_args, _, arg_types = kernel.args.python_argdefs()
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, kernel, arg_types
-        ):
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
             kernel.call_kernel(kernel_name, template_node.node)
 
         V.graph.removed_buffers |= kernel.removed_buffers
