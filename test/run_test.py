@@ -106,7 +106,7 @@ def maybe_set_hip_visible_devies():
 
 
 def strtobool(s):
-    return s.lower() not in {"", "0", "false", "off"}
+    return s.lower() not in {"", "0", "false", "off", "no"}
 
 
 class TestChoices(list):
@@ -442,7 +442,8 @@ def run_test(
 
     if options.showlocals:
         if options.pytest:
-            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
+            unittest_args.extend(["--showlocals", "--tb=long"])
+            unittest_args.append("--color=yes" if options.color else "--color=no")
         else:
             unittest_args.append("--locals")
 
@@ -1280,6 +1281,11 @@ def parse_args():
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
         and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+    )
+    parser.add_argument(
+        "--color",
+        default=not IS_CI,
+        type=lambda x: bool(strtobool(x)),
     )
     parser.add_argument(
         "--shard",
