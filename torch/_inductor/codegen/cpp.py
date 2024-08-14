@@ -2200,7 +2200,7 @@ class CppVecKernel(CppKernel):
             csevar.is_vec = True
             return csevar
 
-    def load_to_buffer(self, name: str, index: sympy.Expr, buffer: IndentedBuffer):
+    def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2212,16 +2212,13 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)
-            csevar = self.cse.generate(buffer, line)  # type: ignore[assignment]
+            csevar = self.cse.generate(self.loads, line)  # type: ignore[assignment]
         else:
-            csevar = self._load_or_store_non_contiguous(var, index, dtype, buffer)  # type: ignore[assignment]
+            csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
         csevar.update_on_args("load", (self, name, index), {})
         csevar.is_vec = True
         return csevar
-
-    def load(self, name: str, index: sympy.Expr):
-        return self.load_to_buffer(name, index, self.loads)
 
     def _get_store_line(
         self,
@@ -2272,9 +2269,8 @@ class CppVecKernel(CppKernel):
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
-                load_var = self.load_to_buffer(name, index, self.stores)
                 code = self._get_store_line(
-                    f"({load_var} + {value})",
+                    f"{value}",
                     var,
                     index,
                     dtype,
