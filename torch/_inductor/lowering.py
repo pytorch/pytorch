@@ -2067,12 +2067,34 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fx_strides(fx_node, *args, **kwargs):
+def constrain_to_fx_strides(fx_node, *args, ignore_mutated_args_FIXME=False, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
             stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         return arg
+
+    if ignore_mutated_args_FIXME:
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
+        schema = fx_node.target._schema
+
+        new_args = []
+        new_kwargs = {}
+        schema_args, schema_kwargs = torch._library.utils.schema_args_kwargs(schema)
+        for arg, fx_arg, schema_arg in zip(args, fx_node.args, schema_args):
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                new_args.append(arg)
+            else:
+                new_args.append(apply_constraint(arg, fx_arg))
+        for key in kwargs:
+            arg = kwargs[key]
+            fx_arg = fx_node.kwargs[key]
+            schema_arg = schema_kwargs[key]
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                new_kwargs[key] = arg
+            else:
+                new_kwargs[key] = apply_constraint(arg, fx_arg)
+        return tuple(args), kwargs
 
     args = tuple(
         apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
