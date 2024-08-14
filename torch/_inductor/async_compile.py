@@ -25,11 +25,7 @@ from torch._inductor.codecache import (
     TritonCodeCache,
     TritonFuture,
 )
-from torch._inductor.compile_worker.subproc_pool import (
-    _warm_process_pool,
-    AnyPool,
-    SubprocPool,
-)
+from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
@@ -160,11 +156,9 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
-            return
-        _compile_start()
-        _warm_process_pool(cls.process_pool(), config.compile_threads)
-        _compile_end()
+        if config.compile_threads > 1:
+            # Creating the pool is enough to start the warmup.
+            cls.process_pool()
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:

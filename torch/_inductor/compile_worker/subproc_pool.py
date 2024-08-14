@@ -197,18 +197,16 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
-        self.pool = self._new_pool(nprocs, True)
+        self.pool = self._new_pool(nprocs)
         self.running = True
 
-    def _new_pool(self, nprocs, warm):
+    def _new_pool(self, nprocs):
         pool = ProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context("fork"),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-        if warm:
-            _warm_process_pool(pool, nprocs)
         return pool
 
     def main(self):
@@ -238,7 +236,7 @@ class SubprocMain:
                 # If any subprocess in the pool crashes, we get a BrokenProcessPool
                 # exception and the whole pool becomes unusable. Handle crashes by
                 # recreating the pool and resubmitting.
-                self.pool = self._new_pool(self.nprocs, False)
+                self.pool = self._new_pool(self.nprocs)
 
     def _submit_inner(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
@@ -270,36 +268,6 @@ class SubprocMain:
 
 
 AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
-
-
-def _warm_process_pool(pool: AnyPool, n: int):
-    if isinstance(pool, SubprocPool):
-        return  # no need
-    assert isinstance(pool, ProcessPoolExecutor)
-
-    # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
-    # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
-
-    # Examples:
-    # A simple x + x + x script: 10ms seconds in the middle of the program, 2ms at startup
-    # tf_efficientnet_b0 benchmark: 50ms! in the middle of the program , 3ms at startup
-
-    # So we want to start the workers early when it is still cheap, and also to allow the workers to get
-    # ready before we have work for them.
-
-    # ProcessPoolExecutor also does not launch the workers until it finds a point when all the workers are idle.
-    # But if we waited until then fork time will be long and we will be waiting for the processes to initialize.
-
-    # We force them to start here with some YOLOing of the internal methods.
-
-    # TODO(masnesral): Are these still relevant?
-    if hasattr(pool, "_start_queue_management_thread"):
-        pool._start_queue_management_thread()
-    else:
-        for _ in range(n):
-            pool._adjust_process_count()
-        if hasattr(pool, "_start_executor_manager_thread"):
-            pool._start_executor_manager_thread()
 
 
 class TestException(RuntimeError):
