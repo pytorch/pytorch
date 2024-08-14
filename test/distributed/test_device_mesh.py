@@ -323,7 +323,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
         # ep_mesh is considered different from mesh_2d["TP"]
-        # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
         self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
@@ -338,7 +337,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
             another_mesh_1 if self.rank < self.world_size // 2 else another_mesh_2
         )
         # another_mesh is considered the same as ep_mesh
-        # since they have the same mesh and no parent mesh.
         self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
         self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
@@ -486,7 +484,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
     def test_get_item_1d(self):
         mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
         # Make sure slicing out 1D mesh from a 1D mesh works.
-        # We are just dummy return without the parent mesh here.
         dp_mesh = mesh["dp"]
         self.assertEqual(dp_mesh, mesh)
 
@@ -577,6 +574,24 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
         self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
 
+    @with_comms
+    def test_flatten_mesh(self):
+        mesh_shape = (2, 2, 2)
+        mesh_dim_names = ("dp", "cp", "tp")
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # Test flatten contiguous dims
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        flattened_dp_cp_mesh = dp_cp_mesh._flatten()
+        self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+
+        # Test flatten non-contiguous dims
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        flattned_dp_tp_mesh = dp_tp_mesh._flatten()
+        self.assertEqual(dp_tp_mesh.mesh.flatten(), flattned_dp_tp_mesh.mesh)
+
 
 class TestMeshEnv(DTensorTestBase):
     @property
@@ -601,7 +616,7 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
 
     @with_comms
-    def test_get_parent_mesh_dim_exist(self):
+    def test_get_root_mesh_dim_exist(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
@@ -612,7 +627,7 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh_2d["TP"]), 1)
 
     @with_comms
-    def test_get_parent_mesh_dim_not_exist(self):
+    def test_get_root_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
