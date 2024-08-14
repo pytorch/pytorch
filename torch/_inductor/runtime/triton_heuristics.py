@@ -666,6 +666,7 @@ class CachingAutotuner(KernelInterface):
 
         if with_profiler:
             from torch._inductor.utils import do_bench_using_profiling
+
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
@@ -957,7 +958,9 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid, with_profiler=self.with_profiler)
+            ms = self.bench(
+                launcher, *args, grid=grid, with_profiler=self.with_profiler
+            )
             num_in_out_ptrs = len(
                 [
                     arg_name
@@ -1181,7 +1184,9 @@ def cached_autotune(
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
-                with_profiler=inductor_meta["profile_bandwidth_with_do_bench_using_profiling"],
+                with_profiler=inductor_meta[
+                    "profile_bandwidth_with_do_bench_using_profiling"
+                ],
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
