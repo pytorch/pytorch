@@ -1253,13 +1253,14 @@ class FxGraphCache:
         compiled_graph = None
         cache_state = None
         cache_event_time = None
-        key = None
-        debug_lines = None
+        cache_info: Dict[str, Any] = {}
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
+            cache_info["key"] = key
+            cache_info["components"] = debug_lines
 
             remote_cache = None
             if remote:
@@ -1293,6 +1294,7 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
                 compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
                 FxGraphCache._save_graph(
                     key,
                     compiled_graph,
@@ -1305,15 +1307,17 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time_ns()
-                if (
-                    dist.distributed_c10d.is_initialized()
-                    and (time_taken_ns := compiled_graph._time_taken_ns) is not None
-                ):
-                    increased_timeout_sec = time_taken_ns // 1e9  # convert to seconds
-                    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
-                    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                        timedelta(seconds=increased_timeout_sec)
-                    )
+                if (time_taken_ns := compiled_graph._time_taken_ns) is not None:
+                    cache_info["time_saved_ns"] = time_taken_ns
+                    if dist.distributed_c10d.is_initialized():
+                        increased_timeout_sec = (
+                            time_taken_ns // 1e9
+                        )  # convert to seconds
+                        cache_info["ephemeral_timeout_increase"] = increased_timeout_sec
+                        log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+                        dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                            timedelta(seconds=increased_timeout_sec)
+                        )
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
@@ -1324,9 +1328,9 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
-        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
+        cache_info["cache_state"] = cache_state
         ChromiumEventLogger.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -1334,7 +1338,7 @@ class FxGraphCache:
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
