@@ -498,7 +498,7 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` is mkldnn tensor. Will be deprecated.
   bool is_mkldnn() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_onednn();
+    return impl_->is_mkldnn();
   }
 
    /// Returns if a `Tensor` is onednn tensor.
