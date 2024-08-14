@@ -904,7 +904,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for PlacementStrategy
         output_specs_list: List[Optional[DTensorSpec]] = []
-        op_args_target_specs = []
+        op_args_target_specs: List[Optional[DTensorSpec]] = []
         redistribute_costs = []
 
         input_src_spec = input_placement_strategy.output_spec
@@ -915,22 +915,21 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
         # and normalized input (x_hat) should have the same sharding
         # placements, and grad_out's sharding is determined by the
         # pointwise result of x_hat and weight/bias.
-        if output_mask[0]:
-            # TODO: now grad_out spec follows input spec. we may need
-            # to change it to apply a pointwise rule over grad_out,
-            # input, and weight.
-            grad_out_target_spec = DTensorSpec(
-                mesh=mesh,
-                placements=_replicate_dims_start_at(input_src_spec.placements, axis),
-                tensor_meta=input_src_spec.tensor_meta,
-            )
-            op_args_target_specs.append(grad_out_target_spec)
-            redistribute_costs.append(
-                generate_redistribute_costs(grad_out_strategy, grad_out_target_spec)
-            )
-            output_specs_list.append(grad_out_target_spec)
-        else:
-            output_specs_list.append(None)
+        # TODO: now grad_out spec follows input spec. we may need
+        # to change it to apply a pointwise rule over grad_out,
+        # input, and weight.
+        grad_out_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=_replicate_dims_start_at(input_src_spec.placements, axis),
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        op_args_target_specs.append(grad_out_target_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(grad_out_strategy, grad_out_target_spec)
+        )
+        output_specs_list.append(grad_out_target_spec) if output_mask[
+            0
+        ] else output_specs_list.append(None)
 
         # arg: input
         input_target_spec = DTensorSpec(
@@ -979,6 +978,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
         else:
             output_specs_list.append(None)
+            op_args_target_specs.append(None)
 
         # arg: bias
         # d_bias = sum(grad_out, outer_dim, keepdim=False)
@@ -989,11 +989,9 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             # in forward pass
             op_args_target_specs.append(bias_src_spec)
             redistribute_costs.append([0.0 for _ in bias_strategy.strategies])
-            # Currently we do not support the case where output_mask[0] is False while
-            # output_mask[1] is True. But it's easy to support that by accessing
-            # grad_out_spec via a local variable rather than the list. We just don't
-            # see the case.
-            grad_out_spec = output_specs_list[0]
+            grad_out_spec = (
+                output_specs_list[0] if output_mask[0] else input_target_spec
+            )
             assert isinstance(grad_out_spec, DTensorSpec)
             # d_bias spec follows a reduction over grad_out
             inp_placements = _replicate_dims_start_at(grad_out_spec.placements, axis)
@@ -1012,11 +1010,12 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
         else:
             output_specs_list.append(None)
+            op_args_target_specs.append(None)
 
         out_tuple_strategy.strategies.append(
             PlacementStrategy(
                 output_specs=tuple(output_specs_list),
-                input_specs=op_args_target_specs,
+                input_specs=op_args_target_specs,  # type: ignore[arg-type]
                 redistribute_cost=redistribute_costs,
             )
         )

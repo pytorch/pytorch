@@ -239,7 +239,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs = []
+                expected_input_specs: List[Optional[DTensorSpec]] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
@@ -253,13 +253,16 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
-                    expected_input_specs.append(
-                        desired_spec.shallow_copy_with_tensor_meta(
-                            input_spec.tensor_meta
+                    if desired_spec:
+                        expected_input_specs.append(
+                            desired_spec.shallow_copy_with_tensor_meta(
+                                input_spec.tensor_meta
+                            )
                         )
-                    )
-                    if input_spec.placements != desired_spec.placements:
-                        needs_redistribute = True
+                        if input_spec.placements != desired_spec.placements:
+                            needs_redistribute = True
+                    else:
+                        expected_input_specs.append(None)
 
                 suggestion_schema = None
                 if needs_redistribute:
