@@ -46,12 +46,6 @@ static void pool2d_template(const Tensor& input,
                             const std::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
                             const c10::string& op_name) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_CHECK(input.scalar_type() != ScalarType::Long,
-                "MPS: ",
-                op_name,
-                " op with int64 input is supported natively starting from macOS 13.0.");
-  }
   const int64_t ndims = input.ndimension();
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));

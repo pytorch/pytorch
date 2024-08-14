@@ -363,6 +363,48 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+PyObject* wrap_lifted_ivalue_args(
+    const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
+  PyObject* pyivalueargs =
+      PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
+  size_t idx = 0;
+  for (const auto& arg : lifted_ivalue_args) {
+    if (arg.actual_ptr->isInt() || arg.actual_ptr->isSymInt()) {
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyLong_FromSsize_t(arg.actual_ptr->toInt()));
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      PyList_SET_ITEM(
+          pyivalueargs, idx++, PyFloat_FromDouble(arg.actual_ptr->toDouble()));
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
+    }
+  }
+  return pyivalueargs;
+}
+
+void set_ivalue_proxies(
+    PyObject* fake_ivalue_args,
+    std::vector<LiftedIValueArg>& lifted_ivalue_args) {
+  TORCH_INTERNAL_ASSERT(PyList_Check(fake_ivalue_args));
+  TORCH_INTERNAL_ASSERT(
+      static_cast<size_t>(PyList_Size(fake_ivalue_args)) ==
+      lifted_ivalue_args.size());
+
+  for (const auto& i : c10::irange(lifted_ivalue_args.size())) {
+    auto& arg = lifted_ivalue_args[i];
+    if (arg.actual_ptr->isInt() || arg.actual_ptr->isSymInt()) {
+      arg.proxy = at::IValue(
+          py::cast<c10::SymInt>(PyList_GET_ITEM(fake_ivalue_args, i)));
+      TORCH_INTERNAL_ASSERT(arg.proxy.isSymInt());
+    } else if (arg.actual_ptr->isDouble() || arg.actual_ptr->isSymFloat()) {
+      arg.proxy = at::IValue(
+          py::cast<c10::SymFloat>(PyList_GET_ITEM(fake_ivalue_args, i)));
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
+    }
+  }
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -371,11 +413,20 @@ static TraceState call_begin_capture(
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
+  THPObjectPtr pyivalueargsinput(
+      wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args));
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
-      self, method_name, pyinput.get(), pysizeinput.get(), nullptr)));
+      self,
+      method_name,
+      pyinput.get(),
+      pysizeinput.get(),
+      pyivalueargsinput.get(),
+      nullptr)));
 
-  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr};
-  check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
+  PyObject *fake_inputs{nullptr}, *fake_sizes{nullptr},
+      *fake_ivalue_args{nullptr};
+  check(PyArg_ParseTuple(
+      pyresult.get(), "OOO", &fake_inputs, &fake_sizes, &fake_ivalue_args));
 
   variable_list proxy_inputs = THPVariable_UnpackList(fake_inputs);
   TORCH_INTERNAL_ASSERT(
@@ -386,6 +437,7 @@ static TraceState call_begin_capture(
     arg.proxy_tensor = proxy_inputs[i];
   }
 
+  set_ivalue_proxies(fake_ivalue_args, compiler_call.lifted_ivalue_args.args);
   return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
@@ -418,6 +470,7 @@ CacheNode* _compiled_autograd_impl(
     const edge_list& output_edges,
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
+    THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
@@ -621,6 +674,8 @@ CacheNode* _compiled_autograd_impl(
 
   *graph_arg_inputs = THPVariable_WrapList(compiler_call.tensor_args.inputs);
   *graph_arg_sizes = wrap_int_list(compiler_call.dyn_size_inputs);
+  *graph_arg_ivalue_args =
+      wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
   return cache;
 }
@@ -640,6 +695,7 @@ variable_list compiled_autograd(
 
   THPObjectPtr inputs;
   THPObjectPtr sizes;
+  THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
   CacheNode* cache = _compiled_autograd_impl(
       graph_root,
@@ -648,6 +704,7 @@ variable_list compiled_autograd(
       output_edges,
       &inputs,
       &sizes,
+      &ivalue_args,
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
@@ -655,6 +712,7 @@ variable_list compiled_autograd(
       cache->compiled_fn.get(),
       inputs.get(),
       sizes.get(),
+      ivalue_args.get(),
       hooks.get(),
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
