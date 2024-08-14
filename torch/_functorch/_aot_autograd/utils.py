@@ -256,6 +256,22 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
+    # Logic:
+    # 1. Inputs identified as input tokens:
+    #    - If used as a first argument in with_effects
+    #    - Last fw_metadata.num_backward_discovered_tokens forward inputs
+    #
+    # 2. Outputs identified as output tokens:
+    #    - If in input_tokens.
+    #    - If Produced by getitem(with_effects, 0)
+    #
+    # 3. Checks invariants of number input output tokens:
+    # forward:
+    # expected_num_erased_inputs == len(fw_metadata.tokens) + fw_metadata.num_backward_discovered_tokens
+    # expected_num_erased_outputs == len(fw_metadata.tokens) + fw_metadata.num_backward_out_tokens
+    # backward:
+    # expected_num_erased_inputs == fw_metadata.num_backward_out_tokens
+    # expected_num_erased_outputs == fw_metadata.num_backward_out_tokens
     num_tokens = len(fw_metadata.tokens)
     num_backward_out_tokens = fw_metadata.num_backward_out_tokens
     num_backward_discovered_tokens = fw_metadata.num_backward_discovered_tokens
@@ -345,7 +361,6 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         module.recompile()
 
     if num_tokens > 0 or num_backward_out_tokens > 0:
-        # Even if Forward did not use tokens, backward operations with tokens may be placed by partitinoer in forward.
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
@@ -383,9 +398,6 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                 ),
             )
         do(bw_module, "backward", num_backward_out_tokens, num_backward_out_tokens)
-
-    # No need to update fw_metadata.num_forward_returns and fw_metadata.num_forward as num_tokens are not part of it.
-    # As CompiledFunction.forward runs function wrapped in EffectTokensWrapper, that will toss out output tokens.
 
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
@@ -453,6 +465,11 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
 
 
+# Collect metadata analysis traces only forward fn.
+# If backward uses more effect tokens, we will know it only after joint fn tracing.
+# This function is adding additional primals for discovered in backward tokens.
+# Those primal_tokens are placed in the end of primals.
+# ViewAndMutationMeta.num_backward_discovered_tokens corresponds to the number of added tokens.
 def add_discovered_token_in_backward_as_input(gm, num_tokens: int):
     placeholders = []
     added_inputs = 0
@@ -471,13 +488,10 @@ def add_discovered_token_in_backward_as_input(gm, num_tokens: int):
             num_primals = len(inps[0])
 
             with gm.graph.inserting_before(placeholders[num_primals]):
-                # Naming with tangents as partitioner counts all inputs without "tangents" as forward inputs
                 bw_input_token = gm.graph.placeholder("primals_bw_token")
                 added_inputs += 1
 
                 node_meta = bw_input_token.meta
-                # fake_mode = placeholders[0].meta["val"].fake_mode
-                # node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
                 node_meta["val"] = torch.tensor([])
                 node_meta["tensor_meta"] = torch.tensor([])
 
