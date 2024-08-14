@@ -10,7 +10,7 @@ from torch._inductor.codecache import CUDACodeCache
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.inductor_utils import skipIfWindowsCuda
+from torch.testing._internal.common_utils import skipIfWindowsCuda
 
 
 _SOURCE_CODE = r"""

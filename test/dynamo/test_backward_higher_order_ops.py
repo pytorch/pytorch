@@ -13,7 +13,8 @@ from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import HAS_CUDA, skipIfWindowsCuda
+from torch.testing._internal.common_utils import skipIfWindowsCuda
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 def _multiply(x):
