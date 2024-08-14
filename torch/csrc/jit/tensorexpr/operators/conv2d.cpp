@@ -481,11 +481,11 @@ Tensor computeMkldnnPrepackedConvRun(
   }
 
   BufHandle ResultBuf(
-      "mkldnn_prepacked_conv_run", outputShape, outputStrides, dtype);
+      "onednn_prepacked_conv_run", outputShape, outputStrides, dtype);
   const BufHandle& inp = std::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = std::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
-      ResultBuf, "nnc_mkldnn_prepacked_conv_run", {inp, prepacked}, {});
+      ResultBuf, "nnc_onednn_prepacked_conv_run", {inp, prepacked}, {});
   return Tensor(ResultBuf.node(), s);
 }
 
