@@ -440,6 +440,19 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 19)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_device(self):
+        def fn(x):
+            with torch.cuda.device(x.device.index - 1):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_autograd_profiler_enabled(self):
         def fn(x):
             if torch.autograd._profiler_enabled():

@@ -371,6 +371,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
+        elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
+            assert args[0].is_python_constant()
+            return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
             and hasattr(
