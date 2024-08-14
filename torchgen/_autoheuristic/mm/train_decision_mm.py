@@ -49,7 +49,10 @@ class AHTrainDecisionTreeMM(AHTrainDecisionTree):
             drop=True
         )
         df_train = datasets["train"]
-        df_train = pd.concat([df_train, df_timm_train, df_hf_train], ignore_index=True,)
+        df_train = pd.concat(
+            [df_train, df_timm_train, df_hf_train],
+            ignore_index=True,
+        )
         return df_train
 
     def ranking_always_included_choices(self):
