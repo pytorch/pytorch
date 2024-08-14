@@ -24,7 +24,7 @@ CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
 @skipIfTorchDynamo("too slow")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
-class TestMkldnnFusion(JitTestCase):
+class TestOnednnFusion(JitTestCase):
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:
             self.assertGraphContainsExactly(graph, pat, 0)

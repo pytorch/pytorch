@@ -19,7 +19,7 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
   // and we dont want to coalesce mkldnn tensors bc they do layout
   // transformations based on usage
-  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+  if (lhs.is_onednn() || rhs.is_onednn()) {
     return false;
   }
   if (lhs.is_nested() || rhs.is_nested()) {

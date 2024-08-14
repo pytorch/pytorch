@@ -68,7 +68,7 @@ Tensor mkldnn_linear(
       self.dim() != 0,
       "mkldnn_linear: input needs to has dim at least 1, input dim ",
       self.dim());
-  TORCH_CHECK(self.is_mkldnn(),
+  TORCH_CHECK(self.is_onednn(),
       "mkldnn_linear: input needs to be mkldnn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
@@ -84,7 +84,7 @@ Tensor mkldnn_linear(
 
   const ideep::tensor x = itensor_from_onednn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
-  const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
+  const Tensor weight = (weight_t.is_onednn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
   const ideep::tensor w = itensor_from_tensor(weight);
 
   ideep::tensor y;
@@ -110,7 +110,7 @@ Tensor mkldnn_linear(
 
 Tensor mkldnn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight_t){
-  TORCH_CHECK(grad_output.is_mkldnn(),
+  TORCH_CHECK(grad_output.is_onednn(),
       "mkldnn_linear_backward: grad_output needs to be mkldnn layout");
   TORCH_CHECK(weight_t.device().is_cpu() && weight_t.scalar_type() == kFloat,
       "mkldnn_linear_backward: weight_t needs to be a dense tensor");
@@ -140,7 +140,7 @@ Tensor mkldnn_linear_backward_input(
 
 std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
-  TORCH_CHECK(grad_output.is_mkldnn() && input.is_mkldnn(),
+  TORCH_CHECK(grad_output.is_onednn() && input.is_onednn(),
       "mkldnn_linear_backward: grad_output and input needs to be mkldnn layout");
   TORCH_CHECK(weight.device().is_cpu() && weight.scalar_type() == kFloat,
       "mkldnn_linear_backward: weight needs to be a dense tensor");
@@ -379,7 +379,7 @@ static Tensor mkl_linear(
     return output;
   }
   int64_t M = self.numel() / self.size(self.dim() - 1);
-  if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
+  if (M == prepack_batch_size && mkl_weight_t.is_onednn()) {
     auto self_ = self.is_contiguous() ? self : self.contiguous();
     auto K = origin_weight_t.size(1);
     auto N = origin_weight_t.size(0);

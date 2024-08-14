@@ -850,7 +850,7 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
-                    not data.is_mkldnn
+                    not data.is_onednn
                     and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype

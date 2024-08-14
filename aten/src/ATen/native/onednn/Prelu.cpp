@@ -49,7 +49,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
 
   ideep::prelu_backward::compute(
       x, w, grady, gradx, gradw, ideep::prop_kind::backward);
-  if (weight.is_mkldnn()) {
+  if (weight.is_onednn()) {
     return std::make_tuple(
         new_with_itensor_onednn(std::move(gradx),
                                 optTypeMetaToScalarType(grad_output.options().dtype_opt()),
