@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -42,6 +42,9 @@ from .runtime_utils import (
     triton_config_to_hashable,
 )
 
+
+if TYPE_CHECKING:
+    from ..remote_cache import RemoteCacheBackend
 
 try:
     import triton
@@ -1079,7 +1082,7 @@ def cached_autotune(
 
         local_cache = None
         cache_filename = None
-        remote_cache = None
+        remote_cache: Optional[RemoteCacheBackend] = None
         remote_cache_key = None
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
@@ -1146,7 +1149,7 @@ def cached_autotune(
             if local_cache is not None and cache_filename is not None:
                 local_cache.put(cache_filename, data)
             if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)
+                remote_cache.put(remote_cache_key, data)  # type: ignore[arg-type]
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
