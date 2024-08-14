@@ -533,7 +533,6 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
       uint64_t resElemSize = result.element_size();
       MPSDataType dtype = getMPSDataType(batch1);
 
-      uint64_t maxSupportedElems = pow(2, 32);
       uint64_t elemInMatrix = resRows * resCols;
       uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
       uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
