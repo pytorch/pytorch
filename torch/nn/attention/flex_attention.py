@@ -756,8 +756,8 @@ def create_block_mask(
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
-             mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
-         )
+            mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+        )
         block_mask = _create_sparse_block_from_block_mask(
             (partial_block_mask, full_block_mask), mask_mod
         )
