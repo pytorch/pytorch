@@ -164,6 +164,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
   at::Tensor seed_t, offset_t;
 
+  at::PhiloxCudaState philox_state;
+  bool use_philox_state = false;
   if (p_dropout > 0.0)  {
     // number of times random will be generated per thread, to offset philox counter in thc random
     // state
@@ -171,19 +173,21 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     int64_t counter_offset = batch_size * num_heads * 32;
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+    philox_state = gen->philox_cuda_state(counter_offset);
     if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
       seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
     } else {
+      // See Note [CUDA Graph-safe RNG states] about the design
+      use_philox_state = true;
       seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
       offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
   } else {
     if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      seed_t = at::empty({}, at::dtype(at::kLong));
+      offset_t = at::empty({}, at::dtype(at::kLong));
     } else {
       seed_t = at::empty({}, at::dtype(at::kLong));
       offset_t = at::empty({}, at::dtype(at::kLong));
@@ -208,10 +212,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
+  using aotriton::TensorView;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
+  using sdp::aotriton_adapter::mk_philoxtensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+  auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
+  auto offset = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
@@ -220,8 +228,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                  mk_aotensor<2>(M, "M"),
                  mk_aotensor(output_t, "Out"),
                  p_dropout,
-                 mk_aoscalartensor(seed_t),
-                 mk_aoscalartensor(offset_t),
+                 seed,
+                 offset,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
