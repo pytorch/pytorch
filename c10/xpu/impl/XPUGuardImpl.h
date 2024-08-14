@@ -64,6 +64,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
 
+  // NB: These do NOT set the current device
   void setStream(Stream s) const override {
     const XPUStream stream(s);
     setCurrentXPUStream(stream);

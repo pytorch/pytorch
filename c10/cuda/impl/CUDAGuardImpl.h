@@ -75,6 +75,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setStream(s);
     return old_stream.unwrap();
   }
+  // NB: These do NOT set the current device
   void setStream(Stream s) const override {
     const CUDAStream stream(s);
     setCurrentCUDAStream(stream);

@@ -1230,6 +1230,7 @@ PyObject* THPModule_setStream(
       device_type);
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
+  // Set the current device to the device of stream.
   if (impl.getDevice().index() != stream.device_index()) {
     impl.setDevice(stream.device());
   }
