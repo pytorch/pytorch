@@ -308,7 +308,7 @@ static py::object dispatch_on_subclass(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
             .is(py::handle(arg)) &&
         torch_function.ptr() != torch::disabled_torch_function_impl()) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Defining your `",
           torch_function_name_str,
           "` as a plain method is deprecated ",
@@ -984,8 +984,10 @@ auto FunctionParameter::check(
     case ParameterType::QSCHEME:
       return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
+      // Allow symint to be passed in as device, but we'll specialize and
+      // guard in this case.
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) ||
-          THPDevice_Check(obj);
+          THPDevice_Check(obj) || torch::is_symint(py::handle(obj));
     case ParameterType::STREAM:
       return THPStream_Check(obj);
     case ParameterType::STRING:

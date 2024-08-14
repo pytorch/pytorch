@@ -1,16 +1,16 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _fused_doc,
     _get_capturable_supported_devices,
@@ -24,6 +24,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["Adam", "adam"]
 
@@ -425,7 +426,7 @@ def _single_tensor_adam(
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
+            bias_correction2_sqrt = bias_correction2**0.5
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -488,19 +489,26 @@ def _multi_tensor_adam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_exp_avgs,
-        device_exp_avg_sqs,
-        device_max_exp_avg_sqs,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_exp_avgs_,
+        device_exp_avg_sqs_,
+        device_max_exp_avg_sqs_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
+        device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         # Handle complex parameters
         if has_complex:
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 _view_as_real(
                     device_params,
                     device_grads,
@@ -550,6 +558,7 @@ def _multi_tensor_adam(
         bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
             bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
@@ -572,6 +581,7 @@ def _multi_tensor_adam(
             bias_correction2_sqrt = bias_correction2
 
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
 
@@ -596,9 +606,10 @@ def _multi_tensor_adam(
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]  # type: ignore[arg-type]
+            bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]  # type: ignore[arg-type]
 
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
@@ -653,19 +664,25 @@ def _fused_adam(
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
-            device_params,
-            device_grads,
-            device_exp_avgs,
-            device_exp_avg_sqs,
+            device_params_,
+            device_grads_,
+            device_exp_avgs_,
+            device_exp_avg_sqs_,
             device_max_exp_avg_sqs,
-            device_state_steps,
+            device_state_steps_,
         ),
         _,
     ) in grouped_tensors.items():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
+        device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
 
@@ -687,10 +704,10 @@ def _fused_adam(
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
-            device_max_exp_avg_sqs,
+            device_max_exp_avg_sqs,  # type: ignore[arg-type]
             device_state_steps,
             amsgrad=amsgrad,
-            lr=lr,
+            lr=lr,  # type: ignore[arg-type]
             beta1=beta1,
             beta2=beta2,
             weight_decay=weight_decay,

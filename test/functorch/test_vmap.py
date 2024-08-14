@@ -4363,6 +4363,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("t_copy"),
+                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),

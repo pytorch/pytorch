@@ -34,18 +34,16 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
-    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
-    MapVariable,
     RepeatIteratorVariable,
-    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -80,8 +78,11 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-
+from .nn_module import (
+    NNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -94,11 +95,13 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
     WeakRefVariable,
 )
+
 
 __all__ = [
     "AutogradFunctionContextVariable",
