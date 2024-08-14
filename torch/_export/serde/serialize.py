@@ -597,8 +597,13 @@ class GraphModuleSerializer(metaclass=Final):
         if torch_fn := node.meta.get("torch_fn"):
             ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
-        if quantization_tag := node.meta.get("quantization_tag"):
-            ret["quantization_tag"] = json.dumps(quantization_tag)
+        if custom := node.meta.get("custom"):
+            try:
+                ret["custom"] = json.dumps(custom)
+            except Exception as e:
+                raise SerializeError(
+                    f"Failed to serialize custom metadata for node {node.name} with error {e}"
+                ) from e
 
         return ret
 
@@ -1342,6 +1347,18 @@ class GraphModuleSerializer(metaclass=Final):
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
         )
 
+    def serialize_graph_module_metadata(self, meta: Dict[str, Any]):
+        ret = {}
+        if custom := meta.get("custom"):
+            try:
+                ret["custom"] = json.dumps(custom)
+            except Exception as e:
+                raise SerializeError(
+                    f"Failed to serialize custom metadata for graph with error {e}"
+                ) from e
+
+        return ret
+
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
         graph = self.serialize_graph(graph_module)
 
@@ -1349,6 +1366,7 @@ class GraphModuleSerializer(metaclass=Final):
             graph=graph,
             signature=self.serialize_signature(self.graph_signature),
             module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
+            metadata=self.serialize_graph_module_metadata(graph_module.meta)
         )
 
 
@@ -1908,10 +1926,15 @@ class GraphModuleDeserializer(metaclass=Final):
             module_call_graph = self.deserialize_module_call_graph(
                 serialized_graph_module.module_call_graph
             )
+            graph_module = ep._create_graph_module_for_export(
+                self.module, self.graph
+            )
+            meta = {}
+            if custom := serialized_graph_module.metadata.get("custom"):
+                meta["custom"] = json.loads(custom)
+            graph_module.meta = meta
             return GraphModuleDeserializer.Result(
-                graph_module=ep._create_graph_module_for_export(
-                    self.module, self.graph
-                ),
+                graph_module=graph_module,
                 signature=self.signature,
                 module_call_graph=module_call_graph,
                 names_to_symbols=self.symbol_name_to_symbol,
@@ -2216,8 +2239,8 @@ class GraphModuleDeserializer(metaclass=Final):
         if torch_fn_str := metadata.get("torch_fn"):
             ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
 
-        if quantization_tag_str := metadata.get("quantization_tag"):
-            ret["quantization_tag"] = json.loads(quantization_tag_str)
+        if custom_str := metadata.get("custom"):
+            ret["custom"] = json.loads(custom_str)
 
         return ret
 
