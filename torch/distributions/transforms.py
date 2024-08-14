@@ -992,6 +992,8 @@ class LowerCholeskyTransform(Transform):
 
     domain = constraints.independent(constraints.real, 2)
     codomain = constraints.lower_cholesky
+    bijective = True
+    sign = +1
 
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
@@ -1001,6 +1003,9 @@ class LowerCholeskyTransform(Transform):
 
     def _inverse(self, y):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
+
+    def log_abs_det_jacobian(self, x, y):
+        return x.diagonal(dim1=-2, dim2=-1).sum(dim=-1)
 
 
 class PositiveDefiniteTransform(Transform):
