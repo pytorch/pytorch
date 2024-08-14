@@ -385,7 +385,7 @@ def aot_dispatch_autograd(
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (
-                num_tokens > 0 or fw_metadata.num_backward_discovered_tokens > 0
+                num_tokens > 0 or fw_metadata.num_backward_out_tokens > 0
             ):
                 unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
 

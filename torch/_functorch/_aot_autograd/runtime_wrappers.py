@@ -658,10 +658,14 @@ class EffectTokensWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            if num_tokens > 0:
+            if num_tokens > 0 or runtime_metadata.num_backward_discovered_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
-                args = [*([None] * num_tokens), *args]
+                args = [
+                    *([None] * num_tokens),
+                    *args,
+                    *([None] * runtime_metadata.num_backward_discovered_tokens),
+                ]
                 old_args.clear()
 
             outs = compiled_fn(args)
@@ -1538,13 +1542,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 tensors_saved_for_backwards = fw_outs[
                     CompiledFunction.metadata.tensors_saved_for_backwards_slice
                 ]
-                assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
-                )
                 # See Note [Detaching saved tensors in AOTAutograd]
+                # Saved value can be None in case of backward discovered effects token.
+                # See Note [Side-Effectful Tokens in AOTAutograd]
                 ctx.save_for_backward(
                     *(
-                        x.detach() if x._is_view() else x
+                        x if x is None else x.detach() if x._is_view() else x
                         for x in tensors_saved_for_backwards
                     )
                 )
@@ -1713,10 +1716,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 num_flat_bw_args_with_grads = len(flat_bw_args_with_grads)
 
-                effect_tokens_discovered_in_backward = [
-                    None
-                ] * CompiledFunction.metadata.num_backward_discovered_tokens
-
                 # sanity asserts
                 # metadata_only_inps = [
                 #     x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
@@ -1739,22 +1738,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *ctx.symints,
                     *ctx.saved_tensors,
                     *flat_bw_args_with_grads,
-                    *effect_tokens_discovered_in_backward,
                     *rng_args,
                 ]
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (
-                    len(all_args)
-                    - num_flat_bw_args_with_grads
-                    - len(rng_args)
-                    - len(effect_tokens_discovered_in_backward)
+                    len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
                 )
-                tangents_end_idx = (
-                    len(all_args)
-                    - len(rng_args)
-                    - len(effect_tokens_discovered_in_backward)
-                )
+                tangents_end_idx = len(all_args) - len(rng_args)
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1782,15 +1773,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
                 )
-
-                roffset = len(rng_args) + len(effect_tokens_discovered_in_backward)
                 grad_output_types = [
-                    type(x)
-                    for x in all_args[
-                        -num_flat_bw_args_with_grads - roffset : -roffset
-                        if roffset > 0
-                        else len(all_args)
-                    ]
+                    type(x) for x in all_args[-num_flat_bw_args_with_grads:]
                 ]
                 # In general, we can add more asserts/guards here for when we partitioned
                 # with incorrect assumptions about the grad_outputs.

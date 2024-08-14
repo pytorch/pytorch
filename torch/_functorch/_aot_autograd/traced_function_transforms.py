@@ -239,6 +239,8 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             if functional_tensor_mode is not None:
+                # Prevent partitioner from moving effectful ops happened in backward to forward for side-effects correctness.
+                functional_tensor_mode._effects_partitioner_tag = "must_be_in_backward"
                 functional_tensor_mode._tokens_forward_output = (
                     functional_tensor_mode._tokens.copy()
                 )

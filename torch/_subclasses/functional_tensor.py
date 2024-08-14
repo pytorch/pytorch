@@ -2,6 +2,7 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 
 import torch
@@ -301,6 +302,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         # Filled after forward tracing is done, see on_forward_tracing_end
         self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+        self._effects_partitioner_tag: Optional[str] = None
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
@@ -431,9 +433,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
-            return handle_effects(
-                self._allow_token_discovery, self._tokens, func, args, kwargs
+            from torch._functorch._aot_autograd.traced_function_transforms import (
+                set_partitioner_tag,
             )
+
+            with set_partitioner_tag(
+                self._effects_partitioner_tag
+            ) if self._effects_partitioner_tag is not None else nullcontext():
+                return handle_effects(
+                    self._allow_token_discovery, self._tokens, func, args, kwargs
+                )
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
@@ -746,3 +755,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def mark_mutation_hidden_from_autograd(self, tensor) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
+
+
+def mb_unwrap_functional_tensor(tensor: torch.Tensor):
+    if isinstance(tensor, FunctionalTensor):
+        return torch._from_functional_tensor(tensor.elem)
+    return tensor
