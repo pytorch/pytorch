@@ -1449,7 +1449,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         value = torch.randn(
             (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
         )
-        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
 
         M = S // 2
 
@@ -1461,10 +1460,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex = (
             torch.compile(flex_attention, dynamic=False) if compile else flex_attention
         )
-        out = flex(query, key, value, block_mask=block_mask)
+        out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
         self.assertEqual(out[:, :, M:, :].sum(), 0)
+        self.assertTrue((lse[:, :, M:] == 0.0).all())
 
-        out.backward(do)
+        loss = out.sum() + lse.sum()
+        loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
     @supported_platform
