@@ -1460,6 +1460,16 @@ PyObject* THPVariable_is_onednn(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_mkldnn");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_mkldnn());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1698,7 +1708,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr,
      nullptr,
      nullptr},
-    {"is_mkldnn", (getter)THPVariable_is_onednn, nullptr, nullptr, nullptr}, // Will be deprecated.
+    {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
     {"is_onednn", (getter)THPVariable_is_onednn, nullptr, nullptr, nullptr},
     {"is_mps", (getter)THPVariable_is_mps, nullptr, nullptr, nullptr},
     {"is_maia", (getter)THPVariable_is_maia, nullptr, nullptr, nullptr},
