@@ -620,6 +620,9 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 # Specify a file where we print out the profiling results.
 # None means we do not dump results to a file.
 profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
+# Switch to do_bench_using_profiling to exclude the CPU overheads
+profile_bandwidth_with_do_bench_using_profiling = os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
+
 
 # TODO: remove later
 disable_cpp_codegen = False

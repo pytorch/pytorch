@@ -628,7 +628,7 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, **kwargs):
+    def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs wiht spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
@@ -663,6 +663,10 @@ class CachingAutotuner(KernelInterface):
                 grid=grid,
                 stream=stream,
             )
+
+        if with_profiler:
+            from torch._inductor.utils import do_bench_using_profiling
+            return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
@@ -938,8 +942,9 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
-    def __init__(self, *args, regex_filter="", **kwargs):
+    def __init__(self, *args, regex_filter="", with_profiler=False, **kwargs):
         self.regex_filter = regex_filter
+        self.with_profiler = with_profiler
         super().__init__(*args, **kwargs)
         self.cached = None
 
@@ -952,7 +957,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = self.bench(launcher, *args, grid=grid, with_profiler=self.with_profiler)
             num_in_out_ptrs = len(
                 [
                     arg_name
@@ -1176,6 +1181,7 @@ def cached_autotune(
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
+                with_profiler=inductor_meta["profile_bandwidth_with_do_bench_using_profiling"],
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
