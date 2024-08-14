@@ -716,11 +716,18 @@ void _apply_sparse_csr_linear_solve(
       "Calling linear solver with sparse tensors requires compiling ",
       "PyTorch with CUDA cuDSS and is not supported in ROCm build.");
 #else
+  // layout check
   TORCH_CHECK(A.is_sparse_csr(), "A must be a CSR matrix");
+  TORCH_CHECK(b.layout() == kStrided, "b must be a strided tensor");
+  TORCH_CHECK(x.layout() == kStrided, "x must be a strided tensor");
+  // dim check
   TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
   TORCH_CHECK(b.stride(0) == 1, "b must be a column major tensor");
-  TORCH_CHECK(b.size(0) == A.size(-1), "linear system size mismatch.");
-  TORCH_CHECK(A.dtype() == b.dtype(), "A and b must have the same dtype");
+  TORCH_CHECK(b.size(0) == A.size(0), "linear system size mismatch.");
+  TORCH_CHECK(x.dim() == 1, "x must be a 1D tensor");
+  TORCH_CHECK(x.stride(0) == 1, "x must be a column major tensor");
+  TORCH_CHECK(x.size(0) == A.size(1), "linear system size mismatch.");
+  TORCH_CHECK(A.dtype() == b.dtype() && A.dtype() == x.dtype(), "A, x, and b must have the same dtype");
   TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend")
 
   Tensor crow = A.crow_indices();
