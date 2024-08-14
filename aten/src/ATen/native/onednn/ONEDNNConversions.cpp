@@ -15,8 +15,8 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/from_blob.h>
-#include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
-#include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
+#include <ATen/ops/onednn_reorder_conv2d_weight_native.h>
+#include <ATen/ops/onednn_reorder_conv3d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -102,7 +102,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
               "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 mkldnn tensor")
-  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
+  Tensor mkldnn_tensor = empty_onednn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
@@ -138,14 +138,14 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
 // on-the-fly reorder.
-Tensor mkldnn_reorder_conv2d_weight(
+Tensor onednn_reorder_conv2d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv2d_weight");
+  mkldnn_check_low_precision(self.scalar_type(), "onednn_reorder_conv2d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
@@ -195,14 +195,14 @@ Tensor mkldnn_reorder_conv2d_weight(
                                  self.options().device_opt());
 }
 
-Tensor mkldnn_reorder_conv3d_weight(
+Tensor onednn_reorder_conv3d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv3d_weight");
+  mkldnn_check_low_precision(self.scalar_type(), "onednn_reorder_conv3d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 3);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
@@ -241,18 +241,18 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-static Tensor mkldnn_reorder_conv_weight(
+static Tensor onednn_reorder_conv_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK((self.dim() == 4 || self.dim() == 5), "mkldnn_reorder_conv_weight only supports conv2d and conv3d");
+  TORCH_CHECK((self.dim() == 4 || self.dim() == 5), "onednn_reorder_conv_weight only supports conv2d and conv3d");
   if (self.dim() == 4) {
-    return at::native::mkldnn_reorder_conv2d_weight(self, padding, stride, dilation, groups, input_size);
+    return at::native::onednn_reorder_conv2d_weight(self, padding, stride, dilation, groups, input_size);
   } else {
-    return at::native::mkldnn_reorder_conv3d_weight(self, padding, stride, dilation, groups, input_size);
+    return at::native::onednn_reorder_conv3d_weight(self, padding, stride, dilation, groups, input_size);
   }
 }
 
@@ -319,7 +319,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
   }
 }
 
-static Tensor mkldnn_reorder_conv_transpose_weight(
+static Tensor onednn_reorder_conv_transpose_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -329,10 +329,10 @@ static Tensor mkldnn_reorder_conv_transpose_weight(
     c10::OptionalArrayRef<int64_t> input_size) {
   TORCH_CHECK(
       (self.dim() == 4 || self.dim() == 5),
-      "mkldnn_reorder_conv_transpose_weight only supports conv_transpose2d and conv_transpose3d");
+      "onednn_reorder_conv_transpose_weight only supports conv_transpose2d and conv_transpose3d");
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   mkldnn_check_low_precision(
-      self.scalar_type(), "mkldnn_reorder_conv_transpose_weight");
+      self.scalar_type(), "onednn_reorder_conv_transpose_weight");
   int64_t pdim = self.dim() - 2;
   const auto padding_expanded =
       expand_param_if_needed(padding, "padding", pdim);
@@ -459,7 +459,7 @@ static bool should_use_plain_format(ideep::tensor w) {
 #endif
 }
 
-static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
+static std::vector<Tensor> mkldnn_reorder_onednn_rnn_layer_weight(
  Tensor weight0,
  Tensor weight1,
  int64_t hidden_size,
@@ -541,16 +541,16 @@ static Tensor get_mkldnn_serialized_md(const Tensor& self) {
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_transpose_weight"),
-      TORCH_FN(mkldnn_reorder_conv_transpose_weight));
+      TORCH_FN(onednn_reorder_conv_transpose_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_weight"),
-      TORCH_FN(mkldnn_reorder_conv_weight));
+      TORCH_FN(onednn_reorder_conv_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn::_reorder_mkldnn_rnn_layer_weight"),
-      TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));
+      TORCH_SELECTIVE_NAME("onednn::_reorder_onednn_rnn_layer_weight"),
+      TORCH_FN(mkldnn_reorder_onednn_rnn_layer_weight));
 }
 
 TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
@@ -569,24 +569,24 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
-Tensor mkldnn_reorder_conv2d_weight(
+Tensor onednn_reorder_conv2d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+  TORCH_CHECK(false, "onednn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
-Tensor mkldnn_reorder_conv3d_weight(
+Tensor onednn_reorder_conv3d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
+  TORCH_CHECK(false, "onednn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_ONEDNN_ENABLED()
@@ -606,7 +606,7 @@ static Tensor mkl_reorder_linear_weight(
   auto K = weight.size(1);
   int64_t pack_size =
       (int64_t)(cblas_sgemm_pack_get_size(CblasBMatrix, M, N, K) / sizeof(float) + 1);
-  auto packed_weight = empty_mkldnn(
+  auto packed_weight = empty_onednn(
       {pack_size, 1},
       weight.scalar_type(),
       weight.options().layout_opt(),

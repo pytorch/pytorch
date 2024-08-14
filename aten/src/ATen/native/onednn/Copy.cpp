@@ -13,8 +13,8 @@
 namespace at {
 namespace native {
 
-Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
-  TORCH_CHECK(false, "copy_mkldnn_: ATen not compiled with MKLDNN support");
+Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
+  TORCH_CHECK(false, "copy_onednn_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -27,13 +27,13 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
 namespace at {
 namespace native {
 
-Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(
       self.sizes() == src.sizes(),
-      "copy_mkldnn_: only support same size tensor.");
+      "copy_onednn_: only support same size tensor.");
   TORCH_CHECK(
       self.is_mkldnn() && src.is_mkldnn(),
-      "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! Found self type = ",
+      "copy_onednn_: between mkldnn layout and dense Tensors is not implemented! Found self type = ",
       self.toString(),
       " and src type = ",
       src.toString());

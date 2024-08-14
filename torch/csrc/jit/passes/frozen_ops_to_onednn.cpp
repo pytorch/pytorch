@@ -509,15 +509,15 @@ Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
 }
 
 // aten::convolution does a lot of precomputation and dispatching before
-// mkldnn_convolution is called. registering here we can directly invoke the op
+// onednn_convolution is called. registering here we can directly invoke the op
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not
-        // aten::mkldnn_convolution, which is different for some reason!
-        "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+        // aten::onednn_convolution, which is different for some reason!
+        "prim::onednn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
         [](jit::Stack& stack) {
           int64_t groups = pop(stack).toInt();
           auto dilation = pop(stack).toIntVector();
@@ -540,7 +540,7 @@ jit::RegisterOperators reg_fut_ops({
                 input.sizes(), weight.sizes(), padding, stride, dilation);
             push(
                 stack,
-                at::native::empty_mkldnn(
+                at::native::empty_onednn(
                     o,
                     c10::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
@@ -559,7 +559,7 @@ jit::RegisterOperators reg_fut_ops({
 
           push(
               stack,
-              at::native::mkldnn_convolution(
+              at::native::onednn_convolution(
                   input, weight, bias, padding, stride, dilation, groups));
         },
         aliasAnalysisFromSchema()),
@@ -572,7 +572,7 @@ jit::RegisterOperators reg_fut_ops({
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
-          auto out = at::native::empty_mkldnn(
+          auto out = at::native::empty_onednn(
               self.sizes(),
               c10::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
@@ -660,10 +660,10 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
 
   if (conv->kind() == aten::conv2d) {
-    conv_w_mkldnn = mkldnn_reorder_conv2d_weight(
+    conv_w_mkldnn = onednn_reorder_conv2d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else if (conv->kind() == aten::conv3d) {
-    conv_w_mkldnn = mkldnn_reorder_conv3d_weight(
+    conv_w_mkldnn = onednn_reorder_conv3d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else {
     TORCH_INTERNAL_ASSERT(false);
@@ -814,7 +814,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
         body_node->kind() == aten::conv3d) {
       // this node doesnt handle string padding yet...
       if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
-        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
+        body_node->replaceWithNewSymbol(Symbol::prim("onednn_convolution"));
         body_node->destroy();
         continue;
       }
