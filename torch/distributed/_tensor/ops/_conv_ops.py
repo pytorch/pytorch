@@ -21,7 +21,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
         stride,
         padding,
         dilation,
-        _*,
+        *_,
     ) = op_schema.args_schema
 
     assert isinstance(input_spec, DTensorSpec)
@@ -71,7 +71,7 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         input_spec,
         weight_spec,
         bias_shape_opt,
-        *_
+        *_,
     ) = op_schema.args_schema
 
     assert isinstance(grad_output_spec, DTensorSpec)
