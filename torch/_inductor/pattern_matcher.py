@@ -1637,7 +1637,7 @@ def get_mutation_region_id(
 ) -> MutationRegionId:
     """Given a single node, compute a mutation region id for it.
 
-    Assumes that `compute_mutation_region_ids` was called on the graph in the past.
+    `compute_mutation_region_ids` may have been called on the graph in the past.
     The node need not have been in the graph at that time (we'll update it).
 
     The mutation_region_id is meant to prevent interactions between nodes
@@ -1667,7 +1667,10 @@ def get_mutation_region_id(
     n = node
     if "mutation_region_id" in n.meta:
         return n.meta["mutation_region_id"]
-    assert graph.owning_module.meta["alias_info"] is not None
+    if "alias_info" not in graph.owning_module.meta:
+        # alias info nonexistent, do a full recompute
+        compute_mutation_region_ids(graph.owning_module)
+        return n.meta["mutation_region_id"]
 
     # Backtrack to the first prev node that has a mutation_region_id
     while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
