@@ -5632,7 +5632,7 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
 def _suggest_torch_checks(e, src_map):
     # extract the unresolved condition on unbacked symints in the error
     cond = e.cond
-    diff = ", ".join(s for s in cond.free_symbols if s.name not in src_map)
+    diff = ", ".join(s.name for s in cond.free_symbols if s.name not in src_map)
     if diff:
         log.warning("Unable to find user code corresponding to {%s}", diff)
         return
