@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import re
+import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -1873,7 +1874,7 @@ def _export_for_training(
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
-    strict: bool = True,
+    strict: bool = False,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
@@ -1961,7 +1962,7 @@ def _export(
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
-    strict: bool = True,
+    strict: bool = False if sys.platform == "win32" else True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
