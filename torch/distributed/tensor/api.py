@@ -244,6 +244,7 @@ class DTensor(torch.Tensor):
     requires every Tensor argument of the operator be DTensor. The operator would also produce DTensor outputs with the
     proper sharding layout (determined by the operator semantic itself), which propagates the sharding layout to the next
     operator call, so user only need to specify the leaf tensor's sharding layout in the beginning of the computation.
+
     """
 
     _local_tensor: torch.Tensor
