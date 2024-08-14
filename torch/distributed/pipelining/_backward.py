@@ -3,7 +3,7 @@
 import collections
 import logging
 import weakref
-from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -15,7 +15,7 @@ from ._debug import map_debug_info
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
+def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
         viewed_t = t.view_as(t)
