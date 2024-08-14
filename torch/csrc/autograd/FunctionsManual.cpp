@@ -6718,6 +6718,22 @@ Tensor logsumexp_jvp(
   }
 }
 
+Tensor safe_logsumexp_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    IntArrayRef dim,
+    bool keepdim) {
+  auto lse_jvp = logsumexp_jvp(self_p, self_t, dim, keepdim);
+  const auto neg_inf = at::scalar_tensor(
+      -std::numeric_limits<float>::infinity(),
+      at::TensorOptions().dtype(lse_jvp.dtype()).device(lse_jvp.device()));
+  const auto masked = self_p.eq(neg_inf);
+  const auto masked_rows = all(masked, dim, true);
+  const auto zero = at::scalar_tensor(
+      0.0, at::TensorOptions().dtype(lse_jvp.dtype()).device(lse_jvp.device()));
+  return at::where(masked_rows, zero, lse_jvp);
+}
+
 Tensor warn_backwards(const Tensor& grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
