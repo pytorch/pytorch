@@ -1140,7 +1140,7 @@ flex_attention_backward_template = TritonTemplate(
             tl.store(dv_ptrs, dv, mask=(index_n < KV_LEN) & (index_k < BLOCK_DMODEL))
 
         dk *= SM_SCALE
-        mask = index_n < KV_LEN
+        mask = (index_n < KV_LEN) & (index_k < BLOCK_DMODEL)
         {{store_output(("off_z", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8)}}
 
 @triton.jit
