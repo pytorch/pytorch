@@ -174,10 +174,10 @@ struct VecMaskCast<dst_t, 2, int64_t, 4> {
     auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
     int64_vec[0] = vec_mask[0];
     int64_vec[1] = vec_mask[1];
-    result[0] = convert<int, 1, int64_t, 2>(int64_vec)[0];
+    result[0] = convert<int, 1, int64_t, 2>(int64_vec);
     int64_vec[0] = vec_mask[2];
     int64_vec[1] = vec_mask[3];
-    result[1] = convert<int, 1, int64_t, 2>(int64_vec)[0];
+    result[1] = convert<int, 1, int64_t, 2>(int64_vec);
     return VecMask<int, 2>(result).cast<dst_t, 2>();
   }
 };

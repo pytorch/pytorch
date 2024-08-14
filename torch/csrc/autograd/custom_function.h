@@ -124,7 +124,6 @@ struct TORCH_API AutogradContext {
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
   /// Can be used to save non-variable data for `backward`.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
   /// Saves the list of variables for a future call to `backward`. This
@@ -248,7 +247,6 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
   void operator()(const std::optional<at::Tensor>& x) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
       list_.emplace_back(x.value());
@@ -283,7 +281,6 @@ inline void extract_vars(
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
     std::vector<std::optional<Variable>>& output_list) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list result;
   std::transform(
       output_list.begin(),
@@ -304,7 +301,6 @@ inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
 }
 
 inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<std::optional<Variable>> result;
   std::transform(
       output.begin(),
@@ -327,7 +323,6 @@ auto Function<T>::apply(Args&&... args)
   }
 
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
@@ -336,7 +331,6 @@ auto Function<T>::apply(Args&&... args)
   // TODO Add tracing here
   extract_vars(node->is_variable_input_, input_vars, args...);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_executable =
       GradMode::is_enabled() && any_variable_requires_grad(input_vars);
   auto next_edges =
@@ -351,7 +345,6 @@ auto Function<T>::apply(Args&&... args)
   }
 
   using forward_return_t = forward_t<X, Args...>;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   forward_return_t outputs;
   {
     AutoGradMode grad_mode(false);
@@ -406,7 +399,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
   auto num_inputs = inputs.size();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
@@ -449,7 +441,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     throw std::runtime_error(msg);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
