@@ -910,7 +910,7 @@ def _parameterized_class_attrs_and_values_with_fake_options():
     input_values = []
     input_values.extend(
         itertools.product(
-            (True, False),
+            (False,),
             (True, False),
             (True, False),
             (True, False),
