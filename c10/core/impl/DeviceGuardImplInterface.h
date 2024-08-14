@@ -140,7 +140,8 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
-   * Set the current stream to Stream
+   * Set the current stream to Stream, You are NOT required to set the current
+   * device to match the device of this stream.
    */
   virtual void setStream(Stream) const {
     TORCH_CHECK(false, "Backend doesn't support set the current stream.")
