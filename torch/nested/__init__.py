@@ -5,13 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
-from torch.nested._internal.nested_tensor import (
-    _nt_view_dummy,
-    jagged_from_list,
-    jagged_from_tensor_and_lengths,
-    nested_view_from_values_offsets,
-    nested_view_from_values_offsets_lengths,
-)
 
 from torch.types import _device as Device, _dtype as DType
 
@@ -124,10 +117,13 @@ def as_nested_tensor(
             offsets = torch.arange(0, batch_size * seq_len + 1, seq_len,
                                    device=device, dtype=torch.int64)
 
+            from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+
             return nested_view_from_values_offsets(
                 values, offsets, min_seqlen=seq_len, max_seqlen=seq_len
             )
         else:
+            from torch.nested._internal.nested_tensor import jagged_from_list
 
             assert isinstance(ts, list)
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
@@ -236,6 +232,8 @@ Example::
         # Need to wrap lists of scalars as tensors
         list_of_tensors = [t if isinstance(t, Tensor) else torch.as_tensor(t) for t in tensor_list]
 
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
         with torch.no_grad():
             nt, _ = jagged_from_list(list_of_tensors, offsets=None, device=device, dtype=dtype)
 
@@ -298,6 +296,8 @@ Example::
     elif layout == torch.jagged:
         if dim != 1:
             raise RuntimeError("jagged layout only supports dim=1")
+
+        from torch.nested._internal.nested_tensor import jagged_from_tensor_and_lengths
 
         if isinstance(start, (int, SymInt)):
             start = torch.tensor([start], device=tensor.device, dtype=torch.int64)
@@ -406,13 +406,7 @@ Example::
     if jagged_dim is None:
         jagged_dim = 1
 
+    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
+
     return nested_view_from_values_offsets_lengths(
         values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
-
-
-# This library impl is here so pytorch picks it up when initializing, otherwise users had to import
-# torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
-# fun circular dependency hell, so this is the next best thing
-@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type, misc]
-def _aten_nested_get_jagged_dummy(x: Tensor) -> Tensor:
-    return _nt_view_dummy()
