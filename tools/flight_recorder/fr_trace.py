@@ -39,6 +39,7 @@ from typing import (  # type: ignore[attr-defined]
     Generic,
     List,
     NamedTuple,
+    Set,
     Tuple,
     Type,
     TypeVar,
@@ -183,19 +184,23 @@ class MatchState(Enum):
     - FULLY_MATCHED: Indicates that all aspects of the collective operations match.
     - COLLECTIVE_TYPE_MISMATCH: The types of the collective operations differ.
     - SIZE_OR_SYNTAX_MISMATCH: There is a mismatch in input/output sizes or violation of collective syntax.
-    - COLLECTIVE_STATE_MISMATCH: The states of the collective operations do not align, such as one finished while another is just started or scheduled.
-    - UNDECIDED: The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
+    - COLLECTIVE_STATE_MISMATCH:
+        The states of the collective not same, such as one finished while another just started or scheduled.
+    - UNDECIDED:
+        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
     """
+
     FULLY_MATCHED = 1
     COLLECTIVE_TYPE_MISMATCH = 2
     SIZE_OR_SYNTAX_MISMATCH = 3
     COLLECTIVE_STATE_MISMATCH = 4
     UNDECIDED = 5
 
-def check_size_even_expand(list1, list2, size) -> bool:  
+
+def check_size_even_expand(list1: List[Any], list2: List[Any], size: int) -> bool:
     ratio = None
-    for a, b in zip(lst1, lst2):
-        current_ratio = a / b
+    for a, b in zip(list1, list2):
+        current_ratio = int(a) / int(b)
         if current_ratio == 1:
             continue
         if current_ratio != size:
@@ -204,15 +209,15 @@ def check_size_even_expand(list1, list2, size) -> bool:
             ratio = current_ratio
         else:
             return False
-    
     return True
 
-def check_size_alltoall(alltoall_cases) -> Tuple(bool, int, int):
+
+def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int, int]:
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
-        input_numel += e["input_sizes"]
-        output_numel += e["output_sizes"]
+        input_numel += int(e["input_sizes"])
+        output_numel += int(e["output_sizes"])
     return input_numel == output_numel, input_numel, output_numel
 
 
@@ -225,7 +230,7 @@ class Op:
         nccl:recv 3<-0
     """
 
-    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, List[Membership]]):
+    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]]):
         profiling_name = event["profiling_name"]
         nccl, name = profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
@@ -260,7 +265,7 @@ class Op:
         self.collective_seq_id = event["collective_seq_id"]
         self.p2p_seq_id = event["p2p_seq_id"]
 
-    def _init_global_src_dst(self, pg_ranks: Set[int]) -> None:
+    def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
         self._src_g = pg_ranks[self._src] if self._src is not None else None
         self._dst_g = pg_ranks[self._dst] if self._dst is not None else None
@@ -290,19 +295,27 @@ class Op:
 
         if self.type == "send":
             # TODO: We need more states for p2p ops.
-            return MatchState.FULLY_MATCHED if(
-                other.type == "recv"
-                and self.src == other.src
-                and self.dst == other.dst
-                and self.input_sizes == other.output_sizes
-            ) else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            return (
+                MatchState.FULLY_MATCHED
+                if (
+                    other.type == "recv"
+                    and self.src == other.src
+                    and self.dst == other.dst
+                    and self.input_sizes == other.output_sizes
+                )
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            )
         elif self.type == "recv":
-            return MatchState.FULLY_MATCHED if(
-                other.type == "send"
-                and self.src == other.src
-                and self.dst == other.dst
-                and self.output_sizes == other.input_sizes
-            ) else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            return (
+                MatchState.FULLY_MATCHED
+                if (
+                    other.type == "send"
+                    and self.src == other.src
+                    and self.dst == other.dst
+                    and self.output_sizes == other.input_sizes
+                )
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            )
         elif self.type in COLLECTIVES:
             if self.type != other.type:
                 return MatchState.COLLECTIVE_TYPE_MISMATCH
@@ -316,23 +329,37 @@ class Op:
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
             # TODO: need to consider uneven sharding for all-gather.
             # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
-            if self.type in ["all_gather", "all_gather_base"] and not check_size_even_expand(other.output_sizes, self.input_sizes, self.pg_size):
+            if self.type in [
+                "all_gather",
+                "all_gather_base",
+            ] and not check_size_even_expand(
+                other.output_sizes, self.input_sizes, self.pg_size
+            ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
-            if self.type in ["reduce_scatter", "_reduce_scatter_base"] and not check_size_even_expand(other.input_sizes, self.output_sizes, self.pg_size):
+            if self.type in [
+                "reduce_scatter",
+                "_reduce_scatter_base",
+            ] and not check_size_even_expand(
+                other.input_sizes, self.output_sizes, self.pg_size
+            ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
             # TODO: need to add more checks for gather and scatter.
             if self.state != other.state:
                 return MatchState.COLLECTIVE_STATE_MISMATCH
         elif self.type == "coalesced":
-            return MatchState.FULLY_MATCHED if(other.type == "coalesced") else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            return (
+                MatchState.FULLY_MATCHED
+                if (other.type == "coalesced")
+                else MatchState.SIZE_OR_SYNTAX_MISMATCH
+            )
         return MatchState.SIZE_OR_SYNTAX_MISMATCH
 
 
 def match_one_event(
     event_a: Dict[Any, Any],
     event_b: Dict[Any, Any],
-    memberships: Dict[str, List[Membership]],
-) -> bool:
+    memberships: Dict[str, Set[Any]],
+) -> MatchState:
     op_a = Op(event_a, memberships)
     op_b = Op(event_b, memberships)
     return op_a.match(op_b)
@@ -342,7 +369,7 @@ def match_coalesced_groups(
     all_rank_events: Dict[Any, Any],
     group_size: int,
     groups: Dict[str, Group],
-    memberships: Dict[str, List[Membership]],
+    memberships: Dict[str, Set[Any]],
 ) -> bool:
     """
     all_rank_events: {
@@ -450,7 +477,7 @@ Flat DB builder
 
 def build_groups_memberships(
     pg_config: Any,
-) -> Tuple[List[Group], Dict[Any, Group], List[Membership], Dict[str, Any]]:
+) -> Tuple[List[Group], Dict[Any, Group], List[Membership], Dict[str, Set[Any]]]:
     """
     pg_config: {
         global_rank: {
@@ -489,6 +516,7 @@ def build_groups_memberships(
                 for rank in ranks:
                     memberships.append(Membership(group_id=pg_id, global_rank=rank))
                 _groups[pg_id] = groups[-1]
+                # TODO: make ranks int no matter what input (because it can be json or pickled string)
                 _memberships[pg_id] = set(ranks)
             else:
                 # validation across ranks
@@ -548,7 +576,7 @@ def find_coalesced_group(
 def just_print_entries(
     all_entries: Dict[int, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
-    _memberships: Dict[str, List[Membership]],
+    _memberships: Dict[str, Set[Any]],
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
@@ -571,9 +599,9 @@ def just_print_entries(
 
 
 def build_collectives(
-    all_entries: Dict[int, List[Dict[str, Any]]],
+    all_entries: Dict[str, List[Dict[str, Any]]],
     _groups: Dict[str, Group],
-    _memberships: Dict[str, List[Membership]],
+    _memberships: Dict[str, Set[Any]],
 ) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
@@ -638,7 +666,7 @@ def build_collectives(
         expected_ranks = set(_memberships[pg_name])
         candidate_ranks = {first_rank}
         candidate_idx = {}
-        found_ranks = {}
+        found_ranks = set()
         found_idx = {}
 
         if find_coalesced_group(pg_name, entries):
@@ -691,47 +719,54 @@ def build_collectives(
                         )
                     )
                 nccl_calls.extend(reversed(reversed_calls))
-
         else:
             mismatch_count = 1
             has_undecided_case = False
-            errors = {}
+            errors = Set()
             for o in expected_ranks.intersection(set(other_ranks)):
                 for i, e in enumerate(all_entries[o]):  # type: ignore[index]
                     # step over ops from other PGs
                     # only check match state when seq_id matches
-                    if e["process_group"] == (pg_name, desc) and e["collective_seq_id"] == collective_seq_id:
-                        match = match_one_event(entries[0], e, _memberships)
+                    if (
+                        e["process_group"] == (pg_name, desc)
+                        and e["collective_seq_id"] == collective_seq_id
+                    ):
+                        match_state = match_one_event(entries[0], e, _memberships)
                         if (
-                            match in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
+                            match_state
+                            in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
                             and mismatch[pg_name] == 0
                         ):
                             found_ranks.add(o)
                             found_idx[o] = i
-                            has_undecided_case = (match == MatchState.UNDECIDED)
+                            has_undecided_case = match_state == MatchState.UNDECIDED
                         else:
                             candidate_ranks.add(o)
                             candidate_idx[o] = i
-                            errors.add(match)
+                            errors.add(match_state)
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
-            if candidate_ranks + found_ranks != expected_ranks:
+            if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
                 print(
                     f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name}",
-                    f"Missing ranks are {expected_ranks - (candidate_ranks + found_ranks)}"
+                    f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)}",
                 )
-            # case two: alltoall or alltoall_base case.
-            elif len(candidate_ranks) == 1: 
+            elif len(candidate_ranks) == 1:
+                # case two: alltoall or alltoall_base case.
                 if has_undecided_case:
-                    alltoall_cases = [entries[0]] + [e for o in found_ranks for e in all_entries[o][found_idx[o]]]  # type: ignore[index]
-                    check_result, input_numel, output_numel = check_size_alltoall(alltoall_cases)
+                    alltoall_cases = [entries[0]] + [
+                        all_entries[o][found_idx[o]] for o in found_ranks
+                    ]
+                    check_result, input_numel, output_numel = check_size_alltoall(
+                        alltoall_cases
+                    )
                     if not check_result:
                         mismatch[pg_name] += 1
                         print(
                             f"Input/output mismatch in the collective for group {pg_name}:{desc} collective {profiling_name}",
-                            f"input_numel {input_numel} output_numel{output_numel}"
+                            f"input_numel {input_numel} output_numel{output_numel}",
                         )
                         candidate_ranks.update(found_ranks)
                         candidate_idx.update(found_idx)
@@ -742,16 +777,17 @@ def build_collectives(
                         found_idx.update(candidate_idx)
                         candidate_idx.clear()
                         candidate_ranks.clear()
+                # case three: all joined and everything matches on all ranks.
                 else:
                     found_ranks.update(candidate_ranks)
                     found_idx.update(candidate_idx)
                     candidate_idx.clear()
                     candidate_ranks.clear()
-            # case three: 
+            # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             else:
                 print(
                     f"Collective errors for group {pg_name}:{desc} collective {profiling_name}",
-                    f"Found errors: {error.name for error in errors}"
+                    f"Found errors: {error.name for error in errors}",
                 )
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
@@ -781,7 +817,7 @@ def build_collectives(
             #     TODO should there be a way to mark 'mismatches'?
             else:
                 print("appending a non-matching collective")
-                #TODO: figure out a better for mismatch.
+                # TODO: figure out a better for mismatch.
                 # Also, shall we add seq Id as well?
                 for r in candidate_ranks:
                     i = candidate_idx[r] if r != first_rank else 0
