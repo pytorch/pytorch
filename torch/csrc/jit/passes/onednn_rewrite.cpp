@@ -59,7 +59,7 @@ static void insertPrePackedConvOpForNode(Node* n) {
   auto attr = graph->insertConstant(IValue("none"));
   prepack_node->addInput(attr);
   prepack_node->output()->setType(
-      getCustomClass("__torch__.torch.classes.mkldnn.ConvOpContext"));
+      getCustomClass("__torch__.torch.classes.onednn.ConvOpContext"));
   graph->insertNode(prepack_node);
 
   auto prepack_conv = graph->insertNode(
@@ -126,13 +126,13 @@ static void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
         %attr: str = prim::Constant[value="${op_attr}"]()
-        %packed_weight_bias : __torch__.torch.classes.mkldnn.ConvOpContext = mkldnn_prepacked::conv2d_prepack(
+        %packed_weight_bias : __torch__.torch.classes.onednn.ConvOpContext = mkldnn_prepacked::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %input_size, %attr)
         %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
         return (%res))");
 
-  for (auto const& it : mkldnn::fusion_rewrite_map) {
+  for (auto const& it : onednn::fusion_rewrite_map) {
     std::string op = it.first;
     if (op == std::string("none")) {
       continue;

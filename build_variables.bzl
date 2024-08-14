@@ -1085,7 +1085,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/onednn/OpContext.cpp",
     "aten/src/ATen/native/onednn/Pooling.cpp",
     "aten/src/ATen/native/onednn/Prelu.cpp",
-    "aten/src/ATen/native/onednn/RegisterMkldnnOpContextClass.cpp",
+    "aten/src/ATen/native/onednn/RegisterOnednnOpContextClass.cpp",
     "aten/src/ATen/native/onednn/Relu.cpp",
     "aten/src/ATen/native/onednn/RNN.cpp",
     "aten/src/ATen/native/onednn/SoftMax.cpp",

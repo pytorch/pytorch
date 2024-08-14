@@ -13,11 +13,11 @@
 
 namespace at {
 namespace native {
-namespace mkldnn {
+namespace onednn {
 namespace internal {
 namespace convolution {
 
-c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
+c10::intrusive_ptr<onednn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
     std::optional<Tensor> bias,
     std::vector<int64_t> stride,
@@ -30,7 +30,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
   TORCH_CHECK(it != fusion_attr_map.end(), "Fusion behavior undefined.");
   ideep::attr_t op_attr = it->second;
 
-  return mkldnn::MkldnnConvOpContext::create_context(
+  return onednn::OnednnConvOpContext::create_context(
       std::move(weight),
       std::move(bias),
       std::move(padding),
@@ -276,13 +276,13 @@ void run(ContextConv& context, const Tensor& input, void* output) {
 
 Tensor conv_run(
     const Tensor& input,
-    const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context) {
+    const c10::intrusive_ptr<onednn::ConvOpContext>& op_context) {
   return op_context->run(input);
 }
 
 } // namespace convolution
 } // namespace internal
-} // namespace mkldnn
+} // namespace onednn
 } // namespace native
 } // namespace at
 

@@ -238,7 +238,7 @@ class ConvolutionUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise.default,
+            op_overload=torch.ops.onednn._convolution_pointwise.default,
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -307,7 +307,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
+            op_overload=torch.ops.onednn._convolution_pointwise.binary,
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -395,7 +395,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             reordered_inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
+            op_overload=torch.ops.onednn._convolution_pointwise_.binary,
         )
         # TODO: op.call: input[0] should be at::Tensor&
         self.cpp_op_schema = """
@@ -490,7 +490,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
+            op_overload=torch.ops.onednn._convolution_transpose_pointwise.default,
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -1048,7 +1048,7 @@ class LinearUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._linear_pointwise.default,
+            op_overload=torch.ops.onednn._linear_pointwise.default,
         )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
@@ -1100,7 +1100,7 @@ class LinearUnary(ExternKernelAlloc):
 
 
 class LinearBinary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+    kernel = "torch.ops.onednn._linear_pointwise.binary"
 
     def __init__(
         self,
@@ -1113,7 +1113,7 @@ class LinearBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._linear_pointwise.binary,
+            op_overload=torch.ops.onednn._linear_pointwise.binary,
         )
         self.cpp_op_schema = """
             at::Tensor(

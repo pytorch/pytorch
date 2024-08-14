@@ -44,7 +44,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterFunctionalization_2.cpp",
     "aten/src/ATen/RegisterFunctionalization_3.cpp",
     # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
-    "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterOnednnCPU.cpp",
     "aten/src/ATen/RegisterNestedTensorCPU.cpp",
     "aten/src/ATen/RegisterQuantizedCPU.cpp",
     "aten/src/ATen/RegisterSparseCPU.cpp",

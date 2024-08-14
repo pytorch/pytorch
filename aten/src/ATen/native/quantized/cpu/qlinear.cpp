@@ -914,7 +914,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     at::Tensor input, // int8 CPU Tensor, not QTensor
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor onednn_weight, // int8 tensor from MkldnnCPU
+    at::Tensor onednn_weight, // int8 tensor from OnednnCPU
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
     std::optional<at::Tensor> bias, // plain tensor
@@ -1195,7 +1195,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       double act_scale,
       int64_t act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> bias,
@@ -1224,7 +1224,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> bias,
@@ -1255,7 +1255,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       double act_scale,
       int64_t act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<at::Tensor> other, // extra input for binary post-op
@@ -1287,7 +1287,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<at::Tensor> other, // extra input for binary post-op
@@ -1336,7 +1336,7 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_relu_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
 }
 
-TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(QLinearOnednn::run_pointwise));
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),

@@ -19,7 +19,7 @@ RegisterEngineAllocator cpu_alloc(
   }
 );
 
-namespace at::native::mkldnn{
+namespace at::native::onednn{
 void clear_computation_cache();
 
 void clear_computation_cache() {
@@ -28,6 +28,6 @@ void clear_computation_cache() {
   ideep::convolution_forward::t_store().clear();
 }
 
-} // namespace  at::native::mkldnn
+} // namespace  at::native::onednn
 
 #endif // AT_ONEDNN_ENABLED()
