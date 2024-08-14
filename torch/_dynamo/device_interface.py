@@ -308,6 +308,42 @@ def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterfa
     return device_interfaces.items()
 
 
+from dataclasses import dataclass
+
+@dataclass
+class CpuDeviceProperties:
+    multi_processor_count: int
+
+
+class CpuInterface(DeviceInterface):
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def get_compute_capability(device) -> str:
+        return ""
+
+    @staticmethod
+    def current_device():
+        return 0
+
+    @staticmethod
+    def synchronize(device: _device_t = None):
+        pass
+
+    @staticmethod
+    def get_raw_stream(*args):
+        pass
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            import multiprocessing
+            cpu_count = multiprocessing.cpu_count()
+            return CpuDeviceProperties(cpu_count)
+
 def init_device_reg():
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
@@ -318,4 +354,5 @@ def init_device_reg():
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
+    register_interface_for_device("cpu", CpuInterface)
     _device_initialized = True

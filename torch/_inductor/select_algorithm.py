@@ -27,7 +27,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
-from .autotune_process import TensorMeta, TritonBenchmarkRequest
+from .autotune_process import TensorMeta, TritonCPUBenchmarkRequest, TritonGPUBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
@@ -573,6 +573,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
+                cuda=V.graph.scheduler.get_current_device_or_throw().type != "cpu",
             )
 
 
@@ -742,7 +743,11 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
-        bmreq = TritonBenchmarkRequest(
+        if layout.device.type == "cpu":
+            bmreq_cls = TritonCPUBenchmarkRequest
+        else:
+            bmreq_cls = TritonGPUBenchmarkRequest
+        bmreq = bmreq_cls(
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,

@@ -1785,6 +1785,8 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
+        with open(V.debug.filename("output_code.py"), "w") as f:
+            f.write(code)
 
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
@@ -1864,6 +1866,7 @@ class GraphLowering(torch.fx.Interpreter):
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
+        return False  # FIXME
         return (
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1

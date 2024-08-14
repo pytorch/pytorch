@@ -664,7 +664,10 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        if device_interface.current_device().type == "cpu":
+            return benchmarker.benchmark_cpu(kernel_call)
+        else:
+            return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides

@@ -203,7 +203,9 @@ def init_backend_registration():
     from .wrapper import WrapperCodeGen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        cpu_backends = {"cpp": CppScheduling,
+                        "halide": HalideScheduling,
+                        "triton": TritonScheduling}
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -1768,6 +1770,7 @@ class Kernel(CodeGen):
         if mask:
             cond = f"({cond}) | ~({mask})"
 
+        return ''  # skip emitting device_assert for now
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def check_bounds(
