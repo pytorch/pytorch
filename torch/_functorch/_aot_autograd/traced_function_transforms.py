@@ -685,7 +685,6 @@ def handle_effect_tokens_fn(
             )
             assert functional_tensor_mode is not None
             f_tokens = pytree.tree_map(to_fun, tokens)
-
             for i, k in enumerate(meta.tokens.keys()):
                 functional_tensor_mode._tokens[k] = f_tokens[i]
 
@@ -700,7 +699,7 @@ def handle_effect_tokens_fn(
             fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
 
             # meta is collected from tracing forward only, so len(meta.tokens) is the number of tokens used in forward.
-            # Tokens can be discovered in backward only, in that case len(functional_tensor_mode._tokens) != num_tokens
+            # New effect tokens can be discovered in backward. In this case len(functional_tensor_mode._tokens) != len(meta.tokens)
 
             bwd_out_tokens = functional_tensor_mode._tokens.values()
             # Not adding tokens, that were not updated in backward
