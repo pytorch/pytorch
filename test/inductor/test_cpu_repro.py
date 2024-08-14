@@ -1978,6 +1978,14 @@ class CPUReproTests(TestCase):
         self.common(fn, inps)
         assert metrics.generated_cpp_vec_kernel_count == 2
 
+        with set_num_threads(1), config.patch(
+            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inps)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
