@@ -13954,7 +13954,6 @@ op_db: List[OpInfo] = [
                    # log2(z)->-inf for |z|->0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     BinaryUfuncInfo('ldexp',
-                    ref=lambda input, other: np.multiply(input, np.power(np.array(2, dtype=input.dtype), other)),
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
