@@ -237,7 +237,7 @@ class DTensor(torch.Tensor):
     tensors during forward/backward).
     3. DTensor provides dedicated tensor factory methods (e.g. :meth:`empty`, :meth:`ones`, :meth:`randn`, etc.)
     to allow different :class:`DTensor` creations by directly specifying the :class:`DeviceMesh` and
-    :class:`Placement`
+    :class:`Placement`.
 
     ``DTensor`` overrides the PyTorch operators to perform sharded computation or issue communications when necessary.
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
@@ -266,7 +266,8 @@ class DTensor(torch.Tensor):
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
         other tensor properties (i.e. shape, requires_grad, strides, etc).
-        Note: This is not a public API and it's only supposed to be used by the
+
+        .. note:: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using ``DTensor.from_local``, if
             you want to construct a DTensor from a "global" tensor (where you
