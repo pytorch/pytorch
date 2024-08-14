@@ -353,33 +353,13 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+    # Benchmark shows even we applied mod & mask to each block for non divisible seqlen,
+    # it's on par or slightly faster than only applying to the last block in fwd.
+    # However, we choose different strategy for bwd, where we only apply mod & mask
+    # to the last block because it's faster a lot.
     if not IS_DIVISIBLE:
-        if block_n_end >= 1:
-            # loop over k, v and update accumulator until block_n_end - 1
-            for start_n in range(block_n_start, block_n_end - 1):
-                acc, l_i, m_i = fwd_compute_block_mn(
-                    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
-                    # accumulated values
-                    acc, l_i, m_i,
-                    # Offsets
-                    off_z, off_h, offs_m, offs_n,
-                    MATMUL_PRECISION, RCP_LN2,
-                    {{gen_argdefs()}},
-                    IS_FULL_BLOCKS,
-                )
-
-                # update pointers
-                offset = get_offset_for_next_block(
-                    start_n, kv_indices, kv_num_blocks,
-                    SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N
-                )
-
-                V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-                K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
-                offs_n = offs_n + offset
-
-            # Need to mask out part of the lask block for non divisible seqlen.
+        # loop over k, v and update accumulator until block_n_end
+        for start_n in range(block_n_start, block_n_end):
             acc, l_i, m_i = fwd_compute_block_mn(
                 q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
                 # accumulated values
@@ -391,7 +371,16 @@ def forward_inner(
                 IS_FULL_BLOCKS, True,
             )
 
+            # update pointers
+            offset = get_offset_for_next_block(
+                start_n, kv_indices, kv_num_blocks,
+                SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N
+            )
 
+            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+
+            offs_n = offs_n + offset
     else:
         # loop over k, v and update accumulator until block_n_end
         for start_n in range(block_n_start, block_n_end):
