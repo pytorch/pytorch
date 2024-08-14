@@ -30,7 +30,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 
 def reverse_closure(
     roots: List[Node], target_nodes: Set[Node]
-) -> Tuple[Set[Node], set[Node]]:
+) -> Tuple[Set[Node], Set[Node]]:
     # Recurse until we reach a target node
     closure: Set[Node] = set()
     actual_target_nodes = set()
