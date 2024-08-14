@@ -272,7 +272,7 @@ def _named_parameters_with_duplicates(
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
-    except AssertionError as e:
+    except AssertionError:
         kwargs.pop("remove_duplicate")
         ret = list(module.named_parameters(**kwargs))
     return ret
