@@ -70,7 +70,6 @@ class Adagrad(Optimizer):
                 raise RuntimeError("`fused` does not support `differentiable`")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
-            self._step_supports_amp_scaling = True
             self._need_device_dtype_check_for_fused = True
 
         for group in self.param_groups:
@@ -126,9 +125,12 @@ class Adagrad(Optimizer):
         for p in group["params"]:
             if p.grad is not None:
                 if group["fused"] and getattr(
-                    self, "_need_device_dtype_check_for_fused", True
+                    self,
+                    "_need_device_dtype_check_for_fused",
+                    True,
                 ):
                     _device_dtype_check_for_fused(p, cuda_unsupported=True)
+                    self._need_device_dtype_check_for_fused = False
                 has_sparse_grad |= p.grad.is_sparse
                 has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
