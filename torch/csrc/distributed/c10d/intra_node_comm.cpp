@@ -128,7 +128,6 @@ bool IntraNodeComm::rendezvous() {
   if (isInitialized_) {
     return true;
   }
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   if (!isIntraNodeCommSupported() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
@@ -147,6 +146,14 @@ bool IntraNodeComm::rendezvous() {
   DevInfo devInfo{};
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
+
+#if defined(USE_ROCM)
+  auto ret = rsmi_init(0);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
+    return false;
+  }
+#endif
 
   auto peerDevInfos =
       storeAllGather(store_, "handshake-0", rank_, worldSize_, devInfo);
@@ -191,8 +198,6 @@ bool IntraNodeComm::rendezvous() {
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
-#endif
-  return false;
 }
 
 } // namespace c10d::intra_node_comm
