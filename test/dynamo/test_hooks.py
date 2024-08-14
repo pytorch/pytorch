@@ -11,7 +11,7 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
-from torch.testing._internal.common_utils import skipIfWindows, skipIfWindowsCuda
+from torch.testing._internal.common_utils import skipIfCudaWindows, skipIfWindows
 from torch.utils.hooks import RemovableHandle
 
 
@@ -323,7 +323,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(out.grad, torch.Tensor([2.0]))
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_intermediary_hooks_same_on_aot_eager(self):
         def my_hook(grad, *, k=0):
@@ -360,7 +360,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x1.grad)
         self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_input_hooks_same(self):
         backends = ["eager", "aot_eager", "inductor"]
@@ -399,7 +399,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(x0.grad, x1.grad)
             self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_intermediary_hooks_same_on_inductor(self):
         def my_hook(grad, *, k=0):
@@ -436,7 +436,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x1.grad)
         self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_complex_state_mutation_in_intermediary_hooks_same_on_inductor(self):
         class SomePyClass:
@@ -482,7 +482,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(obj.count, 4)
         self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_complex_state_mutation_in_intermediary_hooks_same_on_inductor_with_graph_break(
         self,
@@ -558,7 +558,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             torch.compile(mod, backend=cnt, fullgraph=True)(x0, obj3)
             self.assertEqual(cnt.frame_count, 1)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_hook_with_closure(self):
         def fn(x, obj):
@@ -591,7 +591,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_intermediate_hook_with_closure_eager(self):
         def fn(x, obj):
@@ -624,7 +624,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_intermediate_hook_with_closure_aot(self):
         def fn(x, obj):
@@ -655,7 +655,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_no_recompile_on_hook_identity_change(self):
         def my_hook(grad, k=0):
@@ -697,7 +697,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             comp_out[0].backward(torch.ones(4))
             self.assertEqual(x0.grad, x1.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_functools_arg_vary(self):
         def pre_hook(grad, *, k):
@@ -721,7 +721,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             h(x).sum().backward()
             self.assertEqual(orig_grad * 2, x.grad)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_post_acc_grad_hook(self):
         def hook(input_t):
@@ -771,7 +771,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_recompile(self):
         def hook(param):

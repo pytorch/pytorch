@@ -1826,7 +1826,7 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
     return dec_fn
 
 
-def skipIfWindowsCuda(func=None, *, msg="test doesn't currently work on the Windows cuda stack"):
+def skipIfCudaWindows(func=None, *, msg="test doesn't currently work on the Windows cuda stack"):
     def dec_fn(fn):
         reason = f"skipIfWindowsCuda: {msg}"
 

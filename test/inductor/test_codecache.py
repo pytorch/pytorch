@@ -33,8 +33,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfCudaWindows,
     skipIfWindows,
-    skipIfWindowsCuda,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -317,7 +317,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_cache_load_with_guards_static_bounds(self, device, dtype):
         """
@@ -362,7 +362,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_constant_handling(self, device):
         """
@@ -423,7 +423,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
@@ -488,7 +488,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_cache_clear(self):
         """
         Test clearing the cache.
@@ -525,7 +525,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_cache_with_nt(self):
         def gen_nt(r):
             values = torch.randn(r, 16)
@@ -556,7 +556,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_cache_with_symint_non_arg_guard(self):
         def fn(x, ref_id):
             self_id = 22
@@ -581,7 +581,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_cache_guard(self):
         def f(x, val):
@@ -808,7 +808,7 @@ class TestFxGraphCacheHashing(TestCase):
 
 class TestUtils(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_fresh_inductor_cache(self):
         def fn(x, y):

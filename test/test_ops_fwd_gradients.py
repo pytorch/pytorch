@@ -14,7 +14,9 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     run_tests,
+    skipIfCudaWindows,
     skipIfTorchInductor,
+    skipIfWindows,
     TestCase,
     TestGradients,
     unMarkDynamoStrictTest,
@@ -37,6 +39,8 @@ _gradcheck_ops = partial(
 class TestFwdGradients(TestGradients):
     # Test that forward-over-reverse gradgrad is computed correctly
     @_gradcheck_ops(op_db)
+    @skipIfCudaWindows
+    @skipIfWindows
     def test_fn_fwgrad_bwgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 

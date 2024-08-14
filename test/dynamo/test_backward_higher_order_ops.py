@@ -13,7 +13,7 @@ from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import skipIfWindows, skipIfWindowsCuda
+from torch.testing._internal.common_utils import skipIfCudaWindows, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -40,7 +40,7 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.grad, y * grad_out)
 
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_invoke_in_pt2(self):
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
@@ -96,7 +96,7 @@ class _multiply_invoke(torch.nn.Module):
         )
 
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_invoke_in_pt2_compiled_autograd(self):
         graph = None
 
@@ -148,7 +148,7 @@ class GraphModule(torch.nn.Module):
             graph = None
 
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_invoke_in_pt2_compiled_autograd_side_effect(self):
         def _side_effect_stateful_fn2(x, obj):
             obj.counter = obj.counter + 1
@@ -226,7 +226,7 @@ class GraphModule(torch.nn.Module):
             graph = None
 
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_invoke_in_pt2_compiled_autograd_graph_breaks(self):
         def _graph_breaking_fn(x):
             print("Boo!")

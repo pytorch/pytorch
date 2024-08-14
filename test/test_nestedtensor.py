@@ -50,10 +50,10 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    skipIfCudaWindows,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
-    skipIfWindowsCuda,
     subtest,
     TEST_WITH_ROCM,
     TestCase,
@@ -6085,7 +6085,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
     )
     @skipIfWindows
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 128
@@ -6539,7 +6539,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):

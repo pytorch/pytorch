@@ -21,8 +21,8 @@ from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
     find_free_port,
+    skipIfCudaWindows,
     skipIfWindows,
-    skipIfWindowsCuda,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -217,7 +217,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_recompiles(self):
         def fn(x, y):
@@ -263,7 +263,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_example_fn(self):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
@@ -288,7 +288,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_dynamo_error(self):
         try:
@@ -309,7 +309,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_inductor_error(self):
         import torch._inductor.lowering
@@ -475,7 +475,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_graph_breaks(self):
         @torch._dynamo.optimize("inductor")
@@ -510,7 +510,7 @@ class StructuredTraceTest(TestCase):
 
     # TODO: bring in the trace_source tests once we start emitting bytecode
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_graph_sizes_dynamic(self):
         def fn(a, b):
@@ -551,7 +551,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_guards_recompiles(self):
         def fn(x, ys, zs):
@@ -625,7 +625,7 @@ def forward(self, x, y):
         )
 
     @torch._inductor.config.patch("fx_graph_cache", True)
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_codecache(self):
         def fn(a):
@@ -670,7 +670,7 @@ def forward(self, x, y):
 
     @torch._inductor.config.patch("fx_graph_cache", True)
     @show_chrome_events
-    @skipIfWindowsCuda
+    @skipIfCudaWindows
     @skipIfWindows
     def test_chromium_event(self):
         def fn(a):
