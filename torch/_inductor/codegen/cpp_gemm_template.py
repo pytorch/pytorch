@@ -14,15 +14,18 @@ from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import ops, V
+from ..virtualized import V
+from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
+    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
+
 
 log = logging.getLogger(__name__)
 
@@ -32,133 +35,134 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 {%- if x_scale is not none %}
-{%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
 {%- else %}
-{%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
 {%- endif %}
 
-extern "C"
+extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     constexpr int64_t num_threads = {{num_threads}};
     constexpr int64_t N = {{N}};
     constexpr int64_t K = {{K}};
-    constexpr int64_t M0 = {{micro_gemm.register_blocking.block_m}};
-    constexpr int64_t N0 = {{micro_gemm.register_blocking.block_n}};
-    constexpr int64_t K0 = {{micro_gemm.register_blocking.block_k}};
-    constexpr int64_t N0_blocks = (N + N0 - 1) / N0;
-    constexpr int64_t K0_blocks = (K + K0 - 1) / K0;
+    constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
+    constexpr int64_t Nr = {{micro_gemm.register_blocking.block_n}};
+    constexpr int64_t Kr = {{micro_gemm.register_blocking.block_k}};
+    constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
+    constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
 
-    {%- if is_dynamic_M %}
+{%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
-    const int64_t M0_blocks = (M + M0 - 1) / M0;
+    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
-    mm_get_thread_blocking(num_threads, M, N, K, M0, N0, K0, Mt_blocks, Nt_blocks, Kt_blocks);
+    mm_get_thread_blocking(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
     {%- else %}
-    const auto Mt_blocks = M0_blocks;
-    const auto Nt_blocks = N0_blocks;
-    const auto Kt_blocks = K0_blocks;
+    const auto Mt_blocks = Mr_blocks;
+    const auto Nt_blocks = Nr_blocks;
+    const auto Kt_blocks = Kr_blocks;
     {%- endif %}
     const int64_t Mc_blocks = Mt_blocks;
+    const int64_t Nc_blocks = 1;
     const int64_t Kc_blocks = Kt_blocks;
-    const int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = N0_blocks;
-    const int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
-    {%- else %}
+    const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
+    const int64_t num_Nc_blocks = Nr_blocks;
+    const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+{%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
-    constexpr int64_t M0_blocks = (M + M0 - 1) / M0;
+    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
     constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
     constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
     constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
+    constexpr int64_t Nc_blocks = {{template.cache_blocking().block_n}};
     constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
-    constexpr int64_t num_Mc_blocks = (M0_blocks + Mc_blocks - 1) / Mc_blocks;
-    constexpr int64_t num_Nc_blocks = N0_blocks;
-    constexpr int64_t num_k_slices = (K0_blocks + Kt_blocks - 1) / Kt_blocks;
-    {%- endif %}
+    constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
+    constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
+    constexpr int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+{%- endif %}
 
     // make sure all partitions are assigned
     {{kernel.assert_function}}(
-        Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= M0_blocks * N0_blocks * K0_blocks,
+        Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= Mr_blocks * Nr_blocks * Kr_blocks,
         "Not all partitions are assigned."
     );
 
-    {%- if maybe_k_slicing %}
+{%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
     if (num_k_slices > 1) {
         local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
     }
-    {%- endif %}
+{%- endif %}
 
-    {%- if num_threads > 1 %}
+{%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
         const int tid = omp_get_thread_num();
         int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
         mm_get_thread_blocks(
-            tid, M0_blocks, N0_blocks, K0_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
+            tid, Mr_blocks, Nr_blocks, Kr_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
-        {%- if maybe_k_slicing %}
+    {%- if maybe_k_slicing %}
         const int64_t k_group_id = tid / num_k_slices;
         const int64_t k_slice_id = tid % num_k_slices;
-        {%- endif %}
-    {%- else %}
+    {%- endif %}
+{%- else %}
     {
         const int tid = 0;
         const int64_t m_block_start = 0;
-        const int64_t m_block_end = M0_blocks;
+        const int64_t m_block_end = Mr_blocks;
         const int64_t n_block_start = 0;
-        const int64_t n_block_end = N0_blocks;
+        const int64_t n_block_end = Nr_blocks;
         const int64_t k_block_start = 0;
-        const int64_t k_block_end = K0_blocks;
-    {%- endif %}
+        const int64_t k_block_end = Kr_blocks;
+{%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
-            const int64_t m_start = mc * M0;
-            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * M0, M);
+            const int64_t m_start = mc * Mr;
+            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
-            {%- if use_local_acc %}
-            {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
-            {%- endif %}
-            for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
-                const int64_t n_start = nc * N0;
-                const int64_t n_end = std::min((nc + 1) * N0, N);
+{%- if use_local_acc %}
+    {%- set acc_buf_name = "local_acc_buf" %}
+            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
+{%- endif %}
+            for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
+                const int64_t n_start = nc * Nr;
+                const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                 const int64_t n_size = n_end - n_start;
-                {%- if use_local_acc %}
-                {%- set acc = kernel.local_buffers[acc_buf_name] %}
+                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end); // FIXME: maybe exceeding N?
+{%- if use_local_acc %}
+    {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
-                {%- else %}
-                {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
-                {%- endif %}
+{%- else %}
+    {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- endif %}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
-                    int64_t k_start = kc * K0;
-                    int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * K0, K);
-                    {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
-                    {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
-                    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                    if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(24, false) }}
-                    } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
+                    int64_t k_start = kc * Kr;
+                    int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
+{%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
+                    for (int64_t nci = nc; nci < nc_block_end; nci++) {
+{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+                        if (kc == k_block_start) {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
+                        } else {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
+                        }
                     }
                 }
-                {%- if maybe_k_slicing %}
+{%- if maybe_k_slicing %}
                 if (num_k_slices > 1) {
-                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
                     local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
                 } else
-                {%- endif %}
+{%- endif %}
                 {
-                {%- if N == PADDED_N %}
-                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
-                    {%- set tile_acc = acc %}
-                {%- else %}
-                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
-                {%- endif %}
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -166,35 +170,35 @@ extern "C"
                 }
             }
         }
-        {%- if maybe_k_slicing %}
+{%- if maybe_k_slicing %}
         if (num_k_slices > 1) {
             #pragma omp barrier
             for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
                 // We slice M-dim and each thread in the k-slicing group works on a slice
-                const int64_t m_start_unsliced = mc * M0;
-                const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * M0, M);
+                const int64_t m_start_unsliced = mc * Mr;
+                const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
                 const int64_t m_size_unsliced = m_end_unsliced - m_start_unsliced;
                 const int64_t m_slice_size = (m_size_unsliced + num_k_slices - 1) / num_k_slices;
                 const int64_t m_start = std::min(m_start_unsliced + m_slice_size * k_slice_id, m_end_unsliced);
                 const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
                 const int64_t m_size = m_end - m_start;
                 const int64_t m_offset = m_start - m_start_unsliced;
-                for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
-                    const int64_t n_start = nc * N0;
-                    const int64_t n_end = std::min((nc + 1) * N0, N);
+                for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
+                    const int64_t n_start = nc * Nr;
+                    const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                     const int64_t n_size = n_end - n_start;
-                    const int64_t mxn_cache_block_id = mc * num_Nc_blocks + nc;
+                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
                     auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
                     for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
                         auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
                         for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                             #pragma omp simd
                             for (int64_t n = 0; n < n_size; n++) {
-                                {{acc_buf_name}}[m*N0 + n] += other_acc[m*N0 + n];
+                                {{acc_buf_name}}[m*Nr + n] += other_acc[m*Nr + n];
                             }
                         }
                     }
-                    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -202,7 +206,7 @@ extern "C"
                 }
             }
         }
-        {%- endif %}
+{%- endif %}
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
@@ -224,7 +228,7 @@ class CppPackedGemmTemplate(CppTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
             "packed_gemm",
@@ -278,6 +282,14 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = math.ceil(self.k / register_blocking.block_k)
         factors = get_factors(self.num_threads)
         assert len(factors) > 0
+
+        if config.cpp.gemm_thread_factors is not None:
+            factors = [int(i) for i in config.cpp.gemm_thread_factors.split(",")]
+            assert len(factors) == 3
+            assert math.prod(factors) == self.num_threads
+            return get_blocking(
+                factors[0], factors[1], factors[2], m_blocks, n_blocks, k_blocks
+            )
 
         # we favor square-sized thread blocks for good data reuse
         def get_better_blocking(blocking, best_blocking):
@@ -343,15 +355,26 @@ class CppPackedGemmTemplate(CppTemplate):
     @cache_on_self
     def cache_blocking(self) -> GemmBlocking:
         def get_cache_blocking(register_blocking, thread_blocking):
-            M0 = register_blocking.block_m
-            N0 = register_blocking.block_n
-            K0 = register_blocking.block_k
+            Mr = register_blocking.block_m
+            Nr = register_blocking.block_n
+            Kr = register_blocking.block_k
 
-            Mc_blocks = thread_blocking.block_m
-            # Nc_blocks is always 1
-            Nc_blocks = 1
-            Kc_blocks = thread_blocking.block_k
+            Mt_blocks = thread_blocking.block_m
+            Nt_blocks = thread_blocking.block_n
+            Kt_blocks = thread_blocking.block_k
 
+            if config.cpp.gemm_cache_blocking is not None:
+                blockings = [int(i) for i in config.cpp.gemm_cache_blocking.split(",")]
+                assert len(blockings) == 3
+                Mc_blocks, Nc_blocks, Kc_blocks = blockings
+                return (
+                    min(Mc_blocks, Mt_blocks),
+                    min(Nc_blocks, Nt_blocks),
+                    min(Kc_blocks, Kt_blocks),
+                )
+
+            # The ratios below are empirically determined to decide
+            # the effective sizes of L1 and L2.
             # TODO: tune the factor here
             L1_limit_factor = 1
             L2_limit_factor = 0.5
@@ -362,14 +385,15 @@ class CppPackedGemmTemplate(CppTemplate):
             assert (
                 L1_cache_size > 0
             ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+            L1 = L1_cache_size * L1_limit_factor
+
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
             assert (
                 L2_cache_size > 0
             ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
-            B_size_limit = L1_cache_size * L1_limit_factor
-            A_size_limit = L2_cache_size * L2_limit_factor
+            L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
@@ -377,18 +401,46 @@ class CppPackedGemmTemplate(CppTemplate):
             num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
             num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
 
-            size_cache_B = K0 * Kc_blocks * N0 * Nc_blocks * num_byte_B
+            # NOTE [CPP GEMM Cache Blocking Algorithm]
+            # Our overall strategy is to
+            # 1) Make cache blocks of B L1-reside and reused by multiple rows of A, i.e. Mc.
+            #    Here, B is Kc x Nr where Nr is a single register block. We use L1 size to
+            #    decide Kc. We want to make Mc large enough to better reuse B.
+            # 2) Make cache blocks of A L2-reside, which would limit Mc. We want to reuse A
+            #    along N, where we have two sub-strategies (see notes below) to decide Mc and Nc.
 
-            if size_cache_B > B_size_limit:
-                Kc_blocks = math.floor(
-                    B_size_limit / (K0 * N0 * Nc_blocks * num_byte_B)
-                )
+            # Step 1: Decide Kc assuming B block is L1-reside.
+            size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+            Kc_blocks = Kt_blocks
+            if size_cache_B > L1:
+                Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
 
-            size_cache_A = M0 * Mc_blocks * K0 * Kc_blocks * num_byte_A
-            if size_cache_A > A_size_limit:
-                Mc_blocks = math.floor(
-                    A_size_limit / (M0 * Kc_blocks * K0 * num_byte_A)
-                )
+            # Step 2: Decide Mc assuming A block is L2-reside.
+            min_Mc_ratio = 2  # TODO(jgong5): something to tune?
+            min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
+            assert min_Mc_blocks >= 1
+            Kt_bytes = Kt_blocks * Kr * num_byte_A
+            if min_Mc_blocks * Mr * Kt_bytes < L2:
+                # Strategy 1: A (Mc x Kt) resides in L2 and reused by all Nt
+                # when Nc_blocks is kept 1. Mc should be large enough (>= min_Mc_blocks)
+                # to reuse B (Kc x Nr) in L1. This makes C (Mc x Nr) small enough to reside
+                # in L1.
+                Mc_blocks = min(Mt_blocks, math.floor(L2 / (Mr * Kt_bytes)))
+                Nc_blocks = 1
+            else:
+                # Strategy 2: Kt is too large to hold A (Mc x Kt) in L2, we reuse
+                # A (Mc x Kc) in L2 by B (Kc x Nc). C (Mc x Nc) resides in L2.
+                Mc_blocks = Mt_blocks
+                Nc_blocks = min(math.ceil(Mc_blocks * Mr / Nr), Nt_blocks)
+                Nc_bytes = Nc_blocks * Nr * 4  # assume C or acc is float32/int32
+                Kc_bytes = Kc_blocks * Kr * num_byte_A
+                if Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2:
+                    # The following is the solution for 4*Mc*Nc + Mc*Kc_bytes = L2,
+                    # assuming Mc == Nc for good data reuse.
+                    M_max = (math.sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8
+                    if M_max < Mc_blocks * Mr:
+                        Mc_blocks = math.floor(M_max / Mr)
+                        Nc_blocks = min(math.ceil(Mc_blocks * Mr / Nr), Nt_blocks)
 
             return Mc_blocks, Nc_blocks, Kc_blocks
 
@@ -451,7 +503,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
                 assert len(input_indices) >= 3
-                # assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
+                # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
                 inp_idx = input_indices[0]
                 x_idx = input_indices[1]
                 w_idx = input_indices[2]
@@ -475,7 +527,6 @@ class CppPackedGemmTemplate(CppTemplate):
         def normalize_shapes(inputs, layout_or_out):
             if not trans_w:
                 return inputs, layout_or_out
-
             new_inputs = list(inputs)
             X = inputs[0]
             W = inputs[1]
@@ -657,7 +708,6 @@ class CppPackedGemmTemplate(CppTemplate):
         assert len(self.input_nodes) >= 2
 
         int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
-
         x_scale = None
         x_zp = None
         w_scale = None
@@ -673,8 +723,8 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = self.output_node
         else:
             X, W = self.input_nodes[0], self.input_nodes[1]
-            inp = self.input_nodes[2] if self.has_bias else None
             Y = self.output_node
+            inp = self.input_nodes[2] if self.has_bias else None
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
@@ -692,30 +742,13 @@ class CppPackedGemmTemplate(CppTemplate):
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
         if inp is not None and self.beta != 0 and not int8_gemm:
-
-            def bias_epilogue(input_buffer: ir.Buffer):
-                dtype = self.layout.dtype
-                bias_loader = inp.make_loader()
-                input_loader = input_buffer.make_loader()
-
-                def bias_add_inner(index):
-                    bias = bias_loader(index)
-                    input = input_loader(index)
-                    if self.beta != 1:
-                        result = ops.constant(self.beta, torch.float) * bias + input
-                    else:
-                        result = bias + input
-                    return result
-
-                return ir.Pointwise(
-                    device=input_buffer.get_device(),
-                    dtype=dtype,
-                    inner_fn=bias_add_inner,
-                    ranges=input_buffer.get_size(),
+            # add an epilogue for bias add
+            def _bias_add_epilogue(buf):
+                return create_epilogue_with_attr(
+                    buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
                 )
 
-            epilogue_creators.append(bias_epilogue)
-
+            epilogue_creators.append(_bias_add_epilogue)
         if self.epilogue_creator is not None:
             epilogue_creators.append(self.epilogue_creator)
 
@@ -777,7 +810,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     ordered_size, template_buffer.get_size()
                 )
                 reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                reindexers.extend([reindexer] * len(epilogue_nodes))
+                reindexers.extend([reindexer] * len(epilogue_nodes))  # type: ignore[list-item]
                 if isinstance(Y, ir.BaseView):
                     storage = ir.StorageBox(Y.unwrap_view())
                 else:
@@ -823,6 +856,7 @@ class CppPackedGemmTemplate(CppTemplate):
             is_dynamic_M=self.is_dynamic_M,
             template=self,
             kernel=kernel,
+            export_declaration=get_export_declaration(),
             epilogue_nodes=epilogues,
             reindexers=reindexers,
             Y_2d=Y_2d,

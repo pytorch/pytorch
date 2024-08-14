@@ -13,8 +13,10 @@ from ..autotune_process import CppBenchmarkRequest
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
+from .common import CppWrapperKernelArgs
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
+from .cpp_wrapper_cpu import CppWrapperCpu
 
 
 def parse_expr_with_index_symbols(expr):
@@ -40,6 +42,8 @@ class CppTemplateKernel(CppKernel):
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
+        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
+            self.args = CppWrapperKernelArgs()
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -136,7 +140,7 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size())
+        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:

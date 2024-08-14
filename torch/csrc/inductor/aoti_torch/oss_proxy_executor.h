@@ -7,6 +7,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <iostream>
+#include <utility>
 
 namespace torch::aot_inductor {
 
@@ -46,8 +47,8 @@ struct OSSDynamicArg {
 };
 
 struct OSSOpKernel {
-  OSSOpKernel(const std::string& target, const c10::OperatorHandle& op_handle)
-      : target_(target), op_handle_(op_handle) {}
+  OSSOpKernel(std::string target, c10::OperatorHandle op_handle)
+      : target_(std::move(target)), op_handle_(std::move(op_handle)) {}
 
   std::string target_;
   c10::OperatorHandle op_handle_;
@@ -80,7 +81,7 @@ class OSSProxyExecutor : public ProxyExecutor {
  private:
   void prefill_stack_with_static_arguments(
       int index,
-      at::TypePtr schema_arg_type,
+      const at::TypePtr& schema_arg_type,
       const nlohmann::json& thrift_arg,
       OSSOpKernel& op_kernel);
 
