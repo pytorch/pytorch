@@ -35,9 +35,9 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 {%- if x_scale is not none %}
-  {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
 {%- else %}
-  {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
 {%- endif %}
 
 extern "C" {{export_declaration}}
@@ -56,14 +56,14 @@ extern "C" {{export_declaration}}
 {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
     const int64_t Mr_blocks = (M + Mr - 1) / Mr;
-  {%- if num_threads > 1 %}
+    {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
     mm_get_thread_blocking(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
-  {%- else %}
+    {%- else %}
     const auto Mt_blocks = Mr_blocks;
     const auto Nt_blocks = Nr_blocks;
     const auto Kt_blocks = Kr_blocks;
-  {%- endif %}
+    {%- endif %}
     const int64_t Mc_blocks = Mt_blocks;
     const int64_t Nc_blocks = 1;
     const int64_t Kc_blocks = Kt_blocks;
@@ -105,10 +105,10 @@ extern "C" {{export_declaration}}
         mm_get_thread_blocks(
             tid, Mr_blocks, Nr_blocks, Kr_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
             m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
-  {%- if maybe_k_slicing %}
+    {%- if maybe_k_slicing %}
         const int64_t k_group_id = tid / num_k_slices;
         const int64_t k_slice_id = tid % num_k_slices;
-  {%- endif %}
+    {%- endif %}
 {%- else %}
     {
         const int tid = 0;
@@ -125,7 +125,7 @@ extern "C" {{export_declaration}}
             const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
 {%- if use_local_acc %}
-            {%- set acc_buf_name = "local_acc_buf" %}
+    {%- set acc_buf_name = "local_acc_buf" %}
             {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
@@ -134,19 +134,19 @@ extern "C" {{export_declaration}}
                 const int64_t n_size = n_end - n_start;
                 const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end); // FIXME: maybe exceeding N?
 {%- if use_local_acc %}
-                {%- set acc = kernel.local_buffers[acc_buf_name] %}
+    {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
 {%- else %}
-                {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+    {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- endif %}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * Kr;
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
-                    {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
+{%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-                        {%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-                        {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-                        {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
                             {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
                         } else {
@@ -161,8 +161,8 @@ extern "C" {{export_declaration}}
                 } else
 {%- endif %}
                 {
-                    {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-                    {%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -198,7 +198,7 @@ extern "C" {{export_declaration}}
                             }
                         }
                     }
-                    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
