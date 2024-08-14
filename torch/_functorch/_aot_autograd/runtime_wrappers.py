@@ -1559,6 +1559,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for x in symint_outs
                 ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
+
                 raw_returns = fw_outs[0:num_forward_returns]
 
                 # Wrap all autograd.Function.forward() outputs that are aliases
@@ -1733,7 +1734,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
-
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
@@ -1972,10 +1972,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Toss out the backward output tokens
-                    num_tokens = CompiledFunction.metadata.num_backward_out_tokens
-                    assert isinstance(num_tokens, int)
-                    if num_tokens > 0:
-                        out = out[:-num_tokens]
+                    num_bw_out_tokens = (
+                        CompiledFunction.metadata.num_backward_out_tokens
+                    )
+                    if num_bw_out_tokens > 0:
+                        out = out[:-num_bw_out_tokens]
 
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                     out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(

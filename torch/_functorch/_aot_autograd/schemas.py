@@ -351,13 +351,12 @@ class ViewAndMutationMeta:
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
 
-    # Tokens, that were not used in backward are not added as joint outputs to avoid partitioner failures.
+    # Number of tokens used in backward, appended at the end of backward outputs.
     # Filled after tracing joint function.
     num_backward_out_tokens: int = 0
 
-    # In case when some effect tokens were not used in forward (len(tokens) == 0
-    # But were used in backward.
-    # The joint graph will be edited to add additional bw_token_input.
+    # Number of tokens discovered in backward, during tracing of joint fn.
+    # If present, joint graph will be tweaked to add additional primals_bw_tokens.
     num_backward_discovered_tokens: int = 0
 
     def __post_init__(self):

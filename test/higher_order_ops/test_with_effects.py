@@ -424,14 +424,17 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_effectful_custom_op_with_subclasses(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
             lib.define("zoo(Tensor x) -> Tensor")
+            lib.define("zoo2(Tensor x) -> Tensor")
 
-            d = {"fw": 0}
+            d = {"fw": 0, "bw": 0}
 
             def reset_counter():
                 d["fw"] = 0
+                d["bw"] = 0
 
-            def assert_counter(fw):
+            def assert_counter(fw, bw):
                 self.assertEqual(d["fw"], fw)
+                self.assertEqual(d["bw"], bw)
 
             def foo_impl(a):
                 d["fw"] = d["fw"] + 1
@@ -440,13 +443,22 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def foo_meta(a):
                 return a.clone()
 
-            def foo_bwd(ctx, grad):
-                return grad.clone()
+            def foo2_impl(x):
+                d["bw"] = d["bw"] + 1
+                return x
+
+            def foo2_meta(a):
+                return a.clone()
 
             for backend in ["CPU", "CUDA"]:
                 lib.impl("zoo", foo_impl, backend)
-
+                lib.impl("zoo2", foo2_impl, backend)
             lib.impl("zoo", foo_meta, "Meta")
+            lib.impl("zoo2", foo2_meta, "Meta")
+
+            def foo_bwd(ctx, grad):
+                torch.ops._mylib.zoo2(grad)
+                return grad.clone()
 
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 "_mylib::zoo", "Autograd"
@@ -463,6 +475,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
             _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
+            _register_effectful_op(torch.ops._mylib.zoo2.default, _EffectType.ORDERED)
 
             def fn(x, y):
                 return torch.ops._mylib.zoo(x) + y
@@ -483,13 +496,13 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             ):
                 reset_counter()
                 ref_out = fn(*ins_fn())
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
 
                 compiled_fn = torch.compile(fn, backend="aot_eager")
                 out = compiled_fn(*ins_fn())
                 reset_counter()
                 out = compiled_fn(*ins_fn())
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
 
                 self.assertEqual(ref_out, out)
 
@@ -516,16 +529,17 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 (
                     expected_fw_count,
                     expected_fw_count_after_bw,
+                    expected_bw_count_after_bw,
                 ),
             ) in enumerate(
-                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1), (2, 2)])
+                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)])
             ):
                 ref_ins = ins_fn_req_grad()
                 reset_counter()
                 ref_out = fn(*ref_ins)
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
                 ref_out.sum().backward()
-                assert_counter(expected_fw_count_after_bw)
+                assert_counter(expected_fw_count_after_bw, expected_bw_count_after_bw)
 
                 compiled_fn = torch.compile(fn, fullgraph=True)
 
@@ -533,10 +547,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 out = compiled_fn(*ins)
                 reset_counter()
                 out = compiled_fn(*ins)
-                assert_counter(expected_fw_count)
+                assert_counter(expected_fw_count, 0)
                 self.assertEqual(ref_out, out)
                 out.sum().backward()
-                assert_counter(expected_fw_count_after_bw)
+                assert_counter(expected_fw_count_after_bw, expected_bw_count_after_bw)
                 self.assertEqual(ref_ins[1].grad, ins[1].grad)
                 self.assertEqual(ref_ins[0].grad, ins[0].grad)
 
@@ -553,15 +567,19 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5):
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_1, primals_4);  getitem_1 = primals_4 = None
     add_1 = torch.ops.aten.add.Tensor(getitem_3, primals_5);  getitem_3 = primals_5 = None
-    return (getitem_2, add, add_1)""",
+    return (getitem_2, add, add_1, getitem_2)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, tangents_1, tangents_2):
+def forward(self, getitem_2, tangents_1, tangents_2):
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._mylib.zoo2.default, tangents_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0];  with_effects_2 = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._mylib.zoo2.default, tangents_2);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
     clone = torch.ops.aten.clone.default(tangents_1)
     clone_1 = torch.ops.aten.clone.default(tangents_2)
-    return (clone, clone_1, tangents_1, tangents_2)""",
+    return (clone, clone_1, tangents_1, tangents_2, getitem_6)""",
             )
 
     def test_effects_and_input_mutation_return(self):
@@ -670,6 +688,13 @@ def forward(self, arg0_1, arg1_1):
 
             for backend in ["CPU", "CUDA", "Meta"]:
                 lib.impl("foo", foo_impl, backend)
+
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                "_mylib::foo", "Autograd"
+            ):
+                self.skipTest(
+                    "Double registration of Autograd kernel for test custom op"
+                )
 
             torch.library.register_autograd("_mylib::foo", foo_bwd)
 

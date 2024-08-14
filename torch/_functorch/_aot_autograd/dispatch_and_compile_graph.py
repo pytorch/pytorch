@@ -50,6 +50,9 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     with enable_python_dispatcher(), FunctionalTensorMode(
         pre_dispatch=aot_config.pre_dispatch,
         export=aot_config.is_export,
+        # Allow token discovery for joint fn tracing,
+        # As collecting metadata tracing is done only for forward fn,
+        # while backward graph can use more effects tokens, than forward.
         _allow_token_discovery=True,
     ):
         fx_g = make_fx(
