@@ -1874,7 +1874,7 @@ def _export_for_training(
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
-    strict: bool = False,
+    strict: bool = False if sys.platform == "win32" else True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     global _EXPORT_MODULE_HIERARCHY
