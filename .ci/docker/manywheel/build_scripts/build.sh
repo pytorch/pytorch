@@ -38,11 +38,6 @@ yum -y install bzip2 make git patch unzip bison yasm diffutils \
     automake which file \
     ${PYTHON_COMPILE_DEPS}
 
-if [ "$(uname -m)" != "s390x" ] ; then
-    yum -y install cmake28 \
-    kernel-devel-`uname -r`
-fi
-
 # Install newest autoconf
 build_autoconf $AUTOCONF_ROOT $AUTOCONF_HASH
 autoconf --version
