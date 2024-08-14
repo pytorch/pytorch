@@ -1772,6 +1772,10 @@ def _update_mutation_region_id(
             torch._higher_order_ops.auto_functionalize.get_mutable_arg_names(mutable_op)
         )
         update_reinplace_id(node.kwargs, names_of_reinplace_targets)
+    elif node.target is torch.ops.higher_order.triton_kernel_wrapper_functional:
+        names_of_reinplace_targets = node.kwargs["tensors_to_clone"]  # type: ignore[assignment]
+        kwargs = node.kwargs["kwargs"]
+        update_reinplace_id(kwargs, names_of_reinplace_targets)  # type: ignore[arg-type]
 
     if is_mutation_op(node):
         graph_meta["barrier_counter"] += 1

@@ -1,13 +1,43 @@
 # Owner(s): ["module: inductor"]
 
 import torch
+import torch.testing._internal.common_utils as common_utils
 from functorch import make_fx
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, parametrize, subtest
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+
+if HAS_CUDA:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def sin_kernel(
+        in_ptr,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr + offsets, mask=mask)
+        output = tl.sin(x)
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    def sin_triton(x, out):
+        grid = lambda meta: (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)  # noqa: E731
+        sin_kernel[grid](x, out, x.numel(), BLOCK_SIZE=1024)
+
+else:
+
+    def sin_triton(*args, **kwargs):
+        raise NotImplementedError("Triton is not available on this platform")
 
 
 aten = torch.ops.aten
@@ -121,13 +151,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(res2, x.cos())
             self.assertEqual(num_reinplacing_failures(), 0)
 
-    def test_multiple_mutations(self):
+    @parametrize("fn", [subtest(sin, "op"), subtest(sin_triton, "triton")])
+    def test_multiple_mutations(self, fn):
         counters.clear()
 
         def f(x, out):
-            sin(x, out)
-            sin(out, out)
-            sin(out, out)
+            fn(x, out)
+            fn(out, out)
+            fn(out, out)
             return out
 
         x = torch.randn(3, device=device)
@@ -137,14 +168,15 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(result, out)
         self.assertEqual(num_reinplacing_failures(), 0)
 
-    def test_multiple_intermediate(self):
+    @parametrize("fn", [subtest(sin, "op"), subtest(sin_triton, "triton")])
+    def test_multiple_intermediate(self, fn):
         counters.clear()
 
         def f(x):
             out = torch.empty_like(x)
-            sin(x, out)
-            sin(out, out)
-            sin(out, out)
+            fn(x, out)
+            fn(out, out)
+            fn(out, out)
             return out
 
         x = torch.randn(3, device=device)
@@ -152,7 +184,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(result, x.sin().sin().sin())
         self.assertEqual(num_reinplacing_failures(), 0)
 
-    def test_backward(self):
+    @parametrize("fn", [subtest(sin, "op"), subtest(sin_triton, "triton")])
+    def test_backward(self, fn):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
             return torch.empty_like(x)
@@ -165,7 +198,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             @staticmethod
             def forward(ctx, x):
                 out = foo(x)
-                sin(x, out)
+                fn(x, out)
                 ctx.save_for_backward(out, x)
                 return out
 
@@ -174,7 +207,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 saved, x = ctx.saved_tensors
                 out = foo(x)
                 out.diag().fill_(1)
-                sin(saved, out)
+                fn(saved, out)
                 return out
 
         @torch.compile
@@ -355,6 +388,9 @@ MutationRegionId(barrier_id=1, reinplace_id=None)
 MutationRegionId(barrier_id=1, reinplace_id=None)
 MutationRegionId(barrier_id=1, reinplace_id=None)""",
         )
+
+
+common_utils.instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
 if __name__ == "__main__":
