@@ -82,9 +82,8 @@ class _ReplicateState(_State):
             return
 
         self.has_initialized = True
-
-        device_mesh = kwargs.get("device_mesh", None)
         self.module = module
+
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         for submodule in module.modules():
             if _is_fully_sharded(submodule):
