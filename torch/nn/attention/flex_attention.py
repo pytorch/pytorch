@@ -252,8 +252,8 @@ class BlockMask:
     kv_indices: Tensor
     full_kv_num_blocks: Optional[Tensor]
     full_kv_indices: Optional[Tensor]
-    q_num_blocks: Tensor
-    q_indices: Tensor
+    q_num_blocks: Optional[Tensor]
+    q_indices: Optional[Tensor]
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
     BLOCK_SIZE: Tuple[int, int]
@@ -265,8 +265,8 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor],
         full_kv_indices: Optional[Tensor],
-        q_num_blocks: Tensor,
-        q_indices: Tensor,
+        q_num_blocks: Optional[Tensor],
+        q_indices: Optional[Tensor],
         full_q_num_blocks: Optional[Tensor],
         full_q_indices: Optional[Tensor],
         BLOCK_SIZE: Tuple[int, int],
@@ -399,16 +399,19 @@ class BlockMask:
         return BlockMask(*mapped_attributes)
 
     def __repr__(self):
+        def shape_or_none(x: Optional[torch.Tensor]):
+            return x.shape if x is not None else None
+
         return (
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={self.full_kv_num_blocks.shape if self.full_kv_num_blocks is not None else None},\n"
-            f"    full_kv_indices={self.full_kv_indices.shape if self.full_kv_indices is not None else None},\n"
-            f"    q_num_blocks={self.q_num_blocks.shape},\n"
-            f"    q_indices={self.q_indices.shape},\n"
-            f"    full_q_num_blocks={self.full_q_num_blocks.shape if self.full_q_num_blocks is not None else None},\n"
-            f"    full_q_indices={self.full_q_indices.shape if self.full_q_indices is not None else None},\n"
+            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
+            f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
+            f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
+            f"    q_indices={shape_or_none(self.q_indices)},\n"
+            f"    full_q_num_blocks={shape_or_none(self.full_q_num_blocks)},\n"
+            f"    full_q_indices={shape_or_none(self.full_q_indices)},\n"
             f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
             f"    shape={self.shape},\n"
             f"    sparsity={self.sparsity():.2f}%,\n"
