@@ -237,6 +237,20 @@ def maybe_to_fresh_input(idx, t, meta):
     return t
 
 
+def is_with_effects(node):
+    return node.op == "call_function" and node.target.__name__ == "with_effects"
+
+
+def has_with_effects_ancestors(node):
+    queue = [node]
+    while queue:
+        node = queue.pop()
+        if is_with_effects(node):
+            return True
+        queue.extend(node.all_input_nodes)
+    return False
+
+
 def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
@@ -244,6 +258,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     num_backward_out_tokens = fw_metadata.num_backward_out_tokens
+    num_backward_discovered_tokens = fw_metadata.num_backward_discovered_tokens
 
     def rewrite_with_effects_input_token(module, node):
         with module.graph.inserting_before(node):
@@ -271,21 +286,28 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             )
             node.args = (other_output_args,)
 
-    def do(module):
+    def do(module, subgraph, expected_num_erased_inputs, expected_num_erased_outs):
+        num_erased_inputs = 0
+        num_erased_outs = 0
         input_nodes = []
-        input_token_nodes = []
+        input_token_nodes = set()
         with_effect_nodes = []
         output_token_nodes = []
         other_output_nodes = []
+        outputs_to_erase = []
         for i, node in enumerate(module.graph.nodes):
             if node.op == "placeholder":
                 input_nodes.append(node)
-            elif node.op == "call_function" and node.target.__name__ == "with_effects":
+            elif is_with_effects(node):
                 with_effect_nodes.append(node)
                 if node.args[0] in input_nodes:
-                    input_token_nodes.append(node.args[0])
+                    input_token_nodes.add(node.args[0])
                     rewrite_with_effects_input_token(module, node)
             elif node.op == "output":
+                if subgraph == "forward" and num_backward_discovered_tokens > 0:
+                    for inp in input_nodes[-num_backward_discovered_tokens:]:
+                        input_token_nodes.add(inp)
+
                 outs = node.args[0]
                 for out in outs:
                     if (
@@ -296,21 +318,38 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         and out.args[0] in with_effect_nodes
                     ):
                         output_token_nodes.append(out)
+                    elif out in input_token_nodes:
+                        # Remove saved in forward input token for backward
+                        outputs_to_erase.append(out)
                     else:
                         other_output_nodes.append(out)
 
                 rewrite_output(module, node, output_token_nodes, other_output_nodes)
+                num_erased_outs = len(output_token_nodes) + len(outputs_to_erase)
 
         for input_token_node in input_token_nodes:
             module.graph.erase_node(input_token_node)
 
+        for saved_token_for_backward in outputs_to_erase:
+            module.graph.erase_node(saved_token_for_backward)
+
+        num_erased_inputs = len(input_token_nodes)
+
+        assert (
+            num_erased_inputs == expected_num_erased_inputs
+        ), f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased_inputs}"
+        assert (
+            num_erased_outs == expected_num_erased_outs
+        ), f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased_outs}"
+
         module.recompile()
 
-    if num_tokens > 0:
+    if num_tokens > 0 or num_backward_out_tokens > 0:
+        # Even if Forward did not use tokens, backward operations with tokens may be placed by partitinoer in forward.
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
-            aot_graphs_effects_log.info(
+            aot_graphs_effects_log.debug(
                 "%s",
                 lazy_format_graph_code(
                     "Forward graph before unlifting tokens",
@@ -321,13 +360,18 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(fw_module)
+        do(
+            fw_module,
+            "forward",
+            num_tokens + num_backward_discovered_tokens,
+            num_tokens + num_backward_out_tokens,
+        )
 
     if bw_module is not None and num_backward_out_tokens > 0:
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
-            aot_graphs_effects_log.info(
+            aot_graphs_effects_log.debug(
                 "%s",
                 lazy_format_graph_code(
                     "Backward graph before unlifting tokens",
@@ -338,7 +382,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(bw_module)
+        do(bw_module, "backward", num_backward_out_tokens, num_backward_out_tokens)
 
     # No need to update fw_metadata.num_forward_returns and fw_metadata.num_forward as num_tokens are not part of it.
     # As CompiledFunction.forward runs function wrapped in EffectTokensWrapper, that will toss out output tokens.
@@ -347,6 +391,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # the tokens.
     fw_metadata.tokens = {}
     fw_metadata.num_backward_out_tokens = 0
+    fw_metadata.num_backward_discovered_tokens = 0
 
 
 def root_module_when_exporting_non_strict(flat_fn):
@@ -408,12 +453,13 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
 
 
-def add_discovered_token_in_backward_as_input(gm):
+def add_discovered_token_in_backward_as_input(gm, num_tokens: int):
     placeholders = []
+    added_inputs = 0
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             placeholders.append(node)
-        elif node.op == "call_function" and node.target.__name__ == "with_effects":
+        elif is_with_effects(node) and not has_with_effects_ancestors(node.args[0]):
             import torch.utils._pytree as fx_pytree
             from torch.fx.graph import _PyTreeInfo
 
@@ -422,9 +468,13 @@ def add_discovered_token_in_backward_as_input(gm):
                 placeholders, gm.graph._codegen.pytree_info.in_spec
             )
 
-            with gm.graph.inserting_before(node):
+            num_primals = len(inps[0])
+
+            with gm.graph.inserting_before(placeholders[num_primals]):
                 # Naming with tangents as partitioner counts all inputs without "tangents" as forward inputs
-                bw_input_token = gm.graph.placeholder("tangents_bw_token")
+                bw_input_token = gm.graph.placeholder("primals_bw_token")
+                added_inputs += 1
+
                 node_meta = bw_input_token.meta
                 # fake_mode = placeholders[0].meta["val"].fake_mode
                 # node_meta["val"] = fake_mode.from_tensor(torch.tensor([]))
@@ -432,10 +482,9 @@ def add_discovered_token_in_backward_as_input(gm):
                 node_meta["tensor_meta"] = torch.tensor([])
 
                 old_arg = node.args[0]
+                node.update_arg(0, bw_input_token)
 
-                node.args = (bw_input_token, *node.args[1:])
-
-                new_inps = (inps[0], *(*inps[1], bw_input_token))
+                new_inps = (*(*inps[0], bw_input_token), *inps[1])
 
                 _, new_in_spec = fx_pytree.tree_flatten(new_inps)
                 pytree_info = gm.graph._codegen.pytree_info
@@ -446,4 +495,6 @@ def add_discovered_token_in_backward_as_input(gm):
                 gm.graph.erase_node(old_arg)
                 gm.graph.eliminate_dead_code()
                 gm.recompile()
-            break
+    assert (
+        added_inputs == num_tokens
+    ), f"expected added inputs:{num_tokens} added:{added_inputs}"

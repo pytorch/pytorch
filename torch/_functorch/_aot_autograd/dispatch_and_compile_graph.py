@@ -300,9 +300,11 @@ def aot_dispatch_autograd_graph(
     # If backward graph does use effectful ops with Tokens,
     # we have to add additional token argument to the joint graph manually after tracing.
     if fw_metadata.num_backward_discovered_tokens > 0:
-        add_discovered_token_in_backward_as_input(fx_g)
+        add_discovered_token_in_backward_as_input(
+            fx_g, fw_metadata.num_backward_discovered_tokens
+        )
         if aot_config.enable_log:
-            aot_graphs_effects_log.info(
+            aot_graphs_effects_log.debug(
                 "%s",
                 lazy_format_graph_code(
                     "aot_config id: %s, fw_metadata=%s, Joint graph after adding effect tokens discovered in backward",
