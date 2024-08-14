@@ -20,7 +20,7 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1111,7 +1111,7 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
 
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
     const at::Tensor& input,
@@ -1548,7 +1548,7 @@ static at::Tensor _quantized_convolution_onednn(
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+  auto packed_weight = at::native::itensor_from_onednn(weight);
 
   // Bias
   ideep::tensor onednn_bias;
@@ -1734,7 +1734,7 @@ static at::Tensor _quantized_convolution_onednn(
   }
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 namespace {
@@ -1793,10 +1793,10 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+#if AT_ONEDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {
         return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add_relu(
@@ -1884,7 +1884,7 @@ class QConvoneDNN final {
       c10::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
       std::optional<c10::string_view> algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (act.dim() == 3 || act.dim() == 5) {
       // Conv1D/3D post op check
       TORCH_CHECK(
@@ -1938,7 +1938,7 @@ class QConvoneDNN final {
       std::optional<c10::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<c10::string_view> unary_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
       act.dim() == 4 && binary_attr == "sum" && (
@@ -2001,7 +2001,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
-TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   // Conv1D/2D/3D with unary postop
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), QConvoneDNN::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), QConvoneDNN::run_pointwise);

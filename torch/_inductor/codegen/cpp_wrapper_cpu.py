@@ -730,7 +730,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 # When loading the constants, the valid data will depends on the size
                 # not the data_size so there won't be correctness issue.
                 data_size = (
-                    torch.ops.mkldnn._nbytes(tensor)
+                    torch.ops.onednn._nbytes(tensor)
                     if tensor.is_mkldnn
                     else tensor.untyped_storage().nbytes()
                 )
@@ -755,7 +755,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
 
                 if tensor.is_mkldnn:
-                    opaque_metadata_tensor = torch.ops.mkldnn._get_mkldnn_serialized_md(
+                    opaque_metadata_tensor = torch.ops.onednn._get_onednn_serialized_md(
                         tensor
                     )
                     assert (

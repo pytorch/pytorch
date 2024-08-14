@@ -26,8 +26,8 @@
 #include <nnpack.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -507,17 +507,17 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
-#if AT_MKLDNN_ENABLED()
-    if (!at::globalContext().userEnabledMkldnn()) {
+  bool use_onednn(const at::Tensor& input, const at::Tensor& weight) const  {
+#if AT_ONEDNN_ENABLED()
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (transposed && is_output_padding_big()) {
       return false;
     }
     if (input.device().is_cpu() &&
-        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
-         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+        ((input.scalar_type() == at::kBFloat16 && onednn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && onednn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -782,7 +782,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -1234,7 +1234,7 @@ ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_onednn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1429,7 +1429,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
       break;
     case ConvBackend::Mkldnn:
     case ConvBackend::MkldnnTranspose:
-      if (mkldnn_conv_use_channels_last(input, weight)) {
+      if (onednn_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
@@ -1579,7 +1579,7 @@ at::Tensor _convolution(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       break;
     case ConvBackend::Mkldnn:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1594,7 +1594,7 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::MkldnnTranspose:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1609,7 +1609,7 @@ at::Tensor _convolution(
 #endif
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       output = empty_mkldnn(
           calc_output_size(input, weight, params), optTypeMetaToScalarType(input.options().dtype_opt()),
           input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
@@ -2123,7 +2123,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       }
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       if (output_mask[0]) {
         if (input.is_mkldnn()) {
           backend_grad_input = empty_mkldnn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),
