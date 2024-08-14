@@ -747,27 +747,29 @@ void _apply_sparse_csr_linear_solve(
   cudssData_t cudss_data;
   cudssHandle_t handle = at::cuda::getCurrentCudssHandle();
 
-  cudssConfigCreate(&config);
-  cudssDataCreate(handle, &cudss_data);
+  TORCH_CUDSS_CHECK(cudssConfigCreate(&config));
+  TORCH_CUDSS_CHECK(cudssDataCreate(handle, &cudss_data));
 
   AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
     scalar_t* values_ptr = values.data<scalar_t>();
     scalar_t* b_ptr = b.data<scalar_t>();
     scalar_t* x_ptr = x.data<scalar_t>();
     auto CUDA_R_TYP = std::is_same<scalar_t, double>::value ? CUDA_R_64F : CUDA_R_32F;
-    cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
-    cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
-    cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
   }));
-  cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt);
-  cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt);
-  cudssExecute(handle, CUDSS_PHASE_SOLVE, config, cudss_data, A_mt, x_mt, b_mt);
+  cudssAlgType_t reorder_alg = CUDSS_ALG_1;
+  cudssConfigSet(config, CUDSS_CONFIG_REORDERING_ALG, &reorder_alg, sizeof(cudssAlgType_t));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_SOLVE, config, cudss_data, A_mt, x_mt, b_mt));
   // Destroy the opaque objects
-  cudssConfigDestroy(config);
-  cudssDataDestroy(handle, cudss_data);
-  cudssMatrixDestroy(A_mt);
-  cudssMatrixDestroy(x_mt);
-  cudssMatrixDestroy(b_mt);
+  TORCH_CUDSS_CHECK(cudssConfigDestroy(config));
+  TORCH_CUDSS_CHECK(cudssDataDestroy(handle, cudss_data));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(A_mt));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(x_mt));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(b_mt));
 #endif
 }
 } // namespace
