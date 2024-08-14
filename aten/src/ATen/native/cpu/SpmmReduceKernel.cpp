@@ -19,7 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -105,7 +105,7 @@ void spmm_reduce_kernel_impl(
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     opmath_t* buffer_ptr = nullptr;
 
-    int64_t row_start, row_end;
+    int64_t row_start = 0, row_end = 0;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
       row_end = csr_data[m + 1];
@@ -203,7 +203,7 @@ void spmm_reduce_arg_kernel_impl(
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     opmath_t* buffer_ptr = nullptr;
 
-    int64_t row_start, row_end, c;
+    int64_t row_start = 0, row_end = 0, c = 0;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
       row_end = csr_data[m + 1];
@@ -562,4 +562,4 @@ REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_inp
 REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
 
-}} // at::native
+} // at::native
