@@ -8,6 +8,7 @@ import torch
 import inspect
 import operator
 import collections
+import logging
 
 from dataclasses import is_dataclass, fields
 
@@ -23,6 +24,9 @@ import torch.fx.traceback as fx_traceback
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
            'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
            'ScopeContextManager']
+
+
+log = logging.getLogger(__name__)
 
 
 @compatibility(is_backward_compatible=False)
@@ -136,6 +140,7 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
@@ -175,6 +180,8 @@ class TracerBase:
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
+
+        log.debug("create_node %s", node)
         return node
 
     @compatibility(is_backward_compatible=True)

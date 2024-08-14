@@ -1331,6 +1331,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
+    @skipIfWindows
     def test_vertical_fusion1(self):
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -4993,6 +4994,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -5075,6 +5077,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     @skip_if_gpu_halide  # misaligned address error
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
@@ -5139,6 +5142,7 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
+    @skipIfWindows
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -5308,6 +5312,7 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    @skipIfWindows
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_unbacked_refinement(self):
         def fn(x):
@@ -6785,6 +6790,7 @@ class CommonTemplate:
             ),
         )
 
+    @skipIfWindows
     def test_roi_align(self):
         if not has_torchvision_roi_align():
             raise unittest.SkipTest("requires torchvision")
@@ -7107,6 +7113,7 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    @skipIfWindows
     def test_index_put_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7119,6 +7126,7 @@ class CommonTemplate:
         self.common(fn, (a, idx))
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     def test_index_put_failed_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -7192,6 +7200,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    @skipIfWindows
     def test_new_cpp_build_logical(self):
         from torch._inductor.codecache import validate_new_cpp_commands
 
@@ -7329,6 +7338,7 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @skipIfWindows
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -8001,6 +8011,7 @@ class CommonTemplate:
         check(torch.ones(3, device=self.device, dtype=torch.float32))
         self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
+    @skipIfWindows
     # Already on by default, just want to make sure
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_reuse_buffers_with_aliasing(self):
@@ -8192,6 +8203,7 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
     @skip_if_halide  # hangs forever
+    @skipIfWindows
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -8323,6 +8335,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfWindows
     def test_avg_pool2d_backward3(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -8413,6 +8426,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfWindows
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -8591,6 +8605,7 @@ class CommonTemplate:
             self.assertEqual(len(source_codes), 1)
             self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
+    @skipIfWindows
     def test_roll(self):
         def fn(a):
             return (
@@ -10270,6 +10285,7 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
+    @skipIfWindows
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_bucketize_add_autotune(self):
         # Causes a @pointwise(size_hints) where size_hints is 2D
@@ -10456,6 +10472,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 32)), 2.0), check_lowp=False)
 
+    @skipIfWindows
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_3(self):
         import torch.library
@@ -10772,6 +10789,7 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    @skipIfWindows
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
     @torch._inductor.config.patch(abi_compatible=True)
@@ -10820,6 +10838,7 @@ class CommonTemplate:
                         check_lowp=False,
                     )
 
+    @skipIfWindows
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
         @torch.compile
@@ -10834,6 +10853,7 @@ class CommonTemplate:
         self.common(fn, (x,), reference_in_float=False)
         assertGeneratedKernelCountEqual(self, 1)
 
+    @skipIfWindows
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
@@ -11926,6 +11946,26 @@ if HAS_GPU and not TEST_WITH_ASAN:
             fn(inp)
             self.assertTrue("start_graph" in code)
             self.assertTrue("end_graph" in code)
+
+        def test_comment_graph_fragment(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(x):
+                x = x.sin()
+                x = x.relu()
+                return x
+
+            inp = torch.randn(4, 4, device=GPU_TYPE)
+            code = run_and_get_triton_code(fn, inp)
+            fn(inp)
+            self.assertTrue("Graph fragment" in code)
+            self.assertTrue(
+                "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                in code
+            )
+            self.assertTrue(
+                "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                in code
+            )
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
