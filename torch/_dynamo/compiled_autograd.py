@@ -303,7 +303,7 @@ class AutogradCompilerInstance:
             {},
         )
         self.rename_aot_dispatcher_nodes()
-        # self.reorder_accumulate_grad_nodes()
+        self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
@@ -347,11 +347,6 @@ class AutogradCompilerInstance:
         if self.aot_graph_cls_name is None:
             return
 
-        def seek(it, idx):
-            for _ in range(idx):
-                next(it)
-            return it
-
         def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
             return a.op == b.op and a.target == b.target and a.type == b.type
 
@@ -360,21 +355,23 @@ class AutogradCompilerInstance:
             aot_id = info["aot_id"]
             aot_graph = info["aot_gm"].graph
 
-            # 1. Find the first op in the AOT graph
-            aot_it = iter(aot_graph.nodes)
-            aot_node = next(aot_it)
+            # 1. Find the first user op in the AOT graph
+            aot_node = next(iter(aot_graph.nodes))
             assert aot_node is not None
-            while aot_node.op != "call_function":
-                aot_node = next(aot_it)
+            while aot_node.op != "call_function" or aot_node.stack_trace is None:
+                aot_node = aot_node.next
 
             # 2. Find the first op in the compiled autograd graph segment
-            ca_node = next(seek(iter(self.fx_tracer.graph.nodes), ca_node_start_idx))
-            while ca_node and not is_similar(ca_node, aot_node):
-                # The compiled autograd graph may contain lazily inserted ops
-                # We skip those when aligning nodes from both graphs
-                ca_node = ca_node.next
-
-            if not ca_node:
+            ca_it = iter(self.fx_tracer.graph.nodes)
+            for _ in range(ca_node_start_idx):
+                next(ca_it)
+            ca_node = next(ca_it)
+            try:
+                while ca_node and not is_similar(ca_node, aot_node):
+                    # The compiled autograd graph may contain lazily inserted ops
+                    # We skip those when aligning nodes from both graphs
+                    ca_node = next(ca_it)
+            except StopIteration:
                 verbose_log.debug(
                     "Failed to match %s%s (NodeCall %s) nodes with AOT backward graph %s nodes",
                     self.aot_graph_cls_name,
