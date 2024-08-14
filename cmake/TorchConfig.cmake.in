@@ -96,7 +96,7 @@ else()
   append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
   append_torchlib_if_found(onnx onnx_proto)
 
-  append_torchlib_if_found(foxi_loader fmt)
+  append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
   if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)

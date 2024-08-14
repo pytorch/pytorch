@@ -6232,33 +6232,6 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
-- func: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
-  variants: function
-  device_check: NoCheck
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_strided_to_jagged
-
-- func: _nested_strided_to_jagged_copy(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  tags: view_copy
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: _nested_strided_to_jagged_copy
-  autogen: _nested_strided_to_jagged_copy.out
-
-- func: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_jagged_to_strided_copy(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  tags: view_copy
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: _nested_jagged_to_strided_copy
-  autogen: _nested_jagged_to_strided_copy.out
-
 - func: _nested_get_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
@@ -8917,6 +8890,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: eq_tensor_nested
   tags: [core, pointwise]
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
