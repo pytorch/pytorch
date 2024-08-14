@@ -210,7 +210,7 @@ enum class DispatchKey : uint16_t {
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
-  MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
+  OnednnCPU, // registered at build/aten/src/ATen/RegisterOnednnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
 
   // See [Note: Per-Backend Functionality Dispatch Keys]

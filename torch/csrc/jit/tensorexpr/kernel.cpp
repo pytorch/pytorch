@@ -7,7 +7,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
+#include <torch/csrc/jit/passes/onednn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -289,7 +289,7 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
 }
 
 bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
   auto const& stride = toIValue(node->input(3));

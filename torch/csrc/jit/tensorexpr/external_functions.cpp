@@ -5,7 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/mkldnn/OpContext.h>
+#include <ATen/native/onednn/OpContext.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
@@ -1397,7 +1397,7 @@ void nnc_aten_triangular_solve(
   }
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 void nnc_mkldnn_prepacked_conv_run(
     int64_t bufs_num,
@@ -1408,7 +1408,7 @@ void nnc_mkldnn_prepacked_conv_run(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  using namespace at::native::mkldnn;
+  using namespace at::native::onednn;
 
   auto tensors = constructTensors(
       bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
@@ -1419,7 +1419,7 @@ void nnc_mkldnn_prepacked_conv_run(
   context->run(x, buf_data[0]);
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 
@@ -1603,11 +1603,11 @@ const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv_run(
     "nnc_mkldnn_prepacked_conv_run",
     nnc_mkldnn_prepacked_conv_run);
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

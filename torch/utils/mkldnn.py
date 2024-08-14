@@ -29,7 +29,7 @@ class MkldnnLinear(torch.jit.ScriptModule):
     @torch.jit.script_method
     def forward(self, x):
         x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
-        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
+        y_mkldnn = torch._C._nn.onednn_linear(x_mkldnn, self.weight, self.bias)
         y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
         return y
 
@@ -63,7 +63,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        return torch.mkldnn_convolution(
+        return torch.onednn_convolution(
             x,
             self.weight,
             self.bias,
@@ -90,7 +90,7 @@ class MkldnnConv2d(_MkldnnConvNd):
     def __init__(self, dense_module, dtype):
         super().__init__(dense_module)
 
-        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
+        self.register_buffer('weight', torch._C._nn.onednn_reorder_conv2d_weight(
             dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
@@ -99,7 +99,7 @@ class MkldnnConv2d(_MkldnnConvNd):
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
+        self.weight = torch._C._nn.onednn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
             self.padding,
             self.stride,
@@ -112,7 +112,7 @@ class MkldnnConv3d(_MkldnnConvNd):
     def __init__(self, dense_module, dtype):
         super().__init__(dense_module)
 
-        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
+        self.register_buffer('weight', torch._C._nn.onednn_reorder_conv3d_weight(
             dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
@@ -121,7 +121,7 @@ class MkldnnConv3d(_MkldnnConvNd):
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        self.weight = torch._C._nn.mkldnn_reorder_conv3d_weight(
+        self.weight = torch._C._nn.onednn_reorder_conv3d_weight(
             state[0].to_mkldnn(),
             self.padding,
             self.stride,

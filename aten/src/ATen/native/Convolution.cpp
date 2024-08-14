@@ -26,8 +26,8 @@
 #include <nnpack.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -70,7 +70,7 @@
 #include <ATen/ops/miopen_convolution.h>
 #include <ATen/ops/miopen_convolution_transpose.h>
 #include <ATen/ops/miopen_depthwise_convolution.h>
-#include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/onednn_convolution.h>
 #include <ATen/ops/mps_convolution_backward.h>
 #include <ATen/ops/mps_convolution_transpose_backward.h>
 #include <ATen/ops/slow_conv3d.h>
@@ -507,9 +507,9 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
-#if AT_MKLDNN_ENABLED()
-    if (!at::globalContext().userEnabledMkldnn()) {
+  bool use_onednn(const at::Tensor& input, const at::Tensor& weight) const  {
+#if AT_ONEDNN_ENABLED()
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (transposed && is_output_padding_big()) {
@@ -615,9 +615,9 @@ DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 DEFINE_DISPATCH(miopen_convolution_backward_stub);
 DEFINE_DISPATCH(miopen_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(miopen_depthwise_convolution_backward_stub);
-DEFINE_DISPATCH(mkldnn_convolution_backward_stub);
-DEFINE_DISPATCH(mkldnn_convolution_transpose_stub);
-DEFINE_DISPATCH(mkldnn_convolution_transpose_backward_stub);
+DEFINE_DISPATCH(onednn_convolution_backward_stub);
+DEFINE_DISPATCH(onednn_convolution_transpose_stub);
+DEFINE_DISPATCH(onednn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
@@ -782,7 +782,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -1234,7 +1234,7 @@ ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_onednn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1579,7 +1579,7 @@ at::Tensor _convolution(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       break;
     case ConvBackend::Mkldnn:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1587,14 +1587,14 @@ at::Tensor _convolution(
         weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
       }
-      output = at::mkldnn_convolution(
+      output = at::onednn_convolution(
           input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
       break;
     case ConvBackend::MkldnnTranspose:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       check_input_same_type_as_parameters(input, weight, bias, backend);
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
@@ -1602,15 +1602,15 @@ at::Tensor _convolution(
         weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
       }
-      output = mkldnn_convolution_transpose_stub(input.device().type(),
+      output = onednn_convolution_transpose_stub(input.device().type(),
           input, weight, bias, params.padding, params.output_padding, params.stride, params.dilation, params.groups);
 #else
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
-      output = empty_mkldnn(
+#if AT_ONEDNN_ENABLED()
+      output = empty_onednn(
           calc_output_size(input, weight, params), optTypeMetaToScalarType(input.options().dtype_opt()),
           input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
 #else
@@ -2123,10 +2123,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       }
       break;
     case ConvBackend::MkldnnEmpty:
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
       if (output_mask[0]) {
         if (input.is_mkldnn()) {
-          backend_grad_input = empty_mkldnn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),
+          backend_grad_input = empty_onednn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),
               input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
           backend_grad_input.zero_();
         } else {
@@ -2176,7 +2176,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         weight = weight.contiguous(backend_memory_format);
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        mkldnn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
+        onednn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
           params.stride, params.dilation, params.groups, output_mask);
       break;
     case ConvBackend::MkldnnTranspose:
@@ -2187,7 +2187,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         weight = weight.contiguous(backend_memory_format);
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        mkldnn_convolution_transpose_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
+        onednn_convolution_transpose_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
         params.output_padding, params.stride, params.dilation, params.groups, output_mask);
       break;
     case ConvBackend::Overrideable:
