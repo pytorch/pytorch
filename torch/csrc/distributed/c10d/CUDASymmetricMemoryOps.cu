@@ -16,6 +16,8 @@ using namespace c10d::symmetric_memory;
 
 size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
+  // Only check the offset since the multicast address is always at least
+  // 128-bit aligned
   const size_t ptr_alignment = get_alignment(
       static_cast<size_t>(input.storage_offset() * input.element_size()));
   TORCH_CHECK(

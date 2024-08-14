@@ -10,17 +10,7 @@ constexpr size_t max_num_blocks = 8;
 template <typename T>
 size_t get_alignment(T ptr_or_size) {
   auto val = reinterpret_cast<uintptr_t>(ptr_or_size);
-  if (val % 16 == 0) {
-    return 16;
-  } else if (val % 8 == 0) {
-    return 8;
-  } else if (val % 4 == 0) {
-    return 4;
-  } else if (val % 2 == 0) {
-    return 2;
-  } else {
-    return 1;
-  }
+  return std::min(val & -val, 16ul);
 }
 
 template <>
