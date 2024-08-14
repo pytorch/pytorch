@@ -1186,6 +1186,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has_all(c10::onednn_ks);
   }
 
+  bool is_mkldnn() const {
+    return key_set_.has_all(c10::onednn_ks);
+  }
+
   bool is_vulkan() const {
     if (C10_UNLIKELY(device_policy_)) {
       return device_custom().is_vulkan();
