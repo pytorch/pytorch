@@ -1037,6 +1037,15 @@ class EventVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def reconstruct(self, codegen):
+        # If we got here, this event is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
+        prefix = "_event"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(codegen.create_load_global(name, add=True))
+
 
 class WithExitFunctionVariable(VariableTracker):
     _nonvar_fields = {
