@@ -6164,7 +6164,10 @@ def forward(self, x):
             if isinstance(node.target, torch._ops.HigherOrderOperator)
         ][0]
         schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(cond_node)
-        self.assertExpectedInline(str(schema), """""")
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",
+        )
         # test cond subgraph
         expected_names_and_ops = [
             ("mul_2", "placeholder"),

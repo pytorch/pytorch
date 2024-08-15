@@ -5,7 +5,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, List, Set, Type, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -428,7 +428,7 @@ class HigherOrderOperator(OperatorBase):
 
     @staticmethod
     def generate_schema(
-        hop, example_inputs: tuple[Any, ...], example_output: tuple[Any, ...]
+        hop, example_inputs: Tuple[Any, ...], example_output: Tuple[Any, ...]
     ):
         """
         example_args: a tuple of (name, value) pairs. The ordering of the name corresponds to
