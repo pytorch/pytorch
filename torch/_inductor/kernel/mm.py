@@ -535,7 +535,7 @@ def mm_autoheuristic(
     input_nodes,
     ops,
     precondition,
-    top_k=-1,
+    top_k: Optional[int] = None,
     always_included=None,
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
@@ -576,11 +576,13 @@ def mm_autoheuristic(
         augment_context=ops,
         precondition=precondition,
     )
-    if top_k != -1:
+
+    if top_k is not None:
         # TODO: is there a cleaner way to ensure aten.mm is always included?
         return autoheuristic.get_top_k_choices_caller(
             top_k, always_included=always_included
         )
+
     return autoheuristic.get_choice_caller()
 
 
