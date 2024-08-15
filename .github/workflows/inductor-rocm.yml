@@ -23,10 +23,10 @@ permissions: read-all
 
 jobs:
   linux-focal-rocm6_1-py3_9-inductor-build:
-    name: rocm6.1-py3.8-inductor
+    name: rocm6.1-py3.9-inductor
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm6.1-py3.8
+      build-environment: linux-focal-rocm6.1-py3.9
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -38,10 +38,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: rocm6.1-py3.8-inductor
+    name: rocm6.1-py3.9-inductor
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm6_1-py3_9-inductor-build
     with:
-      build-environment: linux-focal-rocm6.1-py3.8
+      build-environment: linux-focal-rocm6.1-py3.9
       docker-image: ${{ needs.linux-focal-rocm6_1-py3_9-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-focal-rocm6_1-py3_9-inductor-build.outputs.test-matrix }}
