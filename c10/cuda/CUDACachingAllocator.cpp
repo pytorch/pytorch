@@ -1918,16 +1918,40 @@ class DeviceCachingAllocator {
 
     std::unordered_map<PrivatePool*, MempoolId_t> pool_to_id;
     pool_to_id.reserve(graph_pools.size() + graph_pools_freeable.size());
-    for (const auto& pair : graph_pools) {
-      pool_to_id[pair.second.get()] = pair.first;
+    std::vector<Block*> all_blocks;
+    MempoolId_t mempool_id = {0, 0};
+
+    auto active_mempool = MemPoolContext::getActiveMemPool();
+    if (active_mempool) {
+      mempool_id = active_mempool->id();
     }
-    for (const auto& pair : graph_pools_freeable) {
-      pool_to_id[pair.second] = pair.first;
+
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
+      auto pool = graph_pools.find(mempool_id);
+      if (pool != graph_pools.end()) {
+        pool_to_id[pool->second.get()] = pool->first;
+        all_blocks = get_private_pool_head_blocks(pool->second.get());
+      }
+      auto pool_freeable = graph_pools_freeable.find(mempool_id);
+      if (pool_freeable != graph_pools_freeable.end()) {
+        pool_to_id[pool_freeable->second] = pool_freeable->first;
+        auto blocks_freeable =
+            get_private_pool_head_blocks(pool_freeable->second);
+        all_blocks.insert(
+            all_blocks.end(), blocks_freeable.begin(), blocks_freeable.end());
+      }
+    } else {
+      for (const auto& pair : graph_pools) {
+        pool_to_id[pair.second.get()] = pair.first;
+      }
+      for (const auto& pair : graph_pools_freeable) {
+        pool_to_id[pair.second] = pair.first;
+      }
+      all_blocks = get_all_blocks();
     }
 
     size_t total_active = 0;
     std::vector<SegmentInfo> result;
-    const auto all_blocks = get_all_blocks();
 
     for (const Block* const head_block : all_blocks) {
       // For expandable segments, we report one segment for each contiguous
@@ -2139,8 +2163,8 @@ class DeviceCachingAllocator {
  private:
   // All private methods do not acquire the allocator mutex.
 
-  std::vector<const Block*> get_all_blocks() const {
-    std::vector<const Block*> blocks;
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
     blocks.insert(
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(

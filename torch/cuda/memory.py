@@ -975,6 +975,25 @@ def _get_current_allocator() -> _CUDAAllocator:
     return _CUDAAllocator(torch._C._cuda_getAllocator())
 
 
+class MemPoolContext(_MemPoolContext):
+    r"""MemPoolContext holds the currently active pool and stashes the previous
+    pool. On deletion it makes the previous pool active.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+        allocations route to this pool.
+
+    """
+
+    def __init__(self, pool: _MemPool):
+        super().__init__(pool)
+
+    @staticmethod
+    def active_pool() -> Optional[_MemPool]:
+        r"""Returns the active MemPool"""
+        return _MemPoolContext.active_pool()
+
+
 class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
@@ -1039,24 +1058,22 @@ class MemPool(_MemPool):
         for _ in range(self.use_count()):
             _cuda_releasePool(device_index, self.id)
 
+    def snapshot(self):
+        r"""Return a snapshot of the CUDA memory allocator pool state across all
+        devices.
 
-class MemPoolContext(_MemPoolContext):
-    r"""MemPoolContext holds the currently active pool and stashes the previous
-    pool. On deletion it makes the previous pool active.
+        Interpreting the output of this function requires familiarity with the
+        memory allocator internals.
 
-    Args:
-        pool(torch.cuda.MemPool): a MemPool object to be made active so that
-        allocations route to this pool.
-
-    """
-
-    def __init__(self, pool: MemPool):
-        super().__init__(pool)
-
-    @staticmethod
-    def active_pool() -> Optional[_MemPool]:
-        r"""Returns the active MemPool"""
-        return _MemPoolContext.active_pool()
+        .. note::
+            See :ref:`cuda-memory-management` for more details about GPU memory
+            management.
+        """
+        torch.cuda.init()
+        ctx = MemPoolContext(self)
+        snapshot = torch.cuda.memory_snapshot()
+        del ctx
+        return snapshot
 
 
 @contextlib.contextmanager
