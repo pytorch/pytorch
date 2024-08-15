@@ -1412,6 +1412,11 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
 }
 
 Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
+  // Check for type promotion, if the output tensor is defined.
+  TORCH_CHECK(
+      canCast(dtype, result.scalar_type()),
+      "mean.dtype_out(): input types can't be cast to the desired output type ",
+      result.scalar_type());
   return at::mean_out(result, self, IntArrayRef{}, false, dtype);
 }
 
