@@ -668,6 +668,11 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Check if we need to split the batch to do the computation
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
+    TORCH_CHECK(
+        batch1.scalar_type() == kFloat,
+        "Tiling of batch matmul for outputs with more than 2**32 elements is currently only supported for fp32 on MPS backend. ",
+        "Use `PYTORCH_ENABLE_MPS_FALLBACK=1` as a temporary fix. ",
+        "File a feature request for this use case against the MPS backend at https://github.com/pytorch/pytorch/issues");
     result = tiled_bmm_out_mps_impl(batch1, batch2, result);
     return result;
   }
