@@ -392,6 +392,9 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
+# TODO: Implementing this via inheritance rather than composition is a
+# footgun, because self method calls in dict will route back to the set
+# implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
     """We model a sets as dictonary with None values"""
 
@@ -495,6 +498,19 @@ class SetVariable(ConstDictVariable):
             else:
                 arg = args[0]
             return super().call_method(tx, "update", (arg,), kwargs)
+        elif name == "remove":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] not in self:
+                unimplemented("key does not exist")
+            return super().call_method(tx, "pop", args, kwargs)
+        elif name == "discard":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] in self:
+                return super().call_method(tx, "pop", args, kwargs)
+            else:
+                return ConstantVariable.create(value=None)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):

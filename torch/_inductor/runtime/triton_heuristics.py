@@ -1026,6 +1026,8 @@ def should_use_remote_autotune_cache(inductor_meta):
         return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
         return False
+    if torch._utils_internal.is_fb_unit_test():
+        return False
     if inductor_meta.get("is_hip"):
         return False
 
@@ -1324,7 +1326,9 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
+def triton_config_reduction(
+    size_hints, x, r, num_stages=1, num_warps=None, register_intensive=False
+) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -1349,9 +1353,12 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         num_warps = conditional_product(x, r) // 128
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
     # therefore using half the number of warps here correspondingly.
-    default_num_warps = 4 if torch.version.hip else 8
+    max_num_warps = 8 if torch.version.hip else 16
+    # persistent reduction is register intensive
+    if register_intensive:
+        max_num_warps = max_num_warps // 2
     min_num_warps = 1 if torch.version.hip else 2
-    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), default_num_warps))
+    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
@@ -1532,6 +1539,7 @@ def _reduction_configs(
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
 
+    register_intensive = False
     MAX_RBLOCK = 2048
     if (
         size_hints[0] >= 1024
@@ -1551,13 +1559,22 @@ def _reduction_configs(
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
         MAX_RBLOCK = 1024
+        register_intensive = True
 
     contiguous_config = triton_config_reduction(
-        size_hints, 1, (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK)
+        size_hints,
+        1,
+        (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK),
+        register_intensive=register_intensive,
     )
-    outer_config = triton_config_reduction(size_hints, 64, 8)
+    outer_config = triton_config_reduction(
+        size_hints, 64, 8, register_intensive=register_intensive
+    )
     tiny_config = triton_config_reduction(
-        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
+        size_hints,
+        2 * (256 // rnumel) if rnumel <= 256 else 1,
+        min(rnumel, MAX_RBLOCK),
+        register_intensive=register_intensive,
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
@@ -1626,7 +1643,7 @@ def persistent_reduction(
     xnumel, rnumel = size_hints
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel)
+        triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
         for xblock in (1, 8, 32, 128)
         if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
     ]

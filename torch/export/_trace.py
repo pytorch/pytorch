@@ -691,7 +691,7 @@ def _export_to_aten_ir(
     graph_signature.user_outputs = _graph_output_names(gm)
 
     def make_argument_spec(i, node) -> ArgumentSpec:
-        if isinstance(node, (int, bool, float, type(None))):
+        if isinstance(node, (int, bool, float, type(None), str)):
             # For const outputs we just directly return this
             return ConstantArgument(name="", value=node)
 
@@ -2071,7 +2071,17 @@ def _export(
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
 
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
+
     from torch._export.verifier import Verifier
+
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
     exported_program = ExportedProgram(
         root=gm,
