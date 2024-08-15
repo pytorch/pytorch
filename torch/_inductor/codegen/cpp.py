@@ -16,7 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -1182,6 +1182,13 @@ class CppVecOverrides(CppOverrides):
         return f"{a} >> {b}"
 
     @staticmethod
+    def remainder(a, b):
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
+        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -1284,16 +1291,30 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # a and b are integer type
-        _t = f"decltype({a})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if is_float_dtype(a.dtype):
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            return f"at::vec::div_floor_floating_vec({a}, {b})"
+        else:
+            assert all(is_integer_dtype(item.dtype) for item in [a, b])
+            # a and b are integer type
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                # Doing blend to set the remaining bits of b to non-zero
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({b})"
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -2009,6 +2030,11 @@ class CppVecKernel(CppKernel):
         )
         assert num_vectors >= 1
         return num_vectors
+
+    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
+        # This utility function is used to check if the vector lanes has been
+        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
+        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
