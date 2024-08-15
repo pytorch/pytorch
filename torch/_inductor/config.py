@@ -57,6 +57,9 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
+# sleep in inductor for testing
+sleep_sec_TESTING_ONLY: Optional[int] = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -65,9 +68,7 @@ abi_compatible = (
     os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
 )
 
-c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
-)
+c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
 # dead code elimination
 dce = False
@@ -453,6 +454,9 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# enable the combo kernel that combines data-independent kernels (additional
+# to foreach kernels) into a single one (Experimental)
+combo_kernels = False
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
