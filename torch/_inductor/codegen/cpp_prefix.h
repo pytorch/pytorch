@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <map>
 #include <omp.h>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
@@ -592,7 +593,37 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-void mm_get_thread_blocking(
+std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
+  int count = 0;
+  for (int64_t i = std::sqrt(number); i > 0; --i) {
+    if (number % i == 0) {
+      count += 2;
+    }
+  }
+  auto factors = std::shared_ptr<int64_t[]>(new int64_t[count]);
+  int index = 0;
+  for (int64_t i = std::sqrt(number); i > 0; --i) {
+    if (number % i == 0) {
+      factors[index++] = number / i;
+      factors[index++] = i;
+    }
+  }
+  return std::make_tuple(factors, count);
+}
+
+std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
+  thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>> cache;
+  auto it = cache.find(number);
+  if (it != cache.end()) {
+    return it->second;
+  } else {
+    auto factors = _get_factors(number);
+    cache[number] = factors;
+    return factors;
+  }
+}
+
+void _mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -605,26 +636,7 @@ void mm_get_thread_blocking(
     int64_t& Nt,
     int64_t& Kt) {
   // see NOTE [Thread blocking in Cpp GEMM] for heuristics
-  // TODO(jgong5): cache thread blocking results
   Mt = Nt = Kt = 0;
-
-  auto get_factors = [](int64_t number) {
-    int count = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        count += 2;
-      }
-    }
-    auto factors = std::make_unique<int64_t[]>(count);
-    int index = 0;
-    for (int64_t i = std::sqrt(number); i > 0; --i) {
-      if (number % i == 0) {
-        factors[index++] = number / i;
-        factors[index++] = i;
-      }
-    }
-    return std::make_tuple(std::move(factors), count);
-  };
 
   auto get_blocking = [](int64_t m_factor,
                          int64_t n_factor,
@@ -707,8 +719,34 @@ void mm_get_thread_blocking(
   assert(Mt != 0);
 }
 
+void mm_get_thread_blocking(
+    int num_threads,
+    int max_k_slices,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
+  thread_local std::map<
+    std::tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
+    std::tuple<int64_t, int64_t, int64_t>> cache;
+  auto key = std::make_tuple(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    std::tie(Mt, Nt, Kt) = it->second;
+    return;
+  } else {
+    _mm_get_thread_blocking(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr, Mt, Nt, Kt);
+    cache[key] = std::make_tuple(Mt, Nt, Kt);
+  }
+}
+
 template<typename X_t, typename W_t>
-void mm_get_cache_blocking(
+void _mm_get_cache_blocking(
     int num_threads,
     int64_t M,
     int64_t N,
@@ -764,6 +802,36 @@ void mm_get_cache_blocking(
         Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
       }
     }
+  }
+}
+
+template<typename X_t, typename W_t>
+void mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks) {
+  thread_local std::map<
+    std::tuple<int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
+    std::tuple<int64_t, int64_t, int64_t>> cache;
+  auto key = std::make_tuple(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
+    return;
+  } else {
+    _mm_get_cache_blocking<X_t, W_t>(
+        num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks);
+    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
   }
 }
 
