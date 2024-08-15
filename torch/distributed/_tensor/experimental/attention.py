@@ -830,7 +830,7 @@ def context_parallel(
             these buffers can be put in this list to avoid extra restore time.
 
     .. warning::
-        `torch.distributed._tensor.experimental.attention.context_parall` is a
+        `torch.distributed._tensor.experimental.attention.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
     buffers = [] if buffers is None else buffers
