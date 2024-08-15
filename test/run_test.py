@@ -387,6 +387,12 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
+    if scribe_token:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
+    else:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
+
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
