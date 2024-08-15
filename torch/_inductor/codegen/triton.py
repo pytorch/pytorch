@@ -433,7 +433,9 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
 
     def _print_FloatPow(self, expr):
-        return f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
 
     _print_PowByNatural = _print_FloatPow
 

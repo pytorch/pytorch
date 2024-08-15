@@ -5335,7 +5335,7 @@ class CommonTemplate:
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
-            r = r ** 10
+            r = r**10
             return x * r
 
         cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
