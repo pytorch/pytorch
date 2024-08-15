@@ -2590,6 +2590,23 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
 
 
 class DeviceGuard:
+    r"""Context-manager that changes the selected device.
+
+    Args:
+        device_index (int): device index to select. It's a no-op if
+            this argument is negative.
+
+    Examples:
+        >>> torch.set_device(0)
+        >>> torch.current_device()
+        0
+        >>> with torch.DeviceGuard(1):
+        ...     torch.current_device()
+        1
+        >>> torch.current_device()
+        0
+    """
+
     def __init__(self, device_index: builtins.int):
         self.idx = device_index
         self.prev_idx = -1
@@ -2603,6 +2620,24 @@ class DeviceGuard:
 
 
 class StreamGuard:
+    r"""Context-manager that changes the selected stream.
+
+    Args:
+        stream (torch.Stream): selected stream.
+
+    Examples:
+        >>> s1 = torch.Stream()
+        >>> s2 = torch.Stream()
+        >>> torch.set_stream(s1)
+        >>> torch.current_stream() == s1
+        True
+        >>> with torch.StreamGuard(s2):
+        ...     torch.current_stream() == s2
+        True
+        >>> torch.current_stream() == s1
+        True
+    """
+
     def __init__(self, stream: torch.Stream):
         self.stream = stream
         self.src_prev_stream = None

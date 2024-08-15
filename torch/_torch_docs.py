@@ -13484,10 +13484,10 @@ add_docstr(
     r"""
 device_count() -> int
 
-Return the number of current accelerators available.
+Return the number of current :ref:`accelerator<accelerators>` available.
 
 Returns:
-    int: the number of the current accelerators available. If no available accelerators, return 0.
+    int: the number of the current :ref:`accelerator<accelerators>` available. If no available accelerators, return 0.
 """,
 )
 
@@ -13555,14 +13555,18 @@ synchronize(device) -> None
 Wait for all kernels in all streams on the given device to complete.
 
 Arguments:
-    device (:class:`torch.device`, str, int, optional): device for which to synchronize. If not given, use :func:`torch.current_device` by default.
+    device (:class:`torch.device`, str, int, optional): device for which to synchronize.
+        If not given, use :func:`torch.current_device` by default.
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> assert torch.has_accelerator() "No available accelerators detected."
     >>> start_event = torch.Event(enable_timing=True)
     >>> end_event = torch.Event(enable_timing=True)
     >>> start_event.record()
-    >>> # Run some thing here
+    >>> tensor = torch.randn(100, device=torch.current_accelerator())
+    >>> sum = torch.sum(tensor)
     >>> end_event.record()
     >>> torch.synchronize()
     >>> elapsed_time_ms = start_event.elapsed_time(end_event)
