@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <exception>
 
 #include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
@@ -30,7 +29,7 @@ const Function* CompilationUnit::find_function(
 }
 
 Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
-  // NOLINTNEXTLINE
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<Function*>(
       static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
