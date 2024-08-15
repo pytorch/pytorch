@@ -1918,16 +1918,40 @@ class DeviceCachingAllocator {
 
     std::unordered_map<PrivatePool*, MempoolId_t> pool_to_id;
     pool_to_id.reserve(graph_pools.size() + graph_pools_freeable.size());
-    for (const auto& pair : graph_pools) {
-      pool_to_id[pair.second.get()] = pair.first;
+    std::vector<Block*> all_blocks;
+    MempoolId_t mempool_id = {0, 0};
+
+    auto active_mempool = MemPoolContext::getActiveMemPool();
+    if (active_mempool) {
+      mempool_id = active_mempool->id();
     }
-    for (const auto& pair : graph_pools_freeable) {
-      pool_to_id[pair.second] = pair.first;
+
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
+      auto pool = graph_pools.find(mempool_id);
+      if (pool != graph_pools.end()) {
+        pool_to_id[pool->second.get()] = pool->first;
+        all_blocks = get_private_pool_head_blocks(pool->second.get());
+      }
+      auto pool_freeable = graph_pools_freeable.find(mempool_id);
+      if (pool_freeable != graph_pools_freeable.end()) {
+        pool_to_id[pool_freeable->second] = pool_freeable->first;
+        auto blocks_freeable =
+            get_private_pool_head_blocks(pool_freeable->second);
+        all_blocks.insert(
+            all_blocks.end(), blocks_freeable.begin(), blocks_freeable.end());
+      }
+    } else {
+      for (const auto& pair : graph_pools) {
+        pool_to_id[pair.second.get()] = pair.first;
+      }
+      for (const auto& pair : graph_pools_freeable) {
+        pool_to_id[pair.second] = pair.first;
+      }
+      all_blocks = get_all_blocks();
     }
 
     size_t total_active = 0;
     std::vector<SegmentInfo> result;
-    const auto all_blocks = get_all_blocks();
 
     for (const Block* const head_block : all_blocks) {
       // For expandable segments, we report one segment for each contiguous
@@ -2105,6 +2129,15 @@ class DeviceCachingAllocator {
     }
   }
 
+  int getPoolUseCount(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto it = graph_pools.find(mempool_id);
+    if (it != graph_pools.end()) {
+      return it->second->use_count;
+    }
+    return 0;
+  }
+
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (std::find(
@@ -2130,8 +2163,8 @@ class DeviceCachingAllocator {
  private:
   // All private methods do not acquire the allocator mutex.
 
-  std::vector<const Block*> get_all_blocks() const {
-    std::vector<const Block*> blocks;
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
     blocks.insert(
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
@@ -2674,7 +2707,12 @@ class DeviceCachingAllocator {
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      }
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
+        ptr = active_pool->allocator()->raw_alloc(size);
+        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size);
       }
@@ -2779,26 +2817,47 @@ class DeviceCachingAllocator {
   }
 
   bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context) {
-    // First ensure that all blocks that can't currently be allocated due to
-    // outstanding events are returned to the pool.
-    synchronize_and_free_events(context);
+    MempoolId_t mempool_id = {0, 0};
+    auto active_mempool = MemPoolContext::getActiveMemPool();
+    if (active_mempool) {
+      mempool_id = active_mempool->id();
+    }
 
-    // Free all non-split cached blocks to system allocator
-    release_blocks(large_blocks, context);
-    release_blocks(small_blocks, context);
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
+      auto it = graph_pools_freeable.find(mempool_id);
+      if (it != graph_pools_freeable.end()) {
+        synchronize_and_free_events(context, it->second);
+        TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
+        release_blocks(it->second->small_blocks, context);
+        release_blocks(it->second->large_blocks, context);
+        if (it->second->cudaMalloc_count == 0) {
+          auto erase_count = graph_pools.erase(it->first);
+          TORCH_INTERNAL_ASSERT(erase_count == 1);
+          graph_pools_freeable.erase(it);
+        }
+      }
+    } else {
+      // First ensure that all blocks that can't currently be allocated due to
+      // outstanding events are returned to the pool.
+      synchronize_and_free_events(context);
 
-    for (auto it = graph_pools_freeable.begin();
-         it != graph_pools_freeable.end();) {
-      // See notifyCaptureDestroy for the strategy here.
-      TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      release_blocks(it->second->small_blocks, context);
-      release_blocks(it->second->large_blocks, context);
-      if (it->second->cudaMalloc_count == 0) {
-        auto erase_count = graph_pools.erase(it->first);
-        TORCH_INTERNAL_ASSERT(erase_count == 1);
-        it = graph_pools_freeable.erase(it);
-      } else {
-        ++it;
+      // Free all non-split cached blocks to system allocator
+      release_blocks(large_blocks, context);
+      release_blocks(small_blocks, context);
+
+      for (auto it = graph_pools_freeable.begin();
+           it != graph_pools_freeable.end();) {
+        // See notifyCaptureDestroy for the strategy here.
+        TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
+        release_blocks(it->second->small_blocks, context);
+        release_blocks(it->second->large_blocks, context);
+        if (it->second->cudaMalloc_count == 0) {
+          auto erase_count = graph_pools.erase(it->first);
+          TORCH_INTERNAL_ASSERT(erase_count == 1);
+          it = graph_pools_freeable.erase(it);
+        } else {
+          ++it;
+        }
       }
     }
 
@@ -2834,10 +2893,15 @@ class DeviceCachingAllocator {
         block->device,
         context ? context : block->context_when_segment_allocated);
 
-    C10_CUDA_CHECK(cudaFree((void*)block->ptr));
+    auto* pool = block->pool;
+    auto active_pool = MemPoolContext::getActiveMemPool();
+    if (active_pool && active_pool->allocator() && pool->owner_PrivatePool) {
+      active_pool->allocator()->raw_delete((void*)block->ptr);
+    } else {
+      C10_CUDA_CHECK(cudaFree((void*)block->ptr));
+    }
     total_allocated_memory -= block->size;
 
-    auto* pool = block->pool;
     if (pool->owner_PrivatePool) {
       // The cudaFreed block belonged to a CUDA graph's PrivatePool.
       TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->cudaMalloc_count > 0);
@@ -2955,7 +3019,8 @@ class DeviceCachingAllocator {
   }
 
   void synchronize_and_free_events(
-      const std::shared_ptr<GatheredContext>& context) {
+      const std::shared_ptr<GatheredContext>& context,
+      PrivatePool* pool = nullptr) {
     // Synchronize on outstanding events and then free associated blocks.
     stats.num_sync_all_streams++;
 
@@ -2963,22 +3028,41 @@ class DeviceCachingAllocator {
     // make sure capture-deferred end of life events get processed too.
     TORCH_INTERNAL_ASSERT(captures_underway.empty());
     insert_events_deferred_until_no_capture(context);
+    for (auto it = cuda_events.begin(); it != cuda_events.end();) {
+      for (auto e = it->second.begin(); e != it->second.end();) {
+        EventPool::Event event;
+        Block* block = e->second;
+        if (pool) {
+          if (block->pool->owner_PrivatePool == pool) {
+            event = std::move(e->first);
+            C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
-    for (auto& st : cuda_events) {
-      for (auto& e : st.second) {
-        EventPool::Event event = std::move(e.first);
-        Block* block = e.second;
-
+            block->event_count--;
+            if (block->event_count == 0) {
+              free_block(block, context);
+            }
+            e = it->second.erase(e);
+          } else {
+            ++e;
+          }
+          continue;
+        }
+        event = std::move(e->first);
         C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
         block->event_count--;
         if (block->event_count == 0) {
           free_block(block, context);
         }
+        e = it->second.erase(e);
+      }
+
+      if (it->second.empty()) {
+        it = cuda_events.erase(it);
+      } else {
+        it++;
       }
     }
-
-    cuda_events.clear();
   }
 
   void remove_cudagraph_stream_uses(Block* block) {
@@ -3529,6 +3613,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->releasePool(std::move(mempool_id));
+  }
+
+  int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id)
+      override {
+    assertValidDevice(device);
+    return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {
