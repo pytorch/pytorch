@@ -1586,6 +1586,7 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     return inp._metadata_cache.get("max_seqlen", None)
 
 
+# If a section of the Nested Tensor is fully masked out we still retain the section with a length of 0
 @register_jagged_func(torch.ops.aten.masked_select.default, "self: jt, mask: any")
 def masked_select_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(

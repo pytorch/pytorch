@@ -7090,7 +7090,7 @@ COMPILE_FORWARD_FAILURES = {
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
-    # masked_select is expected to output a different shape 
+    # masked_select is expected to output a different shape
     "masked_select",
 }
 
@@ -7173,7 +7173,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
             if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                self.assertEqual(out_compile.unbind(), out_ref.unbind())
+                self.assertEqualIgnoringNestedInts
             else:
                 self.assertEqual(out_compile, out_ref)
 
