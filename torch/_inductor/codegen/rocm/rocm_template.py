@@ -93,7 +93,7 @@ class ROCmTemplate(KernelTemplate):
             self.size_args() if hasattr(self, "size_args") else ()
         )  # subclass should define def size_args()
         size_args_ints = [
-            V.graph.sizevars.symbolic_hint(arg) for arg in size_args
+            V.graph.sizevars.size_hint(arg) for arg in size_args
         ]  # resolve to ints for benchmarking
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
