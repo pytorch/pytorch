@@ -5019,11 +5019,24 @@ class TestMemPool(TestCase):
         self.assertEqual(allocator.allocator(), pool.allocator)
 
         with torch.cuda.use_mem_pool(pool):
-            out = torch.randn(1, device="cuda")
+            out_0 = torch.randn(1, device="cuda")
 
-        # out.data_ptr() should be 123 if dummy_alloc was used to allocate
-        # out tensor
-        self.assertEqual(out.data_ptr(), 123)
+        # out_0.data_ptr() should be 123 if dummy_alloc was used to allocate
+        # out_0 tensor
+        self.assertEqual(out_0.data_ptr(), 123)
+
+        with torch.cuda.use_mem_pool(pool):
+            out_1 = torch.randn(1, device="cuda")
+
+        # pool's use count should be 2, since there are two use_mem_pools
+        # using it above
+        self.assertEqual(pool.use_count(), 2)
+
+        pool.release()
+        # pool's use count should now be 0, since release() calls releasePool
+        # twice based on the use_count()
+        self.assertEqual(pool.use_count(), 0)
+
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
