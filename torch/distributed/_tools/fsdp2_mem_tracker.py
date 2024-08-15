@@ -21,6 +21,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
+
 _TOTAL_KEY = "Total"
 
 __all__ = ["FSDPMemTracker"]

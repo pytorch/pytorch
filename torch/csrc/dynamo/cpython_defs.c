@@ -1,31 +1,12 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
-
-#ifdef _WIN32
-#define unlikely(x) (x)
-#else
-#define unlikely(x) __builtin_expect((x), 0)
-#endif
-
-#define CHECK(cond)                                                     \
-  if (unlikely(!(cond))) {                                              \
-    fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__); \
-    abort();                                                            \
-  } else {                                                              \
-  }
+#include <torch/csrc/dynamo/cpython_includes.h>
+#include <torch/csrc/dynamo/debug_macros.h>
 
 #if IS_PYTHON_3_11_PLUS
 
-// Problem in CPython includes when mixing core and non-core build
-// The fix was not backported to 3.12 so this is needed here
-// https://github.com/python/cpython/issues/105268
-#if IS_PYTHON_3_12_PLUS
-#undef _PyGC_FINALIZED
-#endif
-
 #define Py_BUILD_CORE
-#include <internal/pycore_pystate.h>
-
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
+
 #if IS_PYTHON_3_13_PLUS
 #include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
 #define NEED_OPCODE_METADATA
@@ -34,10 +15,8 @@
 #else
 #include <internal/pycore_opcode.h>
 #endif
+
 #undef NEED_OPCODE_TABLES
-
-#include <internal/pycore_frame.h>
-
 #undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
@@ -74,189 +53,10 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 
 #if IS_PYTHON_3_12_PLUS
 
-// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1136
-// Initialize frame free variables if needed
-// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
-// codepath occurred.
-static void
-frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
-{
-    // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
-    // here:
-    PyCodeObject *co = F_CODE(frame);
-    int lasti = _PyInterpreterFrame_LASTI(frame);
-    if (!(lasti < 0 && _PyCode_CODE(co)->op.code == COPY_FREE_VARS
-          && PyFunction_Check(frame->f_funcobj)))
-    {
-        /* Free vars are initialized */
-        return;
-    }
-
-    /* Free vars have not been initialized -- Do that */
-    PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
-    #if IS_PYTHON_3_13_PLUS
-    int offset = PyUnstable_Code_GetFirstFree(co);
-    #else
-    int offset = PyCode_GetFirstFree(co);
-    #endif
-    for (int i = 0; i < co->co_nfreevars; ++i) {
-        PyObject *o = PyTuple_GET_ITEM(closure, i);
-        frame->localsplus[offset + i] = Py_NewRef(o);
-    }
-    // COPY_FREE_VARS doesn't have inline CACHEs, either:
-    PREV_INSTR(frame) = _PyCode_CODE(F_CODE(frame));
-
-    *free_vars_copied = 1;
-}
-
-// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1162
-static int
-frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
-              PyObject **pvalue)
-{
-    _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
-
-    /* If the namespace is unoptimized, then one of the
-       following cases applies:
-       1. It does not contain free variables, because it
-          uses import * or is a top-level namespace.
-       2. It is a class namespace.
-       We don't want to accidentally copy free variables
-       into the locals dict used by the class.
-    */
-    if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
-        return 0;
-    }
-
-    PyObject *value = frame->localsplus[i];
-    if (frame->stacktop) {
-        if (kind & CO_FAST_FREE) {
-            // The cell was set by COPY_FREE_VARS.
-            CHECK(value != NULL && PyCell_Check(value));
-            value = PyCell_GET(value);
-        }
-        else if (kind & CO_FAST_CELL) {
-            // Note that no *_DEREF ops can happen before MAKE_CELL
-            // executes.  So there's no need to duplicate the work
-            // that MAKE_CELL would otherwise do later, if it hasn't
-            // run yet.
-            if (value != NULL) {
-                if (PyCell_Check(value) &&
-                        THP_PyFrame_OpAlreadyRan(frame, MAKE_CELL, i)) {
-                    // (likely) MAKE_CELL must have executed already.
-                    value = PyCell_GET(value);
-                }
-                // (likely) Otherwise it it is an arg (kind & CO_FAST_LOCAL),
-                // with the initial value set when the frame was created...
-                // (unlikely) ...or it was set to some initial value by
-                // an earlier call to PyFrame_LocalsToFast().
-            }
-        }
-    }
-    else {
-        CHECK(value == NULL);
-    }
-    *pvalue = value;
-    return 1;
-}
-
-// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1213
-static PyObject *
-THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden, int *free_vars_copied)
-{
-    /* Merge fast locals into f->f_locals */
-    PyObject *locals = frame->f_locals;
-    if (locals == NULL) {
-        locals = frame->f_locals = PyDict_New();
-        if (locals == NULL) {
-            return NULL;
-        }
-    }
-    PyObject *hidden = NULL;
-
-    /* If include_hidden, "hidden" fast locals (from inlined comprehensions in
-       module/class scopes) will be included in the returned dict, but not in
-       frame->f_locals; the returned dict will be a modified copy. Non-hidden
-       locals will still be updated in frame->f_locals. */
-    if (include_hidden) {
-        hidden = PyDict_New();
-        if (hidden == NULL) {
-            return NULL;
-        }
-    }
-
-    frame_init_get_vars(frame, free_vars_copied);
-
-    PyCodeObject *co = F_CODE(frame);
-    for (int i = 0; i < co->co_nlocalsplus; i++) {
-        PyObject *value;  // borrowed reference
-        if (!frame_get_var(frame, co, i, &value)) {
-            continue;
-        }
-
-        PyObject *name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
-        _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
-        if (kind & CO_FAST_HIDDEN) {
-            if (include_hidden && value != NULL) {
-                if (PyObject_SetItem(hidden, name, value) != 0) {
-                    goto error;
-                }
-            }
-            continue;
-        }
-        if (value == NULL) {
-            if (PyObject_DelItem(locals, name) != 0) {
-                if (PyErr_ExceptionMatches(PyExc_KeyError)) {
-                    PyErr_Clear();
-                }
-                else {
-                    goto error;
-                }
-            }
-        }
-        else {
-            if (PyObject_SetItem(locals, name, value) != 0) {
-                goto error;
-            }
-        }
-    }
-
-    if (include_hidden && PyDict_Size(hidden)) {
-        PyObject *innerlocals = PyDict_New();
-        if (innerlocals == NULL) {
-            goto error;
-        }
-        if (PyDict_Merge(innerlocals, locals, 1) != 0) {
-            Py_DECREF(innerlocals);
-            goto error;
-        }
-        if (PyDict_Merge(innerlocals, hidden, 1) != 0) {
-            Py_DECREF(innerlocals);
-            goto error;
-        }
-        locals = innerlocals;
-    }
-    else {
-        Py_INCREF(locals);
-    }
-    Py_CLEAR(hidden);
-
-    return locals;
-
-  error:
-    Py_XDECREF(hidden);
-    return NULL;
-}
-
-// https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1301
 int
 THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied)
 {
-    PyObject *locals = THP_PyFrame_GetLocals(frame, 0, free_vars_copied);
-    if (locals == NULL) {
-        return -1;
-    }
-    Py_DECREF(locals);
+    // functionality moved to framelocals_mapping.cpp
     return 0;
 }
 

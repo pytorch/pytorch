@@ -124,9 +124,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
-  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
-      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  return always_use_metal ||
+      (!is_macos_14_4_or_newer &&
+       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
 }
 
 } // anonymous namespace
@@ -160,8 +163,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
   for (C10_UNUSED const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, c10::nullopt, kMPS, c10::nullopt));
-    pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
+    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
   // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
@@ -448,13 +451,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* productTensor = nil;
       MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
+      auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
@@ -847,7 +847,7 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 }
 
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
   return out;
 }
@@ -861,7 +861,7 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
  const Tensor& result,
  const Tensor& clone_A) {
   clone_A.copy_(A);
-  Tensor out = at::empty({0}, A.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, self, upper, transpose, /*left=*/true, unitriangular, out);
   result.resize_(out.sizes());
   result.copy_(out);
