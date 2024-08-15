@@ -1217,7 +1217,7 @@ class FxGraphCache:
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
                 "Freezing may introduce constants that aren't static across runs."
-                )
+            )
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
