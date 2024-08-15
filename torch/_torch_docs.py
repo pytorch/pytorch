@@ -13445,15 +13445,12 @@ Example::
 add_docstr(
     torch.has_accelerator,
     r"""
-has_accelerator(device_type=None) -> bool
+has_accelerator() -> bool
 
-Check if the desired accelerator is available.
-
-Arguments:
-    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+Check if there is an available :ref:`accelerator<accelerators>`.
 
 Returns:
-    bool: A boolean indicating if the desired accelerator is available.
+    bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
 
 Example::
 
@@ -13470,7 +13467,7 @@ current_accelerator() -> (str, optional)
 Return the device type of current :ref:`accelerator<accelerators>`.
 
 Returns:
-    str: the device type of current accelerator.
+    (str, optional): the device type of current accelerator. If no available accelerators, return None.
 
 Example::
 
@@ -13485,19 +13482,12 @@ Example::
 add_docstr(
     torch.device_count,
     r"""
-device_count(device_type=None) -> int
+device_count() -> int
 
-Return the number of desired accelerators available.
-
-Arguments:
-    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+Return the number of current accelerators available.
 
 Returns:
-    int: the number of the desired accelerators available.
-
-Example::
-
-    >>> num = torch.device_count()
+    int: the number of the current accelerators available. If no available accelerators, return 0.
 """,
 )
 
@@ -13505,20 +13495,12 @@ Example::
 add_docstr(
     torch.current_device,
     r"""
-current_device(device_type=None) -> int
+current_device() -> int
 
-Return the index of a currently selected device for the desired accelerator type.
-
-Arguments:
-    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+Return the index of a currently selected device for the current :ref:`accelerator<accelerators>`.
 
 Returns:
     int: the index of a currently selected device.
-
-Example::
-
-    >>> torch.set_device(1)
-    >>> assert torch.current_device() == 1
 """,
 )
 
@@ -13526,18 +13508,12 @@ Example::
 add_docstr(
     torch.set_device,
     r"""
-set_device(int device_index, device_type=None) -> None
+set_device(device) -> None
 
-Set the current device for the desired accelerator type.
+Set the current device for the current :ref:`accelerator<accelerators>`.
 
 Arguments:
-    device_index (int, :class:`torch.device`): selected devie. This function is a no-op if this argument is negative.
-    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
-
-Example::
-
-    >>> torch.set_device(1)
-    >>> assert torch.current_device() == 1
+    device (:class:`torch.device`, str, int): selected devie. This function is a no-op if this argument is negative.
 """,
 )
 
@@ -13545,21 +13521,15 @@ Example::
 add_docstr(
     torch.current_stream,
     r"""
-current_stream(device=None, device_type=None) -> torch.Stream
+current_stream(device) -> torch.Stream
 
 Return the currently selected Stream for a given device.
 
 Arguments:
-    device (torch.device or int, optional): selected device. If not given, use current_device() by default.
-    device_type (str, optional): the desired accelerator type. If not given, the current :ref:`accelerator<accelerators>` type will be used.
+    device (:class:`torch.device`, str, int, optional): selected device. If not given, use :func:`torch.current_device` by default.
 
 Returns:
     torch.Stream: the currently selected Stream for a given device.
-    
-Example::
-
-    >>> torch.set_device(1)
-    >>> assert torch.current_device() == 1
 """,
 )
 
@@ -13569,15 +13539,10 @@ add_docstr(
     r"""
 set_stream(stream) -> None
 
-Set the current stream.
+Set the current stream to selected stream.
 
 Arguments:
-    stream (torch.Stream): selected stream.
-    
-Example::
-
-    >>> torch.set_device(1)
-    >>> assert torch.current_device() == 1
+    stream (torch.Stream): selected stream. This function will set the current device to the device of the selected.
 """,
 )
 
@@ -13590,12 +13555,17 @@ synchronize(device) -> None
 Wait for all kernels in all streams on the given device to complete.
 
 Arguments:
-    device (torch.Device, int): device for which to synchronize. If not given, use current_device() by default.
-    
+    device (:class:`torch.device`, str, int, optional): device for which to synchronize. If not given, use :func:`torch.current_device` by default.
+
 Example::
 
-    >>> torch.set_device(1)
-    >>> assert torch.current_device() == 1
+    >>> start_event = torch.Event(enable_timing=True)
+    >>> end_event = torch.Event(enable_timing=True)
+    >>> start_event.record()
+    >>> # Run some thing here
+    >>> end_event.record()
+    >>> torch.synchronize()
+    >>> elapsed_time_ms = start_event.elapsed_time(end_event)
 """,
 )
 

@@ -160,6 +160,8 @@ As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda
 
     Stream
     Event
+    DeviceGuard
+    StreamGuard
     has_accelerator
     current_accelerator
     device_count
