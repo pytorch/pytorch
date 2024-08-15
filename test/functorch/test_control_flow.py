@@ -27,6 +27,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.common_cuda import (
+    SM70OrLater
+)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -1203,6 +1206,7 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_vmap(self, device):
@@ -1231,6 +1235,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_vmap_dims(self, device):
@@ -1297,6 +1302,7 @@ def forward(self, pred_1, x_1):
                 self.assertEqual(result1, expected_result)
                 self.assertEqual(result2, expected_result)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_vmap_comp(self, device):
@@ -1328,6 +1334,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_vmap_pytree(self, device):
