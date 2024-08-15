@@ -519,7 +519,7 @@ class Replicate(Placement):
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding
     ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
     replica of the global Tensor. The ``Replicate`` placement can be used by all
-    DTensor APIs (i.e. distribute_tensor, from_local, etc.)
+    DTensor APIs (i.e. ``distribute_tensor``, ``DTensor.from_local``, etc.)
     """
 
     def __eq__(self, other: object) -> bool:
@@ -572,7 +572,7 @@ class Partial(Placement):
     Args:
         reduce_op (str, optional): The reduction op to be used for the partial DTensor
         to produce Replicated/Sharded DTensor. Only element-wise reduction operations
-        are supportd, including: "sum", "avg", "prod", "max", "min", default: "sum".
+        are supportd, including: "sum", "avg", "product", "max", "min", default: "sum".
 
     ::note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.

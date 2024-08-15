@@ -40,7 +40,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
@@ -65,9 +66,6 @@ def capture_pre_autograd_graph_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
-    log.warning("Please switch to use torch.export instead.")
-    if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
 
 
 @compatibility(is_backward_compatible=False)
@@ -207,6 +205,12 @@ def capture_pre_autograd_graph(
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    if hasattr(module, "_buffers"):
+        torch._export.utils.remove_proxy_from_state_dict(
+            module._buffers, in_place=True
+        )
     return module
 
 
