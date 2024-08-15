@@ -27,8 +27,9 @@ from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
 try:
     try:
-        from . import test_torchinductor
+        from . import test_cpu_repro, test_torchinductor
     except ImportError:
+        import test_cpu_repro
         import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
@@ -36,6 +37,7 @@ except unittest.SkipTest:
     raise
 
 check_model = test_torchinductor.check_model
+set_num_threads = test_cpu_repro.set_num_threads
 
 aten = torch.ops.aten
 
@@ -790,6 +792,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.gemm_cache_blocking": "2,2,2"})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_cache_blocking(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
