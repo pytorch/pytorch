@@ -722,7 +722,6 @@ def build_collectives(
                     )
                 nccl_calls.extend(reversed(reversed_calls))
         else:
-            mismatch_count = 1
             has_undecided_case = False
             errors = Set()
             for o in expected_ranks.intersection(set(other_ranks)):
