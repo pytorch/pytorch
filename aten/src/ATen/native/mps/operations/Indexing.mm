@@ -302,8 +302,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   TORCH_CHECK(self.dim() <= maxDimensions, "nonzero is not supported for tensor with more than ", 16, " dimensions");
   TORCH_CHECK(out_.is_mps());
 
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && (self.numel() >= nonZeroMaxSize || self.is_complex())) {
-    https://github.com/pytorch/pytorch/issues/122916
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
+      (self.numel() >= nonZeroMaxSize || self.is_complex())) {
+  https: // github.com/pytorch/pytorch/issues/122916
     TORCH_WARN_ONCE("MPS: nonzero op is not natively supported for the provided input on MacOS14",
                     "Falling back on CPU. This may have performance implications.",
                     "See github.com/pytorch/pytorch/issues/122916 for further info");
@@ -312,7 +313,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     out_.copy_(out_fallback);
     return out_;
   }
-  
+
   MPSStream* stream = getCurrentMPSStream();
   using CachedGraph = MPSUnaryCachedGraph;
 
