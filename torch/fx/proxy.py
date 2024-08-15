@@ -98,8 +98,9 @@ _COPY_META_FIELDS = [
     "recompute",
     "ac_graph_id",
     "from_node",
-    "quantization_tag",
-    "_numeric_debug_handle",
+    "quantization_tag",  # TODO deprecated
+    "_numeric_debug_handle",  # TODO deprecated
+    "custom",
     "partitioner_tag"
 ]
 
