@@ -132,7 +132,8 @@ extern "C" {{export_declaration}}
                 const int64_t n_start = nc * Nr;
                 const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                 const int64_t n_size = n_end - n_start;
-                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end); // FIXME: maybe exceeding N?
+                // NB: assume we pad N, nc_block_end won't exceed padded N here.
+                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
