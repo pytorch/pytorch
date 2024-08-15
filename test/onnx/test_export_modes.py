@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -22,7 +23,7 @@ from torch.testing._internal import common_utils
 # Smoke tests for export methods
 class TestExportModes(pytorch_test_common.ExportTestCase):
     class MyModel(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(TestExportModes.MyModel, self).__init__()
 
         def forward(self, x):

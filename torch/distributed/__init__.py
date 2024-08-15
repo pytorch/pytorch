@@ -1,8 +1,14 @@
 # mypy: allow-untyped-defs
+import logging
 import pdb
 import sys
+import traceback
+import typing
 
 import torch
+
+
+log = logging.getLogger(__name__)
 
 
 def is_available() -> bool:
@@ -73,14 +79,25 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    def breakpoint(rank: int = 0):
+    _breakpoint_cache: typing.Dict[int, typing.Any] = {}
+
+    def breakpoint(rank: int = 0, skip: int = 0):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.
 
         Args:
             rank (int): Which rank to break on.  Default: ``0``
+            skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
         """
+        if skip > 0:
+            key = hash(str(traceback.format_exc()))
+            counter = _breakpoint_cache.get(key, 0) + 1
+            _breakpoint_cache[key] = counter
+            if counter <= skip:
+                log.warning("Skip the breakpoint, counter=%d", counter)
+                return
+
         if get_rank() == rank:
             pdb = _DistributedPdb()
             pdb.message(
@@ -100,7 +117,7 @@ if is_available():
             del guard
 
     if sys.platform != "win32":
-        from torch._C._distributed_c10d import _round_robin_process_groups, HashStore
+        from torch._C._distributed_c10d import HashStore
 
     from .device_mesh import DeviceMesh, init_device_mesh
 

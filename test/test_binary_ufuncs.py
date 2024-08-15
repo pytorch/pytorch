@@ -12,7 +12,6 @@ from numbers import Number
 import numpy as np
 
 import torch
-
 import torch.autograd.forward_ad as fwAD
 from torch import inf, nan
 from torch.testing import make_tensor
@@ -67,6 +66,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
+
 
 if TEST_SCIPY:
     import scipy.integrate
@@ -4423,9 +4423,7 @@ class TestBinaryUfuncs(TestCase):
             test_helper(x, q)
 
     @onlyCUDA
-    @dtypes(
-        torch.chalf,
-    )
+    @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
         # Ideally, this should be covered by `test_complex_half_reference_testing`

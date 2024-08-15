@@ -2,6 +2,7 @@
 import types
 from contextlib import contextmanager
 
+
 # The idea for this parameter is that we forbid bare assignment
 # to torch.backends.<cudnn|mkldnn>.enabled and friends when running our
 # test suite, where it's very easy to forget to undo the change

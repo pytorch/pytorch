@@ -18,7 +18,9 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
+
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
+
 
 T = TypeVar("T")
 StoreMode = Optional[Literal["atomic_add"]]
@@ -132,7 +134,11 @@ class OpsHandler(Protocol[T]):
         ...
 
     def to_dtype(
-        self, x: T, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        self,
+        x: T,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
@@ -195,7 +201,7 @@ class OpsHandler(Protocol[T]):
     # in scope, which are typically used by sympy.Expr indexing.
 
     def indirect_indexing(
-        self, x: T, size: sympy.Expr, check: bool = True
+        self, x: T, size: sympy.Expr, check: bool = True, wrap_neg=True
     ) -> sympy.Expr:
         """
         Convert an integral x into a sympy.Expr that can be subsequently used in
@@ -762,7 +768,7 @@ class NoopHandler:
         return (None,) * len(values)
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.Integer(0)
 
 
@@ -806,7 +812,7 @@ class MockHandler:
         )
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
     @classmethod
@@ -932,6 +938,20 @@ class WrapperHandler(Generic[T]):
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
+    return h
+
+
+class AddParenHandler(WrapperHandler[T]):
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self._inner, name)(*args, **kwargs)
+            return f"({val})"
+
+        return inner
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
     return h
 
 

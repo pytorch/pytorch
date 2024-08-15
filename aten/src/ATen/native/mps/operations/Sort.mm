@@ -19,7 +19,7 @@ namespace at::native {
 // sort
 TORCH_IMPL_FUNC(sort_stable_out_mps)
 (const Tensor& self,
- c10::optional<bool> stable,
+ std::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,
@@ -38,16 +38,6 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   dim = maybe_wrap_dim(dim, self.dim(), true);
   if (self.dim() == 0 && self.numel() == 1) {
     indices.zero_();
-    return;
-  }
-
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("torch.sort is supported by MPS on MacOS 13+, please upgrade. Falling back to CPU");
-    Tensor cpu_indices = indices.clone().to("cpu");
-    Tensor cpu_values = values.clone().to("cpu");
-    at::sort_out(cpu_values, cpu_indices, self.to(at::Device(kCPU)), false, dim, descending);
-    values.copy_(cpu_values);
-    indices.copy_(cpu_indices);
     return;
   }
 

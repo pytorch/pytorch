@@ -2,6 +2,7 @@
 
 #include <condition_variable>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -909,7 +910,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
   void markCompleted(
       IValue value,
-      std::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
+      std::optional<std::vector<WeakStorage>> storages = std::nullopt) {
     // Start by performing all steps that can throw, before setting any field.
     // Do this before even acquiring the mutex, because extractStorages might
     // acquire the GIL, which could lead to a lock inversion with our mutex.
@@ -1374,7 +1375,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks. It's optional because we'll only store it
   // if the future completes successfully.
-  optional<c10::Device> currentDevice_;
+  std::optional<c10::Device> currentDevice_;
 
   // The events that correspond to the completion of the async I/O kernels. They
   // are recorded on the appropriate streams when the future is marked completed
@@ -1586,11 +1587,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Object> copy() const;
 
   c10::intrusive_ptr<Object> deepcopy(
-      std::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = std::nullopt) const;
 
   c10::intrusive_ptr<Object> deepcopy(
       IValue::HashIdentityIValueMap& memo,
-      std::optional<at::Device> device = c10::nullopt) const;
+      std::optional<at::Device> device = std::nullopt) const;
 
   bool is_weak_compilation_ref() const {
     return !type_.holds_strong_ref();
@@ -1613,7 +1614,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
   virtual c10::InferredType tryToInferType() = 0;
-  virtual IValue toIValue(const TypePtr& type, std::optional<int32_t> N = c10::nullopt) = 0;
+  virtual IValue toIValue(const TypePtr& type, std::optional<int32_t> N = std::nullopt) = 0;
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
@@ -1747,7 +1748,7 @@ template <class T>
 struct _fake_type {};
 
 // generic_to<T> converts an IValue from a generic list or generic dict
-// to a concrete list/dict type likelike List<T>, Dict<...> or optional<T>.
+// to a concrete list/dict type likelike List<T>, Dict<...> or std::optional<T>.
 // Note that in the case of lists, this only works for IValue-based lists,
 // i.e. not for int64_t, double, ...
 // generic_to<T> is an implementation detail of IValue::to<T> and not
@@ -1911,7 +1912,7 @@ std::unordered_map<K, V> generic_to(
 template <typename T>
 std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>>) {
   if (ivalue.isNone()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return std::move(ivalue).to<T>();
 }
@@ -1948,7 +1949,7 @@ inline T IValue::to() && {
 template <>
 inline std::optional<c10::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
-  // But if the unboxed type is optional<string_view> we cannot destroy
+  // But if the unboxed type is std::optional<string_view> we cannot destroy
   // the IValue.
   return generic_to(*this, _fake_type<std::optional<c10::string_view>>{});
 }
@@ -2280,7 +2281,7 @@ inline IValue::IValue(std::optional<T> v) : IValue() {
   }
 }
 
-inline IValue::IValue(c10::nullopt_t) : IValue() {}
+inline IValue::IValue(std::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object) {
@@ -2363,9 +2364,9 @@ inline const std::string& IValue::toStringRef() const {
 inline std::optional<std::reference_wrapper<const std::string>> IValue::
     toOptionalStringRef() const {
   if (isNone()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
-  AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  AT_ASSERT(isString(), "Expected std::optional<string> but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalStringRef on null intrusive_ptr IValue");
@@ -2389,17 +2390,17 @@ inline PyObject* IValue::toPyObject() const {
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() {
+inline std::optional<T> IValue::toOptional() {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }
 
 template <typename T>
-inline optional<T> IValue::toOptional() const {
+inline std::optional<T> IValue::toOptional() const {
   if (this->isNone()) {
-    return nullopt;
+    return std::nullopt;
   }
   return this->to<T>();
 }

@@ -16,7 +16,7 @@ bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!skip_infra_modes) {
     for (const auto i : c10::irange(
              static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-      if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+      if (torchDispatchModeState.infra_modes_[i] != std::nullopt) {
         return true;
       }
     }
@@ -48,7 +48,7 @@ const std::shared_ptr<PyObject_TorchDispatchMode> TorchDispatchModeTLS::
       if (torchDispatchModeState.infra_modes_[i].has_value()) {
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         out = std::move(torchDispatchModeState.infra_modes_[i].value());
-        torchDispatchModeState.infra_modes_[i] = c10::nullopt;
+        torchDispatchModeState.infra_modes_[i] = std::nullopt;
         break;
       }
     }
@@ -70,7 +70,7 @@ const std::
     if (torchDispatchModeState.infra_modes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto out_mode = torchDispatchModeState.infra_modes_[i].value();
-      torchDispatchModeState.infra_modes_[i] = c10::nullopt;
+      torchDispatchModeState.infra_modes_[i] = std::nullopt;
       if (!any_modes_set()) {
         c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
         c10::impl::tls_set_dispatch_key_included(
@@ -114,7 +114,7 @@ int64_t TorchDispatchModeTLS::stack_len() {
   int64_t infra_modes_len = 0;
   for (const auto i :
        c10::irange(static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS))) {
-    if (torchDispatchModeState.infra_modes_[i] != c10::nullopt) {
+    if (torchDispatchModeState.infra_modes_[i] != std::nullopt) {
       infra_modes_len += 1;
     }
   }
@@ -131,7 +131,7 @@ void TorchDispatchModeTLS::set_mode(
     TorchDispatchModeKey mode_key) {
   TORCH_CHECK(
       torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] ==
-          c10::nullopt,
+          std::nullopt,
       "trying to set the current ",
       to_string(mode_key),
       ", but one already exists");
@@ -149,7 +149,7 @@ const std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
 TorchDispatchModeTLS::unset_mode(TorchDispatchModeKey mode_key) {
   auto out = torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] =
-      c10::nullopt;
+      std::nullopt;
   if (out.has_value() && !any_modes_set()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(

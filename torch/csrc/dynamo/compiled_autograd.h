@@ -165,6 +165,27 @@ struct TensorArgs {
   uint32_t _next_id = 1; // id=0 used by _undefined
 };
 
+struct LiftedIValueArg {
+  LiftedIValueArg() = delete;
+  LiftedIValueArg(const at::IValue* ptr)
+      : actual_ptr(ptr), proxy(at::IValue::uninitialized()) {}
+
+  const at::IValue* actual_ptr; // lifetime handled by autograd node
+  at::IValue proxy;
+};
+
+struct LiftedIValueArgs {
+  at::IValue& next_proxy(const at::IValue* actual_ptr) {
+    TORCH_INTERNAL_ASSERT(next < args.size());
+    auto& iv_arg = args.at(next++);
+    TORCH_INTERNAL_ASSERT(iv_arg.actual_ptr == actual_ptr);
+    return iv_arg.proxy;
+  }
+
+  std::vector<LiftedIValueArg> args;
+  size_t next = 0;
+};
+
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
@@ -178,6 +199,7 @@ struct AutogradCompilerCall {
 
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
+  LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
@@ -258,12 +280,13 @@ class CompiledNodeArgs {
       collect(m.at(k));
     }
   }
-  void collect(const at::IValue& iv) {
+  void collect(const at::IValue& iv, bool nested = false) {
+    // used by AutogradContext::saved_data from CppNode
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
       for (auto&& value : list) {
-        collect(value);
+        collect(value, true);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
@@ -271,8 +294,15 @@ class CompiledNodeArgs {
       // NOLINTNEXTLINE(modernize-loop-convert)
       for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
         collect(it->key());
-        collect(it->value());
+        collect(it->value(), true);
       }
+    } else if (iv.isTensor()) {
+      collect(iv.toTensor());
+    } else if (
+        !nested &&
+        (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
+      // can't lift ivalues nested in collections
+      _compiler.lifted_ivalue_args.args.emplace_back(&iv);
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
@@ -519,9 +549,7 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(
-      const std::vector<std::optional<c10::SymInt>>& ss,
-      size_t num_outputs)
+  TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
@@ -577,12 +605,23 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
-  void before(at::IValue& t) {
-    stashed_ivalues.save(&t, at::IValue(t));
+  void before(at::IValue& iv) {
+    if (iv.isTensor()) {
+      before(iv.toTensor());
+    } else {
+      stashed_ivalues.save(&iv, at::IValue(iv));
+      if (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
+        iv = compiler.lifted_ivalue_args.next_proxy(&iv);
+      }
+    }
   }
 
   void after(at::IValue& t) {
-    stashed_ivalues.restore(&t);
+    if (t.isTensor()) {
+      after(t.toTensor());
+    } else {
+      stashed_ivalues.restore(&t);
+    }
   }
 
   void before(Edge& t) {

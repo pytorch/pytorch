@@ -8,7 +8,6 @@ import sys
 import warnings
 
 import numpy
-
 import pytest
 
 
@@ -32,6 +31,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
+
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -146,7 +146,7 @@ class TestNonarrayArgs(TestCase):
 
     def test_cumproduct(self):
         A = [[1, 2, 3], [4, 5, 6]]
-        assert_(np.all(np.cumproduct(A) == np.array([1, 2, 6, 24, 120, 720])))
+        assert_(np.all(np.cumprod(A) == np.array([1, 2, 6, 24, 120, 720])))
 
     def test_diagonal(self):
         a = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
@@ -701,7 +701,7 @@ class TestFloatExceptions(TestCase):
     @parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
-        ftype = np.obj2sctype(typecode)
+        ftype = np.dtype(typecode).type
         if np.dtype(ftype).kind == "f":
             # Get some extreme values for the type
             fi = np.finfo(ftype)
@@ -924,14 +924,19 @@ class TestTypes(TestCase):
     @xpassIfTorchDynamo  # (reason="value-based casting?")
     def test_can_cast_values(self):
         # gh-5917
-        for dt in np.sctypes["int"] + np.sctypes["uint"]:
+        for dt in [np.int8, np.int16, np.int32, np.int64] + [
+            np.uint8,
+            np.uint16,
+            np.uint32,
+            np.uint64,
+        ]:
             ii = np.iinfo(dt)
             assert_(np.can_cast(ii.min, dt))
             assert_(np.can_cast(ii.max, dt))
             assert_(not np.can_cast(ii.min - 1, dt))
             assert_(not np.can_cast(ii.max + 1, dt))
 
-        for dt in np.sctypes["float"]:
+        for dt in [np.float16, np.float32, np.float64, np.longdouble]:
             fi = np.finfo(dt)
             assert_(np.can_cast(fi.min, dt))
             assert_(np.can_cast(fi.max, dt))
@@ -969,8 +974,8 @@ class TestFromiter(TestCase):
         expected = np.array(list(self.makegen()))
         a = np.fromiter(self.makegen(), int)
         a20 = np.fromiter(self.makegen(), int, 20)
-        assert_(np.alltrue(a == expected, axis=0))
-        assert_(np.alltrue(a20 == expected[:20], axis=0))
+        assert_(np.all(a == expected, axis=0))
+        assert_(np.all(a20 == expected[:20], axis=0))
 
     def load_data(self, n, eindex):
         # Utility method for the issue 2592 tests.
@@ -2159,7 +2164,6 @@ class TestCreationFuncs(TestCase):
 
     def setUp(self):
         super().setUp()
-        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {
