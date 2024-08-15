@@ -38,7 +38,7 @@ from torch._dynamo.testing import (
     same,
     skipIfPy312,
 )
-from torch._dynamo.utils import ifdynstaticdefault
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -10573,6 +10573,7 @@ class CommonTemplate:
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
+        counters.clear()
         with torch.library._scoped_library("mylib", "DEF") as lib:
             lib.define(
                 "copy_(Tensor(a!) ret, Tensor tensors, int dim) -> ()",
@@ -10601,6 +10602,7 @@ class CommonTemplate:
             compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
             compiled_inductor_out = compiled_inductor_f(x)
             self.assertEqual(compiled_inductor_out, eager_out)
+            self.assertEqual(counters["inductor"]["require_stride_order_clones"], 0)
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)

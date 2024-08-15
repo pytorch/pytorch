@@ -4681,8 +4681,15 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order, allow_padding=False):
+        breakpoint()
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
+
+        # Realize the node, otherwise we can't plan its layout.
+        try:
+            x.realize()
+        except NotImplementedError:
+            pass
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
@@ -4741,6 +4748,7 @@ class ExternKernel(InputsKernel):
             except NotImplementedError:
                 pass
         x = cls.copy_input(x)
+        torch._dynamo.utils.counters["inductor"]["require_stride_order_clones"] += 1
         as_storage_and_layout(
             x,
             freeze=True,
