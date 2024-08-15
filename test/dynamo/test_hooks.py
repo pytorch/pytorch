@@ -821,6 +821,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         }
         compiled_model.load_state_dict(backwards_state_dict)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
