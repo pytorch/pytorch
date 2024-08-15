@@ -59,33 +59,6 @@ class ROCmTemplateKernel(ROCmKernel):
             node.get_name(), None
         )
 
-    def check_not_null(self, node: IRNode) -> str:
-        """
-        Generates code to check that a node is not null.
-        """
-
-        if node is None:
-            return ""
-
-        size_str = self.size(node, 0, -1)
-        name_str = self.arg_name(node)
-        if name_str is None:
-            return ""
-
-        res = IndentedBuffer(initial_indent=8)
-        res.tabwidth = 1
-        res.splice(
-            f"""
-            if (!{name_str}) {{
-                int64_t {name_str}_size = {size_str};
-                if ({name_str}_size > 0) {{
-                    throw std::runtime_error("input {name_str} is null but size is not 0!");
-                }}
-            }}
-            """
-        )
-        return res.getvalue()
-
     def def_kernel(
         self,
         inputs: List[IRNode],
