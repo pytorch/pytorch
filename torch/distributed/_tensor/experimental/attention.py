@@ -903,7 +903,7 @@ class _StripeLoadBalancer(_LoadBalancer):
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_rank()
+        cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
         chunks = buffer.chunk(cp_world_size * 2, dim=seq_dim)
         return torch.cat(
@@ -917,7 +917,7 @@ class _StripeLoadBalancer(_LoadBalancer):
     ) -> torch.Tensor:
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
-        cp_rank = mesh.get_rank()
+        cp_rank = mesh.get_local_rank()
 
         all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
         ft_c.all_gather_inplace(all_buffers, buffer, mesh)
@@ -980,7 +980,7 @@ def context_parallel(
             these buffers can be put in this list to avoid extra restore time.
 
     .. warning::
-        `torch.distributed._tensor.experimental.attention.context_parall` is a
+        `torch.distributed._tensor.experimental.attention.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
     buffers = [] if buffers is None else buffers
