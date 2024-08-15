@@ -571,8 +571,8 @@ def _load_model_state_dict(
             _distribute_state_dict(state_dict, local_state_dict, device=new_device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
-    if device == torch.device("meta"):
-        model.to_empty(device=new_device)
+        if device == torch.device("meta"):
+            model.to_empty(device=new_device)
 
     with info.fsdp_context():
         return cast(
