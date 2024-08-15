@@ -1,6 +1,7 @@
 # flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
+
 DYNAMIC = [
     "torch.fx.experimental.symbolic_shapes",
     "torch.fx.experimental.sym_node",
@@ -157,6 +158,16 @@ register_artifact(
 register_artifact(
     "trace_shape_events",
     "Logs traces for every ShapeEnv operation that we record for replay",
+    off_by_default=True,
+)
+register_artifact(
+    "cudagraph_static_inputs",
+    "Logs static inputs handling in dynamo, AOT, and cudagraphs",
+    off_by_default=True,
+)
+register_artifact(
+    "benchmarking",
+    "Detailed Inductor benchmarking information.",
     off_by_default=True,
 )
 

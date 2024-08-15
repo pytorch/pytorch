@@ -9,7 +9,6 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch
-
 import torch._jit_internal as _jit_internal
 from torch._sources import fake_range
 from torch.jit._builtins import _find_builtin
@@ -426,7 +425,7 @@ class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
         # ConcreteTypes that have had their methods already compiled

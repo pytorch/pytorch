@@ -241,7 +241,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         alpha: float,
         beta: float,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
         Args:
             input_nodes (List[Buffer]): List of input nodes of the GEMM kernel.

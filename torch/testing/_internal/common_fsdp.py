@@ -1220,7 +1220,7 @@ class FSDPTest(MultiProcessTestCase):
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
         for _ in range(num_steps):
             optim.zero_grad()
-            with torch.cuda.amp.autocast(enabled=autocast):
+            with torch.amp.autocast("cuda", enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
                 if use_pure_fp16 or (mixed_precision and not isinstance(model, FSDP)):
@@ -1498,7 +1498,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
 
 
 class SkipModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False)
 

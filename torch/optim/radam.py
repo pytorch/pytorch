@@ -11,7 +11,6 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -22,6 +21,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["RAdam", "radam"]
 
@@ -385,15 +385,21 @@ def _multi_tensor_radam(
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_avg_sqs,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_avg_sqs_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_avg_sqs = cast(List[Tensor], grouped_exp_avg_sqs_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
@@ -505,12 +511,13 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                _dispatch_sqrt(
+                (
                     (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
                     / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
                 )
+                ** 0.5
                 if rho_t > 5
                 else 0
                 for rho_t in rho_t_list
@@ -524,7 +531,7 @@ def _multi_tensor_radam(
                 (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
             ]
             bias_correction2 = [
-                _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
+                ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
                 for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
             ]
 

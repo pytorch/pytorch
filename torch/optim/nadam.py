@@ -5,12 +5,12 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _dispatch_sqrt,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -22,6 +22,7 @@ from .optimizer import (
     Optimizer,
     ParamsT,
 )
+
 
 __all__ = ["NAdam", "nadam"]
 
@@ -406,16 +407,23 @@ def _multi_tensor_nadam(
         ), f"If capturable=True, params, mu_products, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_avg_sqs,
-        grouped_mu_products,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_exp_avgs_,
+        grouped_exp_avg_sqs_,
+        grouped_mu_products_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_exp_avgs = cast(List[Tensor], grouped_exp_avgs_)
+        grouped_exp_avg_sqs = cast(List[Tensor], grouped_exp_avg_sqs_)
+        grouped_mu_products = cast(List[Tensor], grouped_mu_products_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         # handle complex
         if has_complex:
             _view_as_real(
@@ -489,8 +497,7 @@ def _multi_tensor_nadam(
             torch._foreach_sqrt_(bias_correction_sqrt)
         else:
             bias_correction_sqrt = [
-                _dispatch_sqrt(1 - beta2 ** _get_value(step))
-                for step in grouped_state_steps
+                (1 - beta2 ** _get_value(step)) ** 0.5 for step in grouped_state_steps
             ]
             mus = [
                 beta1 * (1.0 - 0.5 * (0.96 ** (_get_value(step) * momentum_decay)))
