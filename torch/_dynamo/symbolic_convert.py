@@ -2730,7 +2730,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 # Calling a torch.compiled function
                 f"- Calling torch.func.{name}(compiled_fn) function from eager mode is not supported. "
                 f"Ensure that torch.func.{name} is also wrapped within a torch.compile function. "
-                "For more information, see PyTorch issue #128711."
+                "For more information, see PyTorch issue #128711.\n"
                 # if it reaches here, it means Dynamo failed to inline a functorch function
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
@@ -2777,10 +2777,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self, val
             )
             source = GlobalWeakRefSource(global_name)
-            # we guard on the stack regardless, this is to be extra safe
-            install_guard(source.make_guard(GuardBuilder.WEAKREF_ALIVE))
-            val_ref = weakref.ref(val)
-            self.output.install_global_unsafe(global_name, val_ref)
             self.symbolic_torch_function_mode_stack.append(
                 variables.LazyVariableTracker.create(val, source=source)
             )
