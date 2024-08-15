@@ -9,6 +9,8 @@ For more information on the environment variables, see `ProcessGroupNCCL Environ
 
   * - Variable
     - Description
+  * - ``TORCH_NCCL_ASYNC_ERROR_HANDLING``
+    - Control how we perform Async Error Handling with NCCL when an exception is observed in watchdog. If set to 0, no handling of asynchronous NCCL errors. If set to 1, aborting NCCL communicator and tearing down process upon error. If set to 2, only abort NCCL communicator and if set to 3, tearing down process without aborting NCCL communicator. By default, it is set to 3.
   * - ``TORCH_NCCL_HIGH_PRIORITY``
     - Control whether to use high priority stream for the NCCL communicator.
   * - ``TORCH_NCCL_BLOCKING_WAIT``
@@ -25,6 +27,10 @@ For more information on the environment variables, see `ProcessGroupNCCL Environ
     - Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process.
   * - ``TORCH_NCCL_TRACE_BUFFER_SIZE``
     - The maximum number of events we store in the flight recorder's ring buffer. One event could be the start or end of a collective, for example. Set to 0 to disable the tracebuffer and debugging info dump.
+  * - ``TORCH_NCCL_TRACE_CPP_STACK``
+    - Whether to collect cpp stack traces for flight recorder. Default value is False.
+  * - ``TORCH_NCCL_COORD_CHECK_MILSEC``
+    - Control the interval inside the monitoring thread to check the coordinated signal from other ranks, e.g. to dump the debugging information. Default value is 1000 ms.
   * - ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``
     - Control how much extra time we will wait for dumping the debugging info before we exit and throws timeout exception.
   * - ``TORCH_NCCL_DEBUG_INFO_TEMP_FILE``

@@ -20,7 +20,7 @@ from torch._guards import TracingContext
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import ObservedException, unimplemented
+from ..exc import ObservedException, raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -489,6 +489,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
             options = {"mutable_local": MutableLocal()}
             return variables.EnumVariable.create(self.value, args[0], options)
+        elif self.value is random.Random:
+            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
+                seed = args[0].value
+            else:
+                seed = None
+            random_object = random.Random(seed)
+            return RandomVariable(random_object)
 
         return super().call_function(tx, args, kwargs)
 
@@ -1034,7 +1041,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
 
-        if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
+        if subobj is not NO_SUCH_SUBOBJ:
+            if is_wrapper_or_member_descriptor(subobj):
+                options = {"source": source}
+                return variables.GetAttrVariable(self, name, **options)
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
@@ -1042,8 +1052,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 return SourcelessBuilder.create(tx, subobj)
 
-        options = {"source": source}
-        return variables.GetAttrVariable(self, name, **options)
+        # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
+        raise_observed_exception(AttributeError, tx, self)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
@@ -1235,3 +1245,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return variables.UserMethodVariable(polyfill.mapping_get, self)
         else:
             return super().var_getattr(tx, name)
+
+
+class RandomVariable(UserDefinedObjectVariable):
+    pass

@@ -159,7 +159,7 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
   }
 
  private:
-  void propagateNode(Node* n, bool _ = false) override {
+  void propagateNode(Node* n, bool _ = true) override {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
