@@ -185,7 +185,7 @@ def get_hop_schema(ep: torch.export.ExportedProgram):
         for node in ep.graph.nodes
         if isinstance(node.target, torch._ops.HigherOrderOperator)
     )
-    return torch._ops.HigherOrderOperator.generate_schema_from_fx_node(hop_node)
+    return torch._library.utils.hop_schema_from_fx_node(hop_node)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

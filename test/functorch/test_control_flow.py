@@ -3560,6 +3560,22 @@ _hop_schema_test_dtypes = [
 
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def create_symtype(cls, pytype, shape_env, val):
+            from torch._dynamo.source import ConstantSource
+
+            symbol = shape_env.create_symbol(
+                val,
+                source=ConstantSource(
+                    f"__testing_hop_schema{len(shape_env.var_to_val)}"
+                ),
+                # dynamic_dim=DimDynamic.DYNAMIC,
+                # constraint_dim=None,
+            )
+            return cls(SymNode(symbol, shape_env, pytype, hint=val))
+
         if ty == "bool":
             return True
         elif ty == "int":
@@ -3571,9 +3587,11 @@ class TestHopSchema(TestCase):
         elif ty == "tensor":
             return torch.tensor(1)
         elif ty == "symint":
-            return torch.SymInt(1)
+            shape_env = ShapeEnv()
+            return create_symtype(torch.SymInt, int, shape_env, 1)
         elif ty == "symbool":
-            return torch.SymBool(True)
+            shape_env = ShapeEnv()
+            return create_symtype(torch.SymBool, bool, shape_env, True)
         elif ty == "graph_module":
 
             def f(x):
@@ -3586,18 +3604,14 @@ class TestHopSchema(TestCase):
             )
 
             init_torchbind_implementations()
-            tq = torch.classes._TorchScriptTesting._TensorQueue(
-                torch.empty(
-                    0,
-                ).fill_(-1)
-            )
-            return tq
+            foo = torch.classes._TorchScriptTesting._Foo(3, 4)
+            return foo
         else:
             raise NotImplementedError(ty)
 
     @parametrize("dtype", _hop_schema_test_dtypes)
     def test_type_gen(self, dtype):
-        from torchgen.model import TypeGen
+        from torchgen.gen_schema_utils import TypeGen
 
         example_val = self._get_example_val(dtype)
         ty = TypeGen.from_example(example_val)
@@ -3606,7 +3620,7 @@ class TestHopSchema(TestCase):
 
     @parametrize("dtype", _hop_schema_test_dtypes)
     def test_list_gen(self, dtype):
-        from torchgen.model import TypeGen
+        from torchgen.gen_schema_utils import TypeGen
 
         example_val = self._get_example_val(dtype)
         li1 = [example_val]
@@ -3617,7 +3631,7 @@ class TestHopSchema(TestCase):
         self.assertEqual(ty2.parse(str(ty2)), ty2)
 
     def test_function_schema_gen(self):
-        from torchgen.model import FunctionSchemaGen
+        from torchgen.gen_schema_utils import FunctionSchemaGen
 
         inps = [
             (dtype + "_v", self._get_example_val(dtype))
@@ -3637,15 +3651,15 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema1),
-            """test_op1(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._TensorQueue script_obj_v) -> Tensor output""",  # noqa: B950
+            """test_op1(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._Foo script_obj_v) -> Tensor output""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(schema2),
-            """test_op2(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._TensorQueue script_obj_v) -> Tensor output""",  # noqa: B950
+            """test_op2(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._Foo script_obj_v) -> Tensor output""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(schema3),
-            """test_op3(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._TensorQueue script_obj_v) -> (Tensor output, Tensor output)""",  # noqa: B950,
+            """test_op3(bool bool_v, int int_v, float float_v, str str_v, Tensor tensor_v, SymInt symint_v, SymBool symbool_v, GraphModule graph_module_v, __torch__.torch.classes._Foo script_obj_v) -> (Tensor output, Tensor output)""",  # noqa: B950,
         )
         self.assertEqual(schema1.parse(str(schema1)), schema1)
         self.assertEqual(schema2.parse(str(schema2)), schema2)
@@ -3660,9 +3674,7 @@ class TestHopSchema(TestCase):
             if node.op == "call_function"
             and node.target is torch.ops.higher_order.while_loop
         )
-        schema = torch._ops.HigherOrderOperator.generate_schema_from_fx_node(
-            while_loop_node
-        )
+        schema = torch._library.utils.hop_schema_from_fx_node(while_loop_node)
         self.assertExpectedInline(
             str(schema),
             """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2] output""",  # noqa: B950

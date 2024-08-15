@@ -5,7 +5,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Set, Type, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -425,57 +425,6 @@ class HigherOrderOperator(OperatorBase):
             )
 
         return wrapper()
-
-    @staticmethod
-    def generate_schema(
-        hop, example_inputs: Tuple[Any, ...], example_output: Tuple[Any, ...]
-    ):
-        """
-        example_args: a tuple of (name, value) pairs. The ordering of the name corresponds to
-            the ordering of the arguments in the schema.
-        example_output: a tuple of output values. The ordering of the output corresponds to the
-            the ordering of the return values in the schema. If there's a single return, example_output
-            tuple holds a single return value.
-        """
-        from torchgen.model import FunctionSchemaGen
-
-        return FunctionSchemaGen.from_example(hop._name, example_inputs, example_output)
-
-    @staticmethod
-    def generate_schema_from_fx_node(node):
-        hop = node.target
-        if not isinstance(hop, HigherOrderOperator):
-            raise RuntimeError("fx_node's target must be a hop.")
-
-        def _collect_example_val(node):
-            meta_val = node.meta.get("val", None)
-            if meta_val is None:
-                assert node.op == "get_attr"
-                meta_val = getattr(node.graph.owning_module, node.target)
-            return meta_val
-
-        example_inputs = []
-        for arg in node.args:
-            if isinstance(arg, (torch.fx.Node, torch.fx.node.Node)):
-                example_inputs.append(_collect_example_val(arg))
-            elif isinstance(
-                arg, (torch.fx.immutable_collections.immutable_list, list, tuple)
-            ):
-                example_inputs.append([_collect_example_val(x) for x in arg])
-            else:
-                raise RuntimeError(f"Unsupported arg type {type(arg)}")
-
-        # Bound the arguments to make sure number of inputs are correct
-        bound_args: inspect.BoundArguments = inspect.signature(hop.__call__).bind(
-            *example_inputs
-        )
-
-        # We treat example_output as a single value in return. This is to differentiate 1. return a single val
-        # vs 2. return a tuple with one element.
-        example_output = _collect_example_val(node)
-        return HigherOrderOperator.generate_schema(
-            hop, tuple(bound_args.arguments.items()), (list(example_output),)
-        )
 
     def __str__(self):
         return f"{self.name()}"
