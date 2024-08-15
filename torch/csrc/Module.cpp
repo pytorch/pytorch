@@ -1146,23 +1146,21 @@ PyObject* THPModule_setDevice(
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto device = r.deviceOptional(0);
-  if (!device.has_value()) {
-    Py_RETURN_NONE;
-  }
-  auto device_type = device->type();
+  auto device = r.device(0);
+  c10::DeviceType device_type = device.type();
   TORCH_CHECK(
-      at::isAccelerator(device_type), device_type, " is not an accelerator.");
+      at::getAccelerator(true).value() == device_type,
+      "device doesn't match the current accelerator.");
   TORCH_CHECK(
-      device->has_index(),
+      device.has_index(),
       "Expected a torch.device with a specified index or an integer.");
   // If device index is negative, no-op
-  if (device->index() < 0) {
+  if (device.index() < 0) {
     Py_RETURN_NONE;
   }
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
-  impl.setDevice(device.value());
+  impl.setDevice(device);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1178,7 +1176,10 @@ PyObject* THPModule_getDevice(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPModule_exchangeDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "_exchange_device expects an int, but got ",
+      THPUtils_typename(arg));
   auto device_index = THPUtils_unpackDeviceIndex(arg);
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
@@ -1193,7 +1194,10 @@ PyObject* THPModule_exchangeDevice(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPModule_maybeExchangeDevice(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "_maybe_exchange_device expects an int, but got ",
+      THPUtils_typename(arg));
   auto device_index = THPUtils_unpackDeviceIndex(arg);
   if (device_index < 0) {
     return THPUtils_packDeviceIndex(-1);
@@ -1217,17 +1221,11 @@ PyObject* THPModule_setStream(
   });
   torch::ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
-
   c10::Stream stream = r.stream(0);
   c10::DeviceType device_type = stream.device_type();
   TORCH_CHECK(
-      at::isAccelerator(device_type), device_type, " is not an accelerator.");
-  TORCH_CHECK(
       at::getAccelerator(true).value() == device_type,
-      "stream doesn't match the current accelerator, expect ",
-      at::getAccelerator(true).value(),
-      ", but got ",
-      device_type);
+      "stream device doesn't match the current accelerator.");
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   // Set the current device to the device of stream.
@@ -1248,7 +1246,6 @@ PyObject* THPModule_getStream(
       "current_stream(Device? device=None)",
   });
   torch::ParsedArgs<1> parsed_args{};
-
   auto r = parser.parse(args, kwargs, parsed_args);
   std::optional<c10::DeviceType> device_type;
   std::optional<c10::DeviceIndex> device_index;
@@ -1258,9 +1255,8 @@ PyObject* THPModule_getStream(
   } else {
     device_type = device->type();
     TORCH_CHECK(
-        at::isAccelerator(device_type.value()),
-        device_type.value(),
-        " is not an accelerator.");
+        at::getAccelerator(true) == device_type,
+        "device doesn't match the current accelerator.");
     if (device->has_index()) {
       device_index = device->index();
     }
@@ -1270,7 +1266,6 @@ PyObject* THPModule_getStream(
   if (!device_index.has_value()) {
     device_index = impl.getDevice().index();
   }
-
   c10::Stream stream =
       impl.getStream({device_type.value(), device_index.value()});
   return THPStream_Wrap(stream);
@@ -1296,9 +1291,8 @@ PyObject* THPModule_syncStreamsOnDevice(
   } else {
     device_type = device->type();
     TORCH_CHECK(
-        at::isAccelerator(device_type.value()),
-        device_type.value(),
-        " is not an accelerator.");
+        at::getAccelerator(true) == device_type,
+        "device doesn't match the current accelerator.");
     if (device->has_index()) {
       device_index = device->index();
     }
