@@ -16,6 +16,7 @@
 // in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
 
 #include <ATen/NumericUtils.h>
+#include <ATen/cpu/Utils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 
 #include <c10/util/Float8_e4m3fn.h>
@@ -593,12 +594,13 @@ atomic_add(volatile T *addr, T offset) {
 
 void mm_get_thread_blocking(
     int num_threads,
+    int max_k_slices,
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t M0,
-    int64_t N0,
-    int64_t K0,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
@@ -624,15 +626,16 @@ void mm_get_thread_blocking(
     return std::make_tuple(std::move(factors), count);
   };
 
-  auto get_blocking = [](int64_t num_threads,
-                         int64_t factor,
+  auto get_blocking = [](int64_t m_factor,
+                         int64_t n_factor,
+                         int64_t k_factor,
                          int64_t m_blocks,
                          int64_t n_blocks,
                          int64_t k_blocks) {
-    int64_t thread_block_n = (n_blocks + factor - 1) / factor;
-    int64_t cofactor = num_threads / factor;
-    int64_t thread_block_m = (m_blocks + cofactor - 1) / cofactor;
-    return std::make_tuple(thread_block_m, thread_block_n, k_blocks);
+    int64_t thread_block_k = (k_blocks + k_factor - 1) / k_factor;
+    int64_t thread_block_n = (n_blocks + n_factor - 1) / n_factor;
+    int64_t thread_block_m = (m_blocks + m_factor - 1) / m_factor;
+    return std::make_tuple(thread_block_m, thread_block_n, thread_block_k);
   };
 
   auto is_better_blocking = [=](int64_t Mt_,
@@ -641,22 +644,22 @@ void mm_get_thread_blocking(
                               int64_t Mt,
                               int64_t Nt,
                               int64_t Kt) {
-    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+    return Mt == 0 || Kt_ < Kt || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
   };
 
-  int64_t m_blocks = (M + M0 - 1) / M0;
-  int64_t n_blocks = (N + N0 - 1) / N0;
-  int64_t k_blocks = (K + K0 - 1) / K0;
+  int64_t m_blocks = (M + Mr - 1) / Mr;
+  int64_t n_blocks = (N + Nr - 1) / Nr;
+  int64_t k_blocks = (K + Kr - 1) / Kr;
 
   auto [factors, count] = get_factors(num_threads);
   assert(count > 0);
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    if (n_blocks >= factor &&
-        m_blocks >= num_threads / factor) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor && m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
@@ -668,11 +671,33 @@ void mm_get_thread_blocking(
   }
 
   for (int i = 0; i < count; ++i) {
-    int64_t factor = factors[i];
-    int64_t cofactor = num_threads / factor;
-    if (n_blocks >= factor || m_blocks >= cofactor) {
+    int64_t k_factor = factors[i];
+    if (k_blocks >= k_factor && (max_k_slices == 0 || k_factor <= max_k_slices)) {
+      auto [mxn_factors, mxn_count] = get_factors(num_threads / k_factor);
+      for (int j = 0; j < mxn_count; ++j) {
+        int64_t n_factor = mxn_factors[j];
+        int64_t m_factor = num_threads / (k_factor * n_factor);
+        if (n_blocks >= n_factor && m_blocks >= m_factor) {
+          auto [Mt_, Nt_, Kt_] = get_blocking(
+              m_factor, n_factor, k_factor, m_blocks, n_blocks, k_blocks);
+          if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
+            std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
+          }
+        }
+      }
+    }
+  }
+
+  if (Mt != 0) {
+    return;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    int64_t n_factor = factors[i];
+    int64_t m_factor = num_threads / n_factor;
+    if (n_blocks >= n_factor || m_blocks >= m_factor) {
       auto [Mt_, Nt_, Kt_] = get_blocking(
-          num_threads, factor, m_blocks, n_blocks, k_blocks);
+          m_factor, n_factor, 1, m_blocks, n_blocks, k_blocks);
       if (is_better_blocking(Mt_, Nt_, Kt_, Mt, Nt, Kt)) {
         std::tie(Mt, Nt, Kt) = std::make_tuple(Mt_, Nt_, Kt_);
       }
@@ -680,6 +705,66 @@ void mm_get_thread_blocking(
   }
 
   assert(Mt != 0);
+}
+
+template<typename X_t, typename W_t>
+void mm_get_cache_blocking(
+    int num_threads,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
+    int64_t Mt_blocks,
+    int64_t Nt_blocks,
+    int64_t Kt_blocks,
+    int64_t& Mc_blocks,
+    int64_t& Nc_blocks,
+    int64_t& Kc_blocks) {
+  // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking algorithm.
+  // TODO(jgong5): cache cache blocking results
+  // TODO: tune the factor here
+  float L1_limit_factor = 1.0;
+  float L2_limit_factor = 0.5;
+
+  auto L1_cache_size = at::cpu::L1d_cache_size(); // per core cache size in Bytes
+  assert(L1_cache_size > 0 && "Expect L1_cache_size > 0 but got 0");
+
+  auto L2_cache_size = at::cpu::L2_cache_size(); // per core cache size in Bytes
+  assert(L2_cache_size > 0 && "Expect L2_cache_size > 0 but got 0");
+
+  auto L1 = L1_cache_size * L1_limit_factor;
+  auto L2 = L2_cache_size * L2_limit_factor;
+
+  constexpr size_t num_byte_A = sizeof(X_t);
+  constexpr size_t num_byte_B = sizeof(W_t);
+
+  int64_t size_cache_B = Kr * Kt_blocks * Nr * num_byte_B;
+  Kc_blocks = Kt_blocks;
+  if (size_cache_B > L1) {
+      Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
+  }
+
+  float min_Mc_ratio = 2;
+  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
+  if (min_Mc_blocks * Mr * Kt_bytes < L2) {
+    Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
+    Nc_blocks = 1;
+  } else {
+    Mc_blocks = Mt_blocks;
+    Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+    auto Nc_bytes = Nc_blocks * Nr * 4;
+    auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
+    if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
+      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+      if (M_max < Mc_blocks * Mr) {
+        Mc_blocks = (int64_t)std::floor(M_max / Mr);
+        Nc_blocks = std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+      }
+    }
+  }
 }
 
 inline void mm_get_thread_blocks(
