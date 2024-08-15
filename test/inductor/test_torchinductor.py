@@ -7276,6 +7276,10 @@ class CommonTemplate:
             return result_strided
 
         self.common(fn, [view])
+        reference_out = fn(view)
+        compiled_fn = torch.compile(fn)
+        actual_out = compiled_fn(view)
+        self.assertEqual(reference_out.stride(), actual_out.stride())
 
     def test_like_channels_last(self):
         def foo():

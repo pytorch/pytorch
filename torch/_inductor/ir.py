@@ -4720,7 +4720,14 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_exact_strides(cls, x, exact_strides, allow_padding=False):
         assert exact_strides is not None
-        order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+        unbacked_symbols_in_strides = len(free_unbacked_symbols(exact_strides)) > 0
+        if not unbacked_symbols_in_strides:
+            order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+        else:
+            order = None
+        exact_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+        ]
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
         if is_storage_and_layout(x):
@@ -4772,7 +4779,8 @@ class ExternKernel(InputsKernel):
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-        assert is_stride_order_storage_and_layout(x, order)
+        if order:
+            assert is_stride_order_storage_and_layout(x, order)
         return x
 
     @classmethod
