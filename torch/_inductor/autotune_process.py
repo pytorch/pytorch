@@ -574,7 +574,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
-class GPUDeviceBenchmarkRequest(BenchmarkRequest):
+class GPUDeviceBenchmarkMixin:
     def do_bench(
         self,
         fn,
@@ -601,7 +601,7 @@ class GPUDeviceBenchmarkRequest(BenchmarkRequest):
         return out
 
 
-class CPUDeviceBenchmarkRequest(BenchmarkRequest):
+class CPUDeviceBenchmarkMixin:
     def do_bench(
         self,
         fn,
@@ -611,7 +611,7 @@ class CPUDeviceBenchmarkRequest(BenchmarkRequest):
         return benchmarker.benchmark_cpu(fn)
 
 
-class TritonBenchmarkRequest:
+class TritonBenchmarkRequest(BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
     def __init__(
@@ -687,15 +687,15 @@ class TritonBenchmarkRequest:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class TritonGPUBenchmarkRequest(TritonBenchmarkRequest, GPUDeviceBenchmarkRequest):
+class TritonGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
     pass
 
 
-class TritonCPUBenchmarkRequest(TritonBenchmarkRequest, CPUDeviceBenchmarkRequest):
+class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
     pass
 
 
-class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
+class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -812,7 +812,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
-class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
+class CppBenchmarkRequest(BenchmarkRequest, CPUDeviceBenchmarkMixin):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put Tensors in here!
 

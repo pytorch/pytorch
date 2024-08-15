@@ -29,6 +29,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import (
     TensorMeta,
+    TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
 )
