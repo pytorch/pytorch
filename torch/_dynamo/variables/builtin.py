@@ -850,7 +850,7 @@ class BuiltinVariable(VariableTracker):
         elif len(handlers) == 1:
             (handler,) = handlers
 
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
+            def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
@@ -858,14 +858,14 @@ class BuiltinVariable(VariableTracker):
 
         else:
 
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
+            def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
                 for fn in handlers:
                     rv = fn(tx, args, kwargs)
                     if rv:
                         return rv
                 unimplemented(error_msg)
 
-        return builtin_dipatch
+        return builtin_dispatch
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -1577,6 +1577,20 @@ class BuiltinVariable(VariableTracker):
             unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
             items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
+
+    def call_filter(self, tx: "InstructionTranslator", fn, seq):
+        if seq.has_unpack_var_sequence(tx):
+            seq_unpacked = seq.unpack_var_sequence(tx)
+            try:
+                items = list(
+                    filter(
+                        lambda x: fn.call_function(tx, [x], {}).as_python_constant(),
+                        seq_unpacked,
+                    )
+                )
+                return variables.TupleVariable(items)
+            except NotImplementedError:
+                return
 
     def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
