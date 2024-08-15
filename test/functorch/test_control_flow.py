@@ -17,6 +17,7 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1204,6 +1205,7 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1244,6 +1246,7 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1277,6 +1280,7 @@ def forward(self, pred_1, x_1):
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     self.assertEqual(result, result_exp_PT)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1328,6 +1332,7 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @unittest.skipIf(not importlib.util.find_spec("jax"), "Test requires JAX.")
     @unittest.skipIf(not importlib.util.find_spec("numpy"), "Test requires NumPy.")
@@ -1376,13 +1381,14 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_tuple(self, reverse, combine_mode, device):
         def fct(x, y):
-            return (x[0] + y[1], x[1] / y[0])
+            return (x[0] + y[0], x[1] * y[1])
 
         x = torch.randn(3, 2, 2, device=device, requires_grad=True)
         y = torch.randn(3, 2, 2, device=device, requires_grad=True)
@@ -1394,6 +1400,7 @@ def forward(self, pred_1, x_1):
         expected_result = _fake_associative_scan(fct, inp, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1439,6 +1446,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])

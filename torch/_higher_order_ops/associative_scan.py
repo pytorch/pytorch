@@ -52,9 +52,7 @@ def _interleave(a, b, dim):
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
-        interleaved = torch.ops.aten.slice(
-            interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1
-        )
+        interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
     return interleaved
 
 
@@ -182,8 +180,8 @@ def generic_associative_scan(operator, elems_flat, dim=0):
             return elems
 
         reduced_elems = operator(
-            *[torch.ops.aten.slice(elem, dim, 0, -1, 2) for elem in elems],
-            *[torch.ops.aten.slice(elem, dim, 1, None, 2) for elem in elems],
+            *[aten.slice(elem, dim, 0, -1, 2) for elem in elems],
+            *[aten.slice(elem, dim, 1, None, 2) for elem in elems],
         )
 
         # Recursively compute scan for partially reduced tensors.
@@ -191,23 +189,23 @@ def generic_associative_scan(operator, elems_flat, dim=0):
 
         if num_elems % 2 == 0:
             even_elems = operator(
-                *[torch.ops.aten.slice(e, dim, 0, -1) for e in odd_elems],
-                *[torch.ops.aten.slice(e, dim, 2, None, 2) for e in elems],
+                *[aten.slice(e, dim, 0, -1) for e in odd_elems],
+                *[aten.slice(e, dim, 2, None, 2) for e in elems],
             )
         else:
             even_elems = operator(
                 *odd_elems,
-                *[torch.ops.aten.slice(e, dim, 2, None, 2) for e in elems],
+                *[aten.slice(e, dim, 2, None, 2) for e in elems],
             )
 
         # The first element of a scan is the same as the first element
         # of the original `elems`.
         even_elems = [
-            torch.cat([torch.ops.aten.slice(elem, dim, 0, 1), result], dim=dim)
+            torch.cat([aten.slice(elem, dim, 0, 1), result], dim=dim)
             if result.shape.numel() > 0 and elem.shape[dim] > 0
             else result
             if result.shape.numel() > 0
-            else torch.ops.aten.slice(
+            else aten.slice(
                 elem, dim, 0, 1
             )  # Jax allows/ignores concat with 0-dim, Pytorch does not
             for (elem, result) in zip(elems, even_elems)
