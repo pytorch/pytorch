@@ -165,7 +165,7 @@ def run_functionalized_fw_and_collect_metadata(
         mode = FunctionalTensorMode(_allow_token_discovery=True)
         suppress_pending = contextlib.nullcontext()
         if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
-            suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+            suppress_pending = shape_env.no_pending_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)

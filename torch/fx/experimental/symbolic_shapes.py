@@ -2917,6 +2917,29 @@ class ShapeEnv:
         finally:
             self._ignore_fresh_unbacked_symbols_exit()
 
+    def _no_pending_fresh_unbacked_symbols_tls(self):
+        return getattr(TLS, "no_pending_fresh_unbacked_symbols", False)
+
+    @record_shapeenv_event()
+    def _no_pending_fresh_unbacked_symbols_enter(self):
+        TLS.no_pending_fresh_unbacked_symbols = True
+
+    @record_shapeenv_event()
+    def _no_pending_fresh_unbacked_symbols_exit(self):
+        TLS.no_pending_fresh_unbacked_symbols = False
+
+    @contextmanager
+    def no_pending_fresh_unbacked_symbols(self):
+        """
+        Indicates that the newly allocated unbacked SymInts are being
+        discarded
+        """
+        self._no_pending_fresh_unbacked_symbols_enter()
+        try:
+            yield
+        finally:
+            self._no_pending_fresh_unbacked_symbols_exit()
+
     @record_shapeenv_event()
     def freeze(self):
         """Freeze this ShapeEnv to stop accumulating guards
@@ -3420,7 +3443,7 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter))
         self.counter["create_unbacked_symbol"] += 1
-        if not self._ignore_fresh_unbacked_symbols_tls():
+        if not self._ignore_fresh_unbacked_symbols_tls() and not self._no_pending_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
@@ -3438,7 +3461,7 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
-        if not self._ignore_fresh_unbacked_symbols_tls():
+        if not self._ignore_fresh_unbacked_symbols_tls() and not self._no_pending_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
@@ -3462,7 +3485,7 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
-        if not self._ignore_fresh_unbacked_symbols_tls():
+        if not self._ignore_fresh_unbacked_symbols_tls() and not self._no_pending_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
