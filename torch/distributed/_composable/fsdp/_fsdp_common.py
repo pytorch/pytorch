@@ -12,7 +12,6 @@ import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import DTensorSpec
-import torch._dynamo.compiled_autograd as ca
 
 
 @dataclass
@@ -151,8 +150,3 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
     ):
         return x
     return x.to(dtype)
-
-
-def _wait_event(stream, event):
-    if not ca.compiled_autograd_enabled:
-        stream.wait_event(event)
