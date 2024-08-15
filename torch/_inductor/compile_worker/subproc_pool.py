@@ -110,6 +110,10 @@ class SubprocPool:
                 **os.environ,
                 # We need to set the PYTHONPATH so the subprocess can find torch.
                 "PYTHONPATH": os.pathsep.join(sys.path),
+                # We don't want to re-warm the pool when the subprocess imports
+                # torch._inductor.codecache since the warming process is what
+                # creates the SubprocPool in the first place.
+                "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": _get_ld_library_path(),
             },

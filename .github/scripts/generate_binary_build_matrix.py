@@ -453,9 +453,7 @@ def generate_wheels_matrix(
                             gpu_arch_type, gpu_arch_version
                         ),
                         "devtoolset": (
-                            "cxx11-abi"
-                            if arch_version in ["cpu-cxx11-abi", "xpu"]
-                            else ""
+                            "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,

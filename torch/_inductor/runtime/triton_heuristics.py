@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     _NUM_THREADS_PER_WARP,
@@ -33,7 +34,6 @@ from .runtime_utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    do_bench_gpu,
     dynamo_timed,
     get_first_attr,
     get_max_y_grid,
@@ -664,7 +664,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return do_bench_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
@@ -1025,6 +1025,8 @@ def should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("autotune_remote_cache") is not None:
         return inductor_meta.get("autotune_remote_cache")
     if not inductor_meta.get("is_fbcode"):
+        return False
+    if torch._utils_internal.is_fb_unit_test():
         return False
     if inductor_meta.get("is_hip"):
         return False

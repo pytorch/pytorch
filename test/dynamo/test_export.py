@@ -3480,8 +3480,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     arg0_1 = arg0
-    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
     slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None

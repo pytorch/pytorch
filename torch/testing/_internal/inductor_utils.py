@@ -9,7 +9,7 @@ from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
-from torch._inductor.utils import get_gpu_shared_memory
+from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -111,3 +111,5 @@ IS_H100 = LazyVal(
     lambda: HAS_CUDA
     and get_gpu_shared_memory() == 232448
 )
+
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))

@@ -35,11 +35,11 @@ def local_map(
         func (Callable): the function to be applied on each local shard of
             :class:`DTensor`s.
         out_placements (Union[`PlacementType`, Tuple[`PlacementType`, ...]]):
-            the desired placements of the :class:`DTensor`s in `func`'s flattened output.
-            If the flattened `output` is a single value, the `out_placements` should be
-            of type `PlacementType`. Otherwise if the flattened `output` has multiple
-            values, the `out_placements` should be a tuple of `PlacementType` values 1:1
-            mapping to the flattened `output`.
+            the desired placements of the :class:`DTensor`s in ``func``'s flattened output.
+            If the flattened ``output`` is a single value, the ``out_placements`` should be
+            of type `PlacementType`. Otherwise if the flattened ``output`` has multiple
+            values, the ``out_placements`` should be a tuple of `PlacementType` values 1:1
+            mapping to the flattened ``output``.
             Besides, for :class:`Tensor` output, we use `PlacementType` as its
             placements (a `Tuple[Placement]` value). For non-:class:`Tensor` output,
             the `PlacementType` should be `None`.
@@ -48,44 +48,44 @@ def local_map(
             should ignore the desired placements because the application is not on
             :class:`DTensors`.
         in_placements (Tuple[`PlacementType`, ...], optional):
-            the required placements of the :class:`DTensor`s in `func`'s flattened input.
-            If `in_placements` is specified, `local_map` would examine whether the
+            the required placements of the :class:`DTensor`s in ``func``'s flattened input.
+            If ``in_placements`` is specified, ``local_map`` would examine whether the
             placements of each :class:`DTensor` argument is the same as the required
             placements or not. If the placements are not the same and
-            `redistribute_inputs` is `False`, an exception will be raised. Otherwise if
-            `redistribute_inputs` is `True`, the argument will be first redistributed to
-            the required sharding placements before passing its local tensor to `func`.
-            The only exception is when required placements are not `None` and the
+            ``redistribute_inputs`` is ``False``, an exception will be raised. Otherwise if
+            ``redistribute_inputs`` is `True`, the argument will be first redistributed to
+            the required sharding placements before passing its local tensor to ``func``.
+            The only exception is when required placements are not ``None`` and the
             argument is a :class:`torch.Tensor`. In this case, the placements examination
-            will be skipped and the argument will be directly passed to `func`.
-            If `in_placements` is `None`, no placements examination will be performed.
-            Default: `None`
+            will be skipped and the argument will be directly passed to ``func``.
+            If ``in_placements`` is ``None``, no placements examination will be performed.
+            Default: None
         device_mesh (:class:`DeviceMesh`, optional):
             the device mesh that all the :class:`DTensor`s are placed on. If not
             specified, this will be inferred from the input :class:`DTensor`s' device
             mesh. `local_map` requires every :class:`DTensor`s to be placed on the same
-            device mesh. Default: `None`.
+            device mesh. Default: None.
         redistribute_inputs (bool, optional):
             the bool value indicating whether to reshard the input :class:`DTensor`s when
             their placements are different from the required input placements. If this
-            value is `False` and some :class:`DTensor` input has a different placement,
-            an exception will be raised. Default: `False`.
+            value is ``False`` and some :class:`DTensor` input has a different placement,
+            an exception will be raised. Default: False.
 
     Returns:
-        A `Callable` that applies `func` to each local shard of the input :class:`DTensor`
-        and returns a :class:`DTensor` constructed from the return value of `func`.
+        A ``Callable`` that applies ``func`` to each local shard of the input :class:`DTensor`
+        and returns a :class:`DTensor` constructed from the return value of ``func``.
 
     Raises:
         AssertionError: If the input :class:`DTensor`s are not placed on the same device
-        mesh, or if they are placed on a different device mesh than the `device_mesh`
+        mesh, or if they are placed on a different device mesh than the ``device_mesh``
         argument passed in.
 
         AssertionError: For any non-:class:`DTensor` output, we require its corresponding
-        output placement in `out_placements` be `None`. An AssertionError will be raised
+        output placement in ``out_placements`` be None. An AssertionError will be raised
         if this is not the case.
 
-        ValueError: If `redistribute_inputs=False` but the input :class:`DTensor` needs
-        a redistribution according to `in_placements`.
+        ValueError: If ``redistribute_inputs=False`` but the input :class:`DTensor` needs
+        a redistribution according to ``in_placements``.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")
