@@ -2875,6 +2875,32 @@ def forward(self, x_1):
         self.assertEqual(gm(x), true_fn(x))
         self.assertEqual(foo(x), true_fn(x))
 
+    def test_cond_with_unbacked_sym_pred(self):
+        def foo(x):
+            def true_fn(x):
+                return x + x
+
+            def false_fn(x):
+                return x * x
+
+            az = x.nonzero()
+            return cond(az.shape[0] > 3, true_fn, false_fn, (x,))
+
+        gm = make_fx(foo, tracing_mode="symbolic")(torch.randn(7))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1):
+    nonzero = torch.ops.aten.nonzero.default(x_1)
+    sym_size_int = torch.ops.aten.sym_size.int(nonzero, 0);  nonzero = None
+    gt = sym_size_int > 3;  sym_size_int = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x_1]);  gt = true_graph_0 = false_graph_0 = x_1 = None
+    getitem = cond[0];  cond = None
+    return getitem""",
+        )
+
     def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)

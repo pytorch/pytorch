@@ -861,14 +861,22 @@ class VariableBuilder:
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
 
-            value_hint = value.node.require_hint()
             new_source = ConvertIntSource(self.source)
+            if value.node.has_hint():
+                value_hint = value.node.require_hint()
 
-            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                int(value_hint),
-                new_source,
-                dynamic_dim=DimDynamic.DYNAMIC,
-            )
+                new_symint = (
+                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                        int(value_hint),
+                        new_source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    )
+                )
+            else:
+                # We need to create an unbacked symint to replace the unbacked symbool.
+                # Call ignore_fresh_unbacked_symbols to skip the pending unbacked symbols check.
+                with self.tx.output.shape_env.ignore_fresh_unbacked_symbols():
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
