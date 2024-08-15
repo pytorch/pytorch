@@ -1322,7 +1322,10 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                strides = n.meta["val"].stride()
+                strides = [
+                    s.node.expr if isinstance(s, torch.SymInt) else s
+                    for s in n.meta["val"].stride()
+                ]
                 # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
                 if not isinstance(result.data, ir.ReinterpretView):
                     result = ir.ExternKernel.require_exact_strides(
