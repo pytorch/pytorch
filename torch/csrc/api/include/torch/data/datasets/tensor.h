@@ -26,7 +26,7 @@ struct TensorDataset : public Dataset<TensorDataset, TensorExample> {
   }
 
   /// Returns the number of tensors in the dataset.
-  optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return tensor.size(0);
   }
 

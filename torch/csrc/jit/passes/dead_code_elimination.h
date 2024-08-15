@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // If given a top-level graph, DCE will construct do alias analysis that allows
 // for "smarter" dead code elimination (we will eliminate mutable ops if we can
@@ -38,5 +37,4 @@ TORCH_API void EliminateDeadCode(
     std::function<void(const std::unordered_set<const Value*>&)> cb,
     DCESideEffectPolicy sideEffectPolicy =
         DCESideEffectPolicy::DONT_DELETE_NODES_WITH_SIDE_EFFECTS);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

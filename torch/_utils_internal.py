@@ -124,7 +124,11 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_trace_structured_event(*args, **kwargs) -> None:
+    pass
+
+
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
@@ -178,6 +182,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)

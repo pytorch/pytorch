@@ -8,12 +8,9 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
-#include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
-#include <exception>
 #include <unordered_map>
-#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -367,7 +364,9 @@ private:
   std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
 
-static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
+template<typename encoder_t,
+         typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> || std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
+static inline void mtl_setBuffer(encoder_t encoder, const Tensor& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];

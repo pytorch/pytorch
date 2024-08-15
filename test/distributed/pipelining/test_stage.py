@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map_only
 
+
 d_hid = 512
 batch_size = 256
 chunks = 4
@@ -269,7 +270,7 @@ class StageTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
 
         class CustomState:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.i = 0
 
             def dw_builder(self):
