@@ -663,6 +663,8 @@ class parametrize(_TestParametrizer):
             return f"{name}_{str(value).replace('.', '_')}"
         elif inspect.isclass(value):
             return f"{name}_{value.__name__}"
+        else:
+            return f"{name}{idx}"
 
     def _default_subtest_name(self, idx, values):
         return '_'.join([self._formatted_str_repr(idx, a, v) for a, v in zip(self.arg_names, values)])
