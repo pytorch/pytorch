@@ -1,3 +1,8 @@
+"""
+To run the example, use the following command:
+torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.py -e MLP_operation_tracing
+"""
+import argparse
 import os
 from typing import Callable, Dict, Union
 
@@ -5,7 +10,6 @@ import torch
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.examples.comm_mode_features_example_argparser import args
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -730,4 +734,24 @@ if __name__ == "__main__":
     world_size = int(os.environ["WORLD_SIZE"])
     assert world_size == 4  # our example uses 4 worker ranks
 
-    run_example(world_size, rank, args())
+    parser = argparse.ArgumentParser(
+        description="comm_mode_feature examples",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    example_prompt = (
+        "choose one comm_mode_feature example from below:\n"
+        "\t1. MLP_distributed_sharding_display\n"
+        "\t2. MLPStacked_distributed_sharding_display\n"
+        "\t3. MLP_module_tracing\n"
+        "\t4. transformer_module_tracing\n"
+        "\t5. MLP_operation_tracing\n"
+        "\t6. transformer_operation_tracing\n"
+        "\t7. MLP_json_dump\n"
+        "\t8. transformer_json_dump\n"
+        "\t9. activation_checkpointing\n"
+        "e.g. you want to try the MLPModule sharding display example, please input 'MLP_distributed_sharding_display'\n"
+    )
+    parser.add_argument("-e", "--example", help=example_prompt, required=True)
+    example = parser.parse_args().example
+
+    run_example(world_size, rank, example)
