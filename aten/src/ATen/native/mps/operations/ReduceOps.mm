@@ -222,6 +222,8 @@ static void reduction_out_mps(const Tensor& input_t,
                  inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
                  (inputScalarType != kLong || !macOS13_3_plus)) {
         inputCastType = getMPSDataType(kFloat);
+      } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {
+        inputCastType = getMPSDataType(kFloat);
       }
 
       if (inputCastType != MPSDataTypeInvalid) {
@@ -341,13 +343,21 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
+  // Cast FP16 to FP32 on macOS Monterey due to precision issues.
+  // This is fixed starting with macOS Ventura.
+  bool castInputData = false;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS) && mps_input_dtype == MPSDataTypeFloat16) {
+    castInputData = true;
+    mps_input_dtype = MPSDataTypeFloat32;
+  }
+
   auto stream = getCurrentMPSStream();
   @autoreleasepool {
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
     string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + std::to_string(p) + ":" +
-        keepdim_info + ":" + toString(in_dtype);
+        keepdim_info + ":" + toString(in_dtype) + ":" + std::to_string(castInputData);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
@@ -360,7 +370,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
           ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
           : newCachedGraph->inputTensor_;
 
-      if (opt_dtype.has_value()) {
+      if (opt_dtype.has_value() || castInputData) {
         inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
       }
 
@@ -402,7 +412,8 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output_t) name:nil];
       }
 
-      newCachedGraph->outputTensor_ = outputTensor;
+      newCachedGraph->outputTensor_ =
+          castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
     });
 
     auto otherPlaceholder = Placeholder();
@@ -1404,6 +1415,12 @@ static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bo
 
 // Median of entire tensor into scalar result
 Tensor median_mps(const Tensor& input_t) {
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.");
+    return at::median(input_t.to("cpu"));
+  }
+
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, "median");
 
@@ -1607,6 +1624,18 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (values.numel() == 0 || input_t.numel() == 0) {
     return std::tuple<Tensor&, Tensor&>{values, indices};
+  }
+
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
+                    "Falling back on CPU. This may have performance implications.");
+    return median_from_cpu(input_t.to("cpu"),
+                           dim,
+                           keepdim,
+                           values,
+                           indices,
+                           IntArrayRef(vec_out_shape),
+                           IntArrayRef(vec_apparent_out_shape));
   }
 
   median_out_mps(input_t, dim, keepdim, values, indices, "median_out_mps");
