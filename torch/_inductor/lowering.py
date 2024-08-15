@@ -78,7 +78,7 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
-requires_fx_strides: Set[torch._ops.OpOverload] = set() 
+requires_fx_strides: Set[torch._ops.OpOverload] = set()
 fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
