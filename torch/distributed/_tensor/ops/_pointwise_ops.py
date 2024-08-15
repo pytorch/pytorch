@@ -408,6 +408,7 @@ pointwise_ops = [
     aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
+    torch.ops.inductor.accumulate_grad_.default,
 ]
 
 
