@@ -1549,7 +1549,7 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
       return at::pow(2.0, other);
   }
   // For double and reduced floating types do regular type promotion
-  return at::full({1}, 2.0, self.options()).pow(other);
+  return at::full({}, 2.0, self.options()).pow(other);
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
