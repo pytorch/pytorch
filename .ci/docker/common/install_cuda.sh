@@ -2,7 +2,7 @@
 
 set -ex
 
-NCCL_VERSION=v2.21.5-1
+NCCL_VERSION=v2.22.3-1
 CUDNN_VERSION=9.1.0.70
 
 function install_cusparselt_040 {
