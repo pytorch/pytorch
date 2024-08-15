@@ -6,6 +6,9 @@
 
 set -ex
 
+# Suppress ANSI color escape sequences
+export TERM=vt100
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
