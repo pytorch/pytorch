@@ -11,6 +11,7 @@ from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.experimental.attention import (
     _AttentionContextParallel,
     _CausalBehavior,
+    _cp_options,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
@@ -75,7 +76,7 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
     ) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = rotater
+        _cp_options.rotate_method = rotater
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
@@ -92,9 +93,7 @@ class RingAttentionTest(DTensorTestBase):
             # TODO: Fix this after we move `wait_tensor` to use `with_effect`.
             return
 
-        torch.distributed._tensor.experimental.attention._enable_load_balance = (
-            load_balance
-        )
+        _cp_options.enable_load_balance = load_balance
 
         q = torch.rand(
             (bs, nheads, self.world_size * query_tokens, dim),
@@ -194,7 +193,7 @@ class RingAttentionTest(DTensorTestBase):
             cp_v.requires_grad = False
 
     def test_is_causal_behavior(self) -> None:
-        torch.distributed._tensor.experimental.attention._enable_load_balance = False
+        _cp_options.enable_load_balance = False
         self.assertEqual(
             _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
             _CausalBehavior.NOT_IS_CAUSAL,
@@ -211,7 +210,7 @@ class RingAttentionTest(DTensorTestBase):
                     behavior,
                 )
 
-        torch.distributed._tensor.experimental.attention._enable_load_balance = True
+        _cp_options.enable_load_balance = True
         ranks = [
             [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
             [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
@@ -231,12 +230,8 @@ class RingAttentionTest(DTensorTestBase):
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     @parametrize("is_causal", [True, False])
     def test_ring_attention_native_transformer(self, is_causal: bool) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = (
-            _RotateMethod.ALL_TO_ALL
-        )
-        torch.distributed._tensor.experimental.attention._enable_load_balance = (
-            is_causal
-        )
+        _cp_options.enable_load_balance = is_causal
+        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
@@ -299,9 +294,7 @@ class RingAttentionTest(DTensorTestBase):
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     def test_ring_attention_custom_transformer(self) -> None:
-        torch.distributed._tensor.experimental.attention._rotate_method = (
-            _RotateMethod.ALL_TO_ALL
-        )
+        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
