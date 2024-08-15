@@ -8,7 +8,6 @@
 
 import builtins
 import dis
-import time
 import traceback
 from typing import Optional, Union
 
@@ -291,9 +290,6 @@ class ComptimeContext:
         """
         return self.__tx
 
-    def sleep(self, sec):
-        time.sleep(sec)
-
 
 class _Comptime:
     @staticmethod
@@ -394,10 +390,6 @@ class _Comptime:
             builtins.breakpoint()
 
         comptime(inner)
-
-    @staticmethod
-    def sleep(sec):
-        comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
 comptime = _Comptime()

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
-from typing import cast, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -379,15 +379,11 @@ def _multi_tensor_sgd(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
     )
-
     for (
-        device_params_,
-        device_grads_,
+        device_params,
+        device_grads,
         device_momentum_buffer_list,
     ), indices in grouped_tensors.values():
-        device_params: List[Tensor] = cast(List[Tensor], device_params_)
-        device_grads: List[Tensor] = cast(List[Tensor], device_grads_)
-
         device_has_sparse_grad = has_sparse_grad and any(
             grad.is_sparse for grad in device_grads
         )
@@ -405,7 +401,7 @@ def _multi_tensor_sgd(
                 )
 
         if momentum != 0:
-            bufs: List[Tensor] = []
+            bufs = []
 
             all_states_with_momentum_buffer = True
             for i in range(len(device_momentum_buffer_list)):
@@ -413,7 +409,7 @@ def _multi_tensor_sgd(
                     all_states_with_momentum_buffer = False
                     break
                 else:
-                    bufs.append(cast(Tensor, device_momentum_buffer_list[i]))
+                    bufs.append(device_momentum_buffer_list[i])
 
             if all_states_with_momentum_buffer:
                 torch._foreach_mul_(bufs, momentum)
@@ -426,7 +422,7 @@ def _multi_tensor_sgd(
                             indices[i]
                         ] = torch.clone(device_grads[i]).detach()
                     else:
-                        buf = cast(Tensor, device_momentum_buffer_list[i])
+                        buf = device_momentum_buffer_list[i]
                         buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)
 
                     bufs.append(buf)
@@ -486,11 +482,9 @@ def _fused_sgd(
         [params, grads, momentum_buffer_list], with_indices=False  # type: ignore[list-item]
     )
     for (device, _), (
-        (device_params_, device_grads_, device_momentum_buffer_list),
+        (device_params, device_grads, device_momentum_buffer_list),
         _,
     ) in grouped_tensors.items():
-        device_params: List[Tensor] = cast(List[Tensor], device_params_)
-        device_grads: List[Tensor] = cast(List[Tensor], device_grads_)
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
@@ -501,9 +495,7 @@ def _fused_sgd(
         torch._fused_sgd_(
             device_params,
             device_grads,
-            []
-            if no_momentum_buffer
-            else cast(List[Tensor], device_momentum_buffer_list),
+            [] if no_momentum_buffer else device_momentum_buffer_list,
             weight_decay=weight_decay,
             momentum=momentum,
             lr=lr,
