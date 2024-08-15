@@ -31,7 +31,7 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   if (!_mtl_indexing_library) {
     MTLCompileOptions* options = [MTLCompileOptions new];
 
-    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device, isMacOS13Plus(MacOSVersion::MACOS_VER_13_0_PLUS))];
+    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device)];
 
     if (isMacOS13Plus(MacOSVersion::MACOS_VER_15_0_PLUS)) {
       options.mathMode = MTLMathModeFast;
