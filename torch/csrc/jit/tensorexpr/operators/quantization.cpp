@@ -6,9 +6,7 @@
 
 using namespace torch::jit::tensorexpr;
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 namespace {
 std::vector<int64_t> _pair_int(ArgValue v) {
   if (auto t = std::get_if<IntList>(&v)) {
@@ -809,6 +807,4 @@ Tensor computeQuantizedSigmoidExternalCall(
   return Tensor(ResultBuf.node(), s);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

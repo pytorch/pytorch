@@ -34,6 +34,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2114,6 +2115,37 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -2370,14 +2402,14 @@ class CPUReproTests(TestCase):
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2558,9 +2590,9 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2581,7 +2613,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
@@ -2614,7 +2646,7 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(code.count("empty_strided_cpu("), 3)
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
             softmax = torch.nn.functional.softmax(x, dim=-1)
@@ -2646,7 +2678,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_share_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
             max = torch.nn.functional.softmax(x, dim=-1)
@@ -2672,7 +2704,7 @@ class CPUReproTests(TestCase):
                 1,  # 2 global bufs share 1 local buf
             )
 
-    @config.patch(fx_graph_cache=False)
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion_case2(self):
         # exp and exp2 should be replaced by local buffer
         # since exp will be used after exp2, exp2 can't share the same
@@ -2706,6 +2738,7 @@ class CPUReproTests(TestCase):
                 2,
             )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_with_line_reuse(self):
         # Test Global buffer which is inplace buffer and replaced by local buffer
         def fn(x, y):
@@ -2740,7 +2773,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
@@ -2764,13 +2797,13 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
             # Test argmin
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn2, (x,))
-            assert metrics.generated_cpp_vec_kernel_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -3107,6 +3140,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(2, 3, 4)
         self.assertEqual(torch.compile(func)(x), func(x))
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -3527,30 +3561,41 @@ class CPUReproTests(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.group_norm = torch.nn.GroupNorm(32, 32)
+                self.group_norm = torch.nn.GroupNorm(3, 90)
 
             def forward(self, x):
                 return self.group_norm(x)
 
-        metrics.reset()
-        mod = M().eval()
-        x = torch.randn(2, 32, 32, 32)
-        with torch.no_grad():
-            self.common(mod, (x,))
-            # 2 generated kernels (one for var_mean, the other for result)
-            check_metrics_vec_kernel_count(2)
+        options = itertools.product(
+            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+        )
+        for dtype, fmt in options:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
+            with torch.no_grad():
+                self.common(mod, (x,))
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -3849,6 +3894,42 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_double_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_double_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_fp32_to_double_vec(self):
+        def fn(x):
+            return x.to(torch.double)
+
+        x = torch.randn(32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
+    def test_convert_double_to_fp32_vec(self):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randn((32, 32), dtype=torch.double)
+        metrics.reset()
+        self.common(fn, (x,))
+        check_metrics_vec_kernel_count(1)
+
     def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
         # https://github.com/pytorch/pytorch/issues/115260
         p0 = torch.tensor([1.0879], dtype=torch.float16)
@@ -4061,6 +4142,35 @@ class CPUReproTests(TestCase):
                 2,
                 exactly=True,
             ).run(code)
+
+    @requires_vectorization
+    def test_bool_reduction_vec(self):
+        for op in (
+            torch.masked.mean,
+            torch.any,
+            torch.min,
+            torch.max,
+        ):
+
+            def fn(x1, x2, x3):
+                return op(x1), op(x2), op(x3)
+
+            c = [False] * 63
+            input1 = torch.Tensor(c).to(torch.bool)
+            c[10] = True
+            input2 = torch.Tensor(c).to(torch.bool)
+            input3 = torch.Tensor([True] * 63).to(torch.bool)
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    input1,
+                    input2,
+                    input3,
+                ),
+            )
+            n_veckernel = 6 if op is torch.masked.mean else 3
+            check_metrics_vec_kernel_count(n_veckernel)
 
 
 if __name__ == "__main__":

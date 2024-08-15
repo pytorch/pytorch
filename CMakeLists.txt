@@ -256,10 +256,10 @@ cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 # Using TH_BINARY_BUILD to check whether is binary build.
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
 if(DEFINED ENV{TH_BINARY_BUILD})
-  cmake_dependent_option(USE_CUFILE "Use cuFile" ON
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
                          "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
 else()
-  cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
 endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
@@ -1044,7 +1044,6 @@ if(NOT MSVC)
     endif()
   endif()
 
-  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"

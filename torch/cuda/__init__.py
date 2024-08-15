@@ -11,11 +11,8 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
-import contextlib
 import importlib
 import os
-import sys
 import threading
 import traceback
 import warnings
@@ -24,9 +21,11 @@ from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
+
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -36,6 +35,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .streams import Event, ExternalStream, Stream
+
 
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
@@ -1285,9 +1285,8 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
 
 
 from .memory import *  # noqa: F403
-
-
 from .random import *  # noqa: F403
+
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1536,6 +1535,7 @@ _lazy_call(_register_triton_kernels)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
 
 __all__ = [
     # Typed storage and tensors

@@ -32,6 +32,7 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_or_constant_args,
     check_unspec_python_args,
+    does_not_override_dict_iter_methods,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -849,7 +850,7 @@ class BuiltinVariable(VariableTracker):
         elif len(handlers) == 1:
             (handler,) = handlers
 
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
+            def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
@@ -857,14 +858,14 @@ class BuiltinVariable(VariableTracker):
 
         else:
 
-            def builtin_dipatch(tx: "InstructionTranslator", args, kwargs):
+            def builtin_dispatch(tx: "InstructionTranslator", args, kwargs):
                 for fn in handlers:
                     rv = fn(tx, args, kwargs)
                     if rv:
                         return rv
                 unimplemented(error_msg)
 
-        return builtin_dipatch
+        return builtin_dispatch
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -1331,6 +1332,8 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        from .builder import SourcelessBuilder
+
         if not kwargs:
             if not args:
                 args = ({},)
@@ -1356,13 +1359,24 @@ class BuiltinVariable(VariableTracker):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
                 # method and create a new dict.
-                func_var = arg.var_getattr(tx, "items")
-                if not isinstance(func_var, variables.UserFunctionVariable):
-                    unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
-                out = tx.inline_user_function_return(func_var, args, kwargs)
-                if isinstance(out, ConstDictVariable):
-                    return out
-                return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
+                if does_not_override_dict_iter_methods(type(arg.value)):
+                    # These are implemeted in C, so we will have to manually construct the items
+
+                    if tx.output.side_effects.has_pending_mutation(arg):
+                        unimplemented(
+                            f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
+                        )
+
+                    new_dict = dict(arg.value.items())
+                    return SourcelessBuilder.create(tx, new_dict)
+                else:
+                    func_var = arg.var_getattr(tx, "items")
+                    if not isinstance(func_var, variables.UserFunctionVariable):
+                        unimplemented(f"{user_cls.__name__}.items(): {args} {kwargs}")
+                    out = tx.inline_user_function_return(func_var, args, kwargs)
+                    if isinstance(out, ConstDictVariable):
+                        return out
+                    return BuiltinVariable(user_cls).call_custom_dict(tx, user_cls, out)
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
@@ -1563,6 +1577,20 @@ class BuiltinVariable(VariableTracker):
             unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
             items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
+
+    def call_filter(self, tx: "InstructionTranslator", fn, seq):
+        if seq.has_unpack_var_sequence(tx):
+            seq_unpacked = seq.unpack_var_sequence(tx)
+            try:
+                items = list(
+                    filter(
+                        lambda x: fn.call_function(tx, [x], {}).as_python_constant(),
+                        seq_unpacked,
+                    )
+                )
+                return variables.TupleVariable(items)
+            except NotImplementedError:
+                return
 
     def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints

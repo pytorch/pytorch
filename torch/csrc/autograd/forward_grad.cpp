@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/forward_grad.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 // See discussion in forward_grad.h for why these are global variables and not
@@ -76,5 +75,4 @@ const at::Tensor& ForwardGrad::undef_grad() {
   return singleton_undefined_tensor;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -210,6 +210,29 @@ class ROCmTemplateKernel(ROCmKernel):
         val = sympy_product(sizes)
         return cexpr(self.rename_indexing(val))
 
+    def leading_dimension(self, node: Optional[IRNode], default_value: int = 0) -> str:
+        """
+        Hook called from template call to get the leading dimension of an arg.
+        """
+
+        if node is None:
+            return str(default_value)
+
+        stride = node.get_stride()
+
+        if 2 != len(stride):
+            leading_dim = default_value
+        elif stride[-1] == 1:
+            # row-major case
+            leading_dim = stride[-2]
+        elif stride[-2] == 1:
+            # column-major case
+            leading_dim = stride[-1]
+        else:
+            leading_dim = default_value
+
+        return cexpr(self.rename_indexing(leading_dim))
+
 
 class ROCmTemplateCaller(ChoiceCaller):
     """

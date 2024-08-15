@@ -133,6 +133,7 @@ class Verifier(metaclass=_VerifierMeta):
             operator.abs,
             math.ceil,
             math.floor,
+            math.trunc,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
@@ -148,7 +149,6 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:
