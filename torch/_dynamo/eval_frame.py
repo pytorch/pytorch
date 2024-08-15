@@ -270,7 +270,9 @@ class OptimizedModule(torch.nn.Module):
         prefix: str,
         *args: Any,
     ) -> None:
-        ends_with_suffix = [key.startswith(_OPTIMIZED_PREFIX) for key in state_dict.keys()]
+        ends_with_suffix = [
+            key.startswith(_OPTIMIZED_PREFIX) for key in state_dict.keys()
+        ]
         all_end_with_suffix = all(ends_with_suffix)
         any_end_with_suffix = any(ends_with_suffix)
 

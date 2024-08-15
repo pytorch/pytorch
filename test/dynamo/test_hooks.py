@@ -816,7 +816,9 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         compiled_model.load_state_dict(compiled_state_dict)
 
         # check backwards compatibility
-        backwards_state_dict = {f"_orig_mod.{key}": tensor for key, tensor in original_state_dict.items()}
+        backwards_state_dict = {
+            f"_orig_mod.{key}": tensor for key, tensor in original_state_dict.items()
+        }
         compiled_model.load_state_dict(backwards_state_dict)
 
 if __name__ == "__main__":
