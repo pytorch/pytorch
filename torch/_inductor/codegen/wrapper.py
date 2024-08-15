@@ -1647,12 +1647,12 @@ class WrapperCodeGen(CodeGen):
             )
             call_args_str = ", ".join(call_args_str)
 
-        if triton:
-            if cuda:
-                stream_name = self.write_get_raw_stream(device_index, V.graph)
-            else:
-                stream_name = "0"
+        if cuda:
+            stream_name = self.write_get_raw_stream(device_index, V.graph)
+        else:
+            stream_name = "0"
 
+        if triton:
             self.write_triton_header_once()
             if grid is None:
                 grid_str = grid_fn
