@@ -381,7 +381,7 @@ class NCCLComm {
       std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-    if (aborted_) {
+    if (aborted_ && !initialized_) {
       // Should not abort twice.
       return;
     }
