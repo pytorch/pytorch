@@ -6824,6 +6824,26 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    def test_exported_program_move_to_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self, size=4, h_dim=10, **kwargs):
+                super(Model, self).__init__(**kwargs)
+                self.rnn = torch.nn.GRU(size, h_dim, batch_first=True)
+
+            def forward(self, x):
+                _, states = self.rnn(x)
+                return states
+
+        mod = Model()
+        example_inputs = (torch.rand(1, 10, 4),)
+        ep = export(mod, example_inputs)
+        new_device = torch.device("cuda:0")
+        ep.move_to(device=new_device)
+        gm = ep.module()
+        test_inputs = (torch.rand(1, 10, 4).to(new_device),)
+        outputs = gm(*test_inputs)
+        self.assertEqual(outputs.device, new_device)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
