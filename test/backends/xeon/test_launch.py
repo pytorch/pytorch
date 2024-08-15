@@ -17,38 +17,57 @@ class TestTorchrun(TestCase):
         shutil.rmtree(self._test_dir)
 
     def test_cpu_info(self):
-        lscpu_info = """# The following is the parsable format, which can be fed to other
-# programs. Each different item in every column has an unique ID
-# starting from zero.
-# CPU,Core,Socket,Node
-0,0,0,0
-1,1,0,0
-2,2,0,0
-3,3,0,0
-4,4,1,1
-5,5,1,1
-6,6,1,1
-7,7,1,1
-8,0,0,0
-9,1,0,0
-10,2,0,0
-11,3,0,0
-12,4,1,1
-13,5,1,1
-14,6,1,1
-15,7,1,1
+        lscpu_info = """
+CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE    MAXMHZ   MINMHZ      MHZ
+  0    0      0    0 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  1    0      0    1 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  2    0      0    2 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  3    0      0    3 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  4    1      1    4 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  5    1      1    5 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  6    1      1    6 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  7    1      1    7 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  8    0      0    0 0:0:0:0          yes 5000.0000 800.0000 2400.000
+  9    0      0    1 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 10    0      0    2 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 11    0      0    3 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 12    1      1    4 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 13    1      1    5 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 14    1      1    6 0:0:0:0          yes 5000.0000 800.0000 2400.000
+ 15    1      1    7 0:0:0:0          yes 5000.0000 800.0000 2400.000
 """
-        from torch.backends.xeon.run_cpu import _CPUinfo
+        from torch.backends.xeon._cpu_info import CPUPoolList
 
-        cpuinfo = _CPUinfo(lscpu_info)
-        assert cpuinfo._physical_core_nums() == 8
-        assert cpuinfo._logical_core_nums() == 16
-        assert cpuinfo.get_node_physical_cores(0) == [0, 1, 2, 3]
-        assert cpuinfo.get_node_physical_cores(1) == [4, 5, 6, 7]
-        assert cpuinfo.get_node_logical_cores(0) == [0, 1, 2, 3, 8, 9, 10, 11]
-        assert cpuinfo.get_node_logical_cores(1) == [4, 5, 6, 7, 12, 13, 14, 15]
-        assert cpuinfo.get_all_physical_cores() == [0, 1, 2, 3, 4, 5, 6, 7]
-        assert cpuinfo.get_all_logical_cores() == [
+        cpupool = CPUPoolList(lscpu_txt=lscpu_info)
+        assert [c.cpu for c in cpupool.pool_all] == [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,  # noqa: Q003
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+        ]
+        assert [c.cpu for c in cpupool.pool_all if c.is_physical_core] == [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,  # noqa: Q003
+            6,
+            7,
+        ]
+        assert [c.cpu for c in cpupool.pool_all if c.node == 0] == [
             0,
             1,
             2,
@@ -57,6 +76,8 @@ class TestTorchrun(TestCase):
             9,
             10,
             11,
+        ]
+        assert [c.cpu for c in cpupool.pool_all if c.node == 1] == [
             4,
             5,
             6,
@@ -66,22 +87,40 @@ class TestTorchrun(TestCase):
             14,
             15,
         ]
-        assert cpuinfo.numa_aware_check([0, 1, 2, 3]) == [0]
-        assert cpuinfo.numa_aware_check([4, 5, 6, 7]) == [1]
-        assert cpuinfo.numa_aware_check([2, 3, 4, 5]) == [0, 1]
+        assert [
+            c.cpu for c in cpupool.pool_all if c.node == 0 and c.is_physical_core
+        ] == [0, 1, 2, 3]
+        assert [
+            c.cpu for c in cpupool.pool_all if c.node == 1 and c.is_physical_core
+        ] == [4, 5, 6, 7]
 
-    def test_multi_threads(self):
+    def test_multi_threads_module(self):
         num = 0
         with subprocess.Popen(
-            f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
-            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
+            f'python -m torch.backends.xeon.run_cpu --ninstances 4 --memory-allocator default \
+            --omp-runtime default --multi-task-manager none --log-dir {self._test_dir} --no-python echo "test"',
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         ) as p:
             for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split("-")
-                if segs[-1].strip() == "pwd":
+                segs = str(line, "utf-8").strip().split(":")
+                if segs[-1].strip() == "test":
+                    num += 1
+        assert num == 4, "Failed to launch multiple instances for inference"
+
+    def test_multi_threads_command(self):
+        num = 0
+        with subprocess.Popen(
+            f'torch-xeon-launcher --ninstances 4 --memory-allocator default \
+            --omp-runtime default --multi-task-manager none --log-dir {self._test_dir} --no-python echo "test"',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        ) as p:
+            for line in p.stdout.readlines():
+                segs = str(line, "utf-8").strip().split(":")
+                if segs[-1].strip() == "test":
                     num += 1
         assert num == 4, "Failed to launch multiple instances for inference"
 
