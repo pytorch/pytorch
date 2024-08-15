@@ -3435,9 +3435,12 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
 
         # test float64 computation
-        x = torch.tensor([1], dtype=torch.float64, device=device)
-        exp = torch.tensor([128], dtype=torch.int64, device=device)
-        self.assertEqual(torch.ldexp(x, exp), torch.pow(torch.full((1,), 2, device=device, dtype=torch.float64), 128))
+        mantissas = torch.tensor([1], dtype=torch.float64, device=device)
+        exponents = torch.tensor([128], dtype=torch.int64, device=device)
+        expected = torch.pow(
+            torch.full((1,), 2, device=device, dtype=torch.float64), 128
+        )
+        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
