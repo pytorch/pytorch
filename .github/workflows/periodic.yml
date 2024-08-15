@@ -104,14 +104,20 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
 
-  parallelnative-linux-jammy-py3_8-gcc11-build:
-    name: parallelnative-linux-jammy-py3.8-gcc11
+  parallelnative-linux-jammy-py3_9-gcc11-build:
+    name: parallelnative-linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+<<<<<<< HEAD
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: parallelnative-linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+=======
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
+      build-environment: parallelnative-linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
+>>>>>>> f9904f8c4b1 (Move py 3.8->3.9 pull, trunk, inductor, prerioric CI tests)
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -119,16 +125,16 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
 
-  parallelnative-linux-jammy-py3_8-gcc11-test:
-    name: parallelnative-linux-jammy-py3.8-gcc11
+  parallelnative-linux-jammy-py3_9-gcc11-test:
+    name: parallelnative-linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - parallelnative-linux-jammy-py3_8-gcc11-build
+      - parallelnative-linux-jammy-py3_9-gcc11-build
       - target-determination
     with:
-      build-environment: parallelnative-linux-jammy-py3.8-gcc11
-      docker-image: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
+      build-environment: parallelnative-linux-jammy-py3.9-gcc11
+      docker-image: ${{ needs.parallelnative-linux-jammy-py3_9-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.parallelnative-linux-jammy-py3_9-gcc11-build.outputs.test-matrix }}
 
   linux-focal-cuda11_8-py3_9-gcc9-build:
     name: linux-focal-cuda11.8-py3.9-gcc9
@@ -293,13 +299,13 @@ jobs:
       docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.test-matrix }}
 
-  linux-focal-rocm6_1-py3_8-build:
-    name: linux-focal-rocm6.1-py3.8
+  linux-focal-rocm6_1-py3_9-build:
+    name: linux-focal-rocm6.1-py3.9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.1-py3.8
+      build-environment: linux-focal-rocm6.1-py3.9
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -308,19 +314,19 @@ jobs:
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm6_1-py3_8-test:
+  linux-focal-rocm6_1-py3_9-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm6.1-py3.8
+    name: linux-focal-rocm6.1-py3.9
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm6_1-py3_8-build
+      - linux-focal-rocm6_1-py3_9-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm6.1-py3.8
-      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.1-py3.9
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_9-build.outputs.test-matrix }}
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
