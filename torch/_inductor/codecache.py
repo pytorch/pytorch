@@ -26,6 +26,7 @@ import warnings
 from bisect import bisect_right
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -50,6 +51,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
+import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -1144,7 +1146,6 @@ class FxGraphCache:
         key: str,
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
-        time_taken_ns: int,
         local: bool,
         remote_cache: None,
     ) -> None:
@@ -1196,8 +1197,8 @@ class FxGraphCache:
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": time_taken_ns
-                        // 1000000,  # Convert from NS to MS
+                        "time_taken_ms": disk_compiled_graph._time_taken_ns
+                        // 1e6,  # Convert from NS to MS
                     }
                     if config.is_fbcode()
                     else content
@@ -1291,12 +1292,11 @@ class FxGraphCache:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
-                time_taken_ns = time_ns() - start_time
+                compiled_graph._time_taken_ns = time_ns() - start_time
                 FxGraphCache._save_graph(
                     key,
                     compiled_graph,
                     example_inputs,
-                    time_taken_ns,
                     local,
                     remote_cache,
                 )
@@ -1305,6 +1305,15 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time_ns()
+                if (
+                    dist.distributed_c10d.is_initialized()
+                    and (time_taken_ns := compiled_graph._time_taken_ns) is not None
+                ):
+                    increased_timeout_sec = time_taken_ns // 1e9  # convert to seconds
+                    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+                    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+                        timedelta(seconds=increased_timeout_sec)
+                    )
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
@@ -1380,6 +1389,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
+    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
 
