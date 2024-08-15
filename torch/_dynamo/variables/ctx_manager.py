@@ -958,10 +958,21 @@ class StreamVariable(VariableTracker):
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name in ("wait_stream", "synchronize", "wait_event"):
+        if name in ("wait_stream", "synchronize"):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
+            return variables.ConstantVariable(None)
+        elif name == "wait_event":
+            # NOTE: Unlike CUDA streams, currently there is no way to look up a previously-created CUDA event by id
+            # (i.e. CUDA events are not cached in a pool), therefore there is no way to create a proxy for it and
+            # reconstruct it within the graph. As a result, Dynamo graph does not support calling `.wait_event()`
+            # on CUDA events created outside of the current graph, and will instead just ignore those CUDA events.
+            cuda_event_created_outside_of_graph = args[0].as_proxy() is None
+            if not cuda_event_created_outside_of_graph:
+                tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                )
             return variables.ConstantVariable(None)
         elif name == "query":
             return wrap_fx_proxy_cls(
