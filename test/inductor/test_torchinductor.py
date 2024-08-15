@@ -5332,6 +5332,16 @@ class CommonTemplate:
                 ),
             )
 
+    def test_pow_symfloat(self):
+        def fn(x):
+            r = math.sqrt(x.size(0))
+            r = r**10
+            return x * r
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+        x = torch.randn([16, 16], device=self.device)
+        self.assertEqual(cfn(x), fn(x))
+
     def test_glu(self):
         def fn(x):
             return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
