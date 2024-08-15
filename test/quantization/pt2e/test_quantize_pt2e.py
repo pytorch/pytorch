@@ -1500,9 +1500,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def transform_for_annotation(
                 self, model: torch.fx.GraphModule
             ) -> torch.fx.GraphModule:
-                for n in model.graph.nodes:
+                # Make a copy of the graph to ensure that we are using the
+                # return value of this function.
+                graph = torch.fx.Graph()
+                graph.graph_copy(model.graph, {})
+                for n in graph.nodes:
                     if n.target == torch.ops.aten.add.Tensor:
                         n.target = torch.ops.aten.mul.Tensor
+                model = torch.fx.GraphModule(model, graph)
                 return model
 
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
