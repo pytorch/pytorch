@@ -2453,7 +2453,7 @@ def std(
     return _maybe_convert_to_dtype(a_std, dtype)
 
 
-@register_decomposition(aten.mean)
+# @register_decomposition(aten.mean)
 def mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,

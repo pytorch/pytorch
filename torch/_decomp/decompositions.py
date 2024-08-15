@@ -274,6 +274,11 @@ def mish_backward(grad_output: Tensor, input: Tensor):
     return grad_output * (input_tanh_softplus + out)
 
 
+@register_decomposition([aten.mean.default])
+def mean(x, dim=0, keep_dim=False, *, dtype: torch.dtype=None):
+    return aten.mean.dim(x.flatten(), 0, dtype=dtype)
+
+
 @register_decomposition(aten.silu)
 @out_wrapper()
 @pw_cast_for_opmath

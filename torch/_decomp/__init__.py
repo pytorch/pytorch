@@ -357,6 +357,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.logsumexp.default,
             aten.masked_fill,
             aten.masked_fill_,
+            aten.mean,
             aten.mish,
             aten.mish_,
             aten.mse_loss,
