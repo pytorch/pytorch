@@ -3682,6 +3682,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_device_assert(self):
+        def fn(x, y):
+            x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
+            return torch.gather(x, 0, torch.trunc(y).to(torch.int64))
+
+        x1 = torch.randn(30)
+        x2 = torch.randn(36)
+        y = torch.ones(1, dtype=torch.float64)
+
+        self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
+        self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
+
     def test_slice1(self):
         def fn(a):
             return (
@@ -7216,12 +7228,6 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
-
-    @skipIfWindows
-    def test_new_cpp_build_logical(self):
-        from torch._inductor.codecache import validate_new_cpp_commands
-
-        validate_new_cpp_commands()
 
     def test_as_strided(self):
         def fn(x):
@@ -10892,6 +10898,28 @@ class CommonTemplate:
         x2 = x.clone()
         _, code = run_and_get_code(fn, x, x2)
         FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
+
+    @requires_gpu()
+    def test_scalar_cpu_tensor_arg(self):
+        def fn(x, y):
+            return x + y.sum()
+
+        test_dtypes = [
+            torch.float32,
+            torch.float64,
+            torch.float16,
+            torch.bfloat16,
+        ]
+        for cpu_dtype in test_dtypes:
+            x = torch.rand([20], device=GPU_TYPE)
+            y = torch.rand([4], device="cpu", dtype=cpu_dtype)
+            self.common(
+                fn,
+                (x, y),
+                check_lowp=False,
+                copy_to_gpu=False,
+                reference_in_float=False,
+            )
 
     def test_float16_to_int16(self):
         def fn(x):
