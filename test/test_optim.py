@@ -288,7 +288,7 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
-            lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
+            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
             optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
@@ -595,11 +595,11 @@ class TestOptimRenewed(TestCase):
                 # we break apart a tensor into its real and imaginary parts, which would be 2x(M,N).
                 # For other pointwise optimizers, this distinction is trivial, but for LBFGS where
                 # there are reductions across all parameters (and all the grads get flattened into
-                # one long Tensor), this ordering matters. Why? Reductions (like sum) are NOT
-                # commutative, i.e., a + b + c != a + c + b in computers. Thus, we add a seed here
-                # to control the discrepancy that will happen with LBFGS. Note that in test_complex
-                # above, there is no need for a seed nor for increased tolerance, because results
-                # should be bitwise equivalent.
+                # one long Tensor), this ordering matters. Why? Reductions are not deterministic
+                # because addition between floating point numbers is not associative, i.e.,
+                # a + b + c != a + c + b. Thus, we add a seed here to control the discrepancy that
+                # will happen with LBFGS. Note that in test_complex above, there is no need for a seed
+                # nor for increased tolerance, because results should be bitwise equivalent.
                 torch.manual_seed(2024)
 
             a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)

@@ -214,10 +214,7 @@ class CodeGen::CallArg {
 
 class RegisterCodeGenList {
  public:
-  TORCH_API static RegisterCodeGenList& GetInstance() {
-    static RegisterCodeGenList codegen_list;
-    return codegen_list;
-  }
+  TORCH_API static RegisterCodeGenList& GetInstance();
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
       StmtPtr stmt,

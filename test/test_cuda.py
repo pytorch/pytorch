@@ -4993,28 +4993,30 @@ class TestMemPool(TestCase):
         from torch.utils.cpp_extension import load_inline
 
         dummy_allocator_source = """
+        #include <torch/extension.h>
         extern "C" {
-          void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          void dummy_free(void* ptr) { }
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
+          C10_EXPORT void dummy_free(void* ptr) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
-        with tempfile.TemporaryDirectory() as tempdir:
-            dummy_allocator = load_inline(
-                name=dummy_allocator_libname,
-                cpp_sources=dummy_allocator_source,
-                is_python_module=False,
-                build_directory=tempdir,
-            )
-            allocator = torch.cuda.memory.CUDAPluggableAllocator(
-                os.path.join(tempdir, f"{dummy_allocator_libname}.so"),
-                "dummy_alloc",
-                "dummy_free",
-            )
-            pool = torch.cuda.MemPool(allocator.allocator())
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+        )
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
 
-            # pool should point to the same allocator as the one passed into it
-            self.assertEqual(allocator.allocator(), pool.allocator)
+        # pool should point to the same allocator as the one passed into it
+        self.assertEqual(allocator.allocator(), pool.allocator)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
