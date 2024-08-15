@@ -2,6 +2,7 @@
 import dataclasses
 import functools
 import io
+import itertools
 import logging
 import re
 import sys
@@ -2191,7 +2192,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
-    def test_verbose_logs_aot_id(self):
+    @mock.patch(
+        "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+    )
+    def test_verbose_logs_aot_id(self, _):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
         def fn():
@@ -2222,7 +2226,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertTrue("CompiledFunctionBackward0" in logs.getvalue())
 
-    def test_verbose_logs_aot_dispatcher_nodes(self):
+    @mock.patch(
+        "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+    )
+    def test_verbose_logs_aot_dispatcher_nodes(self, _):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
         def fn():
@@ -2267,7 +2274,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
-    def test_verbose_logs_aot_dispatcher_nodes_hop(self):
+    @mock.patch(
+        "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+    )
+    def test_verbose_logs_aot_dispatcher_nodes_hop(self, _):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
         @dataclasses.dataclass
