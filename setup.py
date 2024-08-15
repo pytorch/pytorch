@@ -365,7 +365,6 @@ def get_submodule_folders():
             "gloo",
             "cpuinfo",
             "onnx",
-            "foxi",
             "QNNPACK",
             "fbgemm",
             "cutlass",

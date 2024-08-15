@@ -8,12 +8,14 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -138,15 +140,17 @@ class FunctionalTensor(torch.Tensor):
             # We should probably eventually fix this so that the first overload can just handle dynamic shapes.
             cls,
             elem.shape,  # sizes
-            elem.stride(),  # strides
-            elem.storage_offset(),  # storage_offset
+            elem.stride() if not is_sparse_any(elem) else None,  # strides
+            elem.storage_offset()
+            if not is_sparse_any(elem)
+            else None,  # storage_offset
             None,  # memory_format
             elem.dtype,  # dtype
             elem.layout,  # layout
             elem.device,  # device
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
-            "sizes",  # dispatch_sizes_strides_policy
+            None,  # dispatch_sizes_strides_policy
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
@@ -274,9 +278,14 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
+    @property
+    def layout(self):
+        return self.elem.layout
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
+        super().__init__()
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -508,11 +517,22 @@ class FunctionalTensorMode(TorchDispatchMode):
             or func == torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
+        # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper
+        if (
+            torch.Tag.inplace_view in func.tags
+            and func is not torch.ops.aten.set_.source_Tensor
+        ):
+            with torch.utils._mode_utils.no_dispatch():
+                func(*args, **kwargs)
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
         # inplace ops like `aten.add_()` are expected to return inputs **directly**, instead of creating fresh tensor objects.
         # Use this util to figure out the right thing to return.
         # If none of our inputs were wrapped, then we have no FunctionalTensor outputs that we need to fix up storages for.
         return return_and_correct_aliasing(func, args, kwargs, outs_wrapped)
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 @contextlib.contextmanager

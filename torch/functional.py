@@ -1456,12 +1456,12 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
 
     Example:
 
-        >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+        >>> a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
         >>> a
         tensor([[ 0.9041,  0.0196],
                 [-0.3108, -2.4423],
                 [-0.4821,  1.0590]])
-        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
         >>> b
         tensor([[-2.1763, -0.4713],
                 [-0.6986,  1.3702]])
@@ -1592,7 +1592,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d(x)
         tensor([[[1]]])
         >>> x = torch.tensor(0.5)
-        >>> y = torch.tensor(1.)
+        >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """

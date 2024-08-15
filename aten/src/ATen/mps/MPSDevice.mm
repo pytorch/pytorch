@@ -105,19 +105,20 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   id mpsCD = NSClassFromString(@"MPSGraph");
-  static auto compileOptions = [[[MTLCompileOptions alloc] init] autorelease];
-  static bool _macos_13_0_plus = [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:
-                                                                                                axis:name:)] == YES;
-  static bool _macos_13_1_plus =
-      [mpsCD instancesRespondToSelector:@selector
-             (sampleGridWithSourceTensor:
-                        coordinateTensor:layout:normalizeCoordinates:relativeCoordinates:alignCorners:paddingMode
-                                        :samplingMode:constantValue:name:)] == YES;
-  static bool _macos_13_2_plus =
-      [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
-  static bool _macos_13_3_plus = [compileOptions respondsToSelector:@selector(maxTotalThreadsPerThreadgroup)] == YES;
-
-  static bool _macos_14_0_plus = [mpsCD instancesRespondToSelector:@selector(conjugateWithTensor:name:)] == YES;
+  auto is_os_version_at_least = [](int major, int minor) {
+    @autoreleasepool {
+      NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
+      return [processInfo
+          isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
+    }
+  };
+  static bool _macos_13_0_plus = is_os_version_at_least(13, 0);
+  static bool _macos_13_1_plus = is_os_version_at_least(13, 1);
+  static bool _macos_13_2_plus = is_os_version_at_least(13, 2);
+  static bool _macos_13_3_plus = is_os_version_at_least(13, 3);
+  static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
+  static bool _macos_14_4_plus = is_os_version_at_least(14, 0);
+  static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
 
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:
@@ -130,6 +131,10 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_13_3_plus;
     case MacOSVersion::MACOS_VER_14_0_PLUS:
       return _macos_14_0_plus;
+    case MacOSVersion::MACOS_VER_14_4_PLUS:
+      return _macos_14_4_plus;
+    case MacOSVersion::MACOS_VER_15_0_PLUS:
+      return _macos_15_0_plus;
     default:
       return false;
   }

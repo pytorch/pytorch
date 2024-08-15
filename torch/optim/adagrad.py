@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
+
 from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
@@ -17,6 +18,7 @@ from .optimizer import (
     ParamsT,
 )
 
+
 __all__ = ["Adagrad", "adagrad"]
 
 
@@ -24,7 +26,7 @@ class Adagrad(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         lr_decay: float = 0,
         weight_decay: float = 0,
         initial_accumulator_value: float = 0,
@@ -35,6 +37,8 @@ class Adagrad(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= lr_decay:
@@ -219,7 +223,7 @@ Adagrad.__doc__ = (
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         initial_accumulator_value (float, optional): initial value of the
@@ -447,7 +451,7 @@ def _multi_tensor_adagrad(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if device_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )

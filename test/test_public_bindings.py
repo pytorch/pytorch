@@ -238,9 +238,7 @@ class TestPublicBindings(TestCase):
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
         # torch.TensorBase is explicitly removed in torch/__init__.py, so included here (#109940)
-        explicitly_removed_torch_C_bindings = {
-            "TensorBase",
-        }
+        explicitly_removed_torch_C_bindings = {"TensorBase"}
 
         torch_C_bindings = torch_C_bindings - explicitly_removed_torch_C_bindings
 
@@ -594,7 +592,7 @@ class TestPublicBindings(TestCase):
                         )
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch."):
-            mod = mod.name
+            modname = mod.name
             test_module(modname)
         test_module("torch")
 

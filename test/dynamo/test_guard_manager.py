@@ -9,14 +9,15 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
 
+
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
 DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
-TENSOR_ALIASING = guards.TENSOR_ALIASING
-install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
+OBJECT_ALIASING = guards.OBJECT_ALIASING
+install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
@@ -213,13 +214,13 @@ num_guards_executed=0)
 
     def test_no_hasattr_guard(self):
         class Bar:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.bar = 2
 
         bar = Bar()
 
         class Foo:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.foo = 2
 
         foo = Foo()
@@ -242,15 +243,15 @@ num_guards_executed=0)
 
         x_guard_mgr = guard_manager.getattr_manager("x", "", a, default_mgr_enum)
         y_guard_mgr = guard_manager.getattr_manager("y", "", a, default_mgr_enum)
-        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
+        install_object_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
 
         # Check structure
         x_guards = x_guard_mgr.get_leaf_guards()
         y_guards = y_guard_mgr.get_leaf_guards()
         self.assertEqual(len(x_guards), 1)
         self.assertEqual(len(y_guards), 1)
-        self.assertTrue(isinstance(x_guards[0], TENSOR_ALIASING))
-        self.assertTrue(isinstance(y_guards[0], TENSOR_ALIASING))
+        self.assertTrue(isinstance(x_guards[0], OBJECT_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], OBJECT_ALIASING))
         # Check that the two guards are the same object
         self.assertTrue(x_guards[0] is y_guards[0])
 
