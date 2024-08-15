@@ -11,7 +11,6 @@ from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
-    _wait_event,
 )
 from ._fsdp_param import FSDPParam
 
@@ -195,7 +194,7 @@ def foreach_all_gather_copy_out(
         all_gather_input_split_sizes,
     ) = all_gather_result
     if all_gather_event is not None:  # sync op
-        _wait_event(torch.cuda.current_stream(), all_gather_event)
+        torch.cuda.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
