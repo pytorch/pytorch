@@ -1195,8 +1195,9 @@ class FxGraphCache:
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": disk_compiled_graph._time_taken_ns
-                        // 1e6,  # Convert from NS to MS
+                        "time_taken_ms": int(
+                            disk_compiled_graph._time_taken_ns // 1e6
+                        ),  # Convert from NS to MS
                     }
                     if config.is_fbcode()
                     else content
@@ -1304,10 +1305,13 @@ class FxGraphCache:
                 cache_state = "hit"
                 cache_event_time = time_ns()
                 if (
-                    torch.distributed.is_initialized()
+                    torch.distributed.is_available()
+                    and torch.distributed.is_initialized()
                     and (time_taken_ns := compiled_graph._time_taken_ns) is not None
                 ):
-                    increased_timeout_sec = time_taken_ns // 1e9  # convert to seconds
+                    increased_timeout_sec = int(
+                        time_taken_ns // 1e9
+                    )  # convert to seconds
                     log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
                     dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
                         timedelta(seconds=increased_timeout_sec)
