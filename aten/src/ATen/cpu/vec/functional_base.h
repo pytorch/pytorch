@@ -8,6 +8,43 @@
 
 namespace at::vec {
 
+template <typename scalar_t, int N>
+inline VectorizedN<scalar_t, N> div_floor_floating_vec(
+    const VectorizedN<scalar_t, N>& a,
+    const VectorizedN<scalar_t, N>& b) {
+    VectorizedN<scalar_t, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = div_floor_floating_vec(a[i], b[i]);
+    }
+    return result;
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> div_floor_floating_vec(
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  using vec_t = Vectorized<scalar_t>;
+  const auto basic_div = a / b;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  auto mod = a.fmod(b);
+  // Fixup for a case that isn't properly handled by Sleef_fmod
+  auto floor = vec_t::blendv(a - mod, a, (basic_div.abs() == inf) & (a.abs() != inf));
+  auto div = floor / b;
+  const auto zero = vec_t(0);
+  auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+  const auto one = vec_t(1);
+  div = vec_t::blendv(div, div - one, mask);
+  auto floordiv = div.floor();
+  mask = (div - floordiv) > vec_t(0.5);
+  floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+  floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+  floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+  return floordiv;
+};
+
 // slow path
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
