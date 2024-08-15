@@ -48,17 +48,17 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_WINDOWS,
     markDynamoStrictTest,
+    NestedTensorTestCase,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
-    TestCase,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -263,20 +263,6 @@ def convert_jagged_to_nested_tensor(
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
-
-
-# Base TestCase for NT tests; used to define common helpers, etc.
-class NestedTensorTestCase(TestCase):
-    def assertEqualIgnoringNestedInts(self, a, b):
-        # unbinding NJTs allows us to compare them as essentially equal without
-        # caring about exact nested int comparison
-        def _unbind_njts(x):
-            if isinstance(x, torch.Tensor) and x.is_nested and x.layout == torch.jagged:
-                return x.unbind()
-            else:
-                return x
-
-        self.assertEqual(tree_map(_unbind_njts, a), tree_map(_unbind_njts, b))
 
 
 @markDynamoStrictTest
@@ -7092,6 +7078,8 @@ BACKWARD_FAILURES = {
     # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
     # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
     "clone",
+    # Calling into torch.ops.aten.size directly
+    "masked_select",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7099,6 +7087,11 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+}
+
+COMPARE_TENSOR_COMPONENT_EQUALITY = {
+    # masked_select is expected to output a different shape 
+    "masked_select",
 }
 
 
@@ -7179,13 +7172,17 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = f(sample.input, *sample.args, **sample.kwargs)
             out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-            self.assertEqual(out_compile, out_ref)
+            if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                self.assertEqual(out_compile.unbind(), out_ref.unbind())
+            else:
+                self.assertEqual(out_compile, out_ref)
 
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_compile_backward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
             torch.compiler.reset()
