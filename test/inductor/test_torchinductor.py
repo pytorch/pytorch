@@ -38,7 +38,7 @@ from torch._dynamo.testing import (
     same,
     skipIfPy312,
 )
-from torch._dynamo.utils import ifdynstaticdefault
+from torch._dynamo.utils import ifdynstaticdefault, counters
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -10573,6 +10573,7 @@ class CommonTemplate:
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
+        counters.clear()
         with torch.library._scoped_library("mylib", "DEF") as lib:
             lib.define(
                 "copy_(Tensor(a!) ret, Tensor tensors, int dim) -> ()",
@@ -10601,6 +10602,25 @@ class CommonTemplate:
             compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
             compiled_inductor_out = compiled_inductor_f(x)
             self.assertEqual(compiled_inductor_out, eager_out)
+            self.assertEqual(counters["inductor"]["require_stride_order_clones"], 0)
+
+            # def f_with_views(x):
+            #     full_default_3 = torch.full([10], 7.0, device="cpu")
+            #     y = full_default_3[::2]
+            #     y = y[:3]
+            #     chunk_cat_default_1 = torch.ops.mylib.copy_.default(
+            #         y, x, 0
+            #     )
+            #     mul_out = torch.mul(y, y)
+            #     return mul_out
+
+            # x = torch.arange(3, dtype=torch.float, device="cpu")
+            # eager_out = f_with_views(x)
+
+            # compiled_inductor_f = torch.compile(f_with_views, backend="inductor", fullgraph=True)
+            # compiled_inductor_out = compiled_inductor_f(x)
+            # self.assertEqual(compiled_inductor_out, eager_out)
+            # self.assertEqual(counters["inductor"]["require_stride_order_clones"], 1)
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)

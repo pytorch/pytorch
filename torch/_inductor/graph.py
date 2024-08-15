@@ -85,6 +85,7 @@ from .lowering import (
     fallback_handler,
     fallback_node_due_to_unsupported_type,
     layout_constraints,
+    requires_fx_strides,
     lowerings,
     make_fallback,
     needs_realized_inputs,
@@ -402,6 +403,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
+        self.seen_custom_ops = set()
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -980,26 +982,6 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
-        def get_custom_op_layout_constraints(
-            target: torch._ops.OpOverload, args: Any, kwargs: Dict[str, Any]
-        ) -> Tuple[Optional[Callable], Tuple[Any], Dict[str, Any]]:  # type: ignore[type-arg]
-            # Custom operations that require preserving stride order
-            # which run through implicit fallback must constrain their
-            # arguments' fx strides
-            layout_constraint = None
-            if torch._C.Tag.needs_fixed_stride_order in target.tags:
-                # We have to OrderedSet the current args because call_function will immediately
-                # evaluate this lowering after creating the fallback, without evaluating
-                # the layout constraint
-                constrain_fn = functools.partial(
-                    constrain_to_fx_strides, ignore_mutated_args_FIXME=True
-                )
-                args, kwargs = constrain_fn(self.current_node, *args, **kwargs)
-                # Also register the layout constraint so when the fallback
-                # is used again, we can constrain the args to the same layout
-                layout_constraint = constrain_fn
-            return layout_constraint, args, kwargs
-
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
@@ -1008,9 +990,6 @@ class GraphLowering(torch.fx.Interpreter):
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
-                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
-                    target, args, kwargs
-                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -1020,7 +999,7 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target, layout_constraint)
+                make_fallback(target)
 
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
@@ -1236,6 +1215,37 @@ class GraphLowering(torch.fx.Interpreter):
         )
         return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
 
+    def propagate_mutation(self, fx_node, old_args, old_kwargs, new_args, new_kwargs):
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
+        assert len(old_args) == len(new_args)
+        assert len(old_kwargs) == len(new_kwargs)
+
+        def maybe_propagate(schema_arg, old_arg, new_arg):
+            if old_arg is new_arg:
+                return
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+
+        schema = fx_node.target._schema
+        for idx, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
+            schema_arg = schema.arguments[idx]
+            maybe_propagate(schema_arg, old_arg, new_arg)
+
+        schema_kwargs = {arg.name: arg for arg in schema.arguments}
+
+        for key in old_kwargs.keys():
+            old_arg = old_kwargs[key]
+            new_arg = new_kwargs[key]
+            schema_arg = schema_kwargs[key]
+            maybe_propagate(schema_arg, old_arg, new_arg)
+
+    def maybe_add_custom_op_layout_constraints(self, op):
+        if op in self.seen_custom_ops:
+            return
+        if isinstance(op, torch._ops.OpOverload) and torch._C.Tag.needs_fixed_stride_order in op.tags:
+            torch._inductor.lowering.add_layout_constraint(op, constrain_to_fx_strides)
+        self.seen_custom_ops.add(op)
+
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
@@ -1252,6 +1262,9 @@ class GraphLowering(torch.fx.Interpreter):
         ), V.set_current_node(
             n
         ):
+            if n.op == "call_function":
+                self.maybe_add_custom_op_layout_constraints(n.target)
+
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1263,8 +1276,14 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
                 debug("layout_constraints")
+                old_args = args
+                old_kwargs = kwargs
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
+                # layout_constraints are allowed to make new copies of the inputs.
+                # if they do, and if the target is mutable, then we need to
+                # write the new values back into the original inputs.
+                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
