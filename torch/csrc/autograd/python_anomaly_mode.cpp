@@ -8,8 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 void PyAnomalyMetadata::store_stack() {
   pybind11::gil_scoped_acquire gil;
@@ -125,5 +124,4 @@ void _print_stack(
   }
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
