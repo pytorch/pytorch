@@ -14,6 +14,7 @@ import re
 import tempfile
 from itertools import count
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -23,7 +24,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -40,7 +40,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import SymT, symbol_is_type
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
@@ -48,9 +48,9 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
+    LineContext,
     cache_on_self,
     get_benchmark_name,
-    LineContext,
     sympy_product,
     sympy_str,
 )
@@ -772,6 +772,8 @@ class PythonWrapperCodegen(CodeGen):
             )
         except (AttributeError, ImportError):
             pass
+        if config.annotate_training:
+            self.header.writeline("from torch.cuda import nvtx")
 
     def include_extra_header(self, header: str):
         pass
@@ -889,6 +891,11 @@ class PythonWrapperCodegen(CodeGen):
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
+            phase = V.graph.get_training_phase()
+            if config.annotate_training:
+                self.prefix.writeline(
+                    f"training_annotation = nvtx.device_range_start('{phase}')"
+                )
             if V.graph.graph_inputs:
                 lhs = ", ".join(V.graph.graph_input_names)
                 if len(V.graph.graph_input_names) == 1:
@@ -1175,6 +1182,10 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.generate_and_run_autotune_block()
 
+            if config.annotate_training:
+                self.wrapper_call.writeline(
+                    "nvtx.device_range_end(training_annotation)"
+                )
             self.generate_return(output_refs)
 
         self.finalize_prefix()
@@ -1644,7 +1655,7 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        from .triton import gen_common_triton_imports, TritonKernel
+        from .triton import TritonKernel, gen_common_triton_imports
 
         compile_wrapper.splice(gen_common_triton_imports())
 

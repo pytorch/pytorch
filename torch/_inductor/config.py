@@ -773,6 +773,10 @@ enable_linear_binary_folding = (
 )
 
 
+# Adds NVTX annotations aroung training phases
+annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
