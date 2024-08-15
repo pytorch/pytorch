@@ -11,8 +11,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
@@ -182,5 +181,4 @@ struct TORCH_API CopySlices : public Node {
   std::shared_ptr<Node> fn;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
