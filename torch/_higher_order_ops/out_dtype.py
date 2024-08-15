@@ -147,10 +147,7 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args,
 ):
-    if mode.enable_tracing:
-        return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-    else:
-        return out_dtype(op, output_dtype, *args)
+    return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
 
 
 @out_dtype.py_impl(FakeTensorMode)

@@ -372,9 +372,9 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"DeviceMesh({self.mesh.tolist()})"
+                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
                 if not self.mesh_dim_names
-                else f"DeviceMesh({self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
             )
             return device_mesh_repr
 

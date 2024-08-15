@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
@@ -174,10 +173,17 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       op_name_with_overload_(std::string(op_name_with_overload)),
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
       pyinterpreter_(getPyInterpreter()) {
+  auto device_name = c10::DeviceTypeName(device_.type());
+  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
-      (device_.type() == c10::DeviceType::CPU) ||
-          (device_.type() == c10::DeviceType::CUDA),
-      "Unsupported device type");
+      device_.type() == c10::DeviceType::CUDA ||
+          device_.type() == c10::DeviceType::CPU ||
+          registered_aoti_runner.find(device_name) !=
+              registered_aoti_runner.end(),
+      "AOTI for eager does not support ",
+      c10::DeviceTypeName(device_.type()),
+      " now.");
+
   init_aoti_kernel_cache();
 }
 
@@ -406,9 +412,13 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
 
 std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     load_aoti_model_runner(const std::string& so_path) {
+  auto device_name = c10::DeviceTypeName(device_.type());
+  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
-          device_.type() == c10::DeviceType::CPU,
+          device_.type() == c10::DeviceType::CPU ||
+          registered_aoti_runner.find(device_name) !=
+              registered_aoti_runner.end(),
       "AOTI for eager does not support ",
       c10::DeviceTypeName(device_.type()),
       " now.");
@@ -418,8 +428,11 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
 #else
     return nullptr;
 #endif
-  } else {
+  } else if (device_.type() == c10::DeviceType::CPU) {
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
+  } else {
+    auto aoti_model_runer_fn = registered_aoti_runner[device_name];
+    return aoti_model_runer_fn(so_path, 1, device_name, "");
   }
 }
 
@@ -429,18 +442,11 @@ void AOTIPythonKernelHolder::cache_miss(
     torch::jit::Stack* stack) {
   auto kernel_lib_path = produce_aoti_kernel_lib(op, keyset, stack);
   std::shared_ptr<AOTIModelContainerRunner> kernel = nullptr;
-  // TODO: To enable the plugin mechanism to allow registration for other
-  // backends
-  if (device_.type() == c10::DeviceType::CPU) {
-    kernel = std::make_shared<AOTIModelContainerRunnerCpu>(kernel_lib_path);
-  } else {
-#ifdef USE_CUDA
-    kernel = std::make_shared<AOTIModelContainerRunnerCuda>(kernel_lib_path);
-#else
-    TORCH_CHECK(false, "Unsupported CUDA device type");
-#endif
-  }
-
+  kernel = load_aoti_model_runner(kernel_lib_path);
+  TORCH_INTERNAL_ASSERT(
+      kernel != nullptr,
+      "Unsupported device: ",
+      c10::DeviceTypeName(device_.type()));
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   auto outputs = kernel->run(inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());

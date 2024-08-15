@@ -112,7 +112,6 @@ class AutogradCompilerInstance:
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
-        self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())

@@ -533,11 +533,28 @@ class TestDeserialize(TestCase):
     ) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
 
+        def _deepcopy_inputs(inputs):
+            # copy.deepcopy(deepcopy) can fail if tensor inputs have attribute (i.e. __dict__).
+            # we remove __dict__ when deepcopying.
+            dict_mapping = dict()
+            inputs_clone = ()
+            for idx, i in enumerate(inputs):
+                if isinstance(i, torch.Tensor) and hasattr(inputs[0], "__dict__"):
+                    dict_mapping[idx] = i.__dict__
+                    i.__dict__ = {}
+                inputs_clone += (copy.deepcopy(i),)
+
+            # Add __dict__ back.
+            for k, v in dict_mapping.items():
+                inputs[k].__dict__ = v
+                inputs_clone[k].__dict__ = v
+            return inputs_clone
+
         def _check_graph(pre_dispatch):
             if pre_dispatch:
                 ep = torch.export._trace._export(
                     fn,
-                    copy.deepcopy(inputs),
+                    _deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
                     pre_dispatch=True,
@@ -546,7 +563,7 @@ class TestDeserialize(TestCase):
             else:
                 ep = torch.export.export(
                     fn,
-                    copy.deepcopy(inputs),
+                    _deepcopy_inputs(inputs),
                     {},
                     dynamic_shapes=dynamic_shapes,
                     strict=strict,
@@ -559,8 +576,8 @@ class TestDeserialize(TestCase):
             )
             deserialized_ep.graph.eliminate_dead_code()
 
-            orig_outputs = ep.module()(*copy.deepcopy(inputs))
-            loaded_outputs = deserialized_ep.module()(*copy.deepcopy(inputs))
+            orig_outputs = ep.module()(*_deepcopy_inputs(inputs))
+            loaded_outputs = deserialized_ep.module()(*_deepcopy_inputs(inputs))
 
             flat_orig_outputs = pytree.tree_leaves(orig_outputs)
             flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)

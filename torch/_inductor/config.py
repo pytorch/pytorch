@@ -66,7 +66,7 @@ abi_compatible = (
 )
 
 c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
 )
 
 # dead code elimination
@@ -798,6 +798,10 @@ class triton:
 
     # limit tiling dimensions
     max_tiles = 2
+
+    # Prefer higher dimensional tilings. This simplifies indexing expressions, making
+    # it easier to identify block pointers.
+    prefer_nd_tiling: bool = False
 
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing

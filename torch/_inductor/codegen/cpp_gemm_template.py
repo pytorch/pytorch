@@ -15,13 +15,13 @@ from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
 from ..virtualized import ops, V
+from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     DTYPE_TO_CPP,
     GemmBlocking,
-    get_export_declaration,
     get_gemm_template_output_and_compute_dtype,
 )
 

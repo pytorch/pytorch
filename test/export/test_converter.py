@@ -102,10 +102,7 @@ class TestConverter(TestCase):
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
 
             converter = TS2EPConverter(ts_model, inp)
-            print(opt, converter.ts_graph)
-
             ep = converter.convert()
-            print(ep)
             ep_list.append(ep)
 
             for _ in range(num_iterations):
@@ -1014,7 +1011,6 @@ class TestConverter(TestCase):
 
         ep_list = self._check_equal_ts_ep_converter(M(), (torch.tensor(1),))
         for ep in ep_list:
-            print(ep.constants)
             self.assertEqual(len(ep.constants), 1)
 
     def test_aten_tensor_prim_dtype(self):
@@ -1326,6 +1322,45 @@ class TestConverter(TestCase):
 
         inp = (torch.randn(2, 3),)
         self._check_equal_ts_ep_converter(M1(), inp, ["script"])
+
+    def test_ts2ep_with_loop(self):
+        def func1(x, x_list: List[torch.Tensor]):
+            a, b, c = x, x, x
+            for i in range(1, 5, 2):
+                for k in range(5):
+                    a = a + a + k
+                    b = b + b - k
+                    x_list.append(x_list[k] + x_list[k + 1])
+                for k in range(5):
+                    b = b + b - k
+                    c = c + c * k
+                    x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
+            return x, x_list
+
+        def func2(x):
+            for i in range(x.size(0)):
+                x = x * x * i
+            return x
+
+        def func3(x):
+            while x.sum() < 10:
+                x += x.sin()
+            return x
+
+        inp = (
+            torch.tensor(1),
+            [torch.ones([2, 2]), torch.ones([2, 2]) * 2],
+        )
+        # Trace unrolls the loop.
+        self._check_equal_ts_ep_converter(func1, inp, ["script"])
+
+        # TODO: (2/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func2, inp, ["script"])
+
+        # TODO: (3/N)
+        # Trace unrolls the loop.
+        # self._check_equal_ts_ep_converter(func3, inp, ["script"])
 
 
 if __name__ == "__main__":

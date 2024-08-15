@@ -1088,6 +1088,7 @@ class FxGraphCache:
         from .graph import GraphLowering
 
         GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
         trace_structured(
@@ -2051,8 +2052,29 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_file(compile_flags)
 
             else:
+                (
+                    object_output_name,
+                    object_output_dir,
+                ) = get_name_and_dir_from_output_file_path(input_path)
+                object_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    compile_only=True,
+                    use_absolute_path=use_absolute_path,
+                    use_mmap_weights=use_mmap_weights,
+                )
+                object_builder = CppBuilder(
+                    name=object_output_name,
+                    sources=input_path,
+                    output_dir=object_output_dir,
+                    BuildOption=object_build_options,
+                )
+                compile_cmd = object_builder.get_command_line()
+                output_o = object_builder.get_target_file_path()
+
                 # TODO: replace this with using the CppBuilder above
-                compile_cmd = cpp_compile_command(
+                compile_cmd_old = cpp_compile_command(
                     input=input_path,
                     output=output_o,
                     vec_isa=picked_vec_isa,
@@ -2063,8 +2085,15 @@ class AotCodeCompiler:
                     use_mmap_weights=use_mmap_weights,
                 )
 
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        compile_cmd.split(" "), compile_cmd_old.split(" ")
+                    )
+
                 log.debug("aot compilation command: %s", compile_cmd)
                 if fbcode_aot_cpu_re:
+                    output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
@@ -2158,37 +2187,62 @@ class AotCodeCompiler:
 
                 archive_path = package_aoti(os.path.split(input_path)[0])
                 return archive_path
-
-            # TODO: replace this with using the CppBuilder above
-            link_cmd = cpp_compile_command(
-                input=[output_o, consts_o],
-                output=output_so,
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
-                use_absolute_path=use_absolute_path,
-            )
-
-            log.debug("aot linkage command: %s", link_cmd)
-            if fbcode_aot_cpu_re:
-                compile_file([output_o, consts_o], output_so, link_cmd.split())
-                os.chmod(output_so, 0o755)
             else:
-                run_command_and_check(link_cmd)
+                output_name, output_dir = get_name_and_dir_from_output_file_path(
+                    output_so
+                )
+                so_build_options = CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
+                so_builder = CppBuilder(
+                    name=output_name,
+                    sources=[output_o, consts_o],
+                    output_dir=output_dir,
+                    BuildOption=so_build_options,
+                )
+                link_cmd = so_builder.get_command_line()
+                output_so = so_builder.get_target_file_path()
 
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
+                # TODO: replace this with using the CppBuilder above
+                link_cmd_old = cpp_compile_command(
+                    input=[output_o, consts_o],
+                    output=output_so,
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                )
 
-            # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
-                f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                f.write(f"// Link cmd\n// {link_cmd}\n")
+                # Temp: add command debug code.
+                if config.is_fbcode():
+                    _temp_validate_new_and_old_command(
+                        link_cmd.split(" "), link_cmd_old.split(" ")
+                    )
+
+                log.debug("aot linkage command: %s", link_cmd)
+                if fbcode_aot_cpu_re:
+                    output_so = os.path.splitext(input_path)[0] + ".so"
+                    compile_file([output_o, consts_o], output_so, link_cmd.split())
+                    os.chmod(output_so, 0o755)
+                else:
+                    run_command_and_check(link_cmd)
+
+                if use_mmap_weights:
+                    with open(output_so, "a+b") as f_so:
+                        so_size = f_so.tell()
+                        # Page align the weights
+                        f_so.write(b" " * (16384 - so_size % 16384))
+                        f_so.write(serialized_weights)
+                        f_so.write(struct.pack("q", magic_number))
+
+                # Append cmds to the end of codegen-ed wrapper file
+                with open(input_path, "a") as f:
+                    f.write("\n")
+                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                    f.write(f"// Link cmd\n// {link_cmd}\n")
 
         return output_so
 

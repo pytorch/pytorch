@@ -49,7 +49,6 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export._remove_effect_tokens_pass import _is_impure_node
 from torch.export.dynamic_shapes import _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
@@ -1531,7 +1530,7 @@ def _export_to_aten_ir_make_fx(
                 record_module_stack=True,
                 pre_dispatch=True,
             )(*flat_args)
-            gm.graph.eliminate_dead_code(is_impure_node=_is_impure_node)
+            gm.graph.eliminate_dead_code()
 
         return gm, None
 

@@ -231,6 +231,7 @@ def set_logs(
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd_verbose: bool = False,
+    cudagraph_static_inputs: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -404,6 +405,9 @@ def set_logs(
             needs to be set. This can be done by providing the fully-qualified module
             name as the key, with the log level as the value. Default: ``None``
 
+        cudagraph_static_inputs (:class:`bool`):
+            Whether to emit debug info for cudagraph static input detection. Default: ``False``
+
 
     Example::
 
@@ -499,6 +503,7 @@ def set_logs(
         export=export,
         cudagraphs=cudagraphs,
         compiled_autograd_verbose=compiled_autograd_verbose,
+        cudagraph_static_inputs=cudagraph_static_inputs,
     )
 
 

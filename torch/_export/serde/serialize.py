@@ -42,8 +42,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
     Argument,
@@ -93,7 +93,7 @@ from .schema import (  # type: ignore[attr-defined]
     UserOutputSpec,
 )
 from .union import _Union
-
+from ..utils import remove_proxy_from_state_dict
 
 __all__ = [
     "serialize",
@@ -1400,9 +1400,13 @@ class ExportedProgramSerializer(metaclass=Final):
         # Test canonical form is well defined.
         canonicalize(serialized_ep)
 
+        # Proxy cannot be dumped, so we remove them.
+        new_state_dict = remove_proxy_from_state_dict(
+            exported_program.state_dict, in_place=False
+        )
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(exported_program.state_dict),
+            serialize_torch_artifact(new_state_dict),
             serialize_torch_artifact(constants),
             serialize_torch_artifact(exported_program.example_inputs),
         )

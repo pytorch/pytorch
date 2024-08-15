@@ -335,7 +335,7 @@ class HigherOrderOperator(OperatorBase):
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        "We recommend filing an issue."
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
@@ -356,7 +356,7 @@ class HigherOrderOperator(OperatorBase):
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
-                        "We recommend filing an issue."
+                        f"We recommend filing an issue."
                     )
                 if result is not NotImplemented:
                     return result
