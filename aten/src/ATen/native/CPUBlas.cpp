@@ -8,7 +8,7 @@
 #include <c10/util/irange.h>
 
 #include <climits>
-#include <iostream>
+
 #if AT_BUILD_WITH_BLAS()
 #if C10_IOS
 #include <Accelerate/Accelerate.h>
