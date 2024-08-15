@@ -1626,14 +1626,17 @@ def remove_extension_h_precompiler_headers():
 def load_inline(name,
                 cpp_sources,
                 cuda_sources=None,
+                sycl_sources=None,
                 functions=None,
                 extra_cflags=None,
                 extra_cuda_cflags=None,
+                extra_sycl_cflags=None,
                 extra_ldflags=None,
                 extra_include_paths=None,
                 build_directory=None,
                 verbose=False,
                 with_cuda=None,
+                with_sycl=None,
                 is_python_module=True,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True,
@@ -1671,11 +1674,21 @@ def load_inline(name,
     declare or define this C++ function in one of the ``cpp_sources`` (and
     include its name in ``functions``).
 
+    The sources in ``sycl_sources`` are concatenated into a separate ``.sycl``
+    file and  prepended with ``torch/types.h``, ``sycl/sycl.hpp`` includes.
+    The ``.cpp`` and ``.sycl`` files are compiled separately, but ultimately
+    linked into a single library. Note that no bindings are generated for
+    functions in ``sycl_sources`` per se. To bind to a SYCL kernel, you must
+    create a C++ function that calls it, and either declare or define this
+    C++ function in one of the ``cpp_sources`` (and include its name
+    in ``functions``).
+
     See :func:`load` for a description of arguments omitted below.
 
     Args:
         cpp_sources: A string, or list of strings, containing C++ source code.
         cuda_sources: A string, or list of strings, containing CUDA source code.
+        sycl_sources: A string, or list of strings, containing SYCL source code.
         functions: A list of function names for which to generate function
             bindings. If a dictionary is given, it should map function names to
             docstrings (which are otherwise just the function names).
@@ -1683,6 +1696,11 @@ def load_inline(name,
             the build. If set to ``None`` (default), this value is
             automatically determined based on whether ``cuda_sources`` is
             provided. Set it to ``True`` to force CUDA headers
+            and libraries to be included.
+        with_sycl: Determines whether SYCL headers and libraries are added to
+            the build. If set to ``None`` (default), this value is
+            automatically determined based on whether ``sycl_sources`` is
+            provided. Set it to ``True`` to force SYCL headers
             and libraries to be included.
         with_pytorch_error_handling: Determines whether pytorch error and
             warning macros are handled by pytorch instead of pybind. To do
@@ -1723,6 +1741,9 @@ def load_inline(name,
     cuda_sources = cuda_sources or []
     if isinstance(cuda_sources, str):
         cuda_sources = [cuda_sources]
+    sycl_sources = sycl_sources or []
+    if isinstance(sycl_sources, str):
+        sycl_sources = [sycl_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
@@ -1768,18 +1789,27 @@ def load_inline(name,
 
         sources.append(cuda_source_path)
 
+    if sycl_sources:
+        sycl_sources.insert(0, '#include <torch/types.h>')
+        sycl_sources.insert(1, '#include <sycl/sycl.hpp>')
+
+        sycl_source_path = os.path.join(build_directory, 'sycl.sycl')
+        _maybe_write(sycl_source_path, "\n".join(sycl_sources))
+
+        sources.append(sycl_source_path)
+
     return _jit_compile(
         name,
         sources,
         extra_cflags,
         extra_cuda_cflags,
-        [],  # extra_sycl_cflags
+        extra_sycl_cflags,
         extra_ldflags,
         extra_include_paths,
         build_directory,
         verbose,
         with_cuda,
-        False,  # with_sycl
+        with_sycl,
         is_python_module,
         is_standalone=False,
         keep_intermediates=keep_intermediates)
