@@ -8,6 +8,7 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
@@ -45,7 +46,7 @@ class BoundVars:
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
             f"loop_body={self.loop_body},\n "

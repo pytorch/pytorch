@@ -60,12 +60,12 @@ def _shard_tensor(
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
-                f"src_rank={src_rank} on rank: {current_rank} does not "
+                f"src_rank={src_rank} on rank: {current_rank} does not "  # type: ignore[index]
                 f"match with src_rank={entry[0]} on rank: {idx}"  # type: ignore[index]
             )
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
-                f"sharding_spec={sharding_spec} on rank: {current_rank} does not "
+                f"sharding_spec={sharding_spec} on rank: {current_rank} does not "  # type: ignore[index]
                 f"match with sharding_spec={entry[1]} on rank: {idx}"  # type: ignore[index]
             )
 

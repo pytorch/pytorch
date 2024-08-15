@@ -11,6 +11,7 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 
+
 F = _ComputationType.FORWARD
 B = _ComputationType.BACKWARD
 W = _ComputationType.WEIGHT
@@ -38,27 +39,27 @@ class ScheduleVShaped(PipelineScheduleMulti):
         )
 
         # Go through one microbatch
-        # F0_0 None None F0_3 B0_3 None None B0_0
-        # None F0_1 F0_2 None None B0_2 B0_1 None
+        # Note(whc) - it might be easier to work with thes schedules by writing them as a list of
+        # ["0F0", ...] and then parsing them in the test infra to turn them into actions.
         self.pipeline_order = {
             0: [
-                _Action(F, 0, 0),
+                _Action(0, F, 0),
                 None,
                 None,
-                _Action(F, 0, 3),
-                _Action(B, 0, 3),
+                _Action(3, F, 0),
+                _Action(3, B, 0),
                 None,
                 None,
-                _Action(B, 0, 0),
+                _Action(0, B, 0),
             ],
             1: [
                 None,
-                _Action(F, 0, 1),
-                _Action(F, 0, 2),
+                _Action(1, F, 0),
+                _Action(2, F, 0),
                 None,
                 None,
-                _Action(B, 0, 2),
-                _Action(B, 0, 1),
+                _Action(2, B, 0),
+                _Action(1, B, 0),
                 None,
             ],
         }
@@ -87,26 +88,26 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
 
         self.pipeline_order = {
             0: [
-                _Action(F, 0, 0),
-                _Action(F, 0, 1),
+                _Action(0, F, 0),
+                _Action(1, F, 0),
                 None,
                 None,
-                _Action(F, 0, 4),
-                _Action(B, 0, 4),
+                _Action(4, F, 0),
+                _Action(4, B, 0),
                 None,
                 None,
-                _Action(B, 0, 1),
-                _Action(B, 0, 0),
+                _Action(1, B, 0),
+                _Action(0, B, 0),
             ],
             1: [
                 None,
                 None,
-                _Action(F, 0, 2),
-                _Action(F, 0, 3),
+                _Action(2, F, 0),
+                _Action(3, F, 0),
                 None,
                 None,
-                _Action(B, 0, 3),
-                _Action(B, 0, 2),
+                _Action(3, B, 0),
+                _Action(2, B, 0),
                 None,
                 None,
             ],
@@ -136,37 +137,35 @@ class ScheduleWithW(PipelineScheduleMulti):
         self.use_full_backward = False
 
         # Go through two microbatches
-        # F0_0 F1_0 F0_2 F1_2 None B0_2 W0_2 B0_0 B1_2 W0_0 B1_0 W1_2 W1_0
-        # None F0_1 F1_1 F0_3 B0_3 F1_3 B0_1 B1_3 W0_3 B1_1 W0_1 W1_3 W1_1
         self.pipeline_order = {
             0: [
-                _Action(F, 0, 0),
-                _Action(F, 1, 0),
-                _Action(F, 0, 2),
-                _Action(F, 1, 2),
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(2, F, 0),
+                _Action(2, F, 1),
                 None,
-                _Action(B, 0, 2),
-                _Action(W, 0, 2),
-                _Action(B, 0, 0),
-                _Action(B, 1, 2),
-                _Action(W, 0, 0),
-                _Action(B, 1, 0),
-                _Action(W, 1, 2),
-                _Action(W, 1, 0),
+                _Action(2, B, 0),
+                _Action(2, W, 0),
+                _Action(0, B, 0),
+                _Action(2, B, 1),
+                _Action(0, W, 0),
+                _Action(0, B, 1),
+                _Action(2, W, 1),
+                _Action(0, W, 1),
             ],
             1: [
                 None,
-                _Action(F, 0, 1),
-                _Action(F, 1, 1),
-                _Action(F, 0, 3),
-                _Action(B, 0, 3),
-                _Action(F, 1, 3),
-                _Action(B, 0, 1),
-                _Action(B, 1, 3),
-                _Action(W, 0, 3),
-                _Action(B, 1, 1),
-                _Action(W, 0, 1),
-                _Action(W, 1, 3),
-                _Action(W, 1, 1),
+                _Action(1, F, 0),
+                _Action(1, F, 1),
+                _Action(3, F, 0),
+                _Action(3, B, 0),
+                _Action(3, F, 1),
+                _Action(1, B, 0),
+                _Action(3, B, 1),
+                _Action(3, W, 0),
+                _Action(1, B, 1),
+                _Action(1, W, 0),
+                _Action(3, W, 1),
+                _Action(1, W, 1),
             ],
         }

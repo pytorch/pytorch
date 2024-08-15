@@ -68,8 +68,6 @@ static void binaryOpTensor(const Tensor& self,
                            const Tensor& output_,
                            std::string op_name,
                            BinaryOpBlock binaryBlock) {
-  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
-              "MPS support binary op with uint8 natively starting from macOS 13.0");
   TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
                 (self.scalar_type() == ScalarType::Long ||
                  (other.scalar_type() == ScalarType::Long &&
@@ -98,26 +96,13 @@ static void binaryOpTensor(const Tensor& self,
   bool needsCopyToOutput = false;
 
   if (needsGather(output_) || (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_)))) {
-    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output = at::empty(output_.sizes(), output_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
     needsCopyToOutput = true;
   }
 
   auto inputDataType = self.scalar_type();
   auto otherDataType = other.scalar_type();
   auto outputDataType = output_.scalar_type();
-  if (!is_macos_13_or_newer()) {
-    // workaround for signed vs. unsigned comparison issue in MacOS 12
-    if (outputDataType == kBool && (inputDataType == kByte || otherDataType == kByte)) {
-      inputDataType = otherDataType = kByte;
-    } else {
-      if (inputDataType == kBool || inputDataType == kByte) {
-        inputDataType = kChar;
-      }
-      if (otherDataType == kBool || otherDataType == kByte) {
-        otherDataType = kChar;
-      }
-    }
-  }
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
@@ -212,7 +197,7 @@ static void binaryOpScalar(const Tensor& self,
 
 static void div_mode_template(const Tensor& self,
                               const Tensor& other,
-                              c10::optional<c10::string_view> rounding_mode,
+                              std::optional<c10::string_view> rounding_mode,
                               const Tensor& output,
                               const string op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
@@ -418,12 +403,12 @@ TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Te
 }
 
 TORCH_IMPL_FUNC(div_out_mode_mps)
-(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& output) {
+(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, const Tensor& output) {
   mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
 }
 
 TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, c10::nullopt, output, "div_out");
+  mps::div_mode_template(self, other, std::nullopt, output, "div_out");
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {

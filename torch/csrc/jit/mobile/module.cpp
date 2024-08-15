@@ -5,14 +5,12 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <exception>
 
 #include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 
@@ -31,7 +29,7 @@ const Function* CompilationUnit::find_function(
 }
 
 Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
-  // NOLINTNEXTLINE
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<Function*>(
       static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
@@ -90,10 +88,10 @@ void Module::unsafeCopyMethod(
 std::optional<Method> Module::find_method(const std::string& basename) const {
   for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return c10::make_optional<Method>(Method(this, fn.get()));
+      return std::make_optional<Method>(Method(this, fn.get()));
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 namespace {
@@ -324,7 +322,7 @@ static std::optional<std::string> print_type(const c10::Type& t) {
   if (auto dyn = t.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
@@ -351,5 +349,4 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

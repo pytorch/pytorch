@@ -299,7 +299,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       dilation,
       groups,
       transpose,
-      c10::nullopt, /* input_scale */
+      std::nullopt, /* input_scale */
       kernel_dim,
       w_scales,
       std::move(w_zero_points),
@@ -458,7 +458,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);
   // Bias
-  std::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   if (bias.has_value()) {
     at::Tensor bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");

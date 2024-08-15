@@ -86,7 +86,7 @@ void f8f8bf16_rowwise_impl(
     at::Tensor WQ, // FP8
     at::Tensor x_scale,
     at::Tensor w_scale,
-    c10::optional<at::Tensor> bias,
+    std::optional<at::Tensor> bias,
     at::Tensor out) {
   int M = XQ.size(0);
   int N = WQ.size(1);
@@ -354,7 +354,7 @@ void dispatch_fp8_rowwise_kernel(
     at::Tensor WQ,
     at::Tensor x_scale,
     at::Tensor w_scale,
-    c10::optional<at::Tensor> bias,
+    std::optional<at::Tensor> bias,
     at::Tensor out) {
   KernelMode kernel = get_kernel_mode(XQ, WQ);
   if (kernel == KernelMode::Small) {
@@ -409,7 +409,7 @@ void f8f8bf16_rowwise(
     at::Tensor WQ, // FP8
     at::Tensor x_scale, // FP32
     at::Tensor w_scale, // FP32
-    c10::optional<at::Tensor> bias, // BF16
+    std::optional<at::Tensor> bias, // BF16
     bool use_fast_accum,
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
@@ -433,7 +433,7 @@ void f8f8bf16_rowwise(
 
   // Templatize based on input dtype.
   bool use_e5m2 = XQ.dtype() == at::kFloat8_e5m2;
-  TORCH_CHECK(WQ.dtype() == at::kFloat8_e4m3fn, "For row-wise scaling the second input is required to be a float8_e4m3fn dtype.");
+  TORCH_CHECK(WQ.dtype() == at::kFloat8_e4m3fn, "For RowWise scaling the second input is required to be a float8_e4m3fn dtype.");
 
   if (use_bias) {
     if (bf16_bias) {

@@ -35,23 +35,17 @@ typedef MPSGraphTensor* (^PoolingOpBlock)(PoolingCachedGraph&, MPSGraphPooling2D
 // Pooling ops (1D/2D forward and backward Max and Average pooling)
 static void pool2d_template(const Tensor& input,
                             const Tensor& output,
-                            const c10::optional<Tensor>& indices_opt,
-                            const c10::optional<Tensor>& grad_output_opt,
+                            const std::optional<Tensor>& indices_opt,
+                            const std::optional<Tensor>& grad_output_opt,
                             IntArrayRef kernel_size,
                             IntArrayRef stride,
                             IntArrayRef padding,
                             IntArrayRef dilation,
                             bool ceil_mode,
                             bool count_include_pad,
-                            const c10::optional<int64_t> divisor_override,
+                            const std::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
                             const c10::string& op_name) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_CHECK(input.scalar_type() != ScalarType::Long,
-                "MPS: ",
-                op_name,
-                " op with int64 input is supported natively starting from macOS 13.0.");
-  }
   const int64_t ndims = input.ndimension();
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
@@ -233,14 +227,14 @@ static void pool2d_template(const Tensor& input,
 
 static void avg_pool2d_template(const Tensor& input,
                                 const Tensor& output,
-                                const c10::optional<Tensor>& grad_output_opt,
+                                const std::optional<Tensor>& grad_output_opt,
                                 IntArrayRef kernel_size,
                                 IntArrayRef stride,
                                 IntArrayRef padding,
                                 IntArrayRef dilation,
                                 bool ceil_mode,
                                 bool count_include_pad,
-                                const c10::optional<int64_t> divisor_override,
+                                const std::optional<int64_t> divisor_override,
                                 const c10::string& op_name) {
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
@@ -335,7 +329,7 @@ static void avg_pool2d_template(const Tensor& input,
 
   pool2d_template(input,
                   output,
-                  c10::nullopt,
+                  std::nullopt,
                   grad_output_opt,
                   kernel_size,
                   stride,
@@ -363,15 +357,15 @@ Tensor mps_max_pool2d(const Tensor& input,
   };
   mps::pool2d_template(input,
                        output,
-                       c10::nullopt,
-                       c10::nullopt,
+                       std::nullopt,
+                       std::nullopt,
                        kernel_size,
                        stride,
                        padding,
                        dilation,
                        ceil_mode,
                        false,
-                       c10::nullopt,
+                       std::nullopt,
                        pooling_op_block,
                        "max_pool2d");
 
@@ -395,7 +389,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
   };
   mps::pool2d_template(input,
                        grad_input,
-                       c10::nullopt,
+                       std::nullopt,
                        grad_output,
                        kernel_size,
                        stride,
@@ -403,7 +397,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
                        dilation,
                        ceil_mode,
                        false,
-                       c10::nullopt,
+                       std::nullopt,
                        pooling_op_block,
                        "max_pool2d_backward");
 
@@ -432,14 +426,14 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
   mps::pool2d_template(input,
                        output,
                        indices,
-                       c10::nullopt,
+                       std::nullopt,
                        kernel_size,
                        stride,
                        padding,
                        dilation,
                        ceil_mode,
                        false,
-                       c10::nullopt,
+                       std::nullopt,
                        pooling_op_block,
                        "max_pool2d_indices");
 
@@ -475,7 +469,7 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
                        dilation,
                        ceil_mode,
                        false,
-                       c10::nullopt,
+                       std::nullopt,
                        pooling_op_block,
                        "max_pool2d_indices_backward");
 }
@@ -490,11 +484,11 @@ TORCH_IMPL_FUNC(avg_pool2d_out_mps)
  int64_t padW,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override,
+ std::optional<int64_t> divisor_override,
  const Tensor& output) {
   mps::avg_pool2d_template(input,
                            output,
-                           c10::nullopt,
+                           std::nullopt,
                            {kH, kW},
                            {dH, dW},
                            {padH, padW},
@@ -513,7 +507,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
  IntArrayRef padding,
  bool ceil_mode,
  bool count_include_pad,
- c10::optional<int64_t> divisor_override,
+ std::optional<int64_t> divisor_override,
  const Tensor& gradInput) {
   mps::avg_pool2d_template(input,
                            gradInput,
