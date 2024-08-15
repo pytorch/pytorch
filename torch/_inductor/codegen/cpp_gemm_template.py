@@ -653,7 +653,7 @@ class CppPackedGemmTemplate(CppTemplate):
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_can_alias: Optional[bool] = None,
+        flag_can_alias_template_with_kernel_output: Optional[bool] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
@@ -678,14 +678,17 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = self.output_node
             inp = self.input_nodes[2] if self.has_bias else None
 
-        can_alias = None
+        can_alias_template_with_kernel_output = None
+
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
 
-            assert flag_can_alias is not None
-            can_alias = flag_can_alias
+            assert flag_can_alias_template_with_kernel_output is not None
+            can_alias_template_with_kernel_output = (
+                flag_can_alias_template_with_kernel_output
+            )
 
         template_buffer = Y
         gemm_output_buffer = template_buffer
@@ -714,17 +717,44 @@ class CppPackedGemmTemplate(CppTemplate):
 
             epilogue_creators.append(_bias_add_epilogue)
 
-        # TODO: can_alis is None when there's no template_buffer_node
-        # TODO: add comment for the condition here
-        if (
-            inp is None
-            and self.epilogue_creator is None
-            and use_local_acc
-            and template_buffer_node is not None
-            and not can_alias
+        if self.epilogue_creator is not None:
+            epilogue_creators.append(self.epilogue_creator)
+
+        # When the GEMM output buffer is localized but it has users other than the epilogue nodes,
+        # we need to copy the value in the GEMM output local buffer to a global buffer.
+        def need_copy_from_local_to_global_buffer_epilogue(
+            use_local_acc, can_alias_template_with_kernel_output, epilogue_creators
         ):
-            # TODO: refine the func name
-            def copy_epilogue(input_buffer: ir.Buffer):
+            # The GEMM output buffer is a global buffer, thus copy is not needed.
+            if not use_local_acc:
+                return False
+
+            # The possible value of can_alias_template_with_kernel_output is (None, False, True)
+            # It is None when generating the gemm template during autotune and it will have value during scheduler codegen.
+            # extra copy_from_local_to_global_buffer_epilogue is not needed in either of the below two cases:
+            #   1. can_alias_template_with_kernel_output is None (i.e. when doing the codegen during autotune)
+            #   2. can_alias_template_with_kernel_output is True, which means it's safe to keep the value in the
+            #       GEMM output buffer in local buffer only (no users outside of the epilogues will use its value).
+            if (
+                can_alias_template_with_kernel_output is None
+                or can_alias_template_with_kernel_output is True
+            ):
+                return False
+
+            # When bias is not None or self.epilogue_creator is not None,
+            # there will be epilogue_creators after the GEMM.
+            # The GEMM output buffer is localized while
+            # the output buffer of the epilogue_creators is a global buffer.
+            if epilogue_creators:
+                return False
+
+            return True
+
+        if need_copy_from_local_to_global_buffer_epilogue(
+            use_local_acc, can_alias_template_with_kernel_output, epilogue_creators
+        ):
+
+            def copy_from_local_to_global_buffer_epilogue(input_buffer: ir.Buffer):
                 dtype = self.layout.dtype
                 input_loader = input_buffer.make_loader()
 
@@ -740,10 +770,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     ranges=input_buffer.get_size(),
                 )
 
-            epilogue_creators.append(copy_epilogue)
-
-        if self.epilogue_creator is not None:
-            epilogue_creators.append(self.epilogue_creator)
+            epilogue_creators.append(copy_from_local_to_global_buffer_epilogue)
 
         # NOTE [How CPP GEMM template epilogues are organized]
         #   gemm_output_buffer
@@ -782,10 +809,7 @@ class CppPackedGemmTemplate(CppTemplate):
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
 
-            # If template_buffer is used by nodes other than the epilogue nodes,
-            # we can't set template_buffer and Y as alias.
-            # Both template_buffer and Y need to be kept.
-            if can_alias:
+            if can_alias_template_with_kernel_output:
                 Y_aliases.add(template_buffer.get_name())
 
             if (

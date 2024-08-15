@@ -4231,18 +4231,17 @@ class CppScheduling(BaseScheduling):
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
 
-        # TODO: improve the name of the function
-        def can_alias(template_buffer, outputs_by_name, epilogue_nodes):
-            # TODO: check the not epilogue_nodes and return True here
-            # If there's no epilogue_nodes, copy = L.copy(dst, src).data.data
-            # in store_output will guarantee that we will have a global template_buffer
+        def can_alias_template_with_kernel_output(
+            template_buffer, outputs_by_name, epilogue_nodes
+        ):
+            # If there's no epilogue_nodes, template_buffer the and kernel output buffer
+            # are the same, thus return True here.
             if not epilogue_nodes:
                 return True
+
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
             for user in users:
-                if not isinstance(user.node, BaseSchedulerNode):
-                    breakpoint()
                 assert isinstance(user.node, BaseSchedulerNode)
                 computed_buffer = user.node.node
                 # If template_buffer is used by nodes other than the epilogue nodes,
@@ -4252,12 +4251,14 @@ class CppScheduling(BaseScheduling):
                     return False
             return True
 
-        flag_can_alias = can_alias(
-            ctb, template_node.outputs_by_name, epilogue_ir_nodes
+        flag_can_alias_template_with_kernel_output = (
+            can_alias_template_with_kernel_output(
+                ctb, template_node.outputs_by_name, epilogue_ir_nodes
+            )
         )
         kernel, render = ctb.make_kernel_render(
             ctb,
-            flag_can_alias=flag_can_alias,
+            flag_can_alias_template_with_kernel_output=flag_can_alias_template_with_kernel_output,
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:

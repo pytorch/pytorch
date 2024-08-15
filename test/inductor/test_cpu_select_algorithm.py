@@ -328,7 +328,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @parametrize(
-        "can_alias",
+        "has_non_epilogue_users",
         (
             True,
             False,
@@ -342,12 +342,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         image_size,
         out_features,
         bias,
-        can_alias,  # TODO: change the naming here
+        has_non_epilogue_users,
         dtype,
     ):
         # Reproducer from the convnext model in timm
         class M(torch.nn.Module):
-            def __init__(self, bias, can_alias):
+            def __init__(self, bias, has_non_epilogue_users):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
@@ -360,7 +360,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 )
                 self.linear2 = torch.nn.Linear(out_features, out_features, bias)
                 self._frozen_param400 = torch.randn(batch_size, out_features, 1, 1)
-                self.can_alias = can_alias
+                self.has_non_epilogue_users = has_non_epilogue_users
 
             def forward(self, mul_272, _convolution_pointwise_default_31):
                 out1 = torch.ops.prims.convert_element_type.default(
@@ -391,7 +391,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 )
                 # If template_buffer will be used by nodes other than the epilogue nodes,
                 # we can't alias the template_buffer with the Y buffer.
-                if not self.can_alias:
+                if self.has_non_epilogue_users:
                     add_191 = torch.ops.aten.add.Tensor(permute_189, add_187)
                     return add_191
                 return permute_189
@@ -401,7 +401,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             batch_size, out_features, image_size, image_size
         ).to(memory_format=torch.channels_last)
 
-        mod = M(bias=bias, can_alias=can_alias).eval()
+        mod = M(bias=bias, has_non_epilogue_users=has_non_epilogue_users).eval()
         with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
             self.common(
                 mod,

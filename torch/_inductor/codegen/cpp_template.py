@@ -82,7 +82,7 @@ class CppTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
-            flag_can_alias: bool,
+            flag_can_alias_template_with_kernel_output: bool,
             epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
@@ -92,7 +92,7 @@ class CppTemplate(KernelTemplate):
                 kernel.render,
                 self,
                 template_buffer_node=template_node,
-                flag_can_alias=flag_can_alias,
+                flag_can_alias_template_with_kernel_output=flag_can_alias_template_with_kernel_output,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,
             )
