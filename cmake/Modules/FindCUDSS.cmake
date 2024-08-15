@@ -42,7 +42,7 @@ find_package_handle_standard_args(CUDSS DEFAULT_MSG CUDSS_LIBRARY_PATH CUDSS_INC
 
 if(CUDSS_FOUND)
   # Get CUDSS version
-  file(READ ${CUDSS_INCLUDE_PATH}/cuDSS.h CUDSS_HEADER_CONTENTS)
+  file(READ ${CUDSS_INCLUDE_PATH}/cudss.h CUDSS_HEADER_CONTENTS)
   string(REGEX MATCH "define CUDSS_VER_MAJOR * +([0-9]+)"
                CUDSS_VERSION_MAJOR "${CUDSS_HEADER_CONTENTS}")
   string(REGEX REPLACE "define CUDSS_VER_MAJOR * +([0-9]+)" "\\1"
