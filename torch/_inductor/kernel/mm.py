@@ -376,7 +376,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
