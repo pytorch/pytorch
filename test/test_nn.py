@@ -2589,7 +2589,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
         weights = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        loss = F.wmae_loss(inputs, targets, weights=weights, reduction='mean')
+        loss = F.mae_loss(inputs, targets, weights=weights, reduction='mean')
         expected_loss = torch.tensor(1.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
