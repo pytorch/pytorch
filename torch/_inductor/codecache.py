@@ -1307,7 +1307,7 @@ class FxGraphCache:
                 cache_event_time = time_ns()
                 if (time_taken_ns := compiled_graph._time_taken_ns) is not None:
                     cache_info["time_saved_ns"] = time_taken_ns
-                    if dist.distributed_c10d.is_initialized():
+                    if torch.distributed.is_initialized():
                         increased_timeout_sec = (
                             time_taken_ns // 1e9
                         )  # convert to seconds
