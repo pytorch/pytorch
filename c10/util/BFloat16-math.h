@@ -78,7 +78,7 @@ template <
     typename T,
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T log(T a) {
-  return std::log(float(a));
+  return ::log(float(a));
 }
 template <
     typename T,

@@ -182,7 +182,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
         if (lamax == neginf) // when all are neginf. (then the whole thing is neginf, but we can pretend)
           lamax = 0;
 
-        log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * s] = std::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax
+        log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * s] = ::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax
           + log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * current_char];
       } else {
         // otherwise we just set to neginf
@@ -203,7 +203,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
         : neginf;
     scalar_t m = ((l1 > l2) ? l1 : l2);
     m = ((m == neginf) ? 0 : m);
-    scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
+    scalar_t log_likelihood = ::log(std::exp(l1-m)+std::exp(l2-m))+m;
     neg_log_likelihood_data[b] = -log_likelihood;
   }
 }
@@ -413,7 +413,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
         if (lbmax == neginf)
           lbmax = 0;
 
-        scalar_t lb = std::log(std::exp(lb1-lbmax)+std::exp(lb2-lbmax)+std::exp(lb3-lbmax))+lbmax
+        scalar_t lb = ::log(std::exp(lb1-lbmax)+std::exp(lb2-lbmax)+std::exp(lb3-lbmax))+lbmax
           + log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * current_target_prime];
 
         log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s] = lb;
@@ -545,7 +545,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
         lcab = log_alpha_beta;
       } else {
         scalar_t max = ((lcab > log_alpha_beta) ? lcab : log_alpha_beta);
-        lcab = std::log(std::exp(lcab-max)+std::exp(log_alpha_beta-max))+max;
+        lcab = ::log(std::exp(lcab-max)+std::exp(log_alpha_beta-max))+max;
       }
     }
   }

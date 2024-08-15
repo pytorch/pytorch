@@ -78,7 +78,7 @@ Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor&
   auto opt = TensorOptions().device(result.device());
 
   // See note [Algorithm of randperm]
-  const double log_threshold_12 = std::log(0.9) * 12;
+  const double log_threshold_12 = ::log(0.9) * 12;
   double nd = static_cast<double>(n);
 
   int bits = std::min(64,

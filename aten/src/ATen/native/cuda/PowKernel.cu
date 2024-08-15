@@ -31,7 +31,7 @@ template <typename value_t>
 void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<value_t> base) {
   // For complex, thrust::pow uses the identity
   // pow(a, b) = exp(log(a) * b)
-  const auto fct = std::log(base);
+  const auto fct = ::log(base);
   gpu_kernel(iter, [=]GPU_LAMBDA(c10::complex<value_t> exp) -> c10::complex<value_t> {
     return std::exp(fct * exp);
   });
@@ -45,7 +45,7 @@ void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<at::Half> bas
   using opmath_t = at::opmath_type<scalar_t>;
   // For complex, thrust::pow uses the identity
   // pow(a, b) = exp(log(a) * b)
-  const auto fct = std::log(opmath_t{base});
+  const auto fct = ::log(opmath_t{base});
 #if AT_USE_JITERATOR()
   static const auto pow_kernel_string =
       jiterator_stringify(template <typename T> T pow_scalar_base_kernel(T exp, T fct) {

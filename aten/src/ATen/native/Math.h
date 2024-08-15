@@ -177,7 +177,7 @@ Date:  February 1996
     x = y * num / dem;
   }
   else{
-    z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
+    z = std::sqrt(-::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
     num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
     dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
 #ifdef _WIN32
@@ -630,7 +630,7 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
   static scalar_t lanczos_g = 6.024680040776729583740234375;
 
   if (std::fabs(a - x) > 0.4 * std::fabs(a)) {
-    ax = a * std::log(x) - x - std::lgamma(a);
+    ax = a * ::log(x) - x - std::lgamma(a);
     if (ax < -MAXLOG) {
       return 0.0;
     }
@@ -704,7 +704,7 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
     }
   }
 
-  logx = std::log(x);
+  logx = ::log(x);
   term = -std::expm1(a * logx - std::lgamma(1+a));
   return term - std::exp(a * logx - std::lgamma(a)) * sum;
 }
@@ -1123,7 +1123,7 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
     }
   }
   else if (x <= 0.5) {
-    if (-0.4 / std::log(x) < a) {
+    if (-0.4 / ::log(x) < a) {
       return 1.0 - _igam_helper_series(a, x);
     }
     else {
@@ -2191,7 +2191,7 @@ template <typename T>
 inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   T t = x * c10::frac_sqrt_2<T>;
   if (x < T{-1.0}) {
-    return std::log(calc_erfcx(-t) / 2) - t * t;
+    return ::log(calc_erfcx(-t) / 2) - t * t;
   } else {
     return std::log1p(-std::erfc(t) / 2);
   }
@@ -2681,7 +2681,7 @@ inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
             yq = yq * (x * x) + YQ[index];
         }
 
-        return yp / yq + (T(0.636619772367581343075535053490057448) * std::log(x) * bessel_j0_forward(x));
+        return yp / yq + (T(0.636619772367581343075535053490057448) * ::log(x) * bessel_j0_forward(x));
     }
 
     T pp = 0.0;
@@ -2795,7 +2795,7 @@ inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
             yq = yq * (x * x) + YQ[index];
         }
 
-        return x * (yp / yq) + (T(0.636619772367581343075535053490057448) * (bessel_j1_forward(x) * std::log(x) - T(1.0) / x));
+        return x * (yp / yq) + (T(0.636619772367581343075535053490057448) * (bessel_j1_forward(x) * ::log(x) - T(1.0) / x));
     }
 
     T pp = 0.0;
@@ -3426,7 +3426,7 @@ inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
             a = (x * x - T(2.0)) * q - p + A[index];
         }
 
-        return T(0.5) * (a - p) - std::log(0.5 * x) * modified_bessel_i0_forward(x);
+        return T(0.5) * (a - p) - ::log(0.5 * x) * modified_bessel_i0_forward(x);
     }
 
     T b = B[0];
@@ -3504,7 +3504,7 @@ inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
             a = (x * x - T(2.0)) * q - p + A[index];
         }
 
-        return std::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x;
+        return ::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x;
     }
 
     T b = B[0];
@@ -3581,7 +3581,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
             a = (x * x - T(2.0)) * q - p + A[index];
         }
 
-        return (T(0.5) * (a - p) - std::log(T(0.5) * x) * modified_bessel_i0_forward(x)) * std::exp(x);
+        return (T(0.5) * (a - p) - ::log(T(0.5) * x) * modified_bessel_i0_forward(x)) * std::exp(x);
     }
 
     T b = B[0];
@@ -3659,7 +3659,7 @@ inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
             a = (x * x - T(2.0)) * q - p + A[index];
         }
 
-        return (std::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x) * std::exp(x);
+        return (::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x) * std::exp(x);
     }
 
     T b = B[0];

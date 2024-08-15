@@ -487,7 +487,7 @@ TEST(Expr, UnaryMath01) {
       {[](const ExprHandle& v) { return tensorexpr::abs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },
-       [](float v) { return std::log(v); }},
+       [](float v) { return ::log(v); }},
       {[](const ExprHandle& v) { return log2(v); },
        [](float v) { return std::log2(v); }},
       {[](const ExprHandle& v) { return log10(v); },

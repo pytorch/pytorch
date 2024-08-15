@@ -85,7 +85,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
     // transformed rejection method, (Hoermann, 1993)
 
     double slam = std::sqrt(lambda);
-    double loglam = std::log(lambda);
+    double loglam = ::log(lambda);
     double b = 0.931 + 2.53 * slam;
     double a = -0.059 + 0.02483 * b;
     double invalpha = 1.1239 + 1.1328 / (b - 3.4);
@@ -102,7 +102,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
       if ((k < 0) || ((us < 0.013) && (V > us))) {
         continue;
       }
-      if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
+      if ((::log(V) + ::log(invalpha) - ::log(a / (us * us) + b)) <=
           (-lambda + k * loglam - std::lgamma(k + 1))) {
         return static_cast<int64_t>(k);
       }

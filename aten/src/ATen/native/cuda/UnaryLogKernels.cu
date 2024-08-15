@@ -21,7 +21,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto log_string = jiterator_stringify(
-        template <typename T> T log_kernel(T x) { return std::log(x); });
+        template <typename T> T log_kernel(T x) { return ::log(x); });
     AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "log_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log_name,

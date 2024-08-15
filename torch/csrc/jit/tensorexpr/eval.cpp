@@ -1128,7 +1128,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kExpm1:
         return std::expm1(v);
       case kLog:
-        return std::log(v);
+        return ::log(v);
       case kLog2:
         return std::log2(v);
       case kLog10:

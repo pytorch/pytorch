@@ -687,7 +687,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"std::log({x})"
+        return f"::log({x})"
 
     @staticmethod
     def round(x):

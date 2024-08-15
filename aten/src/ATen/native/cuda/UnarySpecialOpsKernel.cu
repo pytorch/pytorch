@@ -368,7 +368,7 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
             if (at::_isnan(x)) {
               return x;
             } else if (x > 0) {
-              return -x * std::log(x);
+              return -x * ::log(x);
             } else if (x == 0) {
               return 0;
             }

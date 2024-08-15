@@ -251,7 +251,7 @@ TEST(LLVM, fastLogFloat) {
 
   for (const auto i : c10::irange(kTotalSize)) {
     auto test = b_v(i);
-    auto ref = std::log(a_v(i));
+    auto ref = ::log(a_v(i));
     if (std::isnan(ref)) {
       ASSERT_EQ(std::isnan(test), true);
     } else {

@@ -50,7 +50,7 @@ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, cons
     } else {
       // handle the +inf case, we don't need the special precision for log1p for small values
       // and to avoid producing nan in case of real(max) == real(min) == +inf
-      return std::log(std::exp(min) + std::exp(max));
+      return ::log(std::exp(min) + std::exp(max));
     }
   } else {
     return std::log1p(std::exp(min - max)) + max;

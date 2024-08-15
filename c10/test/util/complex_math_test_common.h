@@ -113,8 +113,8 @@ C10_DEFINE_TEST(TestLog, Definition) {
   // log(x) = log(r) + i*theta
   {
     c10::complex<float> x(1.2, 3.4);
-    c10::complex<float> l = std::log(x);
-    float expected_real = std::log(std::abs(x));
+    c10::complex<float> l = ::log(x);
+    float expected_real = ::log(std::abs(x));
     float expected_imag = std::arg(x);
     C10_ASSERT_NEAR(l.real(), expected_real, tol);
     C10_ASSERT_NEAR(l.imag(), expected_imag, tol);
@@ -129,8 +129,8 @@ C10_DEFINE_TEST(TestLog, Definition) {
   }
   {
     c10::complex<double> x(1.2, 3.4);
-    c10::complex<double> l = std::log(x);
-    float expected_real = std::log(std::abs(x));
+    c10::complex<double> l = ::log(x);
+    float expected_real = ::log(std::abs(x));
     float expected_imag = std::arg(x);
     C10_ASSERT_NEAR(l.real(), expected_real, tol);
     C10_ASSERT_NEAR(l.imag(), expected_imag, tol);
@@ -206,14 +206,14 @@ C10_DEFINE_TEST(TestLog1p, Normal) {
   {
     c10::complex<float> x(0.1, 1.2);
     c10::complex<float> l1 = std::log1p(x);
-    c10::complex<float> l2 = std::log(1.0f + x);
+    c10::complex<float> l2 = ::log(1.0f + x);
     C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
     C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
   }
   {
     c10::complex<double> x(0.1, 1.2);
     c10::complex<double> l1 = std::log1p(x);
-    c10::complex<double> l2 = std::log(1.0 + x);
+    c10::complex<double> l2 = ::log(1.0 + x);
     C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
     C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
   }

@@ -480,7 +480,7 @@ public:
   Vectorized<T> log2() const {
     // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same_v<complex_t_log2, T>, "complex_t_log2 must be T");
-    const T log_2 = T(std::log(2.0));
+    const T log_2 = T(::log(2.0));
     return Vectorized(map(std::log))/Vectorized(log_2);
   }
   Vectorized<T> ceil() const {

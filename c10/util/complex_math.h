@@ -25,7 +25,7 @@ C10_HOST_DEVICE inline c10::complex<T> log(const c10::complex<T>& x) {
       thrust::log(static_cast<thrust::complex<T>>(x)));
 #else
   return static_cast<c10::complex<T>>(
-      std::log(static_cast<std::complex<T>>(x)));
+      ::log(static_cast<std::complex<T>>(x)));
 #endif
 }
 
@@ -322,7 +322,7 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
     return {T(0.5) * std::log1p(r), theta};
   } else {
     T z0 = std::hypot(x + 1, y);
-    return {std::log(z0), theta};
+    return {::log(z0), theta};
   }
 #else
   // CPU path

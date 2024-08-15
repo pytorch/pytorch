@@ -151,7 +151,7 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
               [](scalar_t x) {
                 return x == scalar_t(1)
                     ? std::numeric_limits<scalar_t>::infinity()
-                    : std::log(x / (scalar_t(1) - x));
+                    : ::log(x / (scalar_t(1) - x));
               },
               [kOneVec](Vectorized<scalar_t> x_vec) {
                 return (x_vec / (kOneVec - x_vec)).log();
@@ -168,7 +168,7 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
                 x = x < lo ? lo : (x > hi ? hi : x);
                 return x == scalar_t(1)
                     ? std::numeric_limits<scalar_t>::infinity()
-                    : std::log(x / (scalar_t(1) - x));
+                    : ::log(x / (scalar_t(1) - x));
               },
               [kOneVec, lo_vec, hi_vec](Vectorized<scalar_t> x_vec) {
                 x_vec = vec::clamp(x_vec, lo_vec, hi_vec);
@@ -547,7 +547,7 @@ static void entr_kernel(TensorIteratorBase& iter) {
           if (at::_isnan(x)) {
             return x;
           } else if (x > 0) {
-            return -x * std::log(x);
+            return -x * ::log(x);
           } else if (x == 0) {
             return static_cast<scalar_t>(0);
           }
