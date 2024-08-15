@@ -104,6 +104,8 @@ class HalidePrinter(PythonPrinter):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.trunc({self._print(expr.args[0])})")
 
+    _print_TruncToInt = _print_Trunc
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.ceil({self._print(expr.args[0])})")
