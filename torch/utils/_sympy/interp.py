@@ -38,7 +38,6 @@ from .functions import (
     TruncToInt,
     Where,
 )
-from .singleton_int import SingletonInt
 
 
 log = logging.getLogger(__name__)
@@ -170,9 +169,6 @@ def sympy_interp(
         dtype = torch.bool
     elif isinstance(expr, sympy.Integer):
         dtype = torch.int64
-    elif isinstance(expr, SingletonInt):
-        dtype = torch.int64
-        expr = expr._val  # unpack SingletonInt -> int
     elif isinstance(expr, sympy.Number):
         dtype = torch.double
 

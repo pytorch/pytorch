@@ -2289,12 +2289,12 @@ class GraphModule(torch.nn.Module):
             normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[s0, s1]", primals_2: "i64[s2 + 1]", primals_3: "f32[s5, 0]", primals_4: "f32[s6, 0]", primals_5: "Sym(s2)", primals_6: "Sym(s3)", primals_7: "Sym(s1)", primals_8: "Sym(s1*s3)", primals_9: "Sym(s1)", primals_10: "Sym(s1)", primals_11: "Sym(s2)", primals_12: "Sym(s3)"):
+    def forward(self, primals_1: "f64[s0, s1]", primals_2: "i64[s2 + 1]", primals_3: "f32[s5, 0]", primals_4: "f32[s6, 0]", primals_5: "Sym(s2)", primals_6: "Sym(s1)", primals_7: "Sym(s1)", primals_8: "Sym(s1)", primals_9: "Sym(s2)", primals_10: "Sym(s3)"):
         clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
 
-        mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_11);  clone = None
-        mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_6);  mul = None
-        return (mul_1, primals_2, primals_3, primals_4, primals_11, primals_6, primals_10, primals_8, primals_10, primals_6, primals_10, primals_11, primals_8)
+        mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_9);  clone = None
+        mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(mul, primals_10);  mul = None
+        return (mul_1, primals_2, primals_3, primals_4, primals_9, primals_8, primals_8, primals_8, primals_9, primals_10)
 """,  # noqa: B950
         )
 

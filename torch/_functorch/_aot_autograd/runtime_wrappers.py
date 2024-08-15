@@ -54,7 +54,6 @@ from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
-    unwrap_tensor_subclasses_maybe_joint,
     wrap_tensor_subclasses,
 )
 from .traced_function_transforms import aot_dispatch_subclass
@@ -640,10 +639,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses_maybe_joint(
+            assert self.trace_joint is False
+            unwrapped_args = unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
-                is_joint_structure=self.trace_joint,
                 is_runtime=True,
                 append_symints=True,
             )
@@ -655,6 +654,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
+                included_subclass_symints=True,
             )
             return wrapped_outs
 
@@ -1826,6 +1826,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         unwrap_tensor_subclasses(
                             tangents,
                             is_runtime=False,
+                            # any extra symint will be captured by the partitioner
                             append_symints=False,
                             subclass_metas=None,
                         )
@@ -2010,6 +2011,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 outs_wrapped = wrap_tensor_subclasses(
                                     outs,
                                     subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                                    included_subclass_symints=False,
                                 )
                                 return outs_wrapped
                             return outs
@@ -2038,6 +2040,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        included_subclass_symints=True,
                         is_runtime=True,
                     )
                     return (*[None] * num_tokens, *outs_wrapped)

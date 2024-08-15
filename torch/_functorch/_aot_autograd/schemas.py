@@ -177,6 +177,8 @@ class SubclassCreationMeta:
     # both of its inner elements are TwoTensors, then the
     # arg_count of the outer-most sublass will be 4
     arg_count: int
+    # Mark where or not symints were included
+    included_subclass_symints: bool
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
@@ -200,27 +202,35 @@ class SubclassCreationMeta:
         *,
         curr_start_idx: int,
         is_runtime: bool,
-        is_subclass: bool,
+        is_nested: bool,
     ):
-        outer_size_symint_placeholders = [type(i) is not int for i in self.outer_size]
-        outer_stride_symint_placeholders = [
-            type(i) is not int for i in self.outer_stride
-        ]
+        from .subclass_utils import compute_symint_placeholders
+
+        outer_size_symint_placeholders = compute_symint_placeholders(self.outer_size)
+        outer_stride_symint_placeholders = compute_symint_placeholders(
+            self.outer_stride
+        )
         has_symbolic = any(outer_size_symint_placeholders)
 
-        if is_runtime and has_symbolic and not is_subclass:
+        if is_runtime and has_symbolic and not is_nested:
             start = curr_start_idx
             end = start + sum(outer_size_symint_placeholders)
-            it = iter(all_args[start:end])
+            it_args = iter(all_args[start:end])
+            it_placeholders = iter(outer_size_symint_placeholders)
             outer_size = pytree.tree_map_only(
-                torch.SymInt, lambda _: next(it), self.outer_size
+                lambda _: next(it_placeholders),
+                lambda _: next(it_args),
+                self.outer_size,
             )
 
             start = end
             end = start + sum(outer_stride_symint_placeholders)
-            it = iter(all_args[start:end])
+            it_args = iter(all_args[start:end])
+            it_placeholders = iter(outer_stride_symint_placeholders)
             outer_stride = pytree.tree_map_only(
-                torch.SymInt, lambda _: next(it), self.outer_stride
+                lambda _: next(it_placeholders),
+                lambda _: next(it_args),
+                self.outer_size,
             )
             return outer_size, outer_stride
 
@@ -231,7 +241,7 @@ class SubclassCreationMeta:
         all_args,
         *,
         is_runtime: bool,
-        is_subclass: bool,
+        is_nested: bool,
     ):
         inner_tensors = {}
 
@@ -242,7 +252,9 @@ class SubclassCreationMeta:
                 curr_start_idx += 1
             else:
                 subclass = creation_meta.creation_fn(
-                    all_args, is_runtime=is_runtime, is_subclass=True
+                    all_args,
+                    is_runtime=is_runtime,
+                    is_nested=True,
                 )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
@@ -257,7 +269,7 @@ class SubclassCreationMeta:
             all_args,
             curr_start_idx=curr_start_idx,
             is_runtime=is_runtime,
-            is_subclass=is_subclass,
+            is_nested=is_nested,
         )
 
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
