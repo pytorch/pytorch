@@ -13,6 +13,7 @@ using DebugHandle = int64_t;
 
 class Function;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Code {
   std::vector<Instruction> instructions_;
   std::vector<DebugHandle> debug_handles_;

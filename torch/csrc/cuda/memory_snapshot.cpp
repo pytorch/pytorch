@@ -126,8 +126,7 @@ void _record_memory_history(
     bool trace_alloc_record_context,
     bool record_cpp_context) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && record_cpp_context &&
-      (trace_alloc_record_context || record_context)) {
+  if (enabled && record_cpp_context) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
@@ -173,7 +172,7 @@ void _record_memory_history(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && context && stacks == "all") {
+  if (enabled && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();

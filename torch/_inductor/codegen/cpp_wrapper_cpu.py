@@ -26,6 +26,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     LAYOUT_TO_ATEN,
 )
+from .debug_utils import DebugPrinterManager
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
@@ -1240,9 +1241,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(args_to_print, kernel, None, None)
-        with debug_printer_manager:
+        with DebugPrinterManager(enable_debug_printer, args_to_print, kernel):
             shim_fn = self.get_c_shim_func_name(kernel)
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"

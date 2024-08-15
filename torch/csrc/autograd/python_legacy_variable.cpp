@@ -10,7 +10,8 @@
 
 using namespace at;
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 static PyObject* THPVariable_pynew(
     PyTypeObject* type,
@@ -162,4 +163,5 @@ void init_legacy_variable(PyObject* module) {
   }
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

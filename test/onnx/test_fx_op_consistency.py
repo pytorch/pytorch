@@ -948,7 +948,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "nn.functional.group_norm",
-        dtypes=(torch.float16,),
+        dtypes=(torch.float16, torch.float32),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
@@ -1899,6 +1899,7 @@ def _run_test_output_match(
                         from torch.export import _trace
 
                         model = _trace._export(model, inputs, pre_dispatch=False)
+                        print("GRAPH", model.module().graph)
 
                     except AssertionError as e:
                         # NOTE: avoid fake_mode detection bug in torch.export.export

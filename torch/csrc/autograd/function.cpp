@@ -17,7 +17,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 // The current evaluating node. This is useful to assign the current node as a
 // parent of new nodes created during the evaluation of this node in anomaly
@@ -109,4 +110,5 @@ at::Tensor TypeAndSize::zeros() {
   return at::zeros_symint(sym_sizes, options);
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

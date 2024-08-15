@@ -5,7 +5,9 @@
 
 #include <torch/csrc/utils/python_arg_parser.h>
 
-namespace torch::autograd::utils {
+namespace torch {
+namespace autograd {
+namespace utils {
 
 // The parameter allow_copy is to accept copy for Tensor.to (and by proxy
 // PackedSequences.to) but not nn.Module.to.
@@ -46,4 +48,6 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
         r.memoryformatOptional(3));
   }
 }
-} // namespace torch::autograd::utils
+} // namespace utils
+} // namespace autograd
+} // namespace torch

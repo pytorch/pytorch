@@ -3,7 +3,9 @@
 #include <ATen/record_function.h>
 #include <c10/util/Synchronized.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 /* The OperatorCallTracer class handles the attachment and removal of a
  * recording callback that traces invocation of ATen (and other) PyTorch
  * operators that get called via the Dispatcher.
@@ -29,4 +31,6 @@ struct OperatorCallTracer final {
     at::removeCallback(handle_);
   }
 };
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

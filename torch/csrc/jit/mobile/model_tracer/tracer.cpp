@@ -53,25 +53,26 @@ C10_DEFINE_string(
     return 1;                                               \
   }
 
-static void printOpYAML(
+void printOpYAML(
     std::ostream& out,
     int indent,
     const std::string& op_name,
     bool is_used_for_training,
     bool is_root_operator,
     bool include_all_overloads) {
-  out << std::string(indent, ' ') << op_name << ":" << '\n';
+  out << std::string(indent, ' ') << op_name << ":" << std::endl;
   out << std::string(indent + 2, ' ')
       << "is_used_for_training: " << (is_used_for_training ? "true" : "false")
-      << '\n';
+      << std::endl;
   out << std::string(indent + 2, ' ')
-      << "is_root_operator: " << (is_root_operator ? "true" : "false") << '\n';
+      << "is_root_operator: " << (is_root_operator ? "true" : "false")
+      << std::endl;
   out << std::string(indent + 2, ' ')
       << "include_all_overloads: " << (include_all_overloads ? "true" : "false")
-      << '\n';
+      << std::endl;
 }
 
-static void printOpsYAML(
+void printOpsYAML(
     std::ostream& out,
     const std::set<std::string>& operator_list,
     bool is_used_for_training,
@@ -82,19 +83,19 @@ static void printOpsYAML(
   }
 }
 
-static void printDTypeYAML(
+void printDTypeYAML(
     std::ostream& out,
     int indent,
     const std::string& kernel_tag_name,
-    const std::set<std::string>& dtypes) {
+    const std::set<std::string> dtypes) {
   std::string indent_str = std::string(indent, ' ');
-  out << indent_str << kernel_tag_name << ":" << '\n';
+  out << indent_str << kernel_tag_name << ":" << std::endl;
   for (auto& dtype : dtypes) {
-    out << indent_str << "- " << dtype << '\n';
+    out << indent_str << "- " << dtype << std::endl;
   }
 }
 
-static void printDTypesYAML(
+void printDTypesYAML(
     std::ostream& out,
     const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
         kernel_tags) {
@@ -103,12 +104,12 @@ static void printDTypesYAML(
   }
 }
 
-static void printCustomClassesYAML(
+void printCustomClassesYAML(
     std::ostream& out,
     const torch::jit::mobile::CustomClassTracer::custom_classes_type&
         loaded_classes) {
   for (auto& class_name : loaded_classes) {
-    out << "- " << class_name << '\n';
+    out << "- " << class_name << std::endl;
   }
 }
 
@@ -119,7 +120,7 @@ static void printCustomClassesYAML(
  */
 int main(int argc, char* argv[]) {
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cerr << "Failed to parse command line flags!" << '\n';
+    std::cerr << "Failed to parse command line flags!" << std::endl;
     return 1;
   }
 
@@ -129,13 +130,13 @@ int main(int argc, char* argv[]) {
   std::istringstream sin(FLAGS_model_input_path);
   std::ofstream yaml_out(FLAGS_build_yaml_path);
 
-  std::cout << "Output: " << FLAGS_build_yaml_path << '\n';
+  std::cout << "Output: " << FLAGS_build_yaml_path << std::endl;
   torch::jit::mobile::TracerResult tracer_result;
   std::vector<std::string> model_input_paths;
 
   for (std::string model_input_path;
        std::getline(sin, model_input_path, ',');) {
-    std::cout << "Processing: " << model_input_path << '\n';
+    std::cout << "Processing: " << model_input_path << std::endl;
     model_input_paths.push_back(model_input_path);
   }
 
@@ -146,7 +147,7 @@ int main(int argc, char* argv[]) {
         << "ModelTracer has not been able to load the module for the following reasons:\n"
         << ex.what()
         << "\nPlease consider opening an issue at https://github.com/pytorch/pytorch/issues "
-        << "with the detailed error message." << '\n';
+        << "with the detailed error message." << std::endl;
 
     throw ex;
   }
@@ -160,7 +161,7 @@ int main(int argc, char* argv[]) {
                ". Expected the traced operator list to be bigger then the default size ",
                torch::jit::mobile::always_included_traced_ops.size(),
                ". Please report a bug in PyTorch.")
-        << '\n';
+        << std::endl;
   }
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
@@ -171,9 +172,9 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  yaml_out << "include_all_non_op_selectives: false" << '\n';
-  yaml_out << "build_features: []" << '\n';
-  yaml_out << "operators:" << '\n';
+  yaml_out << "include_all_non_op_selectives: false" << std::endl;
+  yaml_out << "build_features: []" << std::endl;
+  yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,
       tracer_result.root_ops,
@@ -191,14 +192,14 @@ int main(int argc, char* argv[]) {
   if (tracer_result.called_kernel_tags.empty()) {
     yaml_out << " []";
   }
-  yaml_out << '\n';
+  yaml_out << std::endl;
   printDTypesYAML(yaml_out, tracer_result.called_kernel_tags);
 
   yaml_out << "custom_classes:";
   if (tracer_result.loaded_classes.empty()) {
     yaml_out << " []";
   }
-  yaml_out << '\n';
+  yaml_out << std::endl;
   printCustomClassesYAML(yaml_out, tracer_result.loaded_classes);
 
   return 0;

@@ -10,11 +10,13 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <utility>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
@@ -211,4 +213,5 @@ auto CopySlices::apply(variable_list&& inputs1) -> variable_list {
   });
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

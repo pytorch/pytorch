@@ -3,7 +3,8 @@
 #include <ATen/Functions.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
-
+#include <caffe2/serialize/file_adapter.h>
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -21,7 +22,9 @@
 #include <vector>
 
 namespace torch::jit {
+using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
+using caffe2::serialize::ReadAdapterInterface;
 
 namespace {
 

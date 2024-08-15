@@ -11,7 +11,8 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct TORCH_CUDA_CU_API Scatter : public Node {
   explicit Scatter(
@@ -42,4 +43,5 @@ struct TORCH_CUDA_CU_API Gather : public Node {
   int64_t dim_;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

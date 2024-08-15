@@ -5,7 +5,8 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct PyAnomalyMetadata : public AnomalyMetadata {
   static constexpr const char* ANOMALY_TRACE_KEY = "traceback_";
@@ -39,4 +40,5 @@ void _print_stack(
     const std::string& current_node_name,
     bool is_parent);
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

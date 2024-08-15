@@ -43,7 +43,8 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     if (torch::is_symint(r->step)) {
       step_sym = py::handle(r->step).cast<c10::SymInt>();
     } else {
-      Py_ssize_t step = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      Py_ssize_t step;
       if (!_PyEval_SliceIndex(r->step, &step)) {
         throw python_error();
       }
@@ -61,7 +62,8 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   } else if (r->start == Py_None) {
     start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX : 0);
   } else {
-    Py_ssize_t start = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Py_ssize_t start;
     if (!_PyEval_SliceIndex(r->start, &start)) {
       throw python_error();
     }
@@ -75,7 +77,8 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     stop_sym = c10::SymInt(
         step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
   } else {
-    Py_ssize_t stop = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Py_ssize_t stop;
     if (!_PyEval_SliceIndex(r->stop, &stop)) {
       throw python_error();
     }

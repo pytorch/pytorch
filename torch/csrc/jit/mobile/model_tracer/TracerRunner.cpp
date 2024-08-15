@@ -14,7 +14,9 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/script.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 
 // Fetched from caffe2/aten/src/ATen/native/metal/MetalAten.mm
 // Diffusion Link: https://fburl.com/diffusion/atwwmax2
@@ -47,7 +49,7 @@ const std::vector<std::string> gpu_metal_operators = {
  * If/When this list becomes too long, we can consider making it a
  * per-model list.
  */
-static void call_setup_methods() {
+void call_setup_methods() {
   at::zeros({2, 2});
   at::ones({2, 2});
   at::Tensor t1 = at::empty({7, 7});
@@ -96,7 +98,7 @@ static void call_setup_methods() {
  * under certain conditions but may avoid getting called in the trace due to the
  * narrow nature of bundled inputs
  */
-static void call_dependent_methods(std::set<std::string>& root_ops) {
+void call_dependent_methods(std::set<std::string>& root_ops) {
   bool is_training = false;
   bool has_batchnorm = false;
   bool has_dropout = false;
@@ -133,12 +135,12 @@ static void call_dependent_methods(std::set<std::string>& root_ops) {
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
-static void consume_tensor(const at::Tensor& t) {
+void consume_tensor(const at::Tensor& t) {
   const at::Tensor& c = t;
   c.copy_(t.cpu());
 }
 
-static std::unordered_map<std::string, c10::FunctionSchema>
+std::unordered_map<std::string, c10::FunctionSchema>
 _get_runtime_ops_and_schema() {
   std::unordered_map<std::string, c10::FunctionSchema> result;
 
@@ -180,7 +182,7 @@ _get_runtime_ops_and_schema() {
  *   Scalar? output_min=None, Scalar? output_max=None) ->
  *   __torch__.torch.classes.xnnpack.LinearOpContext"
  */
-static void recordCustomClassesFromOpSchemas(
+void recordCustomClassesFromOpSchemas(
     std::set<std::string>& root_ops,
     std::set<std::string>& traced_ops,
     std::set<std::string>& loaded_classes) {
@@ -189,7 +191,7 @@ static void recordCustomClassesFromOpSchemas(
   ops.insert(traced_ops.begin(), traced_ops.end());
   auto ops_and_schemas = _get_runtime_ops_and_schema();
 
-  auto record_if_class = [&](const std::string& type_name) {
+  auto record_if_class = [&](std::string type_name) {
     // All custom class types start with __torch__ not sure if this is by
     // chance or guaranteed
     if (type_name.find("__torch__") != std::string::npos) {
@@ -223,7 +225,7 @@ static void recordCustomClassesFromOpSchemas(
   }
 }
 
-static void run_model(
+void run_model(
     const std::string& input_module_path,
     std::set<std::string>& root_ops,
     std::set<std::string>& enabled_backends,
@@ -234,11 +236,11 @@ static void run_model(
   // TorchBind objects can be traced by the model tracer.
   torch::jit::mobile::MobileModelRunner module_runner(input_module_path, 0);
   root_ops = module_runner.get_root_operators();
-  std::cout << "Got " << root_ops.size() << " Root Operators." << '\n';
+  std::cout << "Got " << root_ops.size() << " Root Operators." << std::endl;
 
   if (torch::jit::mobile::MobileModelRunner::set_has_metal_gpu_operators(
           root_ops)) {
-    std::cout << "Inferred Metal GPU Model." << '\n';
+    std::cout << "Inferred Metal GPU Model." << std::endl;
     root_ops.insert(gpu_metal_operators.begin(), gpu_metal_operators.end());
     called_kernel_tags["__unused__"] = {"Float"};
     enabled_backends.insert("Metal GPU");
@@ -249,7 +251,7 @@ static void run_model(
     // memory via a call to .metal()).
     module_runner.for_each_tensor_in_bundled_inputs(consume_tensor);
   } else {
-    std::cout << "Inferred CPU Model." << '\n';
+    std::cout << "Inferred CPU Model." << std::endl;
     enabled_backends.insert("CPU");
     torch::jit::mobile::MobileModelRunner mobile_module_runner(
         input_module_path);
@@ -339,7 +341,7 @@ TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
     } catch (std::exception& ex) {
       std::cerr
           << "ModelTracer encountered an error while attempting to run the model in FBGEMM mode"
-          << ex.what() << "\n Skipping FBGEMM execution" << '\n';
+          << ex.what() << "\n Skipping FBGEMM execution" << std::endl;
     }
     try {
       at::globalContext().setQEngine(at::QEngine::QNNPACK);
@@ -349,7 +351,7 @@ TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
     } catch (std::exception& ex) {
       std::cerr
           << "ModelTracer encountered an error while attempting to run the model under an inference guard"
-          << ex.what() << "\n Skipping inference guard execution" << '\n';
+          << ex.what() << "\n Skipping inference guard execution" << std::endl;
     }
   }
 
@@ -391,4 +393,6 @@ TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
   return tracer_result;
 }
 
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

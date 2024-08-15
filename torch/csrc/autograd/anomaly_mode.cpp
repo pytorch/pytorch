@@ -4,7 +4,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <mutex>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 bool AnomalyMode::_enabled = false;
 bool AnomalyMode::_check_nan = true;
@@ -74,4 +75,5 @@ void AnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) {
   parent_ = parent_node;
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
