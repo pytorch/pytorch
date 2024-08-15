@@ -19,7 +19,7 @@ from ._fsdp_collectives import (
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
+from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState, _wait_event
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
@@ -273,11 +273,13 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
+        if ca.compiled_autograd_enabled:
+            return
         # Calling `unshard` before lazy init means streams are not initialized
         if hasattr(self.comm_ctx, "all_gather_copy_in_stream"):
-            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+            _wait_event(self.comm_ctx.all_gather_copy_in_stream, event)
         if hasattr(self.comm_ctx, "all_gather_stream"):
-            self.comm_ctx.all_gather_stream.wait_event(event)
+            _wait_event(self.comm_ctx.all_gather_stream, event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
@@ -365,9 +367,7 @@ class FSDPParamGroup:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
             if self.comm_ctx.reduce_scatter_state is not None:
-                torch.cuda.current_stream().wait_event(
-                    self.comm_ctx.reduce_scatter_state.event
-                )
+                _wait_event(torch.cuda.current_stream(), self.comm_ctx.reduce_scatter_state.event)
                 self.comm_ctx.reduce_scatter_state = None
             (
                 reduce_scatter_input,
@@ -394,7 +394,7 @@ class FSDPParamGroup:
 
     def finalize_backward(self):
         if self._post_reduce_event is not None:
-            torch.cuda.current_stream().wait_event(self._post_reduce_event)
+            _wait_event(torch.cuda.current_stream(), self._post_reduce_event)
             self._post_reduce_event = None
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
