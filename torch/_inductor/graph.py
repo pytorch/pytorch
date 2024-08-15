@@ -1323,39 +1323,42 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
+
                 if len(strides):
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
-                    # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
-                        n.meta["val"]
-                    )
-                    unbacked_symbols_in_strides = (
-                        len(free_unbacked_symbols(strides)) > 0
-                    )
-                    if (
-                        not unbacked_symbols_in_strides
-                        and dense
-                        and len(strides)
-                        and len(result.get_size()) == 4
-                        and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    ):
-                        strides = ir.get_new_stride_with_stride_order(
-                            strides, ir.NHWC_STRIDE_ORDER
-                        )
                     if not isinstance(result.data, ir.ReinterpretView):
                         result = ir.ExternKernel.require_exact_strides(
                             result, strides, allow_padding=allow_padding
                         )
-                    elif not unbacked_symbols_in_strides and len(strides):
-                        stride_order = ir.get_stride_order(strides)
-                        result = ir.ExternKernel.require_stride_order(
-                            result, stride_order, allow_padding=allow_padding
+                    else:
+                        # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
+                        dense = torch._prims_common.is_non_overlapping_and_dense(
+                            n.meta["val"]
                         )
+                        unbacked_symbols_in_strides = (
+                            len(free_unbacked_symbols(strides)) > 0
+                        )
+                        if (
+                            not unbacked_symbols_in_strides
+                            and dense
+                            and len(strides)
+                            and len(result.get_size()) == 4
+                            and n in self.nodes_prefer_channels_last
+                            and n.name not in self.user_visible_outputs
+                            and not is_input_for_as_strided
+                        ):
+                            strides = ir.get_new_stride_with_stride_order(
+                                strides, ir.NHWC_STRIDE_ORDER
+                            )
+
+                        if not unbacked_symbols_in_strides and len(strides):
+                            stride_order = ir.get_stride_order(strides)
+                            result = ir.ExternKernel.require_stride_order(
+                                result, stride_order, allow_padding=allow_padding
+                            )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
