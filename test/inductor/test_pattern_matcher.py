@@ -239,7 +239,6 @@ class TestPatternMatcher(TestCase):
             fallback_mixed_mm_expected = (
                 dtype_left == torch.bfloat16 and dtype_right == torch.uint8
             )
-            mixed_mm_expected = not fallback_mixed_mm_expected
             self._test_mixed_impl(
                 fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
             )
