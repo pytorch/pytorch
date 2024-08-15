@@ -753,6 +753,13 @@ class cpp:
     # For example, "4,1,10" means 4 register blocks on M, 1 on N and 10 on K respectively.
     gemm_cache_blocking = os.environ.get("TORCHINDUCTOR_CPP_GEMM_CACHE_BLOCKING", None)
 
+    # For perf tuning and debugging purpose, configure the pre-defined thread blocking factors for
+    # MxNxK dims respectively. The factors are separated by comma and their product
+    # should be the same as the total number of threads.
+    # For example, if the total number of threads is 56, "7,4,2" means the work is
+    # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
+    gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
+
 
 # config specific to codegen/triton.py
 class triton:
