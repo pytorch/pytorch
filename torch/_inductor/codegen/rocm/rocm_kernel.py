@@ -3,7 +3,6 @@ import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
-from ...utils import sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp_utils import CppPrinter
@@ -161,7 +160,12 @@ class ROCmTemplateKernel(ROCmKernel):
             kernel_args.append(arg)
 
         # add size args
-        kernel_args.extend([f"c_int({sarg})" for sarg in node.template.size_args()])
+        kernel_args.extend(
+            [
+                f"c_int({V.graph.sizevars.simplify(sarg)})"
+                for sarg in node.template.size_args()
+            ]
+        )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
@@ -186,59 +190,6 @@ class ROCmTemplateKernel(ROCmKernel):
         )
         if node.get_workspace_size() > 0:
             wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
-
-    def size(
-        self,
-        node: IRNode,
-        start_index: int,
-        end_index: Optional[int] = None,
-        default_value: int = 0,
-    ) -> str:
-        """
-        Hook called from template code to get the size of an arg.
-        Generates code which represents size of a given node in [start_index, end_index).
-        If node is None, returns default_value.
-
-        TODO: Will add needed args to pass it in if it is dynamic.
-        """
-
-        if node is None:
-            return str(default_value)
-
-        start_index = _normalize_idx(start_index, len(node.get_size()))
-        if end_index is None:
-            end_index = start_index
-        end_index = _normalize_idx(end_index, len(node.get_size()))
-
-        sizes = node.get_size()[start_index : end_index + 1]
-        if len(sizes) == 0:
-            return str(default_value)
-
-        val = sympy_product(sizes)
-        return cexpr(self.rename_indexing(val))
-
-    def leading_dimension(self, node: Optional[IRNode], default_value: int = 0) -> str:
-        """
-        Hook called from template call to get the leading dimension of an arg.
-        """
-
-        if node is None:
-            return str(default_value)
-
-        stride = node.get_stride()
-
-        if 2 != len(stride):
-            leading_dim = default_value
-        elif stride[-1] == 1:
-            # row-major case
-            leading_dim = stride[-2]
-        elif stride[-2] == 1:
-            # column-major case
-            leading_dim = stride[-1]
-        else:
-            leading_dim = default_value
-
-        return cexpr(self.rename_indexing(leading_dim))
 
 
 class ROCmTemplateCaller(ChoiceCaller):

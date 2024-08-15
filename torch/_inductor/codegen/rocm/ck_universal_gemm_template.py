@@ -410,16 +410,16 @@ class CKGemmTemplate(CKTemplate):
         Bias = self.input_nodes[2] if len(self.input_nodes) > 2 else None
         Y = self.output_node
 
-        M = sympy.expand(X.get_size()[0])
-        K = sympy.expand(X.get_size()[1])
-        N = sympy.expand(W.get_size()[1])
-        LDA = sympy.expand(X.get_stride()[0 if X.get_stride()[1] == 1 else 1])
-        LDB = sympy.expand(W.get_stride()[0 if W.get_stride()[1] == 1 else 1])
-        LDC = sympy.expand(Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1])
+        M = X.get_size()[0]
+        K = X.get_size()[1]
+        N = W.get_size()[1]
+        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
+        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
+        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
         LDD = (
             0
             if Bias is None
-            else sympy.expand(Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1])
+            else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
         )
 
         return M, N, K, LDA, LDB, LDC, LDD
