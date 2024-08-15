@@ -337,7 +337,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_onednn_fp16_supported():
-
             dtypes.append(torch.float16)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
