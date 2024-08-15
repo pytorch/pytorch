@@ -5,13 +5,11 @@ import inspect
 import math
 import operator
 import re
-
 from inspect import Parameter
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
-
 from torch.export import ExportedProgram
 from torch.export.exported_program import (
     _name_hoo_subgraph_placeholders,
@@ -32,6 +30,7 @@ from torch.utils._pytree import (
     tree_flatten_with_path,
     UnflattenFunc,
 )
+
 
 placeholder_prefixes = {
     InputKind.USER_INPUT: "",
@@ -118,16 +117,23 @@ def _check_input_constraints_for_graph(
                             # such checks can affect the shape env.
                             pass
                         else:
-                            solution = try_solve(
-                                sympy.Eq(node_dim.node.expr, arg_dim), symbol
-                            )
-                            if solution is None:
-                                raise RuntimeError(  # noqa: B904
-                                    f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
-                                    f"of the form {node_dim.node.expr}, where {symbol} is an integer"
-                                )
+                            if isinstance(node_dim.node.expr, sympy.Symbol):
+                                # Short cut for try_solve below. Also useful in cases where
+                                # sympy.Eq(node_dim.node.expr, arg_dim) would evaluate to False
+                                # purely because symbol is constrained to be size-like,
+                                # e.g., when node_dim.node.expr = symbol and arg_dim = 0.
+                                unification_map[symbol] = int(arg_dim)
                             else:
-                                unification_map[symbol] = int(solution[1])
+                                solution = try_solve(
+                                    sympy.Eq(node_dim.node.expr, arg_dim), symbol
+                                )
+                                if solution is None:
+                                    raise RuntimeError(  # noqa: B904
+                                        f"Expected input {node.name}.shape[{j}] = {arg_dim} to be "
+                                        f"of the form {node_dim.node.expr}, where {symbol} is an integer"
+                                    )
+                                else:
+                                    unification_map[symbol] = int(solution[1])
 
                     if node_dim.node.expr in range_constraints:
                         min_val, max_val = _convert_range_to_int(
@@ -359,16 +365,13 @@ def nodes_map(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]
     return nodes
 
 
-def node_replace_(
-    old_node: torch.fx.Node, new_node: torch.fx.Node, delete_old: bool = False
-) -> None:
+def node_replace_(old_node: torch.fx.Node, new_node: torch.fx.Node) -> None:
     """
     Replace all uses of old_node with new_node.
     """
     old_node.replace_all_uses_with(new_node)
-    if delete_old:
-        old_node.users.clear()
-        old_node.graph.erase_node(old_node)
+    old_node.users.clear()
+    old_node.graph.erase_node(old_node)
 
 
 def node_inline_(call_mod_node: torch.fx.Node) -> None:
@@ -390,12 +393,12 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
 
     for ph, arg in zip(phs, call_mod_node.args):
         assert isinstance(arg, torch.fx.Node)
-        node_replace_(ph, arg, delete_old=True)
+        node_replace_(ph, arg)
 
     with gm.graph.inserting_before(call_mod_node):
         for node in body:
             new_node = gm.graph.node_copy(node)
-            node_replace_(node, new_node, delete_old=True)
+            node_replace_(node, new_node)
 
         if len(output) > 0:
             assert len(output) == 1 and len(output[0].args) == 1
@@ -405,7 +408,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                 # Clear the users of the output node and set
                 # the users to be the users of original call_module node.
                 new_output.users.clear()
-                node_replace_(call_mod_node, new_output, delete_old=True)
+                node_replace_(call_mod_node, new_output)
             elif isinstance(new_output, (list, tuple)):
                 # Clear the users of the output node and set
                 # the users to be the users of original call_module node.
@@ -424,7 +427,6 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
                     lambda get_item_node: node_replace_(
                         get_item_node,
                         new_output[get_item_node.args[1]],
-                        delete_old=True,
                     ),
                 )
                 call_mod_node.graph.erase_node(call_mod_node)
@@ -617,6 +619,27 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
+    """
+    If `in_place` is false, return a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
+    `v` is the values in the dictionary.
+    If `in_place` is true, modify `state_dict` in place.
+    """
+    if in_place:
+        for k, v in state_dict.items():
+            if hasattr(v, "proxy"):
+                delattr(state_dict[k], "proxy")
+        return state_dict
+    else:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if hasattr(v, "proxy"):
+                new_state_dict[k] = v.clone().detach()
+            else:
+                new_state_dict[k] = v
+        return new_state_dict
 
 
 def _detect_fake_mode_from_gm(

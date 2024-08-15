@@ -9,8 +9,8 @@
 // - create constant nodes from ints, floats, complex, intlist, Tensors, and
 // other types
 // - implement primitive constant ops.
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 using ::c10::IValue;
 
@@ -57,5 +57,4 @@ std::optional<T> constant_as(const Value* v) {
   }
   return std::nullopt;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

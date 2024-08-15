@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
@@ -235,6 +236,7 @@ def foreach_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
+    reduce_scatter_reduce_op: Optional[Union[dist.ReduceOp, dist.ReduceOp.RedOpType]],
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.cuda.Stream,
     all_reduce_grads: bool,
@@ -280,11 +282,16 @@ def foreach_reduce(
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
         _div_if_needed(reduce_scatter_input, predivide_factor)
+        if reduce_scatter_reduce_op is None:
+            if predivide_factor is None:
+                reduce_scatter_reduce_op = ReduceOp.AVG
+            else:
+                reduce_scatter_reduce_op = ReduceOp.SUM
         dist.reduce_scatter_tensor(
             output=reduce_output,
             input=reduce_scatter_input,
             group=reduce_scatter_group,
-            op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+            op=reduce_scatter_reduce_op,
         )
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream

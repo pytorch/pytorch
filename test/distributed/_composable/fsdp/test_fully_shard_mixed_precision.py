@@ -9,6 +9,9 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable.fsdp._fsdp_collectives import (
+    _get_gradient_divide_factors,
+)
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -58,12 +61,16 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
         self.run_subtests(
-            {"reshard_after_forward": [False, True, 2]},
+            {
+                "param_dtype": [torch.bfloat16, torch.float16],
+                "reshard_after_forward": [False, True, 2],
+            },
             self._test_compute_dtype,
         )
 
-    def _test_compute_dtype(self, reshard_after_forward: Union[bool, int]):
-        param_dtype = torch.bfloat16
+    def _test_compute_dtype(
+        self, param_dtype: torch.dtype, reshard_after_forward: Union[bool, int]
+    ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             reshard_after_forward, param_dtype=param_dtype, reduce_dtype=None
         )
@@ -76,6 +83,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
+        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+        )
+
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((4, 16), device="cuda", dtype=param_dtype)
         for iter_idx in range(10):
@@ -92,10 +103,15 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 # Use reduce-scatter -> all-gather as all-reduce because for
                 # world size >=4, NCCL all-reduce shows numeric differences
                 # compared with NCCL reduce-scatter
+                if predivide_factor is not None and predivide_factor > 1:
+                    param.grad.div_(predivide_factor)
+                elif predivide_factor is None:
+                    param.grad.div_(self.world_size)
                 output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
                 dist.reduce_scatter_tensor(output, param.grad)
                 dist.all_gather_into_tensor(param.grad, output)
-                param.grad.div_(self.world_size)
+                if postdivide_factor is not None and postdivide_factor > 1:
+                    param.grad.div_(postdivide_factor)
             for param_fp32, param_bf16 in zip(
                 ref_model.parameters(), ref_model_bf16.parameters()
             ):

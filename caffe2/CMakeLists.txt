@@ -1047,6 +1047,7 @@ if(USE_XPU)
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
   # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
   #    compilation. add_custom_command requires an explicit dependency.
+  list(APPEND ${Caffe2_XPU_INCLUDE} ${TORCH_XPU_OPS_DIR}/src/ATen/)
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
 
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
@@ -1064,6 +1065,10 @@ if(USE_XPU)
       target_link_libraries(torch_xpu PRIVATE
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
+
+    # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
+    include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+
   endif()
 endif()
 
@@ -1213,6 +1218,7 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/tensorexpr
       ${CMAKE_BINARY_DIR}/test_tensorexpr
@@ -1529,7 +1535,21 @@ if(USE_XPU)
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
 
-  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
+  include(CheckLinkerFlag)
+
+  # Check whether the compiler supports '--no-as-needed' and '--as-needed'
+  check_linker_flag(CXX "-Wl,--no-as-needed" HAVE_NO_AS_NEEDED)
+  check_linker_flag(CXX "-Wl,--as-needed" HAVE_AS_NEEDED)
+
+  # Ensure that torch_cpu is ready before being linked by torch_xpu.
+  add_dependencies(torch_xpu torch_cpu)
+
+  if(HAVE_NO_AS_NEEDED AND HAVE_AS_NEEDED)
+    target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--no-as-needed,\"$<TARGET_FILE:torch_cpu>\" -Wl,--as-needed")
+  else()
+    target_link_libraries(torch_xpu PRIVATE "$<TARGET_FILE:torch_cpu>")
+  endif()
 endif()
 
 # ---[ Metal(OSX) modification

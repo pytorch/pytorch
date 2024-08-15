@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -46,7 +47,7 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -114,7 +115,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
-        micro_pipeline_tp_patterns.apply(gm)
+        micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -656,7 +657,7 @@ noop_registry: Dict[Any, Any] = {}
 def register_noop_decomp(targets, nop_arg=0):
     def register_fun(cond):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
-            (cond, nop_arg)
+            (cond, nop_arg)  # type: ignore[arg-type]
         )
         return cond
 

@@ -14,7 +14,7 @@ RandomSampler::RandomSampler(int64_t size, Dtype index_dtype)
 
 RandomSampler::~RandomSampler() = default;
 
-void RandomSampler::reset(optional<size_t> new_size) {
+void RandomSampler::reset(std::optional<size_t> new_size) {
   // This allocates a new chunk of memory every time (just FYI). It should be
   // amortized over the entire epoch hopefully.
   const auto size = new_size.value_or(static_cast<size_t>(indices_.numel()));
@@ -22,7 +22,7 @@ void RandomSampler::reset(optional<size_t> new_size) {
   index_ = 0;
 }
 
-optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
+std::optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
   AT_ASSERT(index_ <= indices_.numel());
   const size_t remaining_indices = indices_.numel() - index_;
   if (remaining_indices == 0) {

@@ -1,5 +1,4 @@
-# mypy: ignore-errors
-
+# mypy: allow-untyped-decorators
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
 from ._compatibility import compatibility
@@ -19,7 +18,8 @@ if TYPE_CHECKING:
 __all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
-                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload]
+                          torch.Tensor, torch.device, torch.memory_format, torch.layout, torch._ops.OpOverload,
+                          torch.SymInt, torch.SymBool, torch.SymFloat]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
@@ -77,7 +77,7 @@ def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
 
 # Borrowed from CPython typing module
 # https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
-def _type_repr(obj):
+def _type_repr(obj: object) -> str:
     """Return the repr() of an object, special-casing types (internal helper).
     If obj is a type, we return a shorter version than the default
     type.__repr__, based on the module and qualified name, which is
@@ -116,7 +116,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
         name = "_" + name
     return f'{module}.{name}'
 
-def _format_arg(arg, max_list_len=float('inf')) -> str:
+def _format_arg(arg: object, max_list_len: float = float('inf')) -> str:
     if hasattr(arg, '_custom_fx_repr_fn'):
         return arg._custom_fx_repr_fn()
     elif isinstance(arg, list):
@@ -244,14 +244,14 @@ class Node(_NodeBase):
         # transformations. This metadata is preserved across node copies
         self.meta : Dict[str, Any] = {}
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
         state["_erased"] = self._erased
         state["_prev"] = self._prev
         state["_next"] = self._next
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         _erased = state.pop("_erased")
         _prev = state.pop("_prev")
         _next = state.pop("_next")
@@ -317,16 +317,16 @@ class Node(_NodeBase):
         else:  # same length, increase length by 1
             x._sort_key = (*psk, 0)
 
-    def __gt__(self, other: 'Node'):
+    def __gt__(self, other: 'Node') -> bool:
         return self._sort_key > other._sort_key
 
-    def __lt__(self, other: 'Node'):
+    def __lt__(self, other: 'Node') -> bool:
         return self._sort_key < other._sort_key
 
-    def __ge__(self, other: 'Node'):
+    def __ge__(self, other: 'Node') -> bool:
         return self > other or self == other
 
-    def __le__(self, other: 'Node'):
+    def __le__(self, other: 'Node') -> bool:
         return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
@@ -340,7 +340,7 @@ class Node(_NodeBase):
         """
         self._next.prepend(x)
 
-    def _remove_from_list(self):
+    def _remove_from_list(self) -> None:
         p, n = self._prev, self._next
         p._next, n._prev = n, p
 
@@ -357,7 +357,7 @@ class Node(_NodeBase):
         return self._args
 
     @args.setter
-    def args(self, a : Tuple[Argument, ...]):
+    def args(self, a : Tuple[Argument, ...]) -> None:
         """
         Set the tuple of arguments to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -380,7 +380,7 @@ class Node(_NodeBase):
         return self._kwargs
 
     @kwargs.setter
-    def kwargs(self, k : Dict[str, Argument]):
+    def kwargs(self, k : Dict[str, Argument]) -> None:
         """
         Set the dict of kwargs to this Node. The interpretation of arguments
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
@@ -473,10 +473,10 @@ class Node(_NodeBase):
         return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
-    def stack_trace(self, trace : Optional[str]):
+    def stack_trace(self, trace : Optional[str]) -> None:
         self.meta["stack_trace"] = trace
 
-    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
+    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']) -> None:
         """
         This API is internal. Do *not* call it directly.
         """
@@ -498,7 +498,7 @@ class Node(_NodeBase):
             return self._repr_fn(self)
         return self.name
 
-    def _pretty_print_target(self, target):
+    def _pretty_print_target(self, target: object) -> str:
         """
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
@@ -508,17 +508,19 @@ class Node(_NodeBase):
         if isinstance(target, str):
             return target
         if hasattr(target, '__module__'):
-            if not hasattr(target, '__name__'):
+            name = getattr(target, '__name__', None)
+            if name is None:
                 # Just to be defensive, if we don't have `__name__`, get the
                 # qualname. Not sure if this happens for any members of `operator`
                 # or `builtins`. This fallback path is not as good, since e.g.
                 # things in `operator` have `_operator` as their __module__.
-                return _get_qualified_name(target)
+                # TODO: THIS IS BROKEN: _get_qualified_name calls `__name__`
+                return _get_qualified_name(target)  # type: ignore[arg-type]
             if target.__module__ == 'builtins':
-                return f'builtins.{target.__name__}'
+                return f'builtins.{name}'
             elif target.__module__ == '_operator':
-                return f'operator.{target.__name__}'
-        return _get_qualified_name(target)
+                return f'operator.{name}'
+        return _get_qualified_name(target)  # type: ignore[arg-type]
 
     @compatibility(is_backward_compatible=True)
     def format_node(self,
@@ -578,10 +580,10 @@ class Node(_NodeBase):
 
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
-                              replace_with : 'Node',
+                              replace_with: 'Node',
                               delete_user_cb: Callable[['Node'], bool] = lambda user: True,
                               *,
-                              propagate_meta=False
+                              propagate_meta: bool = False
                               ) -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
@@ -633,7 +635,7 @@ class Node(_NodeBase):
         return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
-    def is_impure(self):
+    def is_impure(self) -> bool:
         """
         Returns whether this op is impure, i.e. if its op is a placeholder or
         output, or if a call_function or call_module which is impure.
@@ -701,7 +703,7 @@ class Node(_NodeBase):
         return None
 
     @compatibility(is_backward_compatible=True)
-    def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
+    def replace_input_with(self, old_input: 'Node', new_input: 'Node') -> None:
         """
         Loop through input nodes of ``self``, and replace all instances of
         ``old_input`` with ``new_input``.
@@ -724,7 +726,7 @@ class Node(_NodeBase):
         assert isinstance(new_kwargs, dict)
         self.__update_args_kwargs(new_args, new_kwargs)
 
-    def _rename(self, candidate: str):
+    def _rename(self, candidate: str) -> None:
         if candidate == self.name:
             return
         name = self.graph._graph_namespace.create_name(candidate, None)

@@ -24,7 +24,11 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
+  virtual bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getPinnedMemoryAllocator`.");

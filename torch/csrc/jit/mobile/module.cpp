@@ -11,8 +11,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 
@@ -351,5 +350,4 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

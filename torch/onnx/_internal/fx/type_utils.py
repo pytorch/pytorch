@@ -15,10 +15,12 @@ from typing import (
 )
 
 import numpy
+
 import onnx
 
 import torch
 from torch._subclasses import fake_tensor
+
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
@@ -237,6 +239,9 @@ BaseArgumentTypes = Union[
     torch.memory_format,
     torch.layout,
     torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
 ]
 Argument = Optional[
     Union[

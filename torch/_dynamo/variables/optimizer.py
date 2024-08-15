@@ -15,14 +15,16 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX
-
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
 
+
 if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
     from .base import VariableTracker
 
 
@@ -49,7 +51,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         static_tensor_names=None,
         tensor_to_source=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(value, **kwargs)
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
@@ -88,7 +90,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
@@ -253,7 +255,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             break
 
             group_source = group_vt.source
-            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             for p_ind, (p, p_vt) in enumerate(
                 zip(group["params"], params_vt.unpack_var_sequence(tx))
             ):
@@ -284,7 +286,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
 
-    def wrap_tensor(self, tx, tensor_value):
+    def wrap_tensor(self, tx: "InstructionTranslator", tensor_value):
         """Wrap state tensor in a TensorVariable"""
         from ..decorators import mark_static_address
         from .builder import VariableBuilder
@@ -312,7 +314,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         result = builder(tensor_value)
         return result
 
-    def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
+    def update_list_args(
+        self, tx: "InstructionTranslator", args, kwargs, py_args, py_kwargs
+    ):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):

@@ -6,9 +6,7 @@
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
@@ -34,6 +32,4 @@ struct Code {
   bool initialized = false;
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

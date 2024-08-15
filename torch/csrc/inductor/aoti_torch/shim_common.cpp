@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
+#include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
-#include <memory>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -109,6 +109,7 @@ int32_t aoti_torch_layout__mkldnn() {
     });                                                        \
   }
 
+AOTI_TORCH_ITEM_IMPL(float16, c10::Half)
 AOTI_TORCH_ITEM_IMPL(float32, float)
 AOTI_TORCH_ITEM_IMPL(float64, double)
 AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
@@ -120,6 +121,8 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
+AOTI_TORCH_ITEM_IMPL(complex64, c10::complex<float>)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
@@ -142,6 +145,7 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int16, int16_t, Short)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
 AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(complex64, c10::complex<float>, ComplexFloat)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {
@@ -197,11 +201,26 @@ AOTITorchError aoti_torch_get_numel(
   });
 }
 
+AOTITorchError aoti_torch_get_storage_numel(
+    AtenTensorHandle tensor,
+    int64_t* ret_numel) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    TORCH_INTERNAL_ASSERT(t->has_storage());
+    auto dtype_size = t->dtype().itemsize();
+    size_t nbytes = t->storage().nbytes();
+    TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+    auto numel = nbytes / dtype_size;
+    *ret_numel = numel;
+  });
+}
+
 AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_sizes = const_cast<int64_t*>(t->sizes().data());
   });
 }
@@ -221,6 +240,7 @@ AOTITorchError aoti_torch_get_strides(
     int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     *ret_strides = const_cast<int64_t*>(t->strides().data());
   });
 }
@@ -258,7 +278,7 @@ AOTITorchError aoti_torch_get_device_index(
     int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret_device_index = t->device().index();
+    *ret_device_index = static_cast<int16_t>(t->device().index());
   });
 }
 
@@ -634,6 +654,37 @@ AOTITorchError aoti_torch__scaled_mm(
   });
 }
 
+AOTITorchError aoti_torch__scaled_mm_v2(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle bias,
+    AtenTensorHandle scale_result,
+    int32_t* out_dtype,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    at::Tensor* scale_a_tensor = tensor_handle_to_tensor_pointer(scale_a);
+    at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
+    at::Tensor* scale_result_tensor =
+        tensor_handle_to_tensor_pointer(scale_result);
+    auto r0 = at::_scaled_mm(
+        *self_tensor,
+        *mat2_tensor,
+        *scale_a_tensor,
+        *scale_b_tensor,
+        pointer_to_optional(bias_tensor),
+        pointer_to_optional(scale_result_tensor),
+        pointer_to_optional<c10::ScalarType>(out_dtype),
+        use_fast_accum);
+    *ret0 = new_tensor_handle(std::move(r0));
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_tensor_copy_(
     AtenTensorHandle src,
@@ -719,6 +770,23 @@ AOTITorchError aoti_torch_mm_out(
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::mm_out(*out_tensor, *self_tensor, *mat2_tensor);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+    AtenTensorHandle out,
+    AtenTensorHandle a,
+    AtenTensorHandle b,
+    AtenTensorHandle c,
+    AtenTensorHandle d) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* a_tensor = tensor_handle_to_tensor_pointer(a);
+    at::Tensor* b_tensor = tensor_handle_to_tensor_pointer(b);
+    at::Tensor* c_tensor = tensor_handle_to_tensor_pointer(c);
+    at::Tensor* d_tensor = tensor_handle_to_tensor_pointer(d);
+    torch::inductor::_mm_plus_mm_out(
+        *out_tensor, *a_tensor, *b_tensor, *c_tensor, *d_tensor);
   });
 }
 
@@ -823,7 +891,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle values,
+    const AtenTensorHandle& values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
@@ -866,11 +934,38 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+
+  auto device = t->device();
+  auto min = t->min().item<float>();
+  auto max = t->max().item<float>();
+
+  // Display message
   std::cout << "[";
   if (msg) {
-    std::cout << msg;
+    std::cout << "  " << msg;
   }
-  std::cout << "]:" << *t << "\n";
+  std::cout << "  "
+            << "]:" << std::endl;
+
+  // Print exact tensor values for small size tensors
+  const int threshold = 10;
+  if (t->numel() <= threshold) {
+    std::cout << *t << "\n";
+  }
+
+  // Print summary stats of the tensor
+  std::cout << "Min value: " << min << std::endl;
+  std::cout << "Max value: " << max << std::endl;
+  std::cout << "Device: " << device << std::endl;
+  std::cout << "Size: " << t->sizes() << std::endl;
+  std::cout << "Stride: " << t->strides() << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
+  std::cout << "Layout: " << t->layout() << std::endl;
+  std::cout << "Number of elements: " << t->numel() << std::endl;
+  std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
+  std::cout << "Requires grad: " << t->requires_grad() << std::endl;
+
+  std::cout << std::endl;
 }
 
 // ProxyExecutor
