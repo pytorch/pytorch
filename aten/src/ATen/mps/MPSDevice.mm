@@ -12,18 +12,11 @@ namespace at::mps {
 static std::unique_ptr<MPSDevice> mps_device;
 static c10::once_flag mpsdev_init;
 
-static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device, bool macOS13Plus) {
+static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
   // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
-  MTLLanguageVersion languageVersion = MTLLanguageVersion2_3;
-#if defined(__MAC_13_0)
-  if (macOS13Plus) {
-    languageVersion = MTLLanguageVersion3_0;
-  }
-#endif
-
   TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
-  return languageVersion;
+  return MTLLanguageVersion3_0;
 }
 
 MPSDevice* MPSDevice::getInstance() {
@@ -36,7 +29,7 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   NSError* error = nil;
   if (!_mtl_indexing_library) {
     MTLCompileOptions* options = [MTLCompileOptions new];
-    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device, isMacOS13Plus(MacOSVersion::MACOS_VER_13_0_PLUS))];
+    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device)];
     [options setFastMathEnabled:YES];
     _mtl_indexing_library = [_mtl_device newLibraryWithSource:[NSString stringWithCString:mps::indexing_metal_shaders
                                                                                  encoding:NSASCIIStringEncoding]
@@ -75,13 +68,12 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
-  // Check that MacOS 12.3+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 12.3+
+  // Check that MacOS 13.0+ version of MPS framework is available
+  // Create the MPSGraph and check method introduced in 13.0
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
 
-  if ([mpsCD instancesRespondToSelector:@selector
-             (LSTMWithSourceTensor:recurrentWeight:inputWeight:bias:initState:initCell:descriptor:name:)] == NO) {
+  if ([mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == NO) {
     return;
   }
 
@@ -104,7 +96,6 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
-  id mpsCD = NSClassFromString(@"MPSGraph");
   auto is_os_version_at_least = [](int major, int minor) {
     @autoreleasepool {
       NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
@@ -112,17 +103,14 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
           isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
     }
   };
-  static bool _macos_13_0_plus = is_os_version_at_least(13, 0);
   static bool _macos_13_1_plus = is_os_version_at_least(13, 1);
   static bool _macos_13_2_plus = is_os_version_at_least(13, 2);
   static bool _macos_13_3_plus = is_os_version_at_least(13, 3);
   static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
-  static bool _macos_14_4_plus = is_os_version_at_least(14, 0);
+  static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
 
   switch (version) {
-    case MacOSVersion::MACOS_VER_13_0_PLUS:
-      return _macos_13_0_plus;
     case MacOSVersion::MACOS_VER_13_1_PLUS:
       return _macos_13_1_plus;
     case MacOSVersion::MACOS_VER_13_2_PLUS:
