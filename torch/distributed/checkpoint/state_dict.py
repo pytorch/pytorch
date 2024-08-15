@@ -561,6 +561,7 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
+        new_device = device
         if device == torch.device("meta"):
             new_device = dist.distributed_c10d._get_pg_default_device()
         if info.broadcast_from_rank0:

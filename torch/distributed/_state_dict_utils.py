@@ -632,11 +632,12 @@ def _distribute_state_dict(
                 continue
             elif isinstance(local_state, DTensor):
                 local_state_dict[key] = distribute_tensor(
-                    value.detach().to(device), local_state.device_mesh, local_state.placements
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
                 )
             else:
                 local_state_dict[key] = value.detach().to(device)
-
 
 
 # These APIs are from torch.distributed.checkpoint.
