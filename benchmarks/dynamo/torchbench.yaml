@@ -53,6 +53,7 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - hf_Whisper
+    - timm_efficientnet
 
   cosine: []
 
