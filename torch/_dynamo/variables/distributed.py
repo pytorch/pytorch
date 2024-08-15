@@ -274,6 +274,8 @@ class ProcessGroupVariable(DistributedVariable):
             return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
             return variables.ConstantVariable.create(self.value.size())
+        if name == "_get_backend_name":
+            return variables.ConstantVariable.create(self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 

@@ -2637,6 +2637,17 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_jvp_new_tensor(self):
+        def f(x):
+            y = x.new_tensor(0.5)
+            return x + y
+
+        x = torch.rand(10, 10)
+        tangents = torch.zeros_like(x)
+        actual = jvp(f, (x,), (tangents,))
+        expected = (f(x), torch.zeros_like(x))
+        self.assertEqual(actual, expected)
+
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
