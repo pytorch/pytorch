@@ -2709,9 +2709,9 @@ class TestWrapperSubclassConjugate(TestCase):
     # in particular, conjugate needs to be handled correctly
     def test_wrapper_subclass_conjugate(self):
         a = torch.tensor(
-            [1 + 1j], dtype=torch.complex64, device="cuda", requires_grad=True
+            [1 + 1j], dtype=torch.complex64, device="cpu", requires_grad=True
         )
-        b = torch.randn((1,), dtype=torch.complex64, device="cuda")
+        b = torch.randn((1,), dtype=torch.complex64, device="cpu")
         expected_result = a * b.conj()
 
         a = TwoTensor(a, a.clone())

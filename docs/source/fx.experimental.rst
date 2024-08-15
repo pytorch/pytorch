@@ -66,3 +66,5 @@ torch.fx.experimental.proxy_tensor
     make_fx
     handle_sym_dispatch
     get_proxy_mode
+    maybe_enable_thunkify
+    maybe_disable_thunkify
