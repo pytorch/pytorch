@@ -11,6 +11,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -508,6 +509,9 @@ class TestProfiler(TestCase):
         # rerun to avoid initial start overhead
         with _profile(use_cuda=use_cuda, use_kineto=True) as p:
             self.payload(use_cuda=use_cuda)
+
+        self.assertTrue("aten::mm" in str(p))
+
         output = p.key_averages().table(
             sort_by="self_cuda_time_total" if use_cuda else "self_cpu_time_total",
             row_limit=-1,
@@ -1855,6 +1859,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             for i in range(100):
                 torch.add(1, 2)
                 prof.step()
+        # print(prof.key_averages())
         for ev in prof.key_averages():
             if ev.key == "aten::add":
                 return ev.count
@@ -2539,9 +2544,11 @@ aten::mm""",
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-        report_all_anti_patterns(prof, json_report_dir=".", print_enable=False)
-        try:
-            with open("./torchtidy_report.json") as f:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_all_anti_patterns(prof, json_report_dir=tmpdir, print_enable=False)
+
+            with open(os.path.join(tmpdir, "torchtidy_report.json")) as f:
                 report = json.load(f)
 
             # It is platform dependent whether the path will include "profiler/"
@@ -2554,8 +2561,6 @@ aten::mm""",
             for event in entry:
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
-        finally:
-            os.remove("torchtidy_report.json")
 
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_fuzz_symbolize(self):

@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import logging
 import math
 import warnings
 
@@ -11,6 +12,8 @@ warnings.filterwarnings(
     message="The behavior of DataFrame concatenation with empty or all-NA entries is deprecated",
 )
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 from scipy.stats import gmean
@@ -19,28 +22,21 @@ from sklearn.tree import DecisionTreeClassifier
 from train import AHTrain
 
 
+log = logging.getLogger(__name__)
+DEBUG = True
+if DEBUG:
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    ch.setFormatter(formatter)
+    log.addHandler(ch)
+
+
 class AHTrainDecisionTree(AHTrain):
     def __init__(self):
         super().__init__()
-
-    def get_time(self, row, choice):
-        choices_feedback = json.loads(row["choice2time"])
-        return choices_feedback.get(choice, None)
-
-    def top_k_classes(self, model, probas, k, avail_choices):
-        # Get classes and their corresponding probabilities
-        classes = model.classes_
-        class_proba_pairs = list(zip(classes, probas))
-
-        # Sort by probability (descending) and filter out zero probabilities
-        sorted_classes = [
-            c
-            for c, p in sorted(zip(classes, probas), key=lambda x: x[1], reverse=True)
-            if p > 0 and c in avail_choices
-        ]
-
-        # Return top k choices
-        return sorted_classes[:k]
 
     def is_unsafe_leaf(self, row, predicted_config, choice2time):
         """
@@ -119,6 +115,8 @@ class AHTrainDecisionTree(AHTrain):
         best_model_num_correct = 0
         best_model_num_wrong = 0
         best_model_unsafe_leaves = []
+        columns = ["set", "crit", "max_depth", "min_samples_leaf"]
+        metrics_columns = []
         for max_depth, min_samples_leaf, criterion in itertools.product(
             max_depths, min_samples_leafs, criterion_list
         ):
@@ -138,38 +136,41 @@ class AHTrainDecisionTree(AHTrain):
             predictions, proba, leaf_ids = self.predict(model, df_val, feature_columns)
 
             wrong_pct = self.get_allowed_wrong_prediction_pct()
-            safe_proba = self.get_results(
+            evaluator = DecisionEvaluator(
+                self,
                 model,
                 predictions,
                 df_val,
-                probas=proba,
-                return_safe_proba=True,
+                proba,
                 wrong_pct=wrong_pct,
                 unsafe_leaves=unsafe_leaves,
                 leaf_ids=leaf_ids,
             )
+            safe_proba = evaluator.get_safe_proba()
             print(f"safe_proba={safe_proba}")
 
             def eval(name, df):
                 predictions, proba, leaf_ids = self.predict(model, df, feature_columns)
-                eval_result = self.get_results(
+                evaluator = DecisionEvaluator(
+                    self,
                     model,
                     predictions,
                     df,
-                    probas=proba,
+                    proba,
+                    wrong_pct=wrong_pct,
                     threshold=safe_proba,
                     unsafe_leaves=unsafe_leaves,
                     leaf_ids=leaf_ids,
                 )
-                if name == "val":
-                    nonlocal best_model_num_correct
-                    nonlocal best_model_num_wrong
-                    nonlocal best_model_safe_proba
-                    nonlocal best_model
-                    nonlocal best_model_unsafe_leaves
-                    num_correct = eval_result["correct"]
-                    num_wrong = eval_result["wrong"]
-                    num_total = eval_result["total"]
+                return evaluator.get_results()
+
+            for dataset_name, dataset in datasets.items():
+                eval_result: EvalResults = eval(dataset_name, dataset)
+                eval_result_metrics = eval_result.to_map()
+                if dataset_name == "val":
+                    num_correct = eval_result.accuracy.num_correct
+                    num_wrong = eval_result.accuracy.num_wrong
+                    num_total = eval_result.accuracy.total
                     if num_wrong <= num_total * wrong_pct:
                         if num_correct > best_model_num_correct:
                             print(
@@ -181,58 +182,15 @@ class AHTrainDecisionTree(AHTrain):
                             best_model_safe_proba = safe_proba
                             best_model_unsafe_leaves = unsafe_leaves
 
-                results.append(
-                    (
-                        name,
-                        criterion,
-                        max_depth,
-                        min_samples_leaf,
-                        eval_result["correct"],
-                        eval_result["wrong"],
-                        eval_result["unsure"],
-                        eval_result["total"],
-                        eval_result["wrong_max_speedup"],
-                        eval_result["wrong_gmean_speedup"],
-                        eval_result["top_k_correct"],
-                        eval_result["wrong_max_speedup_k"],
-                        eval_result["wrong_gmean_speedup_k"],
-                        eval_result["top_k_unsure"],
-                        eval_result["max_speedup_default"],
-                        eval_result["gmean_speedup_default"],
-                        eval_result["max_slowdown_default"],
-                        eval_result["non_default_predictions"],
-                        eval_result["default_better"],
-                    )
-                )
-
-            for dataset_name, dataset in datasets.items():
-                eval(dataset_name, dataset)
+                result = (dataset_name, criterion, max_depth, min_samples_leaf)
+                result += tuple(eval_result_metrics.values())
+                results.append(result)
+                if len(metrics_columns) == 0:
+                    metrics_columns = list(eval_result_metrics.keys())
+                    columns += metrics_columns
 
         return (
-            pd.DataFrame(
-                results,
-                columns=[
-                    "set",
-                    "crit",
-                    "max_depth",
-                    "min_samples_leaf",
-                    "correct",
-                    "wrong",
-                    "unsure",
-                    "total",
-                    "wrong_max_spdup",
-                    "wrong_gman_spdup",
-                    "top_k_correct",
-                    "wrong_max_spdup_k",
-                    "wrong_gman_spdup_k",
-                    "top_k_unsure",
-                    "max_spdup_default",
-                    "gman_spdup_default",
-                    "max_slowdown_default",
-                    "non_default_preds",
-                    "default_better",
-                ],
-            ),
+            pd.DataFrame(results, columns=columns),
             best_model,
             best_model_safe_proba,
             best_model_unsafe_leaves,
@@ -359,6 +317,10 @@ class AHTrainDecisionTree(AHTrain):
             mean = group["feedback"].mean()
             std = group["feedback"].std()
             relative_std = (std / mean) * 100 if mean != 0 else np.inf
+            if relative_std > 5:
+                times = group["feedback"].tolist()
+                times_str = ", ".join([f"{t:.3f}" for t in sorted(times)])
+                log.debug("High relative std: %f. times=%s", relative_std, times_str)
             median = group["feedback"].median()
             return pd.Series(
                 {
@@ -434,145 +396,6 @@ class AHTrainDecisionTree(AHTrain):
             cat_feature2cats, categorical_features, results
         )
         return (results, choices, cat_feature2cats, dummy_col_2_col_val, metadata)
-
-    def get_results(
-        self,
-        model,
-        predictions,
-        df,
-        probas,
-        return_safe_proba=False,
-        wrong_pct=0.01,
-        threshold=0.0,
-        k=3,
-        unsafe_leaves=None,
-        leaf_ids=None,
-    ):
-        """
-        Custom evaluation function that evaluates a learned decision tree.
-        """
-
-        def compute_speedup_over_default(default_config, pred, df, i, predicted_time):
-            nonlocal num_non_default_predictions
-            nonlocal speedups_over_default
-            nonlocal num_default_better
-            if default_config is not None:
-                if pred != default_config:
-                    num_non_default_predictions += 1
-                default_time = self.get_time(df.iloc[i], default_config)
-                # TODO: We should keep track of how often this happens
-                if default_time is not None and not math.isinf(default_time):
-                    speedup_over_default = default_time / predicted_time
-                    if speedup_over_default < 1:
-                        num_default_better += 1
-                    speedups_over_default.append(speedup_over_default)
-
-        y_true = df["winner"]
-        num_correct = 0
-        num_wrong = 0
-        num_unsure = 0
-        wrong_probas = []
-        i = 0
-        speedups_wrong = []
-        num_correct_top_k = 0
-        wrong_speedups_top_k = []
-        top_k_unsure = 0
-        speedups_over_default = []
-        num_non_default_predictions = 0
-        num_default_better = 0
-        for pred, true, prob, leaf_id in zip(predictions, y_true, probas, leaf_ids):
-            avail_choices = df["avail_choices"].iloc[i]
-            top_k_choices = self.top_k_classes(
-                model, probas[i], k=k, avail_choices=avail_choices
-            )
-            predicted_time = self.get_time(df.iloc[i], pred)
-            assert true in avail_choices, f"{true} not in {avail_choices}"
-
-            default_config = self.get_default_config(df.iloc[i])
-
-            max_prob = max(prob)
-            if (
-                leaf_id in unsafe_leaves
-                or pred not in avail_choices
-                or (max_prob != 1.0 and max(prob) <= threshold)
-            ):
-                num_unsure += 1
-                speedups_over_default.append(1.0)
-            elif pred == true:
-                compute_speedup_over_default(
-                    default_config, pred, df, i, predicted_time
-                )
-                num_correct += 1
-            else:
-                compute_speedup_over_default(
-                    default_config, pred, df, i, predicted_time
-                )
-                num_wrong += 1
-                wrong_probas.append(max_prob)
-                best_time = self.get_time(df.iloc[i], true)
-                wrong_speedup = predicted_time / best_time
-                speedups_wrong.append(wrong_speedup)
-
-            if true in top_k_choices:
-                num_correct_top_k += 1
-            else:
-                times = []
-                for choice in top_k_choices:
-                    time = self.get_time(df.iloc[i], choice)
-                    if time is not None:
-                        times.append(time)
-                best_time = self.get_time(df.iloc[i], true)
-                min_time = min(times) if times else None
-                if min_time is not None:
-                    speedup = min_time / best_time
-                    wrong_speedups_top_k.append(speedup)
-                else:
-                    top_k_unsure += 1
-            i += 1
-
-        if return_safe_proba:
-            wrong_probas.sort()
-            total = len(predictions)
-            num_wrong = len(wrong_probas)
-            allowed_wrong = int(total * wrong_pct)
-            if allowed_wrong >= num_wrong:
-                return 0.0
-            too_many_wrong = num_wrong - allowed_wrong
-            idx = min(too_many_wrong, len(wrong_probas) - 1)
-            return wrong_probas[idx]
-
-        total = len(predictions)
-        max_speedup = max(speedups_wrong) if speedups_wrong else 0
-        gmean_speedup = gmean(speedups_wrong) if speedups_wrong else 0
-        max_speedup_top_k = max(wrong_speedups_top_k) if wrong_speedups_top_k else 0
-        gmean_speedup_top_k = gmean(wrong_speedups_top_k) if wrong_speedups_top_k else 0
-
-        max_speedup_over_default = (
-            max(speedups_over_default) if speedups_over_default else 0
-        )
-        gmean_speedup_over_default = (
-            gmean(speedups_over_default) if speedups_over_default else 0
-        )
-        max_slowdown_over_defalt = (
-            min(speedups_over_default) if speedups_over_default else 0
-        )
-        return {
-            "correct": num_correct,
-            "wrong": num_wrong,
-            "unsure": num_unsure,
-            "total": total,
-            "wrong_max_speedup": max_speedup,
-            "wrong_gmean_speedup": gmean_speedup,
-            "top_k_correct": num_correct_top_k,
-            "wrong_max_speedup_k": max_speedup_top_k,
-            "wrong_gmean_speedup_k": gmean_speedup_top_k,
-            "top_k_unsure": top_k_unsure,
-            "max_speedup_default": max_speedup_over_default,
-            "gmean_speedup_default": gmean_speedup_over_default,
-            "max_slowdown_default": max_slowdown_over_defalt,
-            "non_default_predictions": num_non_default_predictions,
-            "default_better": num_default_better,
-        }
 
     def gen_classes(self, classes, num_spaces):
         """
@@ -655,6 +478,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
     LearnedHeuristicDecision,
 )
 
+
 class {heuristic_name}(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
@@ -688,6 +512,301 @@ class {heuristic_name}(LearnedHeuristicDecision):
                     path, cat_feature2cats=cat_feature2cats, apply_filters=False
                 )
                 datasets[name] = df_other
+
+
+@dataclass
+class AccuracyMetrics:
+    # Number of correct predictions
+    num_correct: int
+    # Number of wrong predictions
+    num_wrong: int
+    # Number of predictions where model is unsure
+    num_unsure: int
+    # Total number of predictions
+    total: int
+
+    def to_map(self):
+        return {
+            "correct": self.num_correct,
+            "wrong": self.num_wrong,
+            "unsure": self.num_unsure,
+            "total": self.total,
+        }
+
+
+@dataclass
+class WrongSpeedupMetrics:
+    # If the model predicted the wrong choice, this is the maximum speedup of the best choice over the predicted choice
+    max_speedup: float
+    # For all wrong predictions, this is the geometric mean of the speedups of the best choices over the predicted choices
+    gmean_speedup: float
+
+    def to_map(self):
+        return {
+            "wrong_max_speedup": self.max_speedup,
+            "wrong_gmean_speedup": self.gmean_speedup,
+        }
+
+
+@dataclass
+class RankingMetrics:
+    # Number of predictions where best choice is in top k choices
+    num_correct: int
+    # Maximum speedup of best choice over best choice in top k (this tells us how much better the best choice, which
+    # is not in top k, is over the best choice in top k)
+    max_speedup: float
+    # Geometric mean of speedups of best choice over best choice in top k
+    gmean_speedup: float
+    # Number of predictions where model is unsure
+    unsure: int
+
+    def to_map(self):
+        return {
+            "top_k_correct": self.num_correct,
+            "wrong_max_speedup_k": self.max_speedup,
+            "wrong_gmean_speedup_k": self.gmean_speedup,
+            "top_k_unsure": self.unsure,
+        }
+
+
+@dataclass
+class DefaultComparisonMetrics:
+    # Maximum speedup of predicted choice over default choice
+    max_speedup: float
+    # Geometric mean of speedups of predicted choices over default choices
+    gmean_speedup: float
+    # Maximum speedup of default choice over predicted choice
+    max_slowdown: float
+    # Number of predictions where the predicted choice is not the default choice
+    non_default_predictions: int
+    # Number of predictions where the default choice is better than the predicted choice
+    default_better: bool
+
+    def to_map(self):
+        return {
+            "max_speedup_over_default": self.max_speedup,
+            "gmean_speedup_over_default": self.gmean_speedup,
+            "max_speedup_default_over_heuristic": self.max_slowdown,
+            "non_default_predictions": self.non_default_predictions,
+            "default_better": self.default_better,
+        }
+
+
+@dataclass
+class EvalResults:
+    accuracy: AccuracyMetrics
+    speedup: WrongSpeedupMetrics
+    ranking: RankingMetrics
+    default_comparison: DefaultComparisonMetrics
+
+    def to_map(self):
+        return {
+            **self.accuracy.to_map(),
+            **self.speedup.to_map(),
+            **self.ranking.to_map(),
+            **self.default_comparison.to_map(),
+        }
+
+
+class DecisionEvaluator:
+    def __init__(
+        self,
+        train,
+        model,
+        predictions,
+        df,
+        probas,
+        wrong_pct=0.01,
+        threshold=0.0,
+        k=3,
+        unsafe_leaves=None,
+        leaf_ids=None,
+    ) -> None:
+        self.train = train
+        self.model = model
+        self.predictions = predictions
+        self.df = df
+        self.probas = probas
+        self.wrong_pct = wrong_pct
+        self.threshold = threshold
+        self.k = k
+        self.unsafe_leaves = unsafe_leaves
+        self.leaf_ids = leaf_ids
+
+        self.num_correct = 0
+        self.num_wrong = 0
+        self.num_unsure = 0
+        self.wrong_probas = []
+        self.speedups_wrong = []
+        self.num_correct_top_k = 0
+        self.wrong_speedups_top_k = []
+        self.top_k_unsure = 0
+        self.num_non_default_predictions = 0
+        self.speedups_over_default = []
+        self.num_default_better = 0
+
+    def compute_speedup_over_default(self, default_config, pred, i, predicted_time):
+        if default_config is not None:
+            if pred != default_config:
+                self.num_non_default_predictions += 1
+            default_time = self.get_time(self.df.iloc[i], default_config)
+            # TODO: We should keep track of how often this happens
+            if default_time is not None and not math.isinf(default_time):
+                speedup_over_default = default_time / predicted_time
+                if speedup_over_default < 1:
+                    self.num_default_better += 1
+                self.speedups_over_default.append(speedup_over_default)
+            else:
+                log.debug(
+                    "cannot compute speedup over default because default_time=%d",
+                    default_time,
+                )
+
+    def get_time(self, row, choice):
+        choices_feedback = json.loads(row["choice2time"])
+        return choices_feedback.get(choice, None)
+
+    def top_k_classes(self, model, probas, k, avail_choices):
+        # Get classes and their corresponding probabilities
+        classes = model.classes_
+        class_proba_pairs = list(zip(classes, probas))
+
+        # Sort by probability (descending) and filter out zero probabilities
+        sorted_classes = [
+            c
+            for c, p in sorted(zip(classes, probas), key=lambda x: x[1], reverse=True)
+            if p > 0 and c in avail_choices
+        ]
+
+        # Return top k choices
+        return sorted_classes[:k]
+
+    def eval_prediction(
+        self, avail_choices, leaf_id, pred, true, prob, threshold, default_config, i
+    ):
+        predicted_time = self.get_time(self.df.iloc[i], pred)
+        max_prob = max(prob)
+        if (
+            leaf_id in self.unsafe_leaves
+            or pred not in avail_choices
+            or (max_prob != 1.0 and max_prob <= threshold)
+        ):
+            self.num_unsure += 1
+            self.speedups_over_default.append(1.0)
+        elif pred == true:
+            self.compute_speedup_over_default(default_config, pred, i, predicted_time)
+            self.num_correct += 1
+        else:
+            self.compute_speedup_over_default(default_config, pred, i, predicted_time)
+            self.num_wrong += 1
+            self.wrong_probas.append(max_prob)
+            best_time = self.get_time(self.df.iloc[i], true)
+            wrong_speedup = predicted_time / best_time
+            self.speedups_wrong.append(wrong_speedup)
+
+    def eval_ranking_prediction(self, true, top_k_choices, i):
+        if true in top_k_choices:
+            self.num_correct_top_k += 1
+        else:
+            top_k_choices_times = []
+            for choice in top_k_choices:
+                time = self.get_time(self.df.iloc[i], choice)
+                if time is not None:
+                    top_k_choices_times.append(time)
+            best_time = self.get_time(self.df.iloc[i], true)
+            min_time = min(top_k_choices_times, default=None)
+            if min_time is not None:
+                speedup = min_time / best_time
+                self.wrong_speedups_top_k.append(speedup)
+            else:
+                self.top_k_unsure += 1
+                # TODO (AlnisM): print more info (input and choices)
+                log.debug(
+                    "All top k choices have no time which means all top k are unavailable"
+                )
+
+    def get_safe_proba(self):
+        return self.get_results(return_safe_proba=True)
+
+    def compute_safe_proba(self, num_predictions, wrong_probas, wrong_pct):
+        wrong_probas.sort()
+        num_wrong = len(wrong_probas)
+        allowed_wrong = int(num_predictions * wrong_pct)
+        if allowed_wrong >= num_wrong:
+            return 0.0
+        too_many_wrong = num_wrong - allowed_wrong
+        idx = min(too_many_wrong, len(wrong_probas) - 1)
+        return wrong_probas[idx]
+
+    def get_results(self, return_safe_proba=False) -> EvalResults:
+        """
+        Custom evaluation function that evaluates a learned decision tree.
+        """
+
+        y_true = self.df["winner"]
+        i = 0
+        for pred, true, prob, leaf_id in zip(
+            self.predictions, y_true, self.probas, self.leaf_ids
+        ):
+            avail_choices = self.df["avail_choices"].iloc[i]
+            top_k_choices = self.top_k_classes(
+                self.model, prob, k=self.k, avail_choices=avail_choices
+            )
+            assert (
+                true in avail_choices
+            ), f"Best choice {true} not in available choices {avail_choices}"
+            default_config = self.train.get_default_config(self.df.iloc[i])
+            self.eval_prediction(
+                avail_choices,
+                leaf_id,
+                pred,
+                true,
+                prob,
+                self.threshold,
+                default_config,
+                i,
+            )
+            self.eval_ranking_prediction(true, top_k_choices, i)
+            i += 1
+
+        total = len(self.predictions)
+        if return_safe_proba:
+            return self.compute_safe_proba(total, self.wrong_probas, self.wrong_pct)
+
+        def safe_gmean(x):
+            return gmean(x) if x else 0
+
+        max_speedup = max(self.speedups_wrong, default=0)
+        gmean_speedup = safe_gmean(self.speedups_wrong)
+        max_speedup_top_k = max(self.wrong_speedups_top_k, default=0)
+        gmean_speedup_top_k = safe_gmean(self.wrong_speedups_top_k)
+        max_speedup_over_default = max(self.speedups_over_default, default=0)
+        gmean_speedup_over_default = safe_gmean(self.speedups_over_default)
+        max_slowdown_over_default = min(self.speedups_over_default, default=0)
+
+        accuracyMetrics = AccuracyMetrics(
+            self.num_correct, self.num_wrong, self.num_unsure, total
+        )
+        wrongSpeedupMetrics = WrongSpeedupMetrics(max_speedup, gmean_speedup)
+        rankingMetrics = RankingMetrics(
+            self.num_correct_top_k,
+            max_speedup_top_k,
+            gmean_speedup_top_k,
+            self.top_k_unsure,
+        )
+        defaultComparisonMetrics = DefaultComparisonMetrics(
+            max_speedup_over_default,
+            gmean_speedup_over_default,
+            max_slowdown_over_default,
+            self.num_non_default_predictions,
+            self.num_default_better,
+        )
+        return EvalResults(
+            accuracyMetrics,
+            wrongSpeedupMetrics,
+            rankingMetrics,
+            defaultComparisonMetrics,
+        )
 
 
 if __name__ == "__main__":
