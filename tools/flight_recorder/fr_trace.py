@@ -28,6 +28,8 @@ python fr_trace.py -d <dump dir containing trace files> [-o <output file>]
 """
 
 import argparse
+import ast
+import math
 import os
 import pickle
 import sys
@@ -216,8 +218,8 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
-        input_numel += int(e["input_sizes"])
-        output_numel += int(e["output_sizes"])
+        input_numel += math.prod(e["input_sizes"][0])
+        output_numel += math.prod(e["output_sizes"][0])
     return input_numel == output_numel, input_numel, output_numel
 
 
@@ -506,7 +508,7 @@ def build_groups_memberships(
     for global_rank in pg_config:
         for pg_id in pg_config[global_rank]:
             desc = pg_config[global_rank][pg_id]["desc"]
-            ranks = pg_config[global_rank][pg_id]["ranks"]
+            ranks = ast.literal_eval(pg_config[global_rank][pg_id]["ranks"])
             if isinstance(ranks, str):
                 # TODO Bug in FR data format? ranks is '[0, 1,...]'
                 ranks = eval(ranks)
