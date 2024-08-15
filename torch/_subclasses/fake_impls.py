@@ -1131,6 +1131,7 @@ def make_fast_binary_impl(slow_ref):
         assert final_shape is not None
 
         from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
@@ -1141,6 +1142,7 @@ def make_fast_binary_impl(slow_ref):
             ):
                 break
         else:
+            breakpoint()
             return slow("both tensors nontrivially broadcast")
 
         # compute_types
