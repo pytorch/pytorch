@@ -275,8 +275,6 @@ class CompiledForward(FXGraphCacheLoadable):
     Cacheable entry for a forward function
     """
 
-    pass
-
 
 @dataclass
 class CompiledBackward(FXGraphCacheLoadable):
@@ -473,6 +471,9 @@ class AOTAutogradCache:
         # Count missing the FXGraphCache as a miss not a bypass
         except FXGraphCacheMiss as e:
             counters["aot_autograd"]["autograd_cache_miss"] += 1
+            # Special counter when we pass autograd cache but
+            # fail when on inductor guards
+            counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             if config.strict_autograd_cache:
                 raise e
         except BypassAOTAutogradCache as e:
