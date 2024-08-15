@@ -467,11 +467,10 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
 
   static inline bool device_check(ScalarType dtype) {
     if (dtype == ScalarType::Half) {
-      static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16 ||
-        dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+      static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
       return fp16_support;
     } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2_vnni_2;
+      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
     } else {
       return false;
@@ -508,11 +507,10 @@ struct Pack : public Kernel_Cache<PackKey, pack_t> {
 
     static inline bool need_pack(ScalarType dtype) {
     if (dtype == ScalarType::Half) {
-      static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16 ||
-        dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+      static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
       return fp16_pack;
     } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2_vnni_2;
+      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
       return bf16_pack;
     } else {
       return false;
