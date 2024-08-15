@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     skipIfRocm,
     TEST_WITH_ASAN,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -35,6 +36,7 @@ inner(torch.randn(2, 2).to("{device}"))
         self._test_after_aot_runtime_error("cpu", "")
 
     @skipIfRocm
+    @skipIfXpu
     @requires_gpu
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_gpu_runtime_error(self):
