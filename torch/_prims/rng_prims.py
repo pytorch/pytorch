@@ -148,7 +148,11 @@ def get_device(args, kwargs):
 
 
 def register_run_and_save_rng_state_op():
-    run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
+    class RunAndSaveRngState(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_and_save_rng_state")
+
+    run_and_save_rng_state = RunAndSaveRngState()
 
     run_and_save_rng_state.py_impl(DispatchKey.Autograd)(
         autograd_not_implemented(run_and_save_rng_state, deferred_error=True)
@@ -190,7 +194,11 @@ def register_run_and_save_rng_state_op():
 
 
 def register_run_with_rng_state_op():
-    run_with_rng_state = HigherOrderOperator("run_with_rng_state")
+    class RunWithRngState(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_with_rng_state")
+
+    run_with_rng_state = RunWithRngState()
 
     run_with_rng_state.py_impl(DispatchKey.Autograd)(
         autograd_not_implemented(run_with_rng_state, deferred_error=True)
