@@ -302,8 +302,11 @@ def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     return split_k
 
 
-def _get_decoding_default_config(key) -> Tuple[int, int, int]:
-    default_config = (64, 2, 3)
+def _get_decoding_default_config(key) -> List[Tuple[int, int, int]]:
+    default_config = [
+        (32, 2, 3),  # Less Shared Mem
+        (64, 2, 3),  # Baseline config
+    ]
 
     return default_config
 
@@ -366,7 +369,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         buf.realize()
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
-    configs.append(_get_decoding_default_config(key))
+    configs.extend(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
     if config.max_autotune:
         configs += [
