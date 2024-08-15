@@ -57,6 +57,8 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 }
 } // namespace
 
+const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
+
 int32_t aoti_torch_device_type_cpu() {
   return (int32_t)c10::DeviceType::CPU;
 }
@@ -936,8 +938,6 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 
   auto device = t->device();
-  auto min = t->min().item<float>();
-  auto max = t->max().item<float>();
 
   // Display message
   std::cout << "[";
@@ -948,20 +948,23 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
             << "]:" << std::endl;
 
   // Print exact tensor values for small size tensors
-  const int threshold = 10;
-  if (t->numel() <= threshold) {
+  const int64_t numel = t->numel();
+  if (numel <= AOTI_TORCH_MAX_NUMEL_TO_PRINT) {
     std::cout << *t << "\n";
   }
 
   // Print summary stats of the tensor
-  std::cout << "Min value: " << min << std::endl;
-  std::cout << "Max value: " << max << std::endl;
+  std::cout << "Number of elements: " << numel << std::endl;
+  if (numel > 0) {
+    std::cout << "Mean value: " << t->mean().item() << std::endl;
+    std::cout << "Min value: " << t->min().item<float>() << std::endl;
+    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+  }
   std::cout << "Device: " << device << std::endl;
   std::cout << "Size: " << t->sizes() << std::endl;
   std::cout << "Stride: " << t->strides() << std::endl;
   std::cout << "Dtype: " << t->dtype() << std::endl;
   std::cout << "Layout: " << t->layout() << std::endl;
-  std::cout << "Number of elements: " << t->numel() << std::endl;
   std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
   std::cout << "Requires grad: " << t->requires_grad() << std::endl;
 

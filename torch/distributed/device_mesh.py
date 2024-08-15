@@ -66,6 +66,7 @@ else:
             self.mesh_dim_group_options: Dict[
                 int, Tuple[str, Optional[ProcessGroup.Options]]
             ] = {}
+            self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -128,6 +129,13 @@ else:
                     for dim in flatten_dims_in_root
                 ]
             )
+            # Quick return if the flatten mesh has been created before.
+            if (
+                root_mesh in self.root_to_flatten_mapping
+                and flatten_mesh_dim_names in self.root_to_flatten_mapping[root_mesh]
+            ):
+                return self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_names]
+
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
             remained_dims_in_root = list(range(root_mesh.mesh.ndim))
@@ -149,6 +157,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[flatten_mesh_dim_names] = res_flattened_mesh  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
@@ -510,15 +519,15 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
+            it = iter(self.mesh_dim_names)
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
-                mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
+                mesh_dim_name in it for mesh_dim_name in mesh_dim_names
             ):
                 raise KeyError(
                     f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                    "Valid mesh_dim_names should be a subsequence of valid"
-                    f"mesh_dim_names from {self.mesh_dim_names}."
+                    f"Valid mesh_dim_names should be a subsequence of {self.mesh_dim_names}."
                 )
 
             submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
