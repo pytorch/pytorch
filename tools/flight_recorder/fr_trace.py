@@ -352,7 +352,7 @@ class Op:
                 if (other.type == "coalesced")
                 else MatchState.SIZE_OR_SYNTAX_MISMATCH
             )
-        return MatchState.SIZE_OR_SYNTAX_MISMATCH
+        return MatchState.FULLY_MATCHED
 
 
 def match_one_event(
