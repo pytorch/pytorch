@@ -65,6 +65,7 @@ class NestedTensor(torch.Tensor):
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     _size: Tuple[int, ...]
     _strides: Tuple[int, ...]
+    _is_contiguous: bool
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -87,10 +88,12 @@ class NestedTensor(torch.Tensor):
         assert not isinstance(values, NestedTensor)
         assert values.device == offsets.device
 
+        _is_contiguous = kwargs.get("_is_contiguous", True)
+        assert kwargs.get("_is_contiguous", True) or (lengths is not None and not torch.equal(offsets.diff(), lengths))
+
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
-        is_contiguous =  lengths is None or torch.equal(offsets.diff(), lengths)
-        ragged_source = offsets if is_contiguous else lengths
+        ragged_source = offsets if _is_contiguous else lengths
         ragged_size = get_tensor_symint(ragged_source, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
@@ -133,7 +136,7 @@ class NestedTensor(torch.Tensor):
         self._values = values
         self._offsets = offsets
         self._lengths = lengths
-
+        self._is_contiguous = kwargs.get("_is_contiguous", True)
         # holds properties that are computed lazily
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
