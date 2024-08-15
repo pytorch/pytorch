@@ -1028,7 +1028,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
+        if subobj is not NO_SUCH_SUBOBJ:
+            if is_wrapper_or_member_descriptor(subobj):
+                options = {"source": source}
+                return variables.GetAttrVariable(self, name, **options)
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:

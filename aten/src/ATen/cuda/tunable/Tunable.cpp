@@ -45,13 +45,8 @@
 
 namespace at::cuda::tunable {
 
-namespace {
-
-TuningContext tuning_context;
-
-} // anonymous namespace
-
 TuningContext* getTuningContext() {
+  static TuningContext tuning_context;
   return &tuning_context;
 }
 

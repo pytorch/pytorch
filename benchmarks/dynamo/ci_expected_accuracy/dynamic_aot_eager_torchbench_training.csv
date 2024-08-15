@@ -110,7 +110,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,25
+hf_Reformer,pass,19
 
 
 
@@ -278,4 +278,4 @@ vision_maskrcnn,pass,33
 
 
 
-yolov3,fail_accuracy,8
+yolov3,pass,8
