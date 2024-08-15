@@ -41,11 +41,11 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.verifier import Verifier
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import first_call_function_nn_module_stack
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -92,7 +92,7 @@ class ModuleCallEntry:
 def _disable_prexisiting_fake_mode(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             return fn(*args, **kwargs)
 
     return wrapper

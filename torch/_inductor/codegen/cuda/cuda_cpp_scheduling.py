@@ -10,7 +10,6 @@ from ...scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, Scheduler
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
-from ..debug_utils import DebugPrinterManager
 
 
 log = logging.getLogger(__name__)
@@ -103,12 +102,12 @@ class CUDACPPScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, node_schedule)
 
         # debug printing values of intermediate tensors
-        # Note: MultiKernel debug printing is not supported for now
-        enable_debug_printer = config.aot_inductor.debug_intermediate_value_printer
-        _, call_args, _, arg_types = kernel.args.python_argdefs()
-        with DebugPrinterManager(
-            enable_debug_printer, call_args, kernel_name, kernel, arg_types
-        ):
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
             kernel.call_kernel(kernel_name, ctb)
 
         V.graph.removed_buffers |= kernel.removed_buffers
