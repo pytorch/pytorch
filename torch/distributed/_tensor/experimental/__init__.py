@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.experimental.local_map import local_map
+from torch.distributed._tensor.experimental.func_map import local_map
 from torch.distributed._tensor.experimental.register_sharding import register_sharding
 
 
