@@ -7,7 +7,8 @@
 
 #include <string>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamWriter;
@@ -86,4 +87,5 @@ bool _backport_for_mobile_impl(
   return backportManager.backport(oss, writer, from_version, to_version);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

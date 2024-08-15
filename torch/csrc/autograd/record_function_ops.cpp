@@ -12,7 +12,9 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(at::RecordFunction);
 } // namespace caffe2
 
-namespace torch::autograd::profiler {
+namespace torch {
+namespace autograd {
+namespace profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
@@ -163,4 +165,6 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
       c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 
-} // namespace torch::autograd::profiler
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

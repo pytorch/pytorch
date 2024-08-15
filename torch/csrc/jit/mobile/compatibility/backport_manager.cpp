@@ -12,8 +12,10 @@
 #include <cstddef>
 #include <sstream>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
+using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 
@@ -115,6 +117,7 @@ void write_archive_current(
   data_pickle.stop();
   // write out tensor data
   size_t i = 0;
+  std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
   const std::unordered_set<std::string>& pre_serialized_files =
@@ -385,8 +388,8 @@ Thus, the backport is necessary such that the bytecode operator table contains
 number of specified arguments.
 */
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
-  auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
 
   // If there are debug info files in the original model file, it should also
@@ -450,11 +453,11 @@ push in the stack. Thus, the backport is necessary such that the bytecode
 contains all the arguments as before.
 */
 std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
-  auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
   auto constants_values =
-      std::move(*readArchive(kArchiveNameConstants, *reader).toTuple())
+      std::move(*readArchive(kArchiveNameConstants, *reader.get()).toTuple())
           .elements();
 
   // If there are debug info files in the original model file, it should also
@@ -523,8 +526,8 @@ std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
 }
 
 std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
-  auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
   // extra_files are kept
   auto records = reader->getAllRecords();
@@ -693,4 +696,5 @@ bool BackportManager::backport(
   return backport_success;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

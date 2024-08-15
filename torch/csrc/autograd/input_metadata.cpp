@@ -3,7 +3,8 @@
 // TODO: we may be able to move some imports from input_metadata.h to here, but
 // it seems that function.h transitively depends on some of them.
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 namespace {
 
@@ -157,6 +158,7 @@ std::stringstream InputMetadata::incompatible_shape_error_message(
 }
 
 bool InputMetadata::is_cpp_nested_tensor() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool ret = std::holds_alternative<at::Tensor>(shape_);
   TORCH_INTERNAL_ASSERT(ret == (is_nested_ && !is_tensor_subclass_))
   return ret;
@@ -201,4 +203,5 @@ bool InputMetadata::maybe_expandable_to(const at::Tensor& grad) const {
   }
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

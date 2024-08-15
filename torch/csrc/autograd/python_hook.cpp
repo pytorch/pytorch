@@ -26,7 +26,8 @@ static void check_single_result(
     PyObject* result,
     PyObject* hook);
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 namespace {
 
@@ -252,7 +253,8 @@ void PyFunctionTensorPostAccGradHooks::apply_with_saved(
   }
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
 
 static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();

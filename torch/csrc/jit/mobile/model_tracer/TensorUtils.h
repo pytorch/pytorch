@@ -2,7 +2,9 @@
 
 #include <ATen/core/ivalue.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 /**
  * Recursively scan the IValue object, traversing lists, tuples, dicts, and stop
  * and call the user provided callback function 'func' when a Tensor is found.
@@ -10,4 +12,6 @@ namespace torch::jit::mobile {
 void for_each_tensor_in_ivalue(
     const ::c10::IValue& iv,
     std::function<void(const ::at::Tensor&)> const& func);
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

@@ -1,7 +1,9 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 void for_each_tensor_in_ivalue(
     const c10::IValue& iv,
     std::function<void(const ::at::Tensor&)> const& func) {
@@ -35,4 +37,6 @@ void for_each_tensor_in_ivalue(
     AT_ERROR("Unhandled type of IValue. Got ", iv.tagKind());
   }
 }
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

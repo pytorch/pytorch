@@ -17,7 +17,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 namespace {
 
@@ -629,4 +630,5 @@ torch::CppFunction autogradNotImplementedInplaceOrViewFallback() {
       &autogradNotImplementedInplaceOrViewFallbackImpl>();
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

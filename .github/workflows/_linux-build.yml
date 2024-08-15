@@ -34,11 +34,6 @@ on:
         default: "5.2"
         description: |
           List of CUDA architectures CI build should target.
-      runner_prefix:
-        required: false
-        default: ""
-        type: string
-        description: Prefix for runner label
       runner:
         required: false
         type: string
@@ -96,7 +91,7 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}

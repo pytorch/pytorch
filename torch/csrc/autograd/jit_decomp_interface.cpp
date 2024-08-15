@@ -1,6 +1,8 @@
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 
-namespace torch::autograd::impl {
+namespace torch {
+namespace autograd {
+namespace impl {
 
 namespace {
 JitDecompInterface* impl = nullptr;
@@ -14,4 +16,6 @@ JitDecompInterface* getJitDecompImpl() {
   return impl;
 }
 
-} // namespace torch::autograd::impl
+} // namespace impl
+} // namespace autograd
+} // namespace torch

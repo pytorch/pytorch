@@ -41,7 +41,8 @@ using at::TensorOptions;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
@@ -795,4 +796,5 @@ void initTorchFunctions(PyObject* module) {
       });
 }
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

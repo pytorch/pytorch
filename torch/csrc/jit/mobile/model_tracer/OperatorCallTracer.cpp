@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 OperatorCallTracer::OperatorCallTracer() {
   getCalledOperators().withLock([](std::set<std::string>& called_operators) {
     called_operators.clear();
@@ -22,4 +24,6 @@ OperatorCallTracer::OperatorCallTracer() {
                                       .scopes({at::RecordScope::FUNCTION}));
 }
 
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

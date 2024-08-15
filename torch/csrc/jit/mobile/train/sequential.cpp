@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::jit::mobile {
+namespace torch {
+namespace jit {
+namespace mobile {
 SequentialSampler::SequentialSampler(size_t size) : size_(size) {}
 
 void SequentialSampler::reset(std::optional<size_t> new_size) {
@@ -41,4 +43,6 @@ size_t SequentialSampler::index() const noexcept {
   return index_;
 }
 
-} // namespace torch::jit::mobile
+} // namespace mobile
+} // namespace jit
+} // namespace torch

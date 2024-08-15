@@ -252,8 +252,8 @@ class BlockMask:
     kv_indices: Tensor
     full_kv_num_blocks: Optional[Tensor]
     full_kv_indices: Optional[Tensor]
-    q_num_blocks: Optional[Tensor]
-    q_indices: Optional[Tensor]
+    q_num_blocks: Tensor
+    q_indices: Tensor
     full_q_num_blocks: Optional[Tensor]
     full_q_indices: Optional[Tensor]
     BLOCK_SIZE: Tuple[int, int]
@@ -265,8 +265,8 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Optional[Tensor],
         full_kv_indices: Optional[Tensor],
-        q_num_blocks: Optional[Tensor],
-        q_indices: Optional[Tensor],
+        q_num_blocks: Tensor,
+        q_indices: Tensor,
         full_q_num_blocks: Optional[Tensor],
         full_q_indices: Optional[Tensor],
         BLOCK_SIZE: Tuple[int, int],
@@ -399,19 +399,16 @@ class BlockMask:
         return BlockMask(*mapped_attributes)
 
     def __repr__(self):
-        def shape_or_none(x: Optional[torch.Tensor]):
-            return x.shape if x is not None else None
-
         return (
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
-            f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
-            f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
-            f"    q_indices={shape_or_none(self.q_indices)},\n"
-            f"    full_q_num_blocks={shape_or_none(self.full_q_num_blocks)},\n"
-            f"    full_q_indices={shape_or_none(self.full_q_indices)},\n"
+            f"    full_kv_num_blocks={self.full_kv_num_blocks.shape if self.full_kv_num_blocks is not None else None},\n"
+            f"    full_kv_indices={self.full_kv_indices.shape if self.full_kv_indices is not None else None},\n"
+            f"    q_num_blocks={self.q_num_blocks.shape},\n"
+            f"    q_indices={self.q_indices.shape},\n"
+            f"    full_q_num_blocks={self.full_q_num_blocks.shape if self.full_q_num_blocks is not None else None},\n"
+            f"    full_q_indices={self.full_q_indices.shape if self.full_q_indices is not None else None},\n"
             f"    BLOCK_SIZE={self.BLOCK_SIZE},\n"
             f"    shape={self.shape},\n"
             f"    sparsity={self.sparsity():.2f}%,\n"
@@ -837,11 +834,6 @@ def _apply_kernel_options(query, key, value, kernel_options):
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
     kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
-    if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options["IS_DIVISIBLE"] = False
-    else:
-        kernel_options["IS_DIVISIBLE"] = True
-
     return kernel_options
 
 
@@ -912,6 +904,11 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
+    if query.size(-2) >= 32:  # use Attention Kernel
+        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
+            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
+    if key.size(-2) % 128 != 0:
+        raise NotImplementedError("NYI: L must be a multiple of 128")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
         raise ValueError(
             f"Expect query and key/value to have the same number of heads "
