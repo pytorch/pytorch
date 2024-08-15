@@ -60,7 +60,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
 # Note: we use atypical values to amplify error
