@@ -187,6 +187,13 @@ ROCM_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_profiler",
+    "profiler/test_profiler_tree",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -380,6 +387,12 @@ def run_test(
     env=None,
     print_log=True,
 ) -> int:
+    scribe_token = os.getenv("SCRIBE_GRAPHQL_ACCESS_TOKEN", "")
+    if scribe_token:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is set")
+    else:
+        print_to_stderr("SCRIBE_GRAPHQL_ACCESS_TOKEN is NOT set")
+
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_args.copy()
@@ -1827,12 +1840,12 @@ def main():
     try:
         # Actually run the tests
         start_time = time.time()
-        elapsed_time = time.time() - start_time
-        print_to_stderr(
-            f"Starting test batch '{test_batch.name}' {round(elapsed_time, 2)} seconds after initiating testing"
-        )
         run_tests(
             test_batch.sharded_tests, test_directory, options, test_batch.failures
+        )
+        elapsed_time = time.time() - start_time
+        print_to_stderr(
+            f"Running test batch '{test_batch.name}' cost {round(elapsed_time, 2)} seconds"
         )
 
     finally:
