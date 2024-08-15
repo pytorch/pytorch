@@ -442,10 +442,11 @@ def run_test(
 
     if options.showlocals:
         if options.pytest:
-            unittest_args.extend(["--showlocals", "--tb=long"])
-            unittest_args.append("--color=yes" if options.color else "--color=no")
+            unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
         else:
             unittest_args.append("--locals")
+    if options.color and options.pytest:
+        unittest_args.append("--color=yes")
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
