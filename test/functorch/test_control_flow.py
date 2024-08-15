@@ -27,6 +27,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.common_cuda import (
+    SM70OrLater
+)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -1203,6 +1206,7 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
@@ -1236,6 +1240,7 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
@@ -1264,6 +1269,7 @@ def forward(self, pred_1, x_1):
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     self.assertEqual(result, result_exp_PT)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
