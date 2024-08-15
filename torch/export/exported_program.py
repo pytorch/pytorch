@@ -1161,6 +1161,26 @@ class ExportedProgram:
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
+    def _move_to(self, device: torch.device):
+        # change all the nodes with burnt-in device to the new device
+        for node in self.graph.nodes:
+            if "device" in node.kwargs:
+                kwargs = node.kwargs.copy()
+                kwargs["device"] = device
+                node.kwargs = kwargs
+        # move all the tensors and parameters to the new device
+        for k, v in self.state_dict.items():
+            if isinstance(v, torch.nn.Parameter):
+                self._state_dict[k] = torch.nn.Parameter(v.to(device))
+            else:
+                self._state_dict[k] = v.to(device)
+
+    def move_to(self, device: torch.device):
+        """
+        Moves the ExportedProgram to the specified device.
+        """
+        self._move_to(device)
+
 
 def _get_shape_env(gm):
     vals = [
