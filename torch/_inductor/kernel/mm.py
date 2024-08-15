@@ -515,7 +515,17 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mm_autoheuristic(
-    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition, top_k=-1
+    mat1,
+    mat2,
+    m,
+    n,
+    k,
+    choices,
+    name,
+    input_nodes,
+    ops,
+    precondition,
+    top_k: Optional[int] = None,
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
@@ -554,7 +564,7 @@ def mm_autoheuristic(
         augment_context=ops,
         precondition=precondition,
     )
-    if top_k != -1:
+    if top_k is not None:
         return autoheuristic.get_top_k_choices_caller(top_k)
     return autoheuristic.get_choice_caller()
 
