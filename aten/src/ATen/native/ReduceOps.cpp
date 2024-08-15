@@ -1411,6 +1411,10 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
+Tensor& mean_dtype_out(const Tensor &self, std::optional<ScalarType> dtype, Tensor& result) {
+  return at::mean_out(result, self, IntArrayRef{}, false, dtype);
+}
+
 // TODO(@heitorschueroff) implement custom kernels for nanmean
 Tensor& nanmean_out(
     const Tensor& self,

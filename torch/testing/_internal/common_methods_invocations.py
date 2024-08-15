@@ -20948,7 +20948,7 @@ op_db: List[OpInfo] = [
         # FIXME: mean needs 'dim' parameter when using the 'out' overload.
         # Adding it with 'generate_args_kwargs' does not work, since these also get passed
         # onto the reference implementations.
-        supports_out=False,
+        supports_out=True,
         assert_autodiffed=True,
         assert_jit_shape_analysis=True,
         promotes_int_to_float=True,
