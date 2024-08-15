@@ -1578,6 +1578,20 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
 
+    def call_filter(self, tx: "InstructionTranslator", fn, seq):
+        if seq.has_unpack_var_sequence(tx):
+            seq_unpacked = seq.unpack_var_sequence(tx)
+            try:
+                items = list(
+                    filter(
+                        lambda x: fn.call_function(tx, [x], {}).as_python_constant(),
+                        seq_unpacked,
+                    )
+                )
+                return variables.TupleVariable(items)
+            except NotImplementedError:
+                return
+
     def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
         if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
