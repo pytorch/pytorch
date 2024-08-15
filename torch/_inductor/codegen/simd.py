@@ -1406,8 +1406,6 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(final_kernel, MultiKernel)
             else [None, [], None, None]
         )
-        call_args: List[str]
-        arg_signatures: Optional[List[type]]
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.enable_debug_printer = enable_debug_printer
         debug_printer_manager.set_printer_args(
