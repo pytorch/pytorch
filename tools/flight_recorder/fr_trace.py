@@ -785,9 +785,10 @@ def build_collectives(
                     candidate_ranks.clear()
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             else:
+                error_msg = ", ".join(error.name for error in errors)
                 print(
                     f"Collective errors for group {pg_name}:{desc} collective {profiling_name}",
-                    f"Found errors: {error.name for error in errors}",
+                    f"Found errors: {error_msg}",
                 )
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
