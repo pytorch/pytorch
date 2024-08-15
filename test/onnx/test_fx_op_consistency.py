@@ -1974,6 +1974,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """
 
     opset_version = -1
+    op_level_debug: bool = False
     dynamic_shapes: bool = False
     model_type: pytorch_test_common.TorchModelType = (
         pytorch_test_common.TorchModelType.TORCH_NN_MODULE

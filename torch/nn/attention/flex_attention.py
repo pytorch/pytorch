@@ -659,8 +659,8 @@ def _create_sparse_block_from_block_mask(
 
 def create_mask(
     mod_fn: Union[_score_mod_signature, _mask_mod_signature],
-    B: Optional[int],
-    H: Optional[int],
+    B: int,
+    H: int,
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
@@ -679,10 +679,7 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
-    if B is None:
-        B = 1
-    if H is None:
-        H = 1
+
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
@@ -732,7 +729,9 @@ def _create_block_mask_inner(
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         separate_full_blocks=True,
     )
-    return partial_block_mask, full_block_mask
+    return _create_sparse_block_from_block_mask(
+        (partial_block_mask, full_block_mask), mask_mod
+    )
 
 
 def create_block_mask(
@@ -800,11 +799,8 @@ def create_block_mask(
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
-        partial_block_mask, full_block_mask = inner_func(
+        block_mask = inner_func(
             mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
-        )
-        block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod
         )
     return block_mask
 
@@ -840,11 +836,6 @@ def _apply_kernel_options(query, key, value, kernel_options):
     )
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
     kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
-
-    if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options["IS_DIVISIBLE"] = False
-    else:
-        kernel_options["IS_DIVISIBLE"] = True
 
     return kernel_options
 
@@ -916,6 +907,11 @@ def flex_attention(
     _validate_sdpa_input(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
+    if query.size(-2) >= 32:  # use Attention Kernel
+        if query.size(-2) >= 128 and query.size(-2) % 128 != 0:
+            raise NotImplementedError("NYI: S must be <128 or a multiple of 128")
+    if key.size(-2) % 128 != 0:
+        raise NotImplementedError("NYI: L must be a multiple of 128")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
         raise ValueError(
             f"Expect query and key/value to have the same number of heads "
