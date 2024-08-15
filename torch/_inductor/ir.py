@@ -4745,7 +4745,7 @@ class ExternKernel(InputsKernel):
                 return x
             elif isinstance(x.get_layout(), FixedLayout) and (
                 list(x.get_layout().stride) == list(exact_strides)
-                or x.get_layout().is_stride_ordered(order)
+                or (order and x.get_layout().is_stride_ordered(order))
             ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
@@ -4756,7 +4756,11 @@ class ExternKernel(InputsKernel):
                 elif isinstance(x.get_layout().real_layout(), FixedLayout):
                     return x
         # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+        if (
+            isinstance(x, InputBuffer)
+            and order
+            and x.get_layout().is_stride_ordered(order)
+        ):
             return x
         if (
             isinstance(x, TensorBox)
@@ -4764,6 +4768,7 @@ class ExternKernel(InputsKernel):
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
             and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+            and order
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
