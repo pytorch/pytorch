@@ -423,8 +423,6 @@ class InspectSignatureVariable(VariableTracker):
 class InspectParameterVariable(VariableTracker):
     """This is not implemented, if used will graph break."""
 
-    pass
-
 
 class InspectBoundArgumentsVariable(VariableTracker):
     """represents inspect.signature(...).bind(...)"""
