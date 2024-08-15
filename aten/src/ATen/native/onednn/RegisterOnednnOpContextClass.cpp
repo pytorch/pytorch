@@ -79,7 +79,7 @@ TORCH_LIBRARY(onednn, m) {
   m.def("onednn::_nbytes(Tensor onednn_tensor) -> int");
 }
 
-TORCH_LIBRARY(onednn_prepacked, m) {
+TORCH_LIBRARY(mkldnn_prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
       "onednn_prepacked::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, int[2] padding, int[2] dilation, int groups, int[4] input_size, str attr) -> __torch__.torch.classes.onednn.ConvOpContext"));
 
@@ -87,13 +87,13 @@ TORCH_LIBRARY(onednn_prepacked, m) {
       "onednn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.onednn.ConvOpContext W_prepack) -> Tensor Y"));
 }
 
-TORCH_LIBRARY_IMPL(onednn_prepacked, CPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn_prepacked::conv2d_prepack"),
+      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_prepack"),
       TORCH_FN(createConvPrePackOpContext));
 
   m.impl(
-      TORCH_SELECTIVE_NAME("onednn_prepacked::conv2d_run"), TORCH_FN(conv_run));
+      TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"), TORCH_FN(conv_run));
 }
 
 } // namespace onednn
