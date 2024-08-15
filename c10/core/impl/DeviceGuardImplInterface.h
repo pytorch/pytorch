@@ -140,6 +140,14 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
+   * Set the current stream to Stream, You are NOT required to set the current
+   * device to match the device of this stream.
+   */
+  virtual void setStream(Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support set the current stream.")
+  }
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
@@ -210,6 +218,15 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual void synchronizeEvent(void* /*event*/) const {
     TORCH_CHECK(false, "Backend doesn't support synchronizing events.");
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the all streams has completed running on the device.
+   */
+  virtual void syncStreamsOnDevice(const DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support synchronizing all streams on device.");
   }
 
   /**
