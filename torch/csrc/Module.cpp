@@ -1149,8 +1149,9 @@ PyObject* THPModule_setDevice(
   auto device = r.device(0);
   c10::DeviceType device_type = device.type();
   TORCH_CHECK(
-      at::getAccelerator(true).value() == device_type,
-      "device doesn't match the current accelerator.");
+      at::isAccelerator(device_type),
+      c10::DeviceTypeName(device_type),
+      " device type is not an accelerator");
   TORCH_CHECK(
       device.has_index(),
       "Expected a torch.device with a specified index or an integer.");
@@ -1224,8 +1225,9 @@ PyObject* THPModule_setStream(
   c10::Stream stream = r.stream(0);
   c10::DeviceType device_type = stream.device_type();
   TORCH_CHECK(
-      at::getAccelerator(true).value() == device_type,
-      "stream device doesn't match the current accelerator.");
+      at::isAccelerator(device_type),
+      c10::DeviceTypeName(device_type),
+      " device type is not an accelerator.");
   torch::utils::maybe_initialize_device(device_type);
   c10::impl::VirtualGuardImpl impl(device_type);
   // Set the current device to the device of stream.
@@ -1255,8 +1257,9 @@ PyObject* THPModule_getStream(
   } else {
     device_type = device->type();
     TORCH_CHECK(
-        at::getAccelerator(true) == device_type,
-        "device doesn't match the current accelerator.");
+        at::isAccelerator(device_type.value()),
+        c10::DeviceTypeName(device_type.value()),
+        " device type is not an accelerator.");
     if (device->has_index()) {
       device_index = device->index();
     }
@@ -1291,8 +1294,9 @@ PyObject* THPModule_syncStreamsOnDevice(
   } else {
     device_type = device->type();
     TORCH_CHECK(
-        at::getAccelerator(true) == device_type,
-        "device doesn't match the current accelerator.");
+        at::isAccelerator(device_type.value()),
+        c10::DeviceTypeName(device_type.value()),
+        " device type is not an accelerator.");
     if (device->has_index()) {
       device_index = device->index();
     }
