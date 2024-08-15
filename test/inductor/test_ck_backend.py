@@ -129,9 +129,11 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
+
             @torch.compile(dynamic=True)
             def compiled_mm(a, b):
                 return a @ b
+
             Y_compiled = compiled_mm(a, b)
             Y = a @ b
             torch.testing.assert_close(Y_compiled, Y)
