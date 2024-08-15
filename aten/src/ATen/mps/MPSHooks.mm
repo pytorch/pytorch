@@ -20,7 +20,6 @@ bool MPSHooks::hasMPS() const {
 }
 
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
-
   switch (major) {
     case 15:
       if (minor > 0)
@@ -38,6 +37,8 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
       }
     case 13:
       switch (minor) {
+        case 0:
+          return true;
         case 1:
           return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
         case 2:
