@@ -106,7 +106,7 @@ runner_types:
     disk_size: 150
     instance_type: c5.24xlarge
     is_ephemeral: false
-    max_available: 250
+    max_available: 500
     os: linux
     variants:
       amz2023:
