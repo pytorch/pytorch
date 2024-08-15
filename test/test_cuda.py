@@ -5041,6 +5041,11 @@ class TestMemPool(TestCase):
         # in the same pool
         self.assertEqual(len(pool.snapshot()), 2)
 
+        del out_0, out_1
+        pool.empty_cache()
+        # pool now should have 0 segments if empty_cache() reclaimed all the
+        # memory
+        self.assertEqual(len(pool.snapshot()), 0)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
