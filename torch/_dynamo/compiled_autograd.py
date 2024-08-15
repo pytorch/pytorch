@@ -76,7 +76,12 @@ class AutogradCompilerInstance:
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
-        return self.fake_tensor_mode.from_tensor(x, source=source)
+        symbolic_context = torch._dynamo.variables.builder._automatic_dynamic(
+            x, None, source, static_shapes=True
+        )
+        return self.fake_tensor_mode.from_tensor(
+            x, source=source, symbolic_context=symbolic_context
+        )
 
     @staticmethod
     def source(name, idx) -> GetItemSource:

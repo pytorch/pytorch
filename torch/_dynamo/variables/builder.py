@@ -2239,10 +2239,13 @@ def _automatic_dynamic(
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
-    prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
-    shape_env_to_source_to_symbol_cache = (
-        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
-    )
+    if static_shapes:
+        shape_env_to_source_to_symbol_cache = {}
+    else:
+        prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
+        shape_env_to_source_to_symbol_cache = (
+            prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
+        )
 
     # Get base context if the tensor is a view
     view_base_context: Optional[SymbolicContext] = None
