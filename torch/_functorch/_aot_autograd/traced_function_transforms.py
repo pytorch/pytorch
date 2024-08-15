@@ -792,21 +792,35 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
+        nonlocal mod
+        # Need to unwrap and go down the fx.Interpreter.run() path below
+        # in order to properly preserve node stacktraces
+        mod_ = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
+
         with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            mod_, pytree.tree_unflatten(args[:params_len], params_spec)
         ), maybe_disable_thunkify():
-            if isinstance(mod, torch.fx.GraphModule):
+            if isinstance(mod, (torch.fx.GraphModule, torch._dynamo.utils.GmWrapper)):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
                         detect_fake_mode().epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(
-                            *args[params_len:], **kwargs
-                        )
+                        if isinstance(mod, torch._dynamo.utils.GmWrapper):
+                            # Assumption : GmWrapper is only used by compiled autograd.
+                            # it stores no buffers/params and has no kwargs.
+                            # we need to carefully **not** unwrap the args list
+                            # to ensure args are boxed.
+                            assert params_len == 0
+                            assert len(kwargs) == 0
+                            out = PropagateUnbackedSymInts(mod_).run(args)
+                        else:
+                            out = PropagateUnbackedSymInts(mod).run(
+                                *args[params_len:], **kwargs
+                            )
             else:
-                out = mod(*args[params_len:], **kwargs)
+                out = mod_(*args[params_len:], **kwargs)
 
         if not isinstance(out, (tuple, list)):
             raise RuntimeError(
