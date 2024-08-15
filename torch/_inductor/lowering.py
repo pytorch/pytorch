@@ -2095,7 +2095,7 @@ def constrain_to_fx_strides(fx_node, *args, ignore_mutated_args_FIXME=False, **k
             schema_arg = schema.arguments[idx]
             new_args.append(maybe_apply_constraint(schema_arg, arg, fx_arg))
 
-        _, schema_kwargs = torch._library.utils.schema_args_kwargs(schema)
+        schema_kwargs = {arg.name: arg for arg in schema.arguments}
 
         for key in kwargs.keys():
             arg = kwargs[key]

@@ -177,18 +177,6 @@ def fill_defaults(schema, args, kwargs):
     return tuple(new_args), new_kwargs
 
 
-def schema_args_kwargs(schema):
-    args = []
-    kwargs = {}
-    for i in range(len(schema.arguments)):
-        info = schema.arguments[i]
-        if info.kwarg_only:
-            kwargs[info.name] = info
-            continue
-        args.append(info)
-    return tuple(args), kwargs
-
-
 def zip_schema(
     schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Iterable[Tuple[_C.Argument, Any]]:
