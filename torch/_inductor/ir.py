@@ -4717,7 +4717,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_exact_strides(cls, x, exact_strides, allow_padding=False):
         assert exact_strides is not None
-        order = get_stride_order(exact_strides)
+        order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
         if is_storage_and_layout(x):
