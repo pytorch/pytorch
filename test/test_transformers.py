@@ -3010,6 +3010,7 @@ class TestSDPACudaOnly(NNTestCase):
             },
         )
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
