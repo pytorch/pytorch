@@ -36,7 +36,7 @@
 
 // for validators
 #ifdef USE_ROCM
-#include <rocm-core/rocm_version.h>
+#include <rocm_version.h>
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>

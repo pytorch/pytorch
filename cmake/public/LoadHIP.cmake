@@ -42,55 +42,39 @@ find_package_and_print_version(HIP 1.0)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
-  set(FOUND_ROCM_VERSION_H FALSE)
-
   set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
-  set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
 
   # Find ROCM version for checks
   # ROCM 5.0 and later will have header api for version management
-  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm_version.h>\n"
-      )
-  elseif(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm-core/rocm_version.h>\n"
-      )
-  else()
-    message("********************* rocm_version.h couldnt be found ******************\n")
+  find_path(ROCM_VERSION_DIR rocm_version.h HINTS ${ROCM_INCLUDE_DIRS} ${ROCM_INCLUDE_DIRS}/rocm-core)
+  set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
+  file(WRITE ${file} ""
+    "#include <rocm_version.h>\n"
+    "#include <cstdio>\n"
+
+    "#ifndef ROCM_VERSION_PATCH\n"
+    "#define ROCM_VERSION_PATCH 0\n"
+    "#endif\n"
+    "#define STRINGIFYHELPER(x) #x\n"
+    "#define STRINGIFY(x) STRINGIFYHELPER(x)\n"
+    "int main() {\n"
+    "  printf(\"%d.%d.%s\", ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, STRINGIFY(ROCM_VERSION_PATCH));\n"
+    "  return 0;\n"
+    "}\n"
+  )
+
+  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_VERSION_DIR}"
+    RUN_OUTPUT_VARIABLE rocm_version_from_header
+    COMPILE_OUTPUT_VARIABLE output_var
+  )
+  # We expect the compile to be successful if the include directory exists.
+  if(NOT compile_result)
+    message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
-
-  if(FOUND_ROCM_VERSION_H)
-    file(APPEND ${file} ""
-      "#include <cstdio>\n"
-
-      "#ifndef ROCM_VERSION_PATCH\n"
-      "#define ROCM_VERSION_PATCH 0\n"
-      "#endif\n"
-      "#define STRINGIFYHELPER(x) #x\n"
-      "#define STRINGIFY(x) STRINGIFYHELPER(x)\n"
-      "int main() {\n"
-      "  printf(\"%d.%d.%s\", ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, STRINGIFY(ROCM_VERSION_PATCH));\n"
-      "  return 0;\n"
-      "}\n"
-      )
-
-    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      RUN_OUTPUT_VARIABLE rocm_version_from_header
-      COMPILE_OUTPUT_VARIABLE output_var
-      )
-    # We expect the compile to be successful if the include directory exists.
-    if(NOT compile_result)
-      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-    endif()
-    message(STATUS "Caffe2: Header version is: " ${rocm_version_from_header})
-    set(ROCM_VERSION_DEV_RAW ${rocm_version_from_header})
-    message("\n***** ROCm version from rocm_version.h ****\n")
-  endif()
+  message(STATUS "Caffe2: Header version is: " ${rocm_version_from_header})
+  set(ROCM_VERSION_DEV_RAW ${rocm_version_from_header})
+  message("\n***** ROCm version from rocm_version.h ****\n")
 
   string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+).*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
 
