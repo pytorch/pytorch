@@ -963,6 +963,47 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #endif
 }
 
+void ProcessGroupNCCL::registerUserBuffers(at::Device device) {
+  auto active_pool = c10::cuda::MemPoolContext::getActiveMemPool();
+  TORCH_INTERNAL_ASSERT(
+      active_pool,
+      "registerUserBuffers expects a user provided pool that is currently active");
+
+  const auto key = getKeyFromDevice(device);
+  LOG(INFO) << logPrefix()
+            << "Performing user buffer registration on backend device "
+            << device << ", key " << key << ", i am " << this;
+  auto ncclComm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == device.index(),
+        "Mismatch between CUDA memory segment device and current device");
+    ncclComm->registerSegment(
+        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+  }
+}
+
+void ProcessGroupNCCL::deregisterUserBuffers(at::Device device) {
+  auto active_pool = c10::cuda::MemPoolContext::getActiveMemPool();
+  TORCH_INTERNAL_ASSERT(
+      active_pool,
+      "deregisterUserBuffers expects a user provided pool that is currently active");
+
+  const auto key = getKeyFromDevice(device);
+  LOG(INFO) << logPrefix()
+            << "Performing user buffer deregistration on backend device "
+            << device << ", key " << key << ", i am " << this;
+  auto ncclComm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == device.index(),
+        "Mismatch between CUDA memory segment device and current device");
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
