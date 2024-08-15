@@ -13510,10 +13510,10 @@ add_docstr(
     r"""
 set_device(device) -> None
 
-Set the current device for the current :ref:`accelerator<accelerators>`.
+Set the current device to a given device.
 
 Arguments:
-    device (:class:`torch.device`, str, int): selected devie. This function is a no-op if this argument is negative.
+    device (:class:`torch.device`, str, int): a given devie. This function is a no-op if this argument is negative.
 """,
 )
 
@@ -13523,13 +13523,13 @@ add_docstr(
     r"""
 current_stream(device) -> torch.Stream
 
-Return the currently selected Stream for a given device.
+Return the currently selected stream for a given device.
 
 Arguments:
-    device (:class:`torch.device`, str, int, optional): selected device. If not given, use :func:`torch.current_device` by default.
+    device (:class:`torch.device`, str, int, optional): a given device. If not given, use :func:`torch.current_device` by default.
 
 Returns:
-    torch.Stream: the currently selected Stream for a given device.
+    torch.Stream: the currently selected stream for a given device.
 """,
 )
 
@@ -13539,10 +13539,10 @@ add_docstr(
     r"""
 set_stream(stream) -> None
 
-Set the current stream to selected stream.
+Set the current stream to a given stream.
 
 Arguments:
-    stream (torch.Stream): selected stream. This function will set the current device to the device of the selected.
+    stream (torch.Stream): a given stream. This function will set the current device to the device of the given stream.
 """,
 )
 
