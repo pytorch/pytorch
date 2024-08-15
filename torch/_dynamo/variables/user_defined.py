@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
-    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -489,6 +488,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
             options = {"mutable_local": MutableLocal()}
             return variables.EnumVariable.create(self.value, args[0], options)
+        elif self.value is random.Random:
+            if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
+                seed = args[0].value
+            else:
+                seed = None
+            random_object = random.Random(seed)
+            return RandomVariable(random_object)
 
         return super().call_function(tx, args, kwargs)
 
@@ -1022,18 +1028,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if (
-            source
-            and isinstance(self, variables.UnspecializedNNModuleVariable)
-            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
-            # usecase for now.
-            and not tx.output.export
-        ):
-            # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
-                source = UnspecializedParamBufferSource(self.source, name)
-            source = self._wrap_source(source)
-
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
                 options = {"source": source}
@@ -1238,3 +1232,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return variables.UserMethodVariable(polyfill.mapping_get, self)
         else:
             return super().var_getattr(tx, name)
+
+
+class RandomVariable(UserDefinedObjectVariable):
+    pass

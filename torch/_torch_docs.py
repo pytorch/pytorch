@@ -959,6 +959,9 @@ tensor with a different dtype or device then it's copied as if using
 If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device then a
 tensor is constructed using :func:`torch.from_numpy`.
 
+If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
+specifically overwritten by :attr:`device` or a default device.
+
 .. seealso::
 
     :func:`torch.tensor` never shares its data and creates a new "leaf tensor" (see :doc:`/notes/autograd`).

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 bool isDropoutRemovable(const Node* node) {
@@ -58,5 +57,4 @@ void removeDropout(script::Module& module) {
   removeDropout(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
