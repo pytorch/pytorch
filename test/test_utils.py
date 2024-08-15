@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
+from torch.utils._storage_utils import get_storage_id, get_storage_size
 from torch.utils._traceback import (
     CapturedTraceback,
     format_traceback_short,
@@ -48,10 +49,6 @@ from torch.utils.checkpoint import (
     get_device_states,
 )
 from torch.utils.data import DataLoader
-from torch.utils._storage_utils import (
-    get_storage_id,
-    get_storage_size,
-)
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -1254,6 +1251,7 @@ def f(x):
 class TestStorageUtils(TestCase):
     def test_storage_id(self):
         from torch.testing._internal.two_tensor import TwoTensor
+
         t1 = torch.randn(1, 2, dtype=torch.float32)
         t2 = TwoTensor(t1, TwoTensor(t1, t1))
         i = get_storage_id(t1)
@@ -1261,6 +1259,7 @@ class TestStorageUtils(TestCase):
 
     def test_storage_size(self):
         from torch.testing._internal.two_tensor import TwoTensor
+
         t1 = torch.randn(1, 2, dtype=torch.float32)
         t2 = TwoTensor(t1, t1)
         self.assertEqual(get_storage_size(t1), 1 * 2 * 4)

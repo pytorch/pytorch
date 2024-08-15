@@ -1,20 +1,24 @@
 import importlib
-from typing import Union, Tuple, Any
 from functools import lru_cache
+from typing import Any, Tuple, Union
+
+import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
-@lru_cache()
-def is_torch_tpu_available(check_device=True):
+@lru_cache
+def is_torch_tpu_available(check_device: bool = True) -> bool:
     """
     Checks if `torch_xla` is installed and potentially if a TPU is in the environment
-    Taken from https://github.com/huggingface/transformers/blob/1ecf5f7c982d761b4daaa96719d162c324187c64/src/transformers/utils/import_utils.py#L463.
+    Taken from
+    https://github.com/huggingface/transformers/blob/1ecf5f7c982d761b4daaa96719d162c324187c64/src/transformers/utils/import_utils.py#L463.
     """
     if importlib.util.find_spec("torch_xla") is not None:
         if check_device:
             # We need to check if `xla_device` can be found, will raise a RuntimeError if not
             try:
                 import torch_xla.core.xla_model as xm
+
                 _ = xm.xla_device()
                 return True
             except RuntimeError:
@@ -22,7 +26,8 @@ def is_torch_tpu_available(check_device=True):
         return True
     return False
 
-def get_storage_id(tensor: "torch.Tensor") -> Union[int, Tuple[Any, ...]]:
+
+def get_storage_id(tensor: torch.Tensor) -> Union[int, Tuple[Any, ...]]:
     """Returns a unique id for plain tensor
     or a (potentially nested) Tuple of unique id for the flattened Tensor
     if the input is a wrapper tensor subclass Tensor
@@ -44,7 +49,7 @@ def get_storage_id(tensor: "torch.Tensor") -> Union[int, Tuple[Any, ...]]:
     return unique_id
 
 
-def get_storage_size(tensor: "torch.Tensor") -> int:
+def get_storage_size(tensor: torch.Tensor) -> int:
     """Get the storage size for the tensor in number of bytes
     for wrapper tensor subclass Tensors, we'll get the sum of the storage size for all tensor attributes
     """
