@@ -312,22 +312,15 @@ class AutogradCompilerInstance:
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
-        compiled_autograd_log.info(
-            "%s",
-            lazy_format_graph_code(
-                "Compiled autograd graph",
-                graph,
-                include_device=True,
-                colored=True,
-                include_stride=True,
-            ),
+        lazy_graph_code = lazy_format_graph_code(
+            "Compiled autograd graph",
+            graph,
+            include_device=True,
+            include_stride=True,
+            colored=True,
         )
-        verbose_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True, colored=True
-            ),
-        )
+        compiled_autograd_log.info("%s", lazy_graph_code)
+        verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
@@ -355,16 +348,11 @@ class AutogradCompilerInstance:
             return
 
         def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
-            if callable(a.target) and callable(b.target):
-                target_match = a.target.__qualname__ == b.target.__qualname__
-            else:
-                target_match = a.target == b.target
-
             return (
                 a.op == b.op
                 and a.type == b.type
                 and len(a.all_input_nodes) == len(b.all_input_nodes)
-                and target_match
+                and a.target.__name__ == b.target.__name__
             )
 
         for nodecall_index, info in self.aot_graph_infos.items():
