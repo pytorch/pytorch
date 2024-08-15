@@ -19,6 +19,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_per_channel_qparams,
+)
 from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
 
@@ -313,6 +316,65 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @parametrize("batch_size", (1,))
+    @parametrize("in_features", (16,))
+    @parametrize("image_size", (18,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.bfloat16)
+    def test_linear_with_permute(
+        self, batch_size, in_features, image_size, out_features, bias, dtype
+    ):
+        # Reproducer from the convnext model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self._frozen_param398 = torch.randn(batch_size, out_features, 1, 1)
+
+            def forward(self, mul_272, _convolution_pointwise_default_31):
+                out1 = torch.ops.prims.convert_element_type.default(
+                    mul_272, torch.bfloat16
+                )
+                mul_272 = None
+
+                _linear_pointwise_default_131 = self.linear(out1)
+
+                permute_188 = torch.ops.aten.permute.default(
+                    _linear_pointwise_default_131, [0, 3, 1, 2]
+                )
+                mul_273 = torch.ops.aten.mul.Tensor(permute_188, self._frozen_param398)
+                add_187 = torch.ops.aten.add.Tensor(
+                    mul_273, _convolution_pointwise_default_31
+                )
+                convert_element_type_847 = torch.ops.prims.convert_element_type.default(
+                    add_187, torch.bfloat16
+                )
+
+                return convert_element_type_847
+
+        view_12 = torch.randn(batch_size, image_size, image_size, in_features)
+        _convolution_pointwise_default_31 = torch.randn(
+            batch_size, out_features, image_size, image_size
+        ).to(memory_format=torch.channels_last)
+
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (
+                    view_12,
+                    _convolution_pointwise_default_31,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
@@ -532,6 +594,57 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64, 65))
+    def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
+        # x will be reshaped from 3d to 2d
+        second_dim_size = 8
+
+        def _convert_weight_to_int8pack(w):
+            scale, zp = _calculate_dynamic_per_channel_qparams(
+                w.to(torch.float), torch.int8
+            )
+            scale = torch.from_numpy(scale)
+            zp = torch.from_numpy(zp)
+            w_int8 = torch.ao.quantization.fx._decomposed.quantize_per_channel(
+                input=w,
+                scales=scale,
+                zero_points=zp,
+                axis=0,
+                quant_min=-128,
+                quant_max=127,
+                dtype=torch.int8,
+            )
+            return w_int8, scale.to(torch.bfloat16)
+
+        class M(torch.nn.Module):
+            def __init__(self, w):
+                super().__init__()
+                self.linear_weight = torch.nn.Parameter(w, requires_grad=False)
+
+            def forward(self, x, scale):
+                return (
+                    torch.nn.functional.linear(x, self.linear_weight.to(x.dtype))
+                    * scale
+                )
+
+        counters.clear()
+        # Currently, the corresponding torch.fx pattern only supports 3D x
+        # Add 2D X case once the corresponding pattern-matcher pattern is added
+        x = torch.rand((batch_size, second_dim_size, in_features), dtype=dtype)
+        w = torch.rand((out_features, in_features), dtype=dtype)
+        w_int8pack, w_scales = _convert_weight_to_int8pack(w)
+        mod = M(w_int8pack).eval()
+        self.common(mod, (x, w_scales))
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
