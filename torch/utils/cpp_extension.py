@@ -2143,6 +2143,7 @@ def _import_module_from_library(module_name, path, is_python_module):
         return module
     else:
         torch.ops.load_library(filepath)
+        return filepath
 
 
 def _write_ninja_file_to_build_library(path,

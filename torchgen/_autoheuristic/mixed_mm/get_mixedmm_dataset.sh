@@ -1,6 +1,12 @@
 #!/bin/bash
 
-a100_data='https://github.com/AlnisM/autoheuristic-datasets/raw/main/mixedmm_a100_data.zip'
-wget ${a100_data}
-unzip mixedmm_a100_data.zip
-rm mixedmm_a100_data.zip
+base_url='https://github.com/AlnisM/autoheuristic-datasets/raw/main/'
+a100_data='mixedmm_a100_data.zip'
+h100_data='mixedmm_h100_data.zip'
+datasets=("${a100_data}" "${h100_data}")
+for dataset in "${datasets[@]}"; do
+    url="${base_url}${dataset}"
+    wget ${url}
+    unzip ${dataset}
+    rm ${dataset}
+done

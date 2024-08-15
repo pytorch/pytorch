@@ -7,6 +7,7 @@ import sys
 import unittest
 
 import torch
+from torch._dynamo.config import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -64,6 +65,11 @@ class EltwiseNet(torch.nn.Module):
         return torch.nn.functional.relu(2 * torch.abs(-x))
 
 
+class ToDenseNet(torch.nn.Module):
+    def forward(self, x):
+        return x.to_dense()
+
+
 class SparseActivationCOO(torch.nn.Module):
     def forward(self, x):
         return [xi.to_sparse() for xi in x]
@@ -79,6 +85,7 @@ class SparseActivationCSR(torch.nn.Module):
 #
 
 
+@unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
 class TestSparseProp(TestCase):
     def setUp(self):
         TestCase.setUp(self)
@@ -186,6 +193,36 @@ class TestSparseProp(TestCase):
             for i, node in enumerate(prog.graph.nodes):
                 meta = node.meta.get("val", None)
                 if i <= 4:
+                    self.assertEqualMeta(meta, result)
+                else:
+                    self.assertEqual(meta, None)
+
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @parametrize("dtype", DTYPES)
+    @parametrize("itype", ITYPES)
+    @all_sparse_layouts("layout")
+    def test_todensenet(self, dtype, itype, layout):
+        if layout is not torch.sparse_coo:
+            self.skipTest("TODO: support non-coo sparsity (#133174)")
+
+        net = ToDenseNet()
+        for sparse_input in self.generate_simple_inputs(
+            layout,
+            device="cpu",
+            dtype=dtype,
+            index_dtype=itype,
+        ):
+            result = net(sparse_input)
+            # Build the traced graph.
+            prog = torch.export.export(net, (sparse_input,))
+            # Test arg/todense/output.
+            for i, node in enumerate(prog.graph.nodes):
+                meta = node.meta.get("val", None)
+                if i == 0:
+                    self.assertEqualMeta(meta, sparse_input)
+                elif i == 1:
                     self.assertEqualMeta(meta, result)
                 else:
                     self.assertEqual(meta, None)

@@ -61,6 +61,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.utils._mode_utils import no_dispatch
@@ -1361,18 +1363,18 @@ class FakeTensorOperatorInvariants(TestCase):
                 )
 
     # IMPORTANT!!! Always run even if CUDA is not available
-    def test_fake_cuda_no_init(self):
+    def test_fake_gpu_no_init(self):
         # Skip this test, we will try to run CUDA operations to real prop so
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             return
         with FakeTensorMode():
-            torch.empty(10, device="cuda")
-            torch.ones(10, device="cuda")
-            torch.zeros(10, device="cuda")
-            torch.rand(10, device="cuda")
-            torch.tensor(3.14, device="cuda")
-            torch.tensor([[3.14, 2], [1, 2]], device="cuda")
+            torch.empty(10, device=GPU_TYPE)
+            torch.ones(10, device=GPU_TYPE)
+            torch.zeros(10, device=GPU_TYPE)
+            torch.rand(10, device=GPU_TYPE)
+            torch.tensor(3.14, device=GPU_TYPE)
+            torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
