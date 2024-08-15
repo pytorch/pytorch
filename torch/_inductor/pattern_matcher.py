@@ -80,7 +80,8 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1928,9 +1929,7 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     def lazy_init() -> Any:
         counters_ref = counters["inductor"].copy()
 
-        with torch._guards.tracing(
-            None
-        ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
+        with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn()
 
         # clear view matches encountered during tracing
