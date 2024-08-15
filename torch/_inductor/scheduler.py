@@ -865,6 +865,21 @@ class SchedulerNode(BaseSchedulerNode):
 
         return "\n".join(lines)
 
+    def set_sizes(self, sizes: Tuple[Tuple[sympy.Expr, ...], ...]) -> None:
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+        self._sizes = sizes
+        group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
+        self.group = (self.node.get_device(), group_fn(self._sizes))
+
+        if isinstance(self.node, ir.TemplateBuffer):
+            self.set_read_writes(self.node.normalized_read_writes())
+        else:
+            self.set_read_writes(
+                dependencies.extract_read_writes(
+                    self._body, *self._sizes, normalize=True
+                )
+            )
+
     def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
         return self._sizes
 

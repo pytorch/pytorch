@@ -3920,19 +3920,14 @@ class CppScheduling(BaseScheduling):
         {z0: 2, z1: 9216, z2: 32, z3: 30} and indexing_exprs will be changed to
         {'index0': 8847360*z0 + 960*z1 + 30*z2 + z3, 'index1': 32*z0 + z2, 'index2': 30*z2 + z3}.
         """
-
-        def has_reduce_or_modular_index(node):
-            def has_modular_index(expr):
-                if isinstance(expr, ModularIndexing):
-                    return True
-                return any(has_modular_index(arg) for arg in expr.args)
-
-            return len(node.group[1][1]) != 0 or any(
-                has_modular_index(expr) for _, expr in node._body.indexing_exprs.items()
-            )
-
         # No reduction and no mudular
-        if any(has_reduce_or_modular_index(node) for node in nodes):
+        if any(
+            len(node.group[1][1]) != 0
+            or any(
+                expr.has(ModularIndexing) for expr in node._body.indexing_exprs.values()
+            )
+            for node in nodes
+        ):
             return nodes
 
         split_var = None
@@ -3940,31 +3935,25 @@ class CppScheduling(BaseScheduling):
         divide_index_name = None
 
         def has_one_div(node):
-            def has_div(expr, name):
-                if isinstance(expr, FloorDiv):
+            num_div = 0
+            expr_matched = False
+            for name, expr in node._body.indexing_exprs.items():
+                num_div += expr.count(FloorDiv)
+                if expr.count(FloorDiv) == 1:
                     nonlocal split_var
                     nonlocal split_number
                     nonlocal divide_index_name
-                    split_var = expr.args[0]
-                    split_number = expr.args[1]
+                    div_expr = expr.find(FloorDiv).pop()
+                    split_var = div_expr.args[0]
+                    split_number = div_expr.args[1]
                     divide_index_name = name
-                    return (
+                    expr_matched = (
                         isinstance(split_number, sympy.core.numbers.Integer)
                         and isinstance(split_var, sympy.core.symbol.Symbol)
                         and divide_index_name is not None
                     )
-                return any(has_div(arg, name) for arg in expr.args)
 
-            return (
-                len(
-                    [
-                        expr
-                        for name, expr in node._body.indexing_exprs.items()
-                        if has_div(expr, name)
-                    ]
-                )
-                == 1
-            )
+            return num_div == 1 and expr_matched
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         nodes_have_div = [node for node in nodes if has_one_div(node)]
@@ -4009,21 +3998,11 @@ class CppScheduling(BaseScheduling):
                 }
 
             # Here decide the final loop order
-            reduce_vars = []
             with patch.object(
                 original_body, "indexing_from_args", new_indexing_from_args
             ):
-                node._body = ir.LoopBody(
-                    original_body, [iter_vars, reduce_vars], var_ranges
-                )
-            node._sizes = (iter_ranges, reduce_ranges)
-            group_fn = node.scheduler.get_backend(node.node.get_device()).group_fn
-            node.group = (node.node.get_device(), group_fn(node._sizes))
-            node.set_read_writes(
-                dependencies.extract_read_writes(
-                    node._body, *node._sizes, normalize=True
-                )
-            )
+                node._body = ir.LoopBody(original_body, [iter_vars, []], var_ranges)
+            node.set_sizes((iter_ranges, reduce_ranges))
         return nodes
 
     def codegen_outer_loop_node(
