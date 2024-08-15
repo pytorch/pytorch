@@ -7,14 +7,14 @@ from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 aten = torch.ops.aten
 
 
 const = torch.tensor(0.0)
-device = "cuda"
+device = GPU_TYPE
 
 
 def num_reinplacing_failures():
@@ -154,5 +154,5 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests(needs="filelock")
