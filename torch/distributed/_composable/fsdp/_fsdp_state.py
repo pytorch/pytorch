@@ -29,7 +29,7 @@ from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, TrainingState, _wait_event
+from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 
@@ -121,16 +121,15 @@ class FSDPState(_State):
             logger.debug("FSDP::root_pre_forward")
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
-            if not ca.compiled_autograd_enabled:
-                # Wait for optimizer before implicitly prefetched all-gathers
-                if (event := self._state_ctx.post_optim_event) is not None:
-                    _wait_event(self._comm_ctx.all_gather_copy_in_stream, event)
-                    _wait_event(self._comm_ctx.all_gather_stream, event)
-                    self._state_ctx.post_optim_event = None
-                else:
-                    current_stream = torch.cuda.current_stream()
-                    self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-                    self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            # Wait for optimizer before implicitly prefetched all-gathers
+            if (event := self._state_ctx.post_optim_event) is not None:
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(event)
+                self._comm_ctx.all_gather_stream.wait_event(event)
+                self._state_ctx.post_optim_event = None
+            else:
+                current_stream = torch.cuda.current_stream()
+                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -250,8 +249,10 @@ class FSDPState(_State):
             if all_gather_state := self._comm_ctx.all_gather_state:
                 # Free the last all-gather result if needed; refer to
                 # [Note: Overlapping all-gather copy-in and all-gather]
-                _wait_event(self._comm_ctx.all_gather_copy_in_stream, all_gather_state.event)
-                _wait_event(self._comm_ctx.all_gather_stream, all_gather_state.event)
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                    all_gather_state.event
+                )
+                self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:
@@ -290,7 +291,9 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 if self._comm_ctx.reduce_scatter_state is not None:
-                    _wait_event(torch.cuda.current_stream(), self._comm_ctx.reduce_scatter_state.event)
+                    torch.cuda.current_stream().wait_event(
+                        self._comm_ctx.reduce_scatter_state.event
+                    )
                     self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 
@@ -314,9 +317,12 @@ class FSDPState(_State):
         if not torch.is_grad_enabled():
             return output
         flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
-            if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+        tensors = tuple(
+            t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
+        )
+        if tensors:
+            for tensor in tensors:
+                tensor.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):
