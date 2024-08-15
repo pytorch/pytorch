@@ -378,6 +378,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.new_full,
             aten.new_ones,
             aten.new_zeros,
+            aten.nll_loss2d_forward,
+            aten.nll_loss2d_backward,
             aten.nll_loss_backward,
             aten.nll_loss_forward,
             aten.norm,
