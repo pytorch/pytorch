@@ -1453,7 +1453,7 @@ class PReLU(Module):
     .. math::
         \text{PReLU}(x) =
         \begin{cases}
-        x, & \text{ if } x \ge 0 \\
+        x, & \text{ if } x \geq 0 \\
         ax, & \text{ otherwise }
         \end{cases}
 
@@ -1492,18 +1492,50 @@ class PReLU(Module):
         >>> output = m(input)
     """
 
-    __constants__ = ["num_parameters"]
+    __constants__ = ['num_parameters']
     num_parameters: int
 
-    def __init__(
-        self, num_parameters: int = 1, init: float = 0.25, device=None, dtype=None
-    ) -> None:
-        factory_kwargs = {"device": device, "dtype": dtype}
-        self.num_parameters = num_parameters
+    def __init__(self, num_parameters: int = 1, init: float = 0.25,
+                 device=None, dtype=None,**kwargs) -> None:
+        if 'requires_grad' in kwargs:
+            raise TypeError(f"PReLU does not accept the keyword argument 'requires_grad'. "
+                            "To enable gradients, set requires_grad=True on the input tensor or "
+                            "on the parameters individually.")
+        else:
+          raise TypeError(f"Unexpected keyword arguments: {', '.join(kwargs.keys())}. "
+                            "PReLU does not accept these arguments.")
+
+
+        # Validate num_parameters argument before any other operation
+        if not isinstance(num_parameters, int) or isinstance(num_parameters, bool):
+            raise TypeError(f"Expected num_parameters to be an integer, but got {type(num_parameters).__name__}.")
+        if num_parameters < 1:
+            raise ValueError(f"num_parameters should be a positive integer greater than 0, but got {num_parameters}.")
+        else:    
+          self.num_parameters = num_parameters
         super().__init__()
-        self.init = init
+        
+        # Validate init argument
+        if not isinstance(init, (float, int)):
+            raise TypeError(f"Expected init to be a float or int, but got {type(init).__name__} instead.")
+        else:
+          self.init = init
+        
+        # If validation passes, proceed with initialization
+        factory_kwargs = {}
+        if device is not None:
+            if not isinstance(device, torch.device):
+                raise TypeError(f"Invalid device type: {type(device).__name__}. Expected torch.device or NoneType.")
+            factory_kwargs['device'] = device
+        
+        if dtype is not None:
+            if not isinstance(dtype, torch.dtype):
+                raise TypeError(f"Invalid dtype type: {type(dtype).__name__}. Expected torch.dtype or NoneType.")
+            factory_kwargs['dtype'] = dtype
+
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
         self.reset_parameters()
+
 
     def reset_parameters(self):
         torch.nn.init.constant_(self.weight, self.init)
@@ -1512,7 +1544,7 @@ class PReLU(Module):
         return F.prelu(input, self.weight)
 
     def extra_repr(self) -> str:
-        return f"num_parameters={self.num_parameters}"
+        return f'num_parameters={self.num_parameters}'
 
 
 class Softsign(Module):
