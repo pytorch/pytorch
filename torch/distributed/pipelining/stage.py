@@ -243,9 +243,7 @@ class _PipelineStageBase(ABC):
 
         map_aggregate(args_recv_info, map_recv_to_send)
 
-        logger.debug(
-            f"{self.log_prefix} Grad send info: {grad_send_info}"  # noqa: G004
-        )
+        logger.debug("%s Grad send info: %s", self.log_prefix, grad_send_info)
         return grad_send_info
 
     @abstractmethod
@@ -338,8 +336,10 @@ class _PipelineStageBase(ABC):
                 if dst is None:
                     continue
                 logger.debug(
-                    f"{self.log_prefix} "  # noqa: G004
-                    f"Sending tensor to Stage {dst}: {out.size()}"
+                    "%s Sending tensor to Stage %s: %s",
+                    self.log_prefix,
+                    dst,
+                    out.size(),
                 )
                 peer_rank = self.stage_index_to_group_rank[dst]
                 peer_global_rank = (
@@ -372,8 +372,10 @@ class _PipelineStageBase(ABC):
         for grad, grad_recv_stage in zip(self.grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
-                    f"{self.log_prefix} "  # noqa: G004
-                    f"Sending gradient to Stage {grad_recv_stage}: {grad.size()}"
+                    "%s Sending gradient to Stage %s: %s",
+                    self.log_prefix,
+                    grad_recv_stage,
+                    grad.size(),
                 )
                 peer_rank = self.stage_index_to_group_rank[grad_recv_stage]
                 peer_global_rank = (
@@ -556,7 +558,10 @@ class _PipelineStageBase(ABC):
         )
 
         logger.debug(
-            f"{self.log_prefix} Forwarded chunk {fwd_chunk_id}, outputs: {map_debug_info(output)}"  # noqa: G004
+            "%s Forwarded chunk %s, outputs: %s",
+            self.log_prefix,
+            fwd_chunk_id,
+            map_debug_info(output),
         )
         self._validate_fwd_outputs(output_tuple)
         return output
@@ -607,7 +612,7 @@ class _PipelineStageBase(ABC):
             }
 
         self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
-        logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
+        logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
         if not full_backward:
             assert self.dw_builder, "Must provide dw_builder to run partial backward"
@@ -712,8 +717,10 @@ class _PipelineStage(_PipelineStageBase):
         self.node = submod_nodes[self.stage_index]
         self.name = self.node.name
         logger.info(
-            f"[{self.group_rank}] "  # noqa: G004
-            f"Creating PipelineStage {stage_index} for {self.name}"
+            "[%s] Creating PipelineStage %s for %s",
+            self.group_rank,
+            stage_index,
+            self.name,
         )
 
         # Create mapping from stage name to stage index
@@ -733,7 +740,7 @@ class _PipelineStage(_PipelineStageBase):
             isinstance(p, FakeTensor) or p.is_meta for p in self.submod.parameters()
         )
         if has_meta_param:
-            logger.debug(f"{self.log_prefix} Found meta parameters!")  # noqa: G004
+            logger.debug("%s Found meta parameters!", self.log_prefix)
         else:
             self.submod.to(self.device)
 
@@ -791,9 +798,11 @@ class _PipelineStage(_PipelineStageBase):
 
             # Create a receive buffer for this placeholder
             logger.debug(
-                f"{self.log_prefix} "  # noqa: G004
-                f"Creating recv buffer for input '{placeholder.name}' "
-                f": {example_value.shape}, {example_value.dtype}"
+                "%s Creating recv buffer for input '%s' : %s, %s",
+                self.log_prefix,
+                placeholder.name,
+                example_value.shape,
+                example_value.dtype,
             )
             buffer = _make_tensor_from_meta(example_value, self.device)
 
@@ -817,8 +826,7 @@ class _PipelineStage(_PipelineStageBase):
             args_recv_info.append(recv_info)
 
         logger.debug(
-            f"{self.log_prefix} "  # noqa: G004
-            f"Activation recv / args info: {args_recv_info}"
+            "%s Activation recv / args info: %s", self.log_prefix, args_recv_info
         )
         # `args` is a Tuple, hence we will return a Tuple[InputInfo]
         return tuple(args_recv_info)
@@ -880,7 +888,7 @@ class _PipelineStage(_PipelineStageBase):
         )
         self._configure_outputs_meta(output_vals)
 
-        logger.debug(f"{self.log_prefix} " f"Send info: {act_send_info}")  # noqa: G004
+        logger.debug("%s Send info: %s", self.log_prefix, act_send_info)
         return act_send_info
 
     def _get_output_node(self):
@@ -926,9 +934,7 @@ class _PipelineStage(_PipelineStageBase):
 
         # Convert to tuple for convenience in get_ops and retrieve tensor
         grad_recv_info_tuple = tuple(grad_recv_info.values())
-        logger.debug(
-            f"{self.log_prefix} Grad recv info: {grad_recv_info_tuple}"  # noqa: G004
-        )
+        logger.debug("%s Grad recv info: %s", self.log_prefix, grad_recv_info_tuple)
         return grad_recv_info_tuple
 
 
@@ -1350,8 +1356,7 @@ def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
         # log only rank 0's view, they will all be equivalent
         if pg_rank == 0:
             logger.info(
-                f"all stage inputs: {all_inputs}"  # noqa: G004
-                f"all stage outputs: {all_outputs}"
+                "all stage inputs: %s \n all stage outputs: %s", all_inputs, all_outputs
             )
 
     # Check if the output for stage 0 matches the input at stage 1, and so forth
