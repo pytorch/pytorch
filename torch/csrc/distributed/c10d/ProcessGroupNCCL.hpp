@@ -106,6 +106,10 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
 
+// Whether to log C++ stack traces on unclean shutdown (default true)
+static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
+    "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
+
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
@@ -1081,6 +1085,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
+
+  // Whether or not to print C++ stack traces to logs on unclean shutdown.
+  bool logCppStackOnUncleanShutdown_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
