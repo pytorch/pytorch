@@ -1224,12 +1224,12 @@ def forward(self, pred_1, x_1):
         def associative_scan_fct(x):
             return associative_scan(add, x, 0)
 
-        associative_scan1 = torch.vmap(associative_scan_fct, in_dims=0, out_dims=0)
+        associative_scan1 = torch.vmap(associative_scan_fct, in_dims=1, out_dims=1)
         associative_scan2 = associative_scan
 
         result1 = associative_scan1(x)
-        result2 = associative_scan2(add, x, 1)
-        expected_result = _fake_associative_scan(add, x, 1)
+        result2 = associative_scan2(add, x, 0)
+        expected_result = _fake_associative_scan(add, x, 0)
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
@@ -1322,13 +1322,13 @@ def forward(self, pred_1, x_1):
             return associative_scan(add, x, 0)
 
         associative_scan1 = torch.compile(
-            torch.vmap(associative_scan_fct, in_dims=0, out_dims=0), fullgraph=True
+            torch.vmap(associative_scan_fct, in_dims=1, out_dims=1), fullgraph=True
         )
         associative_scan2 = associative_scan
 
         result1 = associative_scan1(x)
-        result2 = associative_scan2(add, x, 1)
-        expected_result = _fake_associative_scan(add, x, 1)
+        result2 = associative_scan2(add, x, 0)
+        expected_result = _fake_associative_scan(add, x, 0)
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
@@ -1363,13 +1363,13 @@ def forward(self, pred_1, x_1):
 
         torch.compiler.reset()
         associative_scan1 = torch.compile(
-            torch.vmap(associative_scan_fct, in_dims=0), fullgraph=True
+            torch.vmap(associative_scan_fct, in_dims=1, out_dims=1), fullgraph=True
         )
-        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=0)
+        associative_scan2 = torch.vmap(associative_scan_fct, in_dims=1, out_dims=1)
 
         result1 = associative_scan1(inp)
         # result2 = associative_scan2(inp)
-        expected_result = _fake_associative_scan(fct_pointwise, inp, 1)
+        expected_result = _fake_associative_scan(fct_pointwise, inp, 0)
         self.assertEqual(result1, expected_result)
         # self.assertEqual(result2, expected_result)
 
