@@ -292,7 +292,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def get_compute_capability(device) -> str:
+    def get_compute_capability(device: _device_t = None) -> str:
         return ""
 
     @staticmethod

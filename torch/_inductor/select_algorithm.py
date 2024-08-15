@@ -15,7 +15,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -748,6 +748,7 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
+        bmreq_cls: Type[TritonBenchmarkRequest]
         if layout.device.type == "cpu":
             bmreq_cls = TritonCPUBenchmarkRequest
         else:

@@ -7,7 +7,11 @@ from ctypes import byref, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
-from torch._inductor.autotune_process import BenchmarkRequest, GPUDeviceBenchmarkMixin, TensorMeta
+from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    GPUDeviceBenchmarkMixin,
+    TensorMeta,
+)
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
