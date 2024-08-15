@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
-from ..common import IndentedBuffer, Kernel, OpOverrides
+from ..common import Kernel, OpOverrides
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
