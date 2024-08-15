@@ -171,7 +171,7 @@ def _scaled_dot_product_ring_efficient_attention(
     )
 
 
-class AttentionOp(Protocol):
+class _AttentionOp(Protocol):
     def __call__(
         self,
         query: torch.Tensor,
@@ -196,7 +196,7 @@ def _ring_rotate(
 
 def _templated_ring_attention(
     mesh: DeviceMesh,
-    op: AttentionOp,
+    op: _AttentionOp,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -278,7 +278,7 @@ def _templated_ring_attention(
     return *sdpa_merger.results(), *rest
 
 
-def sdpa_handler(
+def _sdpa_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
@@ -288,6 +288,9 @@ def sdpa_handler(
     logger.debug("Dispatching op_call: %s", op_info.schema)
 
     # sharding propagation
+    # TODO: remove the context parallel strategy from the default propagation
+    # rule. Either figure out how to dynamically enable it or just don't call
+    # propagate.
     DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
@@ -306,20 +309,20 @@ def sdpa_handler(
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     else:
-        raise NotImplementedError
+        raise NotImplementedError(
+            "CP only supports flash attention and memory efficient attention now."
+        )
 
     return DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
 
 
-def sdpa_backward_handler(
+def _sdpa_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as output tensor
     args = list(args)
-    # assert isinstance(args[0], DTensor) and isinstance(args[4], DTensor)
-    # args[0] = args[0].redistribute(args[4].device_mesh, args[4].placements)
     args = tuple(args)
 
     # extract local tensor and sharding infos to a OpInfo
@@ -352,7 +355,7 @@ def sdpa_backward_handler(
 
 def _templated_ring_attention_backward(
     mesh: DeviceMesh,
-    op: AttentionOp,
+    op: _AttentionOp,
     grad_out: torch.Tensor,
     grad_out_name: str,
     query: torch.Tensor,
@@ -527,10 +530,10 @@ def _scaled_dot_product_ring_efficient_attention_backward(
 
 
 customized_ops = {
-    aten._scaled_dot_product_flash_attention.default: sdpa_handler,
-    aten._scaled_dot_product_flash_attention_backward.default: sdpa_backward_handler,
-    aten._scaled_dot_product_efficient_attention.default: sdpa_handler,
-    aten._scaled_dot_product_efficient_attention_backward.default: sdpa_backward_handler,
+    aten._scaled_dot_product_flash_attention.default: _sdpa_handler,
+    aten._scaled_dot_product_flash_attention_backward.default: _sdpa_backward_handler,
+    aten._scaled_dot_product_efficient_attention.default: _sdpa_handler,
+    aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_backward_handler,
 }
 
 
@@ -550,8 +553,8 @@ def _distribute_function(
     installs hooks to the ``fn`` to convert the inputs and outputs. There are two
     major differences between ``distribute_function`` and ``distribute_module``.
     First, a function does not have parammeters and buffers, as a result,
-    ``distribute_function`` itself won't convert any tensors but simply install the
-    input and output hooks.  The tnesor conversion will happen in the hooks.
+    ``distribute_function`` itself won't convert any parameters/buffers but simply
+    install the input and output hooks.  The tensor conversion will happen in the hooks.
     Another difference is an nn.Module subclass can have several instances and each
     instance be fed into ``distribute_module`` independently with affecting other
     instance. On the other hand, function is a singleton object. So if a function
@@ -822,8 +825,9 @@ def context_parallel(
             nn.Parameter.
         buffer_seq_dims (Optional[List[int]]): the sequence dimensions of ``buffers``.
         no_restore_buffers (Optional[Set[torch.Tensor]]): buffers in these set
-            won't be restored after the context exists. This set must be a subset
-            of ``buffers``.
+            won't be restored after the context exits. This set must be a subset
+            of ``buffers``. If the buffers won't be used after the context exits,
+            these buffers can be put in this list to avoid extra restore time.
 
     .. warning::
         `torch.distributed._tensor.experimental.attention.context_parall` is a
@@ -839,7 +843,8 @@ def context_parallel(
         )
 
     for buffer in no_restore_buffers:
-        if buffer not in buffers:
+        # Cannot use `if not buffer in buffers` which will incur tensor comparison.
+        if not any(b is buffer for b in buffers):
             raise ValueError("`no_restore_buffers` must be a subset of `buffers`.")
 
     original_buffers = [None if b in no_restore_buffers else b.clone() for b in buffers]
