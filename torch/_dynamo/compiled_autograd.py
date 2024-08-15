@@ -369,16 +369,19 @@ class AutogradCompilerInstance:
             aot_it = iter(aot_graph.nodes)
             aot_node = next(aot_it)
             assert aot_node is not None
-            while aot_node.op != "call_function":
-                aot_node = next(aot_it)
-
-            # 2. Find the first op in the compiled autograd graph segment
-            ca_it = iter(self.fx_tracer.graph.nodes)
-            for _ in range(ca_node_start_idx):
-                next(ca_it)
-            ca_node = next(ca_it)
+            try:
+                while aot_node.op != "call_function":
+                    aot_node = next(aot_it)
+            except StopIteration:
+                continue
 
             try:
+                # 2. Find the first op in the compiled autograd graph segment
+                ca_it = iter(self.fx_tracer.graph.nodes)
+                for _ in range(ca_node_start_idx):
+                    next(ca_it)
+                ca_node = next(ca_it)
+
                 # Graphs should all end with output node
                 while ca_node.op != "output" and not is_similar(ca_node, aot_node):
                     # The compiled autograd graph may contain lazily inserted ops

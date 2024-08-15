@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import dataclasses
 import functools
 import io
 import logging
@@ -2260,6 +2261,52 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "aot0_mul_1",
             "aot0_cos",
             "aot0_add",
+        ]
+
+        self.assertEqual(
+            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+        )
+
+    def test_verbose_logs_aot_dispatcher_nodes_hop(self):
+        torch._logging.set_logs(compiled_autograd_verbose=True)
+
+        @dataclasses.dataclass
+        class CustomObj:
+            val: torch.Tensor
+
+        def fn(x, obj):
+            y = x.sin()
+            closure_var = y + 1
+            y.register_hook(lambda grad: grad + obj.val + closure_var)
+            z = y.sin()
+            return z
+
+        opt_fn = torch.compile(fn)
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        obj = CustomObj(torch.tensor(88))
+        fn(x, obj).sum().backward()
+
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx(), compiled_autograd.enable(compiler_fn):
+            opt_fn(y, obj).sum().backward()
+        self.assertEqual(x.grad, y.grad)
+
+        expected_logs = [
+            "CompiledFunctionBackward0",
+            "aot0_primals_2",
+            "aot0_tangents_2",
+            "aot0_tangents_1",
+            "aot0_sin",
+            "aot0_cos",
+            "aot0_mul",
+            "aot0_add_1",
+            "aot0_trace_wrapped",
+            "aot0_cos_1",
+            "aot0_mul_1",
         ]
 
         self.assertEqual(
