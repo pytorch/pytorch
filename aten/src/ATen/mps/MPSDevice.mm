@@ -96,7 +96,6 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
-  id mpsCD = NSClassFromString(@"MPSGraph");
   auto is_os_version_at_least = [](int major, int minor) {
     @autoreleasepool {
       NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
@@ -108,7 +107,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_13_2_plus = is_os_version_at_least(13, 2);
   static bool _macos_13_3_plus = is_os_version_at_least(13, 3);
   static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
-  static bool _macos_14_4_plus = is_os_version_at_least(14, 0);
+  static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
 
   switch (version) {
