@@ -52,6 +52,7 @@ __all__ = [
     "change_current_allocator",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
 ]
 
 
@@ -64,8 +65,24 @@ if not hasattr(torch._C, "_MemPool"):
     # Define dummy base classes
     torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
     torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
+    torch._C.__dict__["_cuda_beginAllocateToPool"] = _dummy_type(
+        "_cuda_beginAllocateToPool"
+    )
+    torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
+        "_cuda_endAllocateCurrentStreamToPool"
+    )
+    torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
+    torch._C.__dict__["_cuda_getPoolUseCount"] = _dummy_type("_cuda_getPoolUseCount")
 
-from torch._C import _cuda_CUDAAllocator, _MemPool, _MemPoolContext  # noqa: F401
+from torch._C import (  # noqa: F401
+    _cuda_beginAllocateToPool,
+    _cuda_CUDAAllocator,
+    _cuda_endAllocateCurrentStreamToPool,
+    _cuda_getPoolUseCount,
+    _cuda_releasePool,
+    _MemPool,
+    _MemPoolContext,
+)
 
 
 def _host_allocator():
@@ -958,6 +975,25 @@ def _get_current_allocator() -> _CUDAAllocator:
     return _CUDAAllocator(torch._C._cuda_getAllocator())
 
 
+class MemPoolContext(_MemPoolContext):
+    r"""MemPoolContext holds the currently active pool and stashes the previous
+    pool. On deletion it makes the previous pool active.
+
+    Args:
+        pool(torch.cuda.MemPool): a MemPool object to be made active so that
+        allocations route to this pool.
+
+    """
+
+    def __init__(self, pool: _MemPool):
+        super().__init__(pool)
+
+    @staticmethod
+    def active_pool() -> Optional[_MemPool]:
+        r"""Returns the active MemPool"""
+        return _MemPoolContext.active_pool()
+
+
 class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
@@ -984,21 +1020,82 @@ class MemPool(_MemPool):
         r"""Returns the allocator this MemPool routes allocations to"""
         return super().allocator
 
+    def use_count(self, device: Union[Device, int] = None):
+        r"""Returns the number of use_mem_pool context managers using this pool.
 
-class MemPoolContext(_MemPoolContext):
-    r"""MemPoolContext holds the currently active pool and stashes the previous
-    pool. On deletion it makes the previous pool active.
+        Args:
+            device (torch.device or int, optional): selected device. Returns
+                the use count of a pool on the current device, given by
+                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+                (default).
+
+        """
+        torch.cuda.init()
+        device_index = (
+            torch.cuda.current_device() if device is None else _get_device_index(device)
+        )
+        return _cuda_getPoolUseCount(device_index, self.id)
+
+    def release(self, device: Union[Device, int] = None):
+        r"""Convenience function that attempts to release a pool, and mark its memory
+        to be free'd based.
+        
+        Note that the memory in a pool can only be free'd when its use count is 0.
+        When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
+        back to the system.
+
+        Args:
+            device (torch.device or int, optional): selected device. Attempts
+                to release a pool on the current device, given by
+                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+                (default).
+
+        """
+        torch.cuda.init()
+        device_index = (
+            torch.cuda.current_device() if device is None else _get_device_index(device)
+        )
+        for _ in range(self.use_count()):
+            _cuda_releasePool(device_index, self.id)
+
+    def snapshot(self):
+        r"""Return a snapshot of the CUDA memory allocator pool state across all
+        devices.
+
+        Interpreting the output of this function requires familiarity with the
+        memory allocator internals.
+
+        .. note::
+            See :ref:`cuda-memory-management` for more details about GPU memory
+            management.
+        """
+        torch.cuda.init()
+        ctx = MemPoolContext(self)
+        snapshot = torch.cuda.memory_snapshot()
+        del ctx
+        return snapshot
+
+
+@contextlib.contextmanager
+def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
+    r"""A context manager that routes allocations to a given pool.
 
     Args:
         pool(torch.cuda.MemPool): a MemPool object to be made active so that
-        allocations route to this pool.
+            allocations route to this pool.
+        device (torch.device or int, optional): selected device. Uses MemPool on
+            the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
 
     """
-
-    def __init__(self, pool: MemPool):
-        super().__init__(pool)
-
-    @staticmethod
-    def active_pool() -> Optional[_MemPool]:
-        r"""Returns the active MemPool"""
-        return _MemPoolContext.active_pool()
+    torch.cuda.init()
+    ctx = MemPoolContext(pool)
+    device_index = (
+        torch.cuda.current_device() if device is None else _get_device_index(device)
+    )
+    _cuda_beginAllocateToPool(device_index, pool.id)
+    try:
+        yield
+    finally:
+        _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        del ctx

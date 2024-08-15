@@ -4996,8 +4996,8 @@ class TestMemPool(TestCase):
         #include <torch/extension.h>
         extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return nullptr; }
-          C10_EXPORT void dummy_free(void* ptr) { }
+          C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) { return (void*)123; }
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) { }
         }
         """
         dummy_allocator_libname = "dummy_allocator"
@@ -5017,6 +5017,30 @@ class TestMemPool(TestCase):
 
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
+
+        with torch.cuda.use_mem_pool(pool):
+            out_0 = torch.randn(1, device="cuda")
+
+        # out_0.data_ptr() should be 123 if dummy_alloc was used to allocate
+        # out_0 tensor
+        self.assertEqual(out_0.data_ptr(), 123)
+
+        with torch.cuda.use_mem_pool(pool):
+            out_1 = torch.randn(1, device="cuda")
+
+        # pool's use count should be 2, since there are two use_mem_pools
+        # using it above
+        self.assertEqual(pool.use_count(), 2)
+
+        pool.release()
+        # pool's use count should now be 0, since release() calls releasePool
+        # twice based on the use_count()
+        self.assertEqual(pool.use_count(), 0)
+
+        # pool should have 2 segments since we made two allocations above in
+        # in the same pool
+        self.assertEqual(len(pool.snapshot()), 2)
+
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
