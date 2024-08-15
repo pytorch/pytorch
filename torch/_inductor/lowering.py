@@ -6245,6 +6245,10 @@ def _sink_tokens(tokens):
 
 @register_lowering(torch.ops.higher_order.with_effects)
 def with_effects(token, op, *args, **kwargs):
+    if op == torch.ops._c10d_functional.wait_tensor.default:
+        assert len(args) == 1
+        return token, _wait_tensor(args[0])
+
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
     from torch._higher_order_ops.effects import get_effect_key

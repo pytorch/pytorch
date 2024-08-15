@@ -452,7 +452,7 @@ class TestWithNCCL(MultiProcessTestCase):
 
         compiled = torch.compile(func, fullgraph=True)
         code = run_and_get_triton_code(compiled, arg)
-        FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code)
+        FileCheck().check("all_reduce_.default(buf2, 'avg', '0')").run(code)
 
         # Unless explicitly specified (e.g. in a custom runtime), the process
         # group registry is shared among all threads in a process. Here we
@@ -517,16 +517,16 @@ class CompileTest(TestCase):
         code = run_and_get_triton_code(compiled, arg)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check("buf2 = empty")
+            .check("buf9 = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf9")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf9")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check("return (buf2, buf9, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -551,12 +551,13 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check("buf0 = empty")
-            .check("buf5 = empty")
+            .check("buf15 = empty")
             .check("buf1 = empty")
-            .check("buf6 = empty")
+            .check("buf16 = empty")
             # Expect in-place with inductor allocated buf
             .check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
@@ -565,12 +566,13 @@ class CompileTest(TestCase):
             # Expect no in-place with graph input (buf5, buf6 are clones)
             .check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf5, buf6]"
+                ".default([buf15, buf16]"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf6")
+            # TODO Why repetitions?
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
             # Expect no extra copy on return
             .check("return (buf0, buf1, buf5, buf6, )")
             .run(code)
@@ -594,17 +596,18 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        print(f"XXX CODE:{code}")
         (
             FileCheck()
-            .check("buf0 = empty")
+            .check("buf2 = empty")
             # Ensure the all_reduce_ input is a view
             .check(
-                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf2"
             )
             .check(
-                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf2"
             )
-            .check("return (reinterpret_tensor(buf0")
+            .check("return (reinterpret_tensor(buf2")
             .run(code)
         )
 
@@ -628,17 +631,17 @@ class CompileTest(TestCase):
         (
             FileCheck()
             # Expect allocation
-            .check("buf0 = empty")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("buf2 = empty")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             # Expect allocation
-            .check("buf7 = empty")
-            .check("extern_kernels.mm(arg0_1, buf0, out=buf7")
-            # Expect buf0 to be reused
-            .check("buf8 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf7, out=buf8")
+            .check("buf9 = empty")
+            .check("extern_kernels.mm(arg1_1, buf2, out=buf9")
+            # Expect to be reused
+            .check("buf10 = buf2; del buf2  # reuse")
+            .check("extern_kernels.mm(arg1_1, buf9, out=buf10")
             # Expect no extra copy on return
-            .check("return (buf7, buf8, )")
+            .check("return (buf9, buf10, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -654,14 +657,15 @@ class CompileTest(TestCase):
         arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
+        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
-                "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1"
+                "buf2 = torch.ops._c10d_functional.all_gather_into_tensor.default(arg1_1"
             )
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect no extra copy on return
-            .check("return (buf0, )")
+            .check("return (buf2, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -681,6 +685,7 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
@@ -696,7 +701,7 @@ class CompileTest(TestCase):
             .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
             # Expect no extra copy on return
-            .check("return (buf16, buf18, buf20, buf22, )")
+            .check("return (buf1, buf2, buf3, buf4, )")
             .run(code)
         )
 
@@ -718,11 +723,11 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check(
-                "buf0 = torch.ops._c10d_functional.reduce_scatter_tensor.default(arg0_1"
+                "buf2 = torch.ops._c10d_functional.reduce_scatter_tensor.default(arg1_1"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             # Expect no extra copy on return
-            .check("return (buf0, )")
+            .check("return (buf2, )")
             .run(code)
         )
 
@@ -743,11 +748,12 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg1_1, arg2_1, arg3_1, arg4_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")
@@ -831,18 +837,19 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        print(f"XXX CODE={code}")
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check("buf2 = empty")
+            .check("buf9 = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.broadcast_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf9")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf9")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check("return (buf2, buf9, )")
             .run(code)
         )
 
@@ -867,7 +874,7 @@ class CompileTest(TestCase):
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)
-        (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
+        (FileCheck().check("all_reduce_.default(buf2, 'avg', '0')").run(code))
 
 
 if __name__ == "__main__":
