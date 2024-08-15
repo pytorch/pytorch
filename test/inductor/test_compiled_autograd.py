@@ -2151,8 +2151,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     def test_verbose_logs_graph(self):
-        torch._logging.set_logs(compiled_autograd_verbose=True)
-
         def fn():
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
@@ -2196,8 +2194,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
     def test_verbose_logs_aot_id(self, _):
-        torch._logging.set_logs(compiled_autograd_verbose=True)
-
         def fn():
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
@@ -2230,8 +2226,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
     def test_verbose_logs_aot_dispatcher_nodes(self, _):
-        torch._logging.set_logs(compiled_autograd_verbose=True)
-
         def fn():
             @torch.compile
             def f(x):
@@ -2278,8 +2272,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
     def test_verbose_logs_aot_dispatcher_nodes_hop(self, _):
-        torch._logging.set_logs(compiled_autograd_verbose=True)
-
         @dataclasses.dataclass
         class CustomObj:
             val: torch.Tensor
@@ -2381,7 +2373,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(len(matches2), 1)
         self.assertEqual(len(matches2[0]), len(patterns2))
 
-    def test_snapshot_verbose_logs_flag(self):
+    def test_verbose_logs_snapshot(self):
         def fn():
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
@@ -2407,17 +2399,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fn()
 
         unexpected_logs = [
-            "SumBackward0 (NodeCall 1)",
-            "ReluBackward0 (NodeCall 2)",
-            "AddmmBackward0 (NodeCall 3)",
-            "TBackward0 (NodeCall 4)",
-            "torch::autograd::AccumulateGrad (NodeCall 5)",
-            "ReluBackward0 (NodeCall 6)",
-            "AddmmBackward0 (NodeCall 7)",
-            "TBackward0 (NodeCall 8)",
-            "torch::autograd::AccumulateGrad (NodeCall 9)",
-            "torch::autograd::AccumulateGrad (NodeCall 10)",
-            "torch::autograd::AccumulateGrad (NodeCall 11)",
+            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0)"
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)

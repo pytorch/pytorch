@@ -313,7 +313,14 @@ class AutogradCompilerInstance:
         )
         set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
+            "%s",
+            lazy_format_graph_code(
+                "Compiled autograd graph",
+                graph,
+                include_device=True,
+                colored=True,
+                include_stride=True,
+            ),
         )
         verbose_log.debug(
             "%s",
