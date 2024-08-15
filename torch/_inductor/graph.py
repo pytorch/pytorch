@@ -1323,10 +1323,14 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
+                allow_padding = (
+                    n.name not in self.user_visible_outputs
+                    and not is_input_for_as_strided
+                )
                 # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
                 if not isinstance(result.data, ir.ReinterpretView):
                     result = ir.ExternKernel.require_exact_strides(
-                        result, exact_strides=strides
+                        result, exact_strides=strides, allow_padding=allow_padding
                     )
                 else:
                     dense = torch._prims_common.is_non_overlapping_and_dense(
@@ -1334,12 +1338,6 @@ class GraphLowering(torch.fx.Interpreter):
                     )
                     unbacked_symbols_in_strides = (
                         len(free_unbacked_symbols(strides)) > 0
-                    )
-                    # requiring a stride order for a non-dense output wouldn't
-                    # recreate the same strides, and would fail with view, defer for now.
-                    allow_padding = (
-                        n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
                     )
                     if (
                         not unbacked_symbols_in_strides
