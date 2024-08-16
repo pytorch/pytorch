@@ -98,7 +98,16 @@ def _partial_update(
     idx: int,
     add: bool,
 ) -> torch.Tensor:
+    """
+    This API partially update a chunk of ``original`` tensor. The ``original``
+    tensor will be first chunked along ``dim`` dimension then the ``idx`` chunk
+    will be updated with ``new``. If ``add`` is True, the chunk will be added
+    with ``new``, otherwise the chunk with be replaced by ``add``.
+
+    The result is a tensor that is the same size as ``original``.
+    """
     chunks = list(original.chunk(n_chunks, dim=dim))
+    assert chunks[idx].shape == new.shape, (original.shape, new.shape, idx)
     if add:
         chunks[idx] += new
     else:
@@ -133,16 +142,13 @@ class _SDPAMerger:
             # The algorithm from
             # github.com/zhuzilin/ring-flash-attention/pull/34#issuecomment-2076126795
             # gives a relatively stable result.
-            new_lse = lse + torch.log(1 + torch.exp(block_lse - lse))
-            out = (
-                torch.exp(lse - new_lse) * out
-                + torch.exp(block_lse - new_lse) * block_out
-            )
+            out = out - F.sigmoid(block_lse - lse) * (out - block_out)
+            lse = lse - F.logsigmoid(lse - block_lse)
             if partial:
-                self._lse = _partial_update(self._lse, new_lse, 2, 2, 1, add=False)
+                self._lse = _partial_update(self._lse, lse, 2, 2, 1, add=False)
                 self._out = _partial_update(self._out, out, 2, 2, 1, add=False)
             else:
-                self._lse = new_lse
+                self._lse = lse
                 self._out = out
 
     def step(self, out: torch.Tensor, lse: torch.Tensor, partial: bool) -> None:
@@ -178,6 +184,7 @@ def _scaled_dot_product_ring_flash_attention(
 
     return _templated_ring_attention(
         mesh,
+        2,
         aten._scaled_dot_product_flash_attention,
         query=query,
         key=key,
@@ -207,6 +214,7 @@ def _scaled_dot_product_ring_efficient_attention(
 
     return _templated_ring_attention(
         mesh,
+        2,
         aten._scaled_dot_product_efficient_attention,
         query=query,
         key=key,
@@ -245,6 +253,7 @@ class _RingRotater(ABC):
 
 
 class _AllToAllRotater(_RingRotater):
+    """Use all_to_all to send the kv to the next rank"""
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
@@ -262,6 +271,10 @@ class _AllToAllRotater(_RingRotater):
 
 
 class _AllGatherRotater(_RingRotater):
+    """
+    Allgather the kv and return the only the requried kv.
+    Only one communication will be done.
+    """
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
@@ -320,6 +333,7 @@ def _ring_rotate(
 
 def _templated_ring_attention(
     mesh: DeviceMesh,
+    seq_dim: int,
     op: _AttentionOp,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -367,7 +381,7 @@ def _templated_ring_attention(
     key = key.contiguous()
     value = value.contiguous()
 
-    sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=2)
+    sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=seq_dim)
 
     rest: List[Any]
     out: torch.Tensor
@@ -376,13 +390,14 @@ def _templated_ring_attention(
     rotater = _create_rotater(pg, 2)
 
     for i in range(size):
-        # overlap communication with compute
         if next_kv is not None:
+            # Wait for the kv from the (cp_rank - 1) rank.
             next_kv = rotater.maybe_wait(next_kv)
             key = next_kv[: key.numel()].reshape(key.shape)
             value = next_kv[key.numel() :].reshape(value.shape)
 
         if i < (size - 1):
+            # Send the k, v to the next rank
             next_kv = torch.cat([key.flatten(), value.flatten()])
             next_kv = rotater.rotate(next_kv, i + 1)
 
@@ -394,8 +409,12 @@ def _templated_ring_attention(
             continue
 
         if i == 0 or (not _cp_options.enable_load_balance or not is_causal):
+            # We need to do SDPA with the full local q, k, v.
             q, k, v, partial = (query, key, value, False)
         elif i <= rank:
+            # Striped load balancing case, and i <= rank.
+            # We need to do SPDA, with only the first half of the k, v.
+            # Note that q, k, v, each contains two stripes.
             q, k, v, partial = (
                 query,
                 key.chunk(2, dim=2)[0],
@@ -403,6 +422,10 @@ def _templated_ring_attention(
                 False,
             )
         else:
+            # Striped load balancing case, and i > rank.
+            # We need to do SPDA with only the second half of the q, and update
+            # only the the second part of  logsumexp. So partial is True.
+            # Note that q, k, v, each contains two stripes.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
         out, logsumexp, *rest = op(
@@ -505,6 +528,7 @@ def _templated_ring_attention_backward(
     is_causal: bool,
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
+    """This API implements the backward of the ring attention."""
     pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
     rank = dist.get_rank(pg)
@@ -525,6 +549,7 @@ def _templated_ring_attention_backward(
     dkv_rotater = _create_rotater(pg, 2, method=_RotateMethod.ALL_TO_ALL)
     for i in range(size):
         if next_kv is not None:
+            # Wait for the kv from the (cp_rank - 1) rank.
             buffer = kv_rotater.maybe_wait(next_kv)
             pointer = 0
             key = buffer[pointer : pointer + key.numel()].reshape(key.shape)
@@ -533,6 +558,7 @@ def _templated_ring_attention_backward(
             pointer += value.numel()
 
         if i != size - 1:
+            # Send the kv to the next rank.
             next_kv = torch.cat([key.flatten(), value.flatten()])
             next_kv = kv_rotater.rotate(next_kv, i + 1)
 
@@ -542,8 +568,12 @@ def _templated_ring_attention_backward(
 
         if is_causal_behavior != _CausalBehavior.SKIP:
             if i == 0 or (not _cp_options.enable_load_balance or not is_causal):
+                # We need to do SDPA with the full local q, k, v.
                 q, k, v, out_, dout, lse = (query, key, value, out, grad_out, logsumexp)
             elif i <= rank:
+                # Striped load balancing case, and i <= rank.
+                # We need to do SPDA with only the first half of the k, v.
+                # Note that q, k, v, each contains two stripes.
                 q, k, v, out_, dout, lse = (
                     query,
                     key.chunk(2, dim=2)[0],
@@ -553,12 +583,17 @@ def _templated_ring_attention_backward(
                     logsumexp,
                 )
             else:
+                # Striped load balancing case, and i > rank.
+                # We need to do SPDA with only the second half of the q
+                # Note that q, k, v, each contains two stripes.
                 q, k, v, out_, dout, lse = (
                     query.chunk(2, dim=2)[1],
                     key,
                     value,
                     out.chunk(2, dim=2)[1],
                     grad_out.chunk(2, dim=2)[1],
+                    # Need to make logsumexp contiguous, otherwise there will
+                    # be numerical error.
                     logsumexp.chunk(2, dim=2)[1].contiguous(),
                 )
 
@@ -577,13 +612,13 @@ def _templated_ring_attention_backward(
             grad_key_ = torch.zeros_like(key, dtype=accum_dtype)
             grad_value_ = torch.zeros_like(value, dtype=accum_dtype)
 
-        # Get the grad key and grad value for the i round.
         if i == 0:
             grad_key += grad_key_
             grad_value += grad_value_
         else:
             pointer = 0
             assert next_grad_kv is not None
+            # Wait for the kv gradient from (cp_rank - 1) rank.
             next_grad_kv = dkv_rotater.maybe_wait(next_grad_kv)
             grad_key = next_grad_kv[pointer : pointer + grad_key.numel()].reshape(
                 grad_key.shape
@@ -600,8 +635,8 @@ def _templated_ring_attention_backward(
                 grad_key += grad_key_
                 grad_value += grad_value_
 
-        # Send the key, value, grad key, and grad value to the next rank.
         next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
+        # Send the grad key, and grad value to the next rank.
         next_grad_kv = dkv_rotater.rotate(next_grad_kv, i + 1)
 
         if i <= rank or not _cp_options.enable_load_balance:
@@ -965,7 +1000,13 @@ class _LoadBalancer(ABC):
         ...
 
 
-class _EvenSharder(_LoadBalancer):
+class _SequentialSharder(_LoadBalancer):
+    """
+    This load balancer chunks the buffer into cp_world_size and rank0 gets
+    0th shard, rank1 gets 1st shard, ...
+    So this doesn't have any load balancing effect when using the causal masking.
+    """
+
     @classmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
@@ -984,6 +1025,12 @@ class _EvenSharder(_LoadBalancer):
 
 
 class _StripeLoadBalancer(_LoadBalancer):
+    """
+    This load balancer chunk the buffer into cp_world_size * 2 shards, and
+    rank0 gets 0th and (cp_world_size * 2 - 1)th shards; aank1 will get 1st
+    and (cp_world_size * 2 - 2)th shards; ...
+    """
+
     @classmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
@@ -1024,7 +1071,9 @@ def _context_parallel_buffers(
 ) -> List[torch.Tensor]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
-    sharder = _StripeLoadBalancer if _cp_options.enable_load_balance else _EvenSharder
+    sharder = (
+        _StripeLoadBalancer if _cp_options.enable_load_balance else _SequentialSharder
+    )
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         new_buffers.append(sharder.shard(buffer, mesh, seq_dim))
 
@@ -1108,5 +1157,7 @@ def context_parallel_unshard(
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
     """
-    sharder = _StripeLoadBalancer if _cp_options.enable_load_balance else _EvenSharder
+    sharder = (
+        _StripeLoadBalancer if _cp_options.enable_load_balance else _SequentialSharder
+    )
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
