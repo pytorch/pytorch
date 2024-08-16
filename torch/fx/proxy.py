@@ -98,8 +98,9 @@ _COPY_META_FIELDS = [
     "recompute",
     "ac_graph_id",
     "from_node",
-    "quantization_tag",
-    "_numeric_debug_handle",
+    "quantization_tag",  # TODO deprecated
+    "_numeric_debug_handle",  # TODO deprecated
+    "custom",
     "partitioner_tag"
 ]
 
@@ -408,20 +409,20 @@ class Proxy:
     def __getstate__(self) -> Dict:
         raise NotImplementedError(
             """__getstate__ not implemented for Proxy. """
-            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
         )
 
     def __deepcopy__(self, memo) -> Dict:
         raise NotImplementedError(
             """__deepcopy__ not implemented for Proxy. """
-            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
         )
 
     def __setstate__(self, d):
         # This is called when being unpickled/loaded.
         raise NotImplementedError(
             """__setstate__ not implemented for Proxy. """
-            """Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
         )
 
     def __call__(self, *args, **kwargs) -> 'Proxy':

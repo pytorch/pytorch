@@ -34,6 +34,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2114,6 +2115,37 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -3551,13 +3583,19 @@ class CPUReproTests(TestCase):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -4105,23 +4143,34 @@ class CPUReproTests(TestCase):
                 exactly=True,
             ).run(code)
 
-    def test_any_bool_vec(self):
-        def fn(x, y):
-            return torch.any(x), torch.any(y)
+    @requires_vectorization
+    def test_bool_reduction_vec(self):
+        for op in (
+            torch.masked.mean,
+            torch.any,
+            torch.min,
+            torch.max,
+        ):
 
-        c = [False] * 64
-        input1 = torch.Tensor(c)
-        c[0] = True
-        input2 = torch.Tensor(c)
-        metrics.reset()
-        self.common(
-            fn,
-            (
-                input1,
-                input2,
-            ),
-        )
-        check_metrics_vec_kernel_count(2)
+            def fn(x1, x2, x3):
+                return op(x1), op(x2), op(x3)
+
+            c = [False] * 63
+            input1 = torch.Tensor(c).to(torch.bool)
+            c[10] = True
+            input2 = torch.Tensor(c).to(torch.bool)
+            input3 = torch.Tensor([True] * 63).to(torch.bool)
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    input1,
+                    input2,
+                    input3,
+                ),
+            )
+            n_veckernel = 6 if op is torch.masked.mean else 3
+            check_metrics_vec_kernel_count(n_veckernel)
 
 
 if __name__ == "__main__":
