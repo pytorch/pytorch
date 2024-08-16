@@ -803,12 +803,7 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
 }
 
 Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
-  Tensor b_copy;
-  if (!b.stride(0) == 1) {
-    b_copy = b.clone(c10::MemoryFormat::Contiguous);
-  } else {
-    b_copy = b;
-  }
+  Tensor b_copy = b.contiguous();
   Tensor out = b_copy.new_empty(b_copy.sizes());
   _apply_sparse_csr_linear_solve(A, b_copy, left, out);
   return out;
