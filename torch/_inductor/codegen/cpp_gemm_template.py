@@ -14,7 +14,7 @@ from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
-from ..virtualized import V
+from ..virtualized import ops, V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
 from .cpp_template import CppTemplate
@@ -695,6 +695,7 @@ class CppPackedGemmTemplate(CppTemplate):
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
+        flag_template_buffer_has_other_users: Optional[bool] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
@@ -719,10 +720,15 @@ class CppPackedGemmTemplate(CppTemplate):
             Y = self.output_node
             inp = self.input_nodes[2] if self.has_bias else None
 
+        template_buffer_has_other_users = None
+
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
             W = template_buffer_node.inputs[1]
             Y = template_buffer_node
+
+            assert flag_template_buffer_has_other_users is not None
+            template_buffer_has_other_users = flag_template_buffer_has_other_users
 
         template_buffer = Y
         gemm_output_buffer = template_buffer
@@ -732,6 +738,14 @@ class CppPackedGemmTemplate(CppTemplate):
         epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: List[ir.Buffer] = []
         Y_aliases: Set[str] = set()
+
+        use_local_acc = (
+            self.layout.dtype != torch.float
+            or int8_gemm
+            or self.padded_n != self.n
+            or self.maybe_k_slicing()
+        )
+
         # TODO(jgong5): for int8 gemm, bias-add is handled outside of gemm template,
         # but we'd better move it here to align with fp.
         if inp is not None and self.beta != 0 and not int8_gemm:
@@ -742,8 +756,58 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
 
             epilogue_creators.append(_bias_add_epilogue)
+
         if self.epilogue_creator is not None:
             epilogue_creators.append(self.epilogue_creator)
+
+        # When the GEMM output buffer is localized but it has users other than the epilogue nodes,
+        # we need to copy the value in the GEMM output local buffer to a global buffer.
+        def need_copy_from_local_to_global_buffer_epilogue(
+            use_local_acc, template_buffer_has_other_users, epilogue_creators
+        ):
+            # The GEMM output buffer is a global buffer, thus copy is not needed.
+            if not use_local_acc:
+                return False
+
+            # The possible value of template_buffer_has_other_users is (None, False, True)
+            # It is None when generating the gemm template during autotune and it will have value during scheduler codegen.
+            # extra copy_from_local_to_global_buffer_epilogue is not needed in either of the below two cases:
+            #   1. template_buffer_has_other_users is None (i.e. when doing the codegen during autotune)
+            #   2. template_buffer_has_other_users is False, which means it's safe to keep the value in the
+            #       GEMM output buffer in local buffer only (no users outside of the epilogues will use its value).
+            if not template_buffer_has_other_users:
+                return False
+
+            # When bias is not None or self.epilogue_creator is not None,
+            # there will be epilogue_creators after the GEMM.
+            # The GEMM output buffer is localized while
+            # the output buffer of the epilogue_creators is a global buffer.
+            if epilogue_creators:
+                return False
+
+            return True
+
+        if need_copy_from_local_to_global_buffer_epilogue(
+            use_local_acc, template_buffer_has_other_users, epilogue_creators
+        ):
+
+            def copy_from_local_to_global_buffer_epilogue(input_buffer: ir.Buffer):
+                dtype = self.layout.dtype
+                input_loader = input_buffer.make_loader()
+
+                def copy_inner(index):
+                    input = input_loader(index)
+                    result = ops.to_dtype(input, dtype)
+                    return result
+
+                return ir.Pointwise(
+                    device=input_buffer.get_device(),
+                    dtype=self.layout.dtype,
+                    inner_fn=copy_inner,
+                    ranges=input_buffer.get_size(),
+                )
+
+            epilogue_creators.append(copy_from_local_to_global_buffer_epilogue)
 
         # NOTE [How CPP GEMM template epilogues are organized]
         #   gemm_output_buffer
@@ -776,17 +840,15 @@ class CppPackedGemmTemplate(CppTemplate):
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-        use_local_acc = (
-            self.layout.dtype != torch.float
-            or int8_gemm
-            or self.padded_n != self.n
-            or self.maybe_k_slicing()
-        )
+
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            Y_aliases.add(template_buffer.get_name())
+
+            if not template_buffer_has_other_users:
+                Y_aliases.add(template_buffer.get_name())
+
             if (
                 Y.get_size() == template_buffer.get_size()
                 and Y.get_stride() == template_buffer.get_stride()
