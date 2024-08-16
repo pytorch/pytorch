@@ -1,4 +1,5 @@
 """Key enums and structs used to handle data flow within the benchmark."""
+# mypy: ignore-errors
 import dataclasses
 import enum
 import itertools as it

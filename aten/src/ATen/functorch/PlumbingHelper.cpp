@@ -43,12 +43,12 @@ std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, std::o
 std::tuple<Tensor, std::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
-    return std::make_tuple(tensor, nullopt);
+    return std::make_tuple(tensor, std::nullopt);
   }
   if (batched->level() == level) {
     return std::make_tuple(batched->value(), batched->bdim());
   }
-  return std::make_tuple(tensor, nullopt);
+  return std::make_tuple(tensor, std::nullopt);
 }
 
 bool isBatchedAtLevel(const Tensor& tensor, int64_t level) {
