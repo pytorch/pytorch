@@ -62,7 +62,6 @@ env:
 
 jobs:
   test:
-    environment: ${{ github.ref == 'refs/heads/main' && 'prod-branch-main' || '' }}
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
