@@ -11,6 +11,7 @@ import itertools
 import logging
 import math
 import operator
+import random
 import re
 import sys
 import types
@@ -162,6 +163,8 @@ from .misc import (
     NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     SavedTensorBox,
     TorchVersionVariable,
@@ -927,6 +930,16 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif value is random.Random:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return RandomClassVariable(source=self.source)
+        elif istype(value, random.Random) and RandomVariable.is_supported_random_obj(
+            value
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = RandomVariable(value, source=self.source)
+            self.tx.output.side_effects.track_mutable(value, result)
+            return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
@@ -2724,6 +2737,7 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         handlers[

@@ -623,6 +623,21 @@ class SideEffects:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.call_function(1, False)
                     cg.pop_top()
+            elif isinstance(var, variables.RandomVariable):
+                # set correct random seed state
+                def gen_fn():
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_attr("setstate")
+
+                cg.add_push_null(gen_fn)
+                cg(var.wrap_state(var.random.getstate()))
+
+                suffixes.append(
+                    [
+                        *create_call_function(1, False),  # setstate
+                        create_instruction("POP_TOP"),
+                    ]
+                )
             else:
                 raise AssertionError(type(var))
 
