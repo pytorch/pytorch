@@ -338,8 +338,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   std::vector<Use> uses = observer_out->uses();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node* embedding_bag_float_op;
+  Node* embedding_bag_float_op = nullptr;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
   for (const Use& use : uses) {
@@ -354,7 +353,6 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   g->insertNode(prepack);
 
   std::vector<Value*> embedding_bag_inputs =
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       embedding_bag_float_op->inputs().vec();
   std::vector<Value*> qembedding_bag_inputs = {prepack->output()};
   const auto inputs_size = embedding_bag_float_op->inputs().size();
@@ -444,8 +442,6 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node *quant, *choose_qparams, *dequant;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
   auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
@@ -463,6 +459,7 @@ void insertQuantizationOps(
     }
     return;
   }
+  Node* dequant = nullptr;
   if (quant_type == QuantType::DYNAMIC) {
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
@@ -472,9 +469,8 @@ void insertQuantizationOps(
           observer_dtype == at::ScalarType::QInt8) {
         // For activation tensors we insert choose_qparams, quant, dequant ops.
         Value* dtype = g->insertGetAttr(self, qparams.back());
-        std::tie(choose_qparams, quant, dequant) =
-            insertChooseQParamQuantDequant(
-                g, observer_out, dtype, at::Symbol::aten(quantize_func));
+        dequant = std::get<2>(insertChooseQParamQuantDequant(
+            g, observer_out, dtype, at::Symbol::aten(quantize_func)));
       } else {
         // dtype does not require quantization, e.g. float32
         // will just remove the observer call
@@ -543,16 +539,14 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node *choose_qparams, *quant, *dequant;
   for (const auto& n : nodes_to_rewrite) {
-    std::tie(choose_qparams, quant, dequant) = n;
+    auto [choose_qparams, quant, dequant] = n;
     dequant->removeAllInputs();
     quant->removeAllInputs();
     choose_qparams->removeAllInputs();
   }
   for (const auto& n : nodes_to_rewrite) {
-    std::tie(choose_qparams, quant, dequant) = n;
+    auto [choose_qparams, quant, dequant] = n;
     dequant->destroy();
     quant->destroy();
     choose_qparams->destroy();
