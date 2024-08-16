@@ -20,7 +20,12 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _tree_map
+from torch.export.dynamic_shapes import (
+    _check_dynamic_shapes,
+    _combine_args,
+    _process_dynamic_shapes,
+    _tree_map_with_path,
+)
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -120,10 +125,11 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
-    constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+    combined_args = _combine_args(
+        nn_module, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    constraints = constraints or []
+    _check_dynamic_shapes(combined_args, dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -213,11 +219,11 @@ def _flatten_dynamic_shapes(
 ) -> List[Any]:
     flat_shapes = []
 
-    def _tree_map_helper(t, shape):
+    def _tree_map_helper(path, t, shape):
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
 
 

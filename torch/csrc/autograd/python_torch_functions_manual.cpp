@@ -21,6 +21,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/native/Resize.h>
 
 #include <Python.h>
 #include <fmt/format.h>
@@ -40,8 +41,7 @@ using at::TensorOptions;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
@@ -712,6 +712,28 @@ void initTorchFunctions(PyObject* module) {
     return wrapper->was_storage_changed();
   });
   py_module.def(
+      "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
+        // Forcefully/unsafely dumps src.storage into dst.
+        // This API is technically and not specific to functionalization
+        // (it just runs set_() without the safety checks).
+        // But its main intended purpose today is during functionalization.
+        // In particular: when we generate a new FunctionalTensor from a view
+        // op, we need to ensure it shares a storage with the view input.
+        //
+        // Other subclasses shouldn't really need to care about this,
+        // because we define aliasing on wrapper subclasses such that:
+        // - differentiable aliasing: subclass_x and subclass_y share a ._base.
+        // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
+        //   is defined recursively based on the aliasing of their inner
+        //   tensors.
+        at::native::checkSetStorage(
+            dst,
+            src.storage(),
+            dst.sym_storage_offset(),
+            dst.sym_sizes(),
+            dst.sym_strides());
+      });
+  py_module.def(
       "_functionalize_mark_mutation_hidden_from_autograd",
       [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
@@ -773,5 +795,4 @@ void initTorchFunctions(PyObject* module) {
       });
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

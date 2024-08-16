@@ -3982,9 +3982,11 @@ class TestAutograd(TestCase):
 
         with torch.inference_mode():
             a = torch.rand(5, requires_grad=True)
-        msg = "update to inference tensor outside InferenceMode"
-        with self.assertRaisesRegex(RuntimeError, msg):
+            # does not error
             torch.autograd.graph.increment_version(a)
+
+        # does not error
+        torch.autograd.graph.increment_version(a)
 
     def test_no_grad_input(self):
         class MyFunction(Function):
@@ -12513,7 +12515,6 @@ class TestAutogradInferenceMode(TestCase):
                 )
                 with self.assertRaisesRegex(RuntimeError, err_msg):
                     out.add_(2)
-                pass
             else:
                 out.add_(2)
 
@@ -12609,7 +12610,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and is being modified inplace"
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         fn(view_out)
-                    pass
                 else:
                     fn(view_out)
 
@@ -12630,7 +12630,6 @@ class TestAutogradInferenceMode(TestCase):
                     err_msg = "A view was created in inference mode and its base or another view "
                     with self.assertRaisesRegex(RuntimeError, err_msg):
                         view_out.grad_fn
-                    pass
                 else:
                     view_out.grad_fn
 

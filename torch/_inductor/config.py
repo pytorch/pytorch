@@ -65,9 +65,7 @@ abi_compatible = (
     os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
 )
 
-c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
-)
+c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
 # dead code elimination
 dce = False
@@ -453,6 +451,9 @@ assert_indirect_indexing = True
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
+# enable the combo kernel that combines data-independent kernels (additional
+# to foreach kernels) into a single one (Experimental)
+combo_kernels = False
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
@@ -617,6 +618,11 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 # Specify a file where we print out the profiling results.
 # None means we do not dump results to a file.
 profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
+# Switch to do_bench_using_profiling to exclude the CPU overheads
+profile_bandwidth_with_do_bench_using_profiling = (
+    os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
+)
+
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -799,6 +805,10 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
+    # Prefer higher dimensional tilings. This simplifies indexing expressions, making
+    # it easier to identify block pointers.
+    prefer_nd_tiling: bool = False
+
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
@@ -883,6 +893,15 @@ class aot_inductor:
     debug_dump_consts_bin: bool = (
         os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
     )
+
+    # enable debug mode for aot inductor and it will print out more information including the intermediate tensor values, etc
+    # for debugging purpose
+    debug_intermediate_value_printer = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0") == "1"
+    )
+
+    # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
+    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
