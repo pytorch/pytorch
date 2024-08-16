@@ -1287,7 +1287,6 @@ class SymbolicContext:
     another version of this that says "use exactly these SymInts, don't
     allocate fresh symbols."
     """
-    pass
 
 
 @dataclass(frozen=True)
