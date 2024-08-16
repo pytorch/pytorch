@@ -2564,7 +2564,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       // or if the mode doesn't match at the current index, return false
       else if (
           (ref_stack_size == 0) || (ref_ind > ref_stack_size - 1) ||
-          mode_type != _ref_stack[this->_ref_stack.size() - 1 - ref_ind]) {
+          mode_type != _ref_stack[ref_ind]) {
         return false;
       }
       ref_ind++;
