@@ -258,7 +258,7 @@ PyObject* THPEngine_run_backward(
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
     Edge gradient_edge; // Temporary variable to hold the gradient edge
-    c10::optional<at::Tensor> mb_output;
+    std::optional<at::Tensor> mb_output;
     if (THPVariable_Check(_tensor)) {
       mb_output = THPVariable_Unpack(_tensor);
       TORCH_CHECK(

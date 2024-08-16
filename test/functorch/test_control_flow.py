@@ -3505,6 +3505,45 @@ def forward(self, l_inp_, l_tmp_):
         )
         self.assertEqual(out, f(inp, tmp))
 
+    def test_two_hops_not_sharing_code_obj(self):
+        pred, args = torch.tensor(True), (torch.ones(3, 3),)
+
+        def fn1(x):
+            return x + 1
+
+        def fn2(x):
+            return x - 1
+
+        from torch._dynamo.testing import CompileCounter
+
+        # Tests rely on automatic_dynamic = True
+        with torch._dynamo.config.patch(automatic_dynamic_shapes=True):
+            cnt = CompileCounter()
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            args = (torch.randn(3, 3),)
+            # No recompilation
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, args)
+            self.assertEqual(cnt.frame_count, 1)
+
+            def cond_fn(x):
+                return x.sum() > 0
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            # recompilation
+            self.assertEqual(cnt.frame_count, 2)
+
+            args = (torch.randn(4, 4),)
+            torch.compile(torch.while_loop, backend=cnt)(cond_fn, fn2, args)
+            self.assertEqual(cnt.frame_count, 2)
+
+            # With recompilation due to automatic dynamic
+            # This also proves that while_loop doesn't share code obj with cond
+            torch.compile(torch.cond, backend=cnt)(pred, fn1, fn2, (torch.randn(4, 4),))
+            self.assertEqual(cnt.frame_count, 3)
+
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 

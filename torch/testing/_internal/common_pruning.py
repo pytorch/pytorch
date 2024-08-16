@@ -1,17 +1,16 @@
-# mypy: ignore-errors
-
 # Owner(s): ["module: unknown"]
 
+from typing import Dict, Any, Tuple
 from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 class ImplementedSparsifier(BaseSparsifier):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Dict[str, Any]) -> None:
         super().__init__(defaults=kwargs)
 
-    def update_mask(self, module, **kwargs):
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Dict[str, Any]) -> None:
         module.parametrizations.weight[0].mask[0] = 0
         linear_state = self.state['linear1.weight']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
@@ -24,7 +23,7 @@ class MockSparseLinear(nn.Linear):
     well as an additional from_dense method.
     """
     @classmethod
-    def from_dense(cls, mod):
+    def from_dense(cls, mod: nn.Linear) -> 'MockSparseLinear':
         """
         """
         linear = cls(mod.in_features,
@@ -32,7 +31,7 @@ class MockSparseLinear(nn.Linear):
         return linear
 
 
-def rows_are_subset(subset_tensor, superset_tensor) -> bool:
+def rows_are_subset(subset_tensor: torch.Tensor, superset_tensor: torch.Tensor) -> bool:
     """
     Checks to see if all rows in subset tensor are present in the superset tensor
     """
@@ -62,7 +61,7 @@ class SimpleLinear(nn.Module):
         self.linear1 = nn.Linear(4, 4, bias=False)
         self.linear2 = nn.Linear(4, 10, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.linear1(x)
         x = self.linear2(x)
@@ -83,7 +82,7 @@ class LinearBias(nn.Module):
             nn.Linear(3, 10, bias=False),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         return x
 
@@ -107,7 +106,7 @@ class LinearActivation(nn.Module):
         self.linear2 = nn.Linear(3, 10, bias=False)
         self.act2 = nn.Tanh()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.linear1(x)
         x = self.act1(x)
@@ -136,7 +135,7 @@ class LinearActivationFunctional(nn.Module):
         self.linear3 = nn.Linear(8, 10, bias=False)
         self.act1 = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.linear1(x)
         x = F.relu(x)
@@ -160,7 +159,7 @@ class SimpleConv2d(nn.Module):
         self.conv2d1 = nn.Conv2d(64, 48, 3, 1, bias=False)
         self.conv2d2 = nn.Conv2d(48, 52, 3, 1, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = self.conv2d2(x)
@@ -181,7 +180,7 @@ class Conv2dBias(nn.Module):
         self.conv2d1 = nn.Conv2d(64, 48, 3, 1, bias=True)
         self.conv2d2 = nn.Conv2d(48, 52, 3, 1, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = self.conv2d2(x)
@@ -207,7 +206,7 @@ class Conv2dActivation(nn.Module):
         self.conv2d1 = nn.Conv2d(64, 48, 3, 1, bias=False)
         self.conv2d2 = nn.Conv2d(48, 52, 3, 1, bias=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = F.relu(x)
@@ -241,7 +240,7 @@ class Conv2dPadBias(nn.Module):
         self.conv2d2 = nn.Conv2d(48, 52, 3, 1, padding=1, bias=True)
         self.act2 = nn.Tanh()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = self.act1(x)
@@ -271,7 +270,7 @@ class Conv2dPool(nn.Module):
         self.conv2d2 = nn.Conv2d(48, 52, kernel_size=3, padding=1, bias=True)
         self.conv2d3 = nn.Conv2d(52, 52, kernel_size=3, padding=1, bias=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = self.maxpool(x)
@@ -305,7 +304,7 @@ class Conv2dPoolFlattenFunctional(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(11, 13, bias=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = F.max_pool2d(x, kernel_size=2, stride=2, padding=1)
@@ -340,7 +339,7 @@ class Conv2dPoolFlatten(nn.Module):
         self.flatten = nn.Flatten()
         self.fc = nn.Linear(44, 13, bias=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.seq(x)
         x = self.conv2d1(x)
         x = F.max_pool2d(x, kernel_size=2, stride=2, padding=1)
@@ -357,12 +356,12 @@ class LSTMLinearModel(nn.Module):
 
     def __init__(
         self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int
-    ):
+    ) -> None:
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, input):
+    def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         output, hidden = self.lstm(input)
         decoded = self.linear(output)
         return decoded, output
@@ -373,13 +372,13 @@ class LSTMLayerNormLinearModel(nn.Module):
 
     def __init__(
         self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int
-    ):
+    ) -> None:
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers)
         self.norm = nn.LayerNorm(hidden_dim)
         self.linear = nn.Linear(hidden_dim, output_dim)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x, state = self.lstm(x)
         x = self.norm(x)
         x = self.linear(x)

@@ -28,7 +28,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: "torch._inductor.graph.GraphLowering",
-    ):
+    ) -> None:
         super().__init__(gm)
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
@@ -82,7 +82,7 @@ class InputDescriptor:
 
 
 class TracingOpsHandler(WrapperHandler[T]):
-    def __init__(self, tracer: torch.fx.Tracer, num_inputs: int):
+    def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
         self.tracer = tracer

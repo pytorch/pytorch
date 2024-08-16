@@ -6,8 +6,8 @@ import onnx
 
 import torch
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
-from torch.onnx._internal import exporter
-from torch.onnx._internal.exporter import (
+from torch.onnx._internal import _exporter_legacy
+from torch.onnx._internal._exporter_legacy import (
     LargeProtobufONNXProgramSerializer,
     ONNXProgramSerializer,
     ProtobufONNXProgramSerializer,
@@ -144,7 +144,9 @@ class TestDynamoExportAPI(common_utils.TestCase):
 
         with self.assertRaises(RuntimeError):
             dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
-        self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+        self.assertTrue(
+            os.path.exists(_exporter_legacy._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH)
+        )
 
     def test_onnx_program_accessible_from_exception_when_export_failed(self):
         class ModelWithExportError(torch.nn.Module):

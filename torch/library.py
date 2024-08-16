@@ -361,11 +361,7 @@ class Library:
         assert dispatch_key != ""
         assert self.m is not None
 
-        self.m.fallback(
-            dispatch_key,
-            fn,
-            with_keyset,
-        )
+        self.m.fallback(dispatch_key, fn, with_keyset)
 
     def _destroy(self):
         if self.m is not None:
@@ -535,6 +531,10 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
     """
+    return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
+
+
+def _impl(qualname, types, func=None, *, lib=None, disable_dynamo=False):
     if isinstance(types, str):
         types = (types,)
     keys = set({})
@@ -553,13 +553,23 @@ def impl(qualname, types, func=None, *, lib=None):
 
     def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
+
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        for key in keys:
-            use_lib.impl(qualname, func, key)
+        if disable_dynamo:
+
+            @torch._disable_dynamo
+            def func_no_dynamo(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            for key in keys:
+                use_lib.impl(qualname, func_no_dynamo, key)
+        else:
+            for key in keys:
+                use_lib.impl(qualname, func, key)
 
     if func is None:
         return register
@@ -667,7 +677,8 @@ def register_kernel(
     assert isinstance(op, str)
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
-    return impl(op, device_types, func, lib=lib)
+
+    return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
 
 
 def register_fake(
@@ -739,10 +750,10 @@ def register_fake(
         >>>
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
-        >>>     # Number of nonzero-elements is data-dependent.
-        >>>     # Since we cannot peek at the data in an fake impl,
-        >>>     # we use the ctx object to construct a new symint that
-        >>>     # represents the data-dependent size.
+        >>> # Number of nonzero-elements is data-dependent.
+        >>> # Since we cannot peek at the data in an fake impl,
+        >>> # we use the ctx object to construct a new symint that
+        >>> # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
         >>>     nnz = ctx.new_dynamic_size()
         >>>     shape = [nnz, x.dim()]
@@ -846,11 +857,13 @@ def register_autograd(
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_sin", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, x.cos())
         >>>
         >>> # Example with a keyword-only arg
@@ -866,11 +879,13 @@ def register_autograd(
         >>> def backward(ctx, grad):
         >>>     return grad * ctx.val
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_mul", backward, setup_context=setup_context)
+        >>> torch.library.register_autograd(
+        ...     "mylib::numpy_mul", backward, setup_context=setup_context
+        ... )
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_mul(x, val=3.14)
-        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
