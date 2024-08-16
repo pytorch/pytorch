@@ -194,7 +194,7 @@ static void sort_kernel(
       auto* indices, int64_t indices_dim_stride,
       int64_t dim_size
     ) {
-      using scalar_t = typename std::remove_pointer<decltype(values)>::type;
+      using scalar_t = std::remove_pointer_t<decltype(values)>;
       if (values_dim_stride == 1 && indices_dim_stride == 1) {
         sort_kernel_impl<
           scalar_t, decltype(values), decltype(indices)
