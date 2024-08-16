@@ -6,12 +6,14 @@ import importlib
 import sys
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
@@ -238,7 +240,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch.nn as nn
 
             class Model(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
 
                 def forward(self, input, other, out):
@@ -325,7 +327,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # mutation on parameters/buffers hits cudagraphs
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.buf = torch.ones([10], device="cuda")
 
@@ -611,6 +613,91 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        def test_cache_hit_forward_miss_backward(self):
+            # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            def complex_memory_overlap_new(t):
+                return True
+
+            # Run forwards, fx graph should cache miss
+            for _ in range(3):
+                torch._dynamo.reset()
+                counters.clear()
+                FxGraphCache.clear()
+
+                with mock.patch(
+                    "torch._inductor.compile_fx.complex_memory_overlap",
+                    new=complex_memory_overlap_new,
+                ):
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+                    # Reset dynamo and related caches except for FXGraphCache
+                    torch._dynamo.reset()
+                    # Forwards should be a cache hit now, we still skip cudagraphs
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+                    # Run backward without complex memory overlap being set
+
+                # Run the backward without complex memory overlap reason
+                # cache should miss, but cudagraphs should not run
+                # because forward skipped it
+                back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                out.backward(back_inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # we should not have cudagraph'd anything
+            assert self.get_manager() is None
+
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        def test_backward_gets_cached_cudagraphs(self):
+            # We pass cpu tensors to foo and save that into the cache
+            # On a subsequent run in a new process, cudagraphs should be
+            # disabled properly on both forward and backwards runs.
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            torch._dynamo.reset()
+            counters.clear()
+            FxGraphCache.clear()
+
+            # Use cpu device to disable cudagraphs during compilation
+            inp = torch.rand([20, 20], device="cpu", requires_grad=True)
+            out = foo(inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cpu")
+            out.backward(back_inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+            # Run again on new process
+            torch._dynamo.reset()
+
+            # Forward and backward should also disable cudagraphs without compilation
+            inp = torch.rand([20, 20], device="cpu", requires_grad=True)
+            out = foo(inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+            back_inp = torch.empty_strided([20, 20], [0, 1], device="cpu")
+            out.backward(back_inp)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+            # we should not have cudagraph'd anything
+            assert self.get_manager() is None
+
         @parametrize("backend", ("inductor", "cudagraphs"))
         def test_forward_backward_not_called(self, backend):
             def foo(x, y):
@@ -657,7 +744,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
             class CloneCounterMode(TorchDispatchMode):
-                def __init__(self):
+                def __init__(self) -> None:
                     self.count = 0
 
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -740,7 +827,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("freezing", True)
         def test_constant_output(self):
             class Mod(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(
                         torch.tensor([float(i) for i in range(10)], device="cuda")
@@ -1223,7 +1310,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
+                    self.assertTrue(
+                        "at::cuda::blas::gemm<float>" in str(e)
+                        or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                    )
                     self.assertTrue(
                         "getCurrentCUDABlasHandle" in str(e)
                         or "getNewWorkspace" in str(e)
@@ -1411,7 +1501,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_alias_of_parameter(self):
             class AliasMod(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.param = torch.nn.Parameter(torch.rand([20, 20], device="cuda"))
 
@@ -1788,9 +1878,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(
                 Exception,
                 r"static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace: None\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:(?s).*"
                 r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
-                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n\n",
+                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
                 self.curr_node().run(
                     [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
@@ -1918,7 +2008,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def __init__(self, param, buf) -> None:
                     super().__init__()
                     self.weight = param
-                    self.register_buffer("buf", buf)
+                    self.buf = torch.nn.Buffer(buf)
 
                 def forward(self, x):
                     return x * self.weight + self.buf
@@ -1973,6 +2063,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.run_static_input_param_test(fn, 6)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
@@ -2008,6 +2099,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
@@ -2052,6 +2144,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
         def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
@@ -2096,6 +2189,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
@@ -2142,7 +2236,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
-                    self.static_tensor = torch.zeros((2, 2), device="cuda")
+                    self.register_buffer(
+                        "static_tensor", torch.zeros((2, 2), device="cuda")
+                    )
                     self.goo = Goo()
 
                 def forward(self, x) -> torch.Tensor:
@@ -2160,13 +2256,130 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            # Run with specific function id to avoid dynamo recompiling
-            self.get_manager().run(
-                [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp],
-                FunctionID(0),
-            )
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                for _ in range(3):
+                    foo(inp)
+            else:
+                # Run with specific function id to avoid dynamo recompiling
+                self.get_manager().run(
+                    [
+                        foo.goo.linear.weight,
+                        foo.goo.linear.bias,
+                        foo.static_tensor,
+                        inp,
+                    ],
+                    FunctionID(0),
+                )
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached1(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            def iter(batch_size: int, mod: torch.nn.Module):
+                x = torch.rand((batch_size, 3), device="cuda")
+                for _ in range(3):
+                    mod(x)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    iter(batch_size, mod)
+
+            FileCheck().check(
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
+            ).run("\n".join(captured_output))
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        def test_skip_if_dynamic_shape_limit_reached2(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.attn = torch.nn.MultiheadAttention(
+                        embed_dim=3, num_heads=3, device="cuda"
+                    )
+
+                def forward(
+                    self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+                ) -> torch.Tensor:
+                    return self.attn(q, k, v)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            def iter(batch_size: int, length: int):
+                q = torch.rand((batch_size, length, 3), device="cuda")
+                k = torch.rand((batch_size, length, 3), device="cuda")
+                v = torch.rand((batch_size, length, 3), device="cuda")
+                for _ in range(3):
+                    mod(q, k, v)
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 40, 10):
+                    for length in range(10, 30, 10):
+                        iter(batch_size, length)
+
+            print(captured_output)
+            FileCheck().check(
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning."
+            ).run(captured_output[0])
+
+        @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
+        def test_warn_once_if_dynamic_shape_limit_reached(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            def iter(batch_size: int, mod: torch.nn.Module):
+                x = torch.rand((batch_size, 3), device="cuda")
+                for _ in range(3):
+                    mod(x)
+
+            mod = torch.compile(Mod(), mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for batch_size in range(10, 200, 10):
+                    iter(batch_size, mod)
+
+            print(captured_output)
+
+            FileCheck().check_count(
+                "CUDAGraph supports dynamic shapes by recording a new graph for each "
+                "distinct input size. Recording too many CUDAGraphs may lead to "
+                "extra overhead. We have observed 2 distinct sizes. "
+                "Please consider the following options for better performance: "
+                "a) padding inputs to a few fixed number of shapes; or b) set "
+                "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
+                "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
+                "to silence this warning.",
+                1,
+                exactly=True,
+            ).run("\n".join(captured_output))
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 

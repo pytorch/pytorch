@@ -2,12 +2,11 @@
 
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
-#include <assert.h>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 // Can't use c10::ArrayRef because it's not truly header-only and
 // pulls in other c10 headers. This is (sadly) copy-pasted and
@@ -48,9 +47,9 @@ class MiniArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same<
+      typename = std::enable_if_t<std::is_same_v<
           std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>::value>>
+          T*>>>
   /* implicit */ MiniArrayRef(Container& container)
       : Data(container.data()), Length(container.size()) {}
 
@@ -73,6 +72,7 @@ class MiniArrayRef final {
 
   /// Construct an MiniArrayRef from a C array.
   template <size_t N>
+  // NOLINTNEXTLINE(*c-array*)
   /* implicit */ constexpr MiniArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   // /// Construct an MiniArrayRef from an empty C array.
@@ -144,16 +144,16 @@ class MiniArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, MiniArrayRef<T>>::type&
-  operator=(U&& Temporary) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, MiniArrayRef<T>>& operator=(
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, MiniArrayRef<T>>::type&
-  operator=(std::initializer_list<U>) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, MiniArrayRef<T>>& operator=(
+      std::initializer_list<U>) = delete;
 };
 
 using MiniIntArrayRef = MiniArrayRef<int64_t>;
@@ -204,7 +204,7 @@ class ArrayRefTensor {
   }
 
   AtenTensorHandle expensiveCopyToTensor() const {
-    AtenTensorHandle result;
+    AtenTensorHandle result = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
         sizes_.size(),
         sizes_.data(),
@@ -213,7 +213,7 @@ class ArrayRefTensor {
         device_type_,
         device_idx_,
         &result));
-    void* dataPtr;
+    void* dataPtr = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(result, &dataPtr));
     std::memcpy(dataPtr, data(), numel() * sizeof(T));
     return result;
@@ -281,7 +281,7 @@ inline AtenTensorHandle reinterpret_tensor_wrapper(
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
     int64_t storage_offset) {
-  AtenTensorHandle result;
+  AtenTensorHandle result = nullptr;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
       self, ndim, sizes_ptr, strides_ptr, storage_offset, &result));
   return result;
@@ -307,7 +307,7 @@ inline ArrayRefTensor<T> reinterpret_tensor_wrapper(
 }
 
 inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
-  void* result;
+  void* result = nullptr;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor, &result));
   return result;
 }
@@ -378,5 +378,4 @@ RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
   return art.expensiveCopyToTensor();
 }
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor

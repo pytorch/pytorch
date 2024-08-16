@@ -468,7 +468,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
     auto [B_broadcast_size, _] = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/true);
   set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
@@ -524,7 +524,7 @@ TORCH_META_FUNC(_linalg_solve_ex)(const Tensor& A,
   TORCH_CHECK(left || !vector_case, "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.solve is equivalent to B / A.squeeze(-1)");
   auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
                                   : B_broad_shape;
-  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(result_shape, /*f_contig=*/left);
 
   set_output_strided(0, result_shape, result_strides, B.options(), {});
 
@@ -603,7 +603,7 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
 
   // This one checks that B can be broadcasted to the shape of A
   auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
-  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/left);
+  auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*f_contig=*/left);
 
   set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
@@ -1508,7 +1508,7 @@ void _linalg_check_errors(
     return;
   }
 
-  int32_t info;
+  int32_t info = 0;
   std::string batch_str;
   if (is_matrix) {
     info = infos.item<int>();
@@ -1583,6 +1583,8 @@ static bool _may_require_fw_or_bw_grad(const Tensor& input) {
           || input._fw_grad(/*level */ 0).defined()
           || isTensorSubclassLike(input));
 }
+
+// NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.inv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 TORCH_IMPL_FUNC(linalg_inv_ex_out)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
@@ -2028,7 +2030,7 @@ TORCH_IMPL_FUNC(linalg_lu_out)(const Tensor& A,
                     const_cast<Tensor&>(U),
                     use_L ? L : U,
                     pivots,
-                    /*unpack_lu=*/true,
+                    /*unpack_data=*/true,
                     /*unpack_pivots=*/pivot);
 }
 
@@ -2079,7 +2081,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
+      .declare_static_shape(pivots.sizes(), /*squash_dims=*/pivots.dim() - 1)
       .add_output(perm)
       .add_owned_const_input(pivots.contiguous())
       .build();
@@ -2120,7 +2122,7 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
   // Make LU / pivots F-contiguous
   auto pivots_ = pivots.expect_contiguous();
   auto LU_ = at::native::borrow_else_clone(
-      LU.mT().is_contiguous(), LU, LU, /*row_major=*/false);
+      LU.mT().is_contiguous(), LU, LU, /*contig=*/false);
 
   const auto trans = !adjoint ? TransposeType::NoTranspose :
                      LU.is_complex() ? TransposeType::ConjTranspose
@@ -3569,7 +3571,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // set default rcond value
   double rcond_value = rcond.has_value()
     ? rcond.value()
-    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
+    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * static_cast<double>(std::max<int64_t>(input.size(-2), input.size(-1)));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
@@ -3699,8 +3701,8 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
   // We can revisit this decision later and remove upper completely
   // also from low level functions or add it to the public API.
-  bool upper = false;
-  if (upper) {
+  constexpr bool upper = false;
+  if constexpr (upper) {
     at::triu_out(const_cast<Tensor&>(LD), self);
   } else {
     at::tril_out(const_cast<Tensor&>(LD), self);
@@ -3754,7 +3756,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto pivots_ = pivots.expect_contiguous();
 
   auto LD_ = at::native::borrow_else_clone(
-      LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
+      LD.mT().is_contiguous(), LD, LD, /*contig=*/false);
   result.copy_(B);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(result));
 
@@ -4026,4 +4028,5 @@ Tensor linalg_vander_symint(
   auto ones =  result.new_ones_symint(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
+// NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 }  // namespace at::native

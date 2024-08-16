@@ -1,0 +1,322 @@
+name: Build manywheel docker images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - '.ci/docker/manywheel/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-manywheel-images.yml
+  pull_request:
+    paths:
+      - '.ci/docker/manywheel/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-manywheel-images.yml
+
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  DOCKER_ID: ${{ secrets.DOCKER_ID }}
+  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-docker-cuda:
+    runs-on: linux.9xlarge.ephemeral
+    strategy:
+      matrix:
+        cuda_version: ["12.4", "12.1", "11.8"]
+    env:
+      GPU_ARCH_TYPE: cuda
+      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Purge tools folder (free space for build)
+        run: rm -rf /opt/hostedtoolcache
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux-builder-cuda${{matrix.cuda_version}}
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux-builder:cuda${{matrix.cuda_version}}
+  # NOTE: manylinux_2_28 are still experimental, see https://github.com/pytorch/pytorch/issues/123649
+  build-docker-cuda-manylinux_2_28:
+    runs-on: linux.9xlarge.ephemeral
+    strategy:
+      matrix:
+        cuda_version: ["12.4", "12.1", "11.8"]
+    env:
+      GPU_ARCH_TYPE: cuda-manylinux_2_28
+      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Purge tools folder (free space for build)
+        run: rm -rf /opt/hostedtoolcache
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux2_28-builder-cuda${{matrix.cuda_version}}
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux2_28-builder:cuda${{matrix.cuda_version}}
+  build-docker-cuda-aarch64:
+    runs-on: linux.arm64.2xlarge
+    strategy:
+      matrix:
+        cuda_version: ["12.4"]
+    env:
+      GPU_ARCH_TYPE: cuda-aarch64
+      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v3
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinuxaarch64-builder-cuda${{matrix.cuda_version}}
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinuxaarch64-builder:cuda${{matrix.cuda_version}}
+  build-docker-rocm:
+    runs-on: linux.9xlarge.ephemeral
+    strategy:
+      matrix:
+        rocm_version: ["6.0", "6.1"]
+    env:
+      GPU_ARCH_TYPE: rocm
+      GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux-builder-rocm${{matrix.rocm_version}}
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux-builder:rocm${{matrix.rocm_version}}
+  build-docker-cpu:
+    runs-on: linux.9xlarge.ephemeral
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux-builder-cpu
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux-builder:cpu
+  build-docker-cpu-manylinux_2_28:
+    runs-on: linux.9xlarge.ephemeral
+    env:
+      GPU_ARCH_TYPE: cpu-manylinux_2_28
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux2_28-builder-cpu
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux2_28-builder:cpu
+  build-docker-cpu-aarch64:
+    runs-on: linux.arm64.2xlarge
+    env:
+      GPU_ARCH_TYPE: cpu-aarch64
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinuxaarch64-builder-cpu-aarch64
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinuxaarch64-builder:cpu-aarch64
+  build-docker-cpu-aarch64-2_28:
+    runs-on: linux.arm64.2xlarge
+    env:
+      GPU_ARCH_TYPE: cpu-aarch64-2_28
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux2_28_aarch64-builder-cpu-aarch64
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux2_28_aarch64-builder:cpu-aarch64
+  build-docker-cpu-cxx11-abi:
+    runs-on: linux.9xlarge.ephemeral
+    env:
+      GPU_ARCH_TYPE: cpu-cxx11-abi
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinuxcxx11-abi-builder-cpu-cxx11-abi
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinuxcxx11-abi-builder:cpu-cxx11-abi
+  build-docker-xpu:
+    runs-on: linux.9xlarge.ephemeral
+    env:
+      GPU_ARCH_TYPE: xpu
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: manylinux2_28-builder-xpu
+            docker-build-dir:  .ci/docker/manywheel
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        run: |
+          .ci/docker/manywheel/build.sh manylinux2_28-builder:xpu

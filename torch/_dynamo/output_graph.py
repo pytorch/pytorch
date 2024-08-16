@@ -2,8 +2,10 @@
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
+import json
 import logging
 import operator
 import re
@@ -16,9 +18,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 import sympy
 
 import torch._guards
-
 import torch._logging
-
+import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
@@ -30,7 +31,7 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import config, logging as torchdynamo_logging, variables
+from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -67,6 +68,7 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
+    _extract_tensor_dict,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -101,11 +103,12 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-
 from .variables.torch_function import TensorWithTFOverrideVariable
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -805,7 +808,7 @@ class OutputGraph:
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.proxy.node.meta
-                vt.proxy.node.meta["tensor_dict"] = target.__dict__.copy()
+                vt.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
 
@@ -1136,6 +1139,10 @@ class OutputGraph:
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
+            else:
+                # NB: Important to run compiler collective even when there is
+                # a graph break
+                self.run_compiler_collective(tx)
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
@@ -1252,113 +1259,139 @@ class OutputGraph:
                 GlobalContextCheckpointState(current_global_state)
             )
 
-    @torch._guards.TracingContext.clear_frame()
+    def run_compiler_collective(self, tx):
+        if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            compile_pg = ds.compile_pg
+            log.info("compiler_collective %s", ds.local_state)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compiler_collective",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(
+                    dataclasses.asdict(ds.local_state),
+                ),
+            )
+            with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
+                all_states = [None] * compile_pg.size()
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                ds.all_states = all_states
+            # Clear speculation log, because are tracing may diverge due to
+            # this information from the compiler collective
+            tx.speculation_log.clear()
+            raise exc.CompileCollectiveRestartAnalysis
+
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        from .decorators import disable
+        with torch._guards.TracingContext.clear_frame():
+            from .decorators import disable
 
-        assert self.should_exit
+            assert self.should_exit
 
-        name = unique_id("__compiled_fn")
+            self.run_compiler_collective(tx)
 
-        assert isinstance(rv, list)
-        assert isinstance(root, FakeRootModule)
-        self.create_node(
-            "output",
-            "output",
-            (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
-            {},
-        )
-        if not config.do_not_emit_runtime_asserts:
-            insert_deferred_runtime_asserts(
-                fx.GraphModule(root, self.graph),
-                self.shape_env,
-                name,
+            name = unique_id("__compiled_fn")
+
+            assert isinstance(rv, list)
+            assert isinstance(root, FakeRootModule)
+            output_node = self.create_node(
+                "output",
+                "output",
+                (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
+                {},
             )
-        # NB: deferred runtime asserts can keep graphargs live, so make sure
-        # those are inserted before pruning
-        self.remove_unused_graphargs()
-        ncalls = count_calls(self.graph)
-        counters["stats"]["calls_captured"] += ncalls
-
-        # free a bit of memory
-        self.real_value_cache.clear()
-
-        gm = _make_graph_module(root, self.graph)
-        for register_finalizer in self.register_finalizer_fns:
-            register_finalizer(gm)
-
-        gm.compile_subgraph_reason = self.compile_subgraph_reason
-        gm.meta[
-            "dynamo_flat_name_to_original_fqn"
-        ] = self.dynamo_flat_name_to_original_fqn.copy()
-
-        graph_code_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                name, gm, include_stride=True, include_device=True, colored=True
-            ),
-        )
-        torch._logging.trace_structured(
-            "dynamo_output_graph",
-            lambda: {"sizes": self.get_graph_sizes_structured()},
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
-        self.call_cleanup_hooks()
-        old_fake_mode = self.tracing_context.fake_mode
-        if not self.export:
-            import torch._functorch.config as _config
-
-            with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                backend_fake_mode = torch._subclasses.FakeTensorMode(
-                    shape_env=old_fake_mode.shape_env,
+            tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
+            if not config.do_not_emit_runtime_asserts:
+                insert_deferred_runtime_asserts(
+                    fx.GraphModule(root, self.graph),
+                    self.shape_env,
+                    name,
                 )
-            # TODO(voz): Ostensibily, this should be scoped and
-            # restore back to old_fake_mode, but doing so currently violates
-            # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-            self.tracing_context.fake_mode = backend_fake_mode
+            # NB: deferred runtime asserts can keep graphargs live, so make sure
+            # those are inserted before pruning
+            self.remove_unused_graphargs()
+            ncalls = count_calls(self.graph)
+            counters["stats"]["calls_captured"] += ncalls
 
-        with self.restore_global_state():
-            compiled_fn = self.call_user_compiler(gm)
+            # free a bit of memory
+            self.real_value_cache.clear()
 
-        from torch.fx._lazy_graph_module import _LazyGraphModule
+            gm = _make_graph_module(root, self.graph)
+            for register_finalizer in self.register_finalizer_fns:
+                register_finalizer(gm)
 
-        if isinstance(compiled_fn, _LazyGraphModule) or (
-            isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
-            and compiled_fn.__name__ == "_lazy_forward"
-        ):
-            # Since dynamo will run the forward method for the GraphModule shortly
-            # anyways, it does not hurt to do the real recompilation here if
-            # this is a _LazyGraphModule. This makes it easier for dynamo to
-            # optimize a _LazyGraphModule.
+            gm.compile_subgraph_reason = self.compile_subgraph_reason
+            gm.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ] = self.dynamo_flat_name_to_original_fqn.copy()
 
-            lazy_gm = (
-                compiled_fn
-                if isinstance(compiled_fn, _LazyGraphModule)
-                else compiled_fn.__self__
+            graph_code_log.debug(
+                "%s",
+                lazy_format_graph_code(
+                    name, gm, include_stride=True, include_device=True, colored=True
+                ),
             )
+            torch._logging.trace_structured(
+                "dynamo_output_graph",
+                lambda: {"sizes": self.get_graph_sizes_structured()},
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
+            self.call_cleanup_hooks()
+            old_fake_mode = self.tracing_context.fake_mode
+            if not self.export:
+                import torch._functorch.config as _config
 
-            _LazyGraphModule.force_recompile(lazy_gm)
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                    backend_fake_mode = torch._subclasses.FakeTensorMode(
+                        shape_env=old_fake_mode.shape_env,
+                    )
+                # TODO(voz): Ostensibily, this should be scoped and
+                # restore back to old_fake_mode, but doing so currently violates
+                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+                self.tracing_context.fake_mode = backend_fake_mode
 
-            if not isinstance(compiled_fn, _LazyGraphModule):
-                # replace compiled_fn with the real forward method
-                compiled_fn = lazy_gm.forward
+            with self.restore_global_state():
+                compiled_fn = self.call_user_compiler(gm)
 
-        compiled_fn = disable(compiled_fn)
+            from torch.fx._lazy_graph_module import _LazyGraphModule
 
-        counters["stats"]["unique_graphs"] += 1
-        # This is safe because we pre-process name to be unique
-        self.install_global_unsafe(name, compiled_fn)
+            if isinstance(compiled_fn, _LazyGraphModule) or (
+                isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
+                and compiled_fn.__name__ == "_lazy_forward"  # type: ignore[attr-defined]
+            ):
+                # Since dynamo will run the forward method for the GraphModule shortly
+                # anyways, it does not hurt to do the real recompilation here if
+                # this is a _LazyGraphModule. This makes it easier for dynamo to
+                # optimize a _LazyGraphModule.
 
-        cg = PyCodegen(tx)
-        cg.make_call_generated_code(name)
-        return cg.get_instructions()
+                lazy_gm = (
+                    compiled_fn
+                    if isinstance(compiled_fn, _LazyGraphModule)
+                    else compiled_fn.__self__  # type: ignore[attr-defined]
+                )
+
+                _LazyGraphModule.force_recompile(lazy_gm)
+
+                if not isinstance(compiled_fn, _LazyGraphModule):
+                    # replace compiled_fn with the real forward method
+                    compiled_fn = lazy_gm.forward
+
+            compiled_fn = disable(compiled_fn)
+
+            counters["stats"]["unique_graphs"] += 1
+            # This is safe because we pre-process name to be unique
+            self.install_global_unsafe(name, compiled_fn)
+
+            cg = PyCodegen(tx)
+            cg.make_call_generated_code(name)
+            return cg.get_instructions()
 
     @property
     def placeholders(self) -> List[fx.Node]:
@@ -1368,8 +1401,13 @@ class OutputGraph:
     def graphargs(self) -> List[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        with dynamo_timed(
+            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+        ):
+            return self._call_user_compiler(gm)
+
+    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1416,9 +1454,7 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
 
         signpost_event(
             "dynamo",
@@ -1500,29 +1536,7 @@ class OutputGraph:
                 return False
             return True
 
-        # NB: You could try to expand this to cover more cases by simply
-        # detecting whenever you have an int output, but this is a bit
-        # dangerous in case someone adds a function that returns an int but is
-        # mutating.  So manually whitelist for now.
-        def is_accessor_node(node):
-            if (
-                node.op == "call_method"
-                and isinstance(node.args[0].meta.get("example_value"), torch.Tensor)
-                and node.target in ["size", "stride", "storage_offset", "item"]
-            ):
-                return True
-            if node.op == "call_function" and node.target in [
-                torch.ops.aten.sym_size,
-                torch.ops.aten.sym_size.default,
-                torch.ops.aten.sym_size.int,
-                torch.ops.aten.sym_stride,
-                torch.ops.aten.sym_stride.default,
-                torch.ops.aten.sym_stride.int,
-                torch.ops.aten.sym_storage_offset,
-                torch.ops.aten.sym_storage_offset.default,
-            ]:
-                return True
-            return False
+        from torch.fx.experimental.symbolic_shapes import is_accessor_node
 
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
@@ -1826,6 +1840,27 @@ class SubgraphTracer(fx.Tracer):
                 (self.graph._target_to_str(source_target), source_target)
             ]
 
+    # preserve original meta if it is available
+    def _maybe_preserve_original_meta(self, tx, node):
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
+            if node_idx is not None:
+                meta = self._orig_gm_meta[node_idx]
+                for field in fx.proxy._COPY_META_FIELDS:
+                    if field in meta:
+                        node.meta[field] = meta[field]
+                if "stack_trace" in meta:
+                    node.meta["stack_trace"] = meta["stack_trace"]
+
     def create_proxy(
         self,
         kind,
@@ -1945,25 +1980,7 @@ class SubgraphTracer(fx.Tracer):
                 )
             ]
 
-        # preserve original meta if it is available
-        if (
-            self._orig_gm_meta
-            and self._orig_gm_lineno_map
-            and self._orig_gm_firstlineno
-        ):
-            lineno = tx.current_instruction.starts_line
-            node_idx = None
-            if lineno is not None:
-                node_idx = self._orig_gm_lineno_map.get(
-                    lineno - self._orig_gm_firstlineno, None
-                )
-            if node_idx is not None:
-                meta = self._orig_gm_meta[node_idx]
-                for field in fx.proxy._COPY_META_FIELDS:
-                    if field in meta:
-                        rv.node.meta[field] = meta[field]
-                if "stack_trace" in meta:
-                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+        self._maybe_preserve_original_meta(tx, rv.node)
 
         if not is_retracing:
             if "nn_module_stack" not in rv.node.meta:
@@ -1992,7 +2009,10 @@ class SubgraphTracer(fx.Tracer):
         if "stack_trace" not in rv.node.meta:
             frame_summaries: List[traceback.FrameSummary] = []
             while tx:
-                frame_summaries.append(tx.frame_summary())
+                # Avoid frame summaries from inside the torch/nn/modules. This ensures that we keep the stack trace of
+                # the user code.
+                if not tx.is_co_filename_from_nn_modules():
+                    frame_summaries.append(tx.frame_summary())
                 tx = getattr(tx, "parent", None)
             # Reverse the frame_summaries, such that the innermost frame is at the last
             frame_summaries.reverse()

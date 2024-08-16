@@ -1,8 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Union
 
 import torch
+from torch import Tensor
+
 from .optimizer import Optimizer, ParamsT
+
 
 __all__ = ["LBFGS"]
 
@@ -214,7 +217,7 @@ class LBFGS(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1,
+        lr: Union[float, Tensor] = 1,
         max_iter: int = 20,
         max_eval: Optional[int] = None,
         tolerance_grad: float = 1e-7,
@@ -222,6 +225,10 @@ class LBFGS(Optimizer):
         history_size: int = 100,
         line_search_fn: Optional[str] = None,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
+        if not 0.0 <= lr:
+            raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(

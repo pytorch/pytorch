@@ -5,7 +5,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch.nn
 
@@ -20,9 +20,11 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
+    UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -40,11 +42,16 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
+from .lazy import LazyVariableTracker
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 
-def initialize_lazy_module(tx, mod, args, kwargs):
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
     """
     Fairly coupled helper used by NNModuleVariable and UnspecializedNNModuleVariable.
 
@@ -126,7 +133,7 @@ class NNModuleVariable(VariableTracker):
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
@@ -143,7 +150,9 @@ class NNModuleVariable(VariableTracker):
     def python_type(self):
         return self.module_type
 
-    def _wrap_submodule(self, tx, source, submod, *key_extra, **options):
+    def _wrap_submodule(
+        self, tx: "InstructionTranslator", source, submod, *key_extra, **options
+    ):
         return
 
     def unpack_var_sequence(self, tx):
@@ -178,7 +187,7 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -202,7 +211,7 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
-    def has_key_in_generic_dict(self, tx, key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         base = tx.output.get_submodule(self.module_key)
 
         if object_has_getattribute(base):
@@ -231,7 +240,7 @@ class NNModuleVariable(VariableTracker):
             tx, [variables.ConstantVariable.create(name)], {}
         )
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         from .builder import VariableBuilder
 
         if self.source:
@@ -767,7 +776,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     Giving one graph per module class.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -791,6 +800,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # to mod._modules['linear']. In these cases, we set the
         # nn_module_stack_source appropriately to resemble mod.linear.
         self.nn_module_stack_source = self.source
+
+    def _wrap_source(self, attr_source):
+        if not isinstance(attr_source, UnspecializedNNModuleSource):
+            return UnspecializedNNModuleSource(attr_source)
+        return attr_source
 
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
@@ -834,7 +848,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return super().unpack_var_sequence(tx)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
@@ -883,7 +900,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 tx, [self] + list(args), kwargs
             )
 
-    def trace_supported_methods(self, tx, method, name, args, kwargs):
+    def trace_supported_methods(
+        self, tx: "InstructionTranslator", method, name, args, kwargs
+    ):
         def get_kwargs(*names):
             fn = getattr(self.value, name)
             bound_args = inspect.signature(fn).bind(
@@ -1031,13 +1050,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def getattr_helper(self, tx, field, name_vt):
+    def getattr_helper(self, tx: "InstructionTranslator", field, name_vt):
         dict_vt = self.var_getattr(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
@@ -1045,6 +1064,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             "_forward_hooks",
             "_forward_pre_hooks",
         ):
+            # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
+            # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name
             ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
@@ -1058,9 +1079,47 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             )
                         )
                     return variables.ConstDictVariable({})
+
+        # For non-empty hook dicts, one way is to just fallback to VariableBuilder and create a ConstDictVariable.
+        # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
+        # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
+        # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
+        # ConstDictVariable to avoid any guard on the keys.
+        if (
+            self.source
+            and name
+            in (
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            )
+            and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            hooks_dict = getattr(self.value, name)
+            hooks_dict_source = AttrSource(self.source, name)
+            install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            tx.output.guard_on_key_order.add(hooks_dict_source.name())
+
+            def build_key_value(i, k, v):
+                # Make key sourceless to avoid any guard on it
+                key = variables.ConstantVariable.create(k)
+
+                # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
+                # value. This removes the reliance on the actual key value.
+                source_key = ConstDictKeySource(hooks_dict_source, i)
+                source_value = GetItemSource(hooks_dict_source, source_key)
+                value = LazyVariableTracker.create(v, source_value)
+                return key, value
+
+            result = dict(
+                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+            )
+
+            return variables.ConstDictVariable(
+                result, type(hooks_dict), source=hooks_dict_source
+            )
         return super().var_getattr(tx, name)
 
-    def manually_trace_nn_module_getattr(self, tx, name):
+    def manually_trace_nn_module_getattr(self, tx: "InstructionTranslator", name):
         """
         Dynamo tracing of nn.Module __getattr__ can be expensive if the model
         has deep submodule hierarchy. Since the __getattr__ is stable, we can
@@ -1078,6 +1137,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return out
 
 
+class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
+    """
+    Differentiates between builtin nn modules (e.g. torch.nn.Linear) and user defined nn modules.
+    """
+
+    def _wrap_source(self, attr_source):
+        if not isinstance(attr_source, UnspecializedBuiltinNNModuleSource):
+            return UnspecializedBuiltinNNModuleSource(attr_source)
+        return attr_source
+
+
 class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     """
     Tracing behavior: trace into submodules and treat them as Unspecialized, do not
@@ -1090,7 +1160,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
         assert (
             source is not None
@@ -1099,19 +1169,12 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         super().__init__(value=value, **kwargs)
         self.source = source
 
-    @staticmethod
-    def _wrap_source(source):
-        if not isinstance(source, (FSDPNNModuleSource, UnspecializedNNModuleSource)):
+    def _wrap_source(self, attr_source):
+        if not isinstance(
+            attr_source, (FSDPNNModuleSource, UnspecializedNNModuleSource)
+        ):
             if torch._dynamo.config.skip_fsdp_guards:
-                return FSDPNNModuleSource(source)
+                return FSDPNNModuleSource(attr_source)
             else:
-                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-                return UnspecializedNNModuleSource(source)
-        else:
-            return source
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "source":
-            value = FSDPManagedNNModuleVariable._wrap_source(value)
-
-        return super().__setattr__(name, value)
+                return UnspecializedNNModuleSource(attr_source)
+        return attr_source

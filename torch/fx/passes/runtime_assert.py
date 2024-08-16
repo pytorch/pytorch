@@ -1,7 +1,9 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import logging
 import operator
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
+
 
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
 if TYPE_CHECKING:
@@ -14,11 +16,15 @@ else:
 import torch
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
+
+
+__all__ = ["insert_deferred_runtime_asserts"]
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -87,6 +93,7 @@ def insert_deferred_runtime_asserts(
     import sympy
 
     from torch.fx.experimental.symbolic_shapes import (
+        _has_unsupported_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
@@ -119,19 +126,6 @@ def insert_deferred_runtime_asserts(
         else:
             placeholders.add(node)
 
-    def _contains_sympy_function(expr):
-        """
-        Checks if sympy expression is or contains any args that are sympy.Functions
-        TODO(pianpwk): remove this eventually
-        """
-        if not isinstance(expr, sympy.Expr):
-            return False
-        if isinstance(expr, sympy.Function):
-            return True
-        if hasattr(expr, "args"):
-            return any(_contains_sympy_function(arg) for arg in expr.args)
-        return False
-
     def _is_intermediate_tensor_sym_call(node: fx.Node) -> bool:
         """
         If a size/stride/storage offset call on an intermediate tensor,
@@ -140,13 +134,8 @@ def insert_deferred_runtime_asserts(
         return (
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
-            and not _contains_sympy_function(val)
-            # this holds back from reifying anything in torch.utils._sympy.functions.py from input shapes.
-            # TODO: figure out missing parts, too many failures on TruncToInt, CeilToInt, etc.
-            # see for example:
-            # test/dynamo/test_unspec.py test_unspec_float_precision
-            # test/dynamo/test_repros.py test_do_paste_mask
-            # test/nn/test_packed_sequence.py test_pack_padded_sequence (PYTORCH_TEST_WITH_DYNAMO=1)
+            # this holds back from reifying anything in torch.utils._sympy.functions.py that's unsupported
+            and not _has_unsupported_sympy_function(val)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -195,14 +184,17 @@ def insert_deferred_runtime_asserts(
     def add_runtime_asserts(ras):
         for ra in ras:
             if (
-                ra.expr in added_asserts  # redundant
+                # redundant
+                ra.expr in added_asserts
+                # if we've already added a constrain_range call for this symbol,
+                # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
                 or (
                     len(ra.expr.free_symbols) == 1
                     and next(iter(ra.expr.free_symbols)) in constrained_unbacked_symbols
                     and _is_bound_expr_for_symbol(ra.expr)
                 )
-                # if we've already added a constrain_range call for this symbol,
-                # then single-symbol bound asserts like u0 >= 0, u0 <= 5 are redundant.
+                # don't try to reify sympy functions we can't turn into FX nodes
+                or _has_unsupported_sympy_function(ra.expr)
             ):
                 continue
 
@@ -266,19 +258,20 @@ def insert_deferred_runtime_asserts(
                                 torch.ops.aten.sym_size.int, (node, i)
                             ),
                         )
-                    for i, s in enumerate(t.stride()):
+                    if not is_sparse_any(t):
+                        for i, s in enumerate(t.stride()):
+                            match_symbol(
+                                s,
+                                lambda: graph.call_function(
+                                    torch.ops.aten.sym_stride.int, (node, i)
+                                ),
+                            )
                         match_symbol(
-                            s,
+                            t.storage_offset(),
                             lambda: graph.call_function(
-                                torch.ops.aten.sym_stride.int, (node, i)
+                                torch.ops.aten.sym_storage_offset.default, (node,)
                             ),
                         )
-                    match_symbol(
-                        t.storage_offset(),
-                        lambda: graph.call_function(
-                            torch.ops.aten.sym_storage_offset.default, (node,)
-                        ),
-                    )
 
             # Handle asserts that aren't associated with any symbol.  This
             # doesn't really have to be in the loop as it will only run once,

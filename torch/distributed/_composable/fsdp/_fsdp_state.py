@@ -1,7 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import logging
-
 from typing import (
     Any,
     Callable,
@@ -43,7 +43,7 @@ logger = logging.getLogger("torch.distributed._composable.fsdp")
 class FSDPStateContext:
     """This has state shared across FSDP states."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # All FSDP states in the root state's module tree
         self.all_states: List[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
@@ -71,7 +71,7 @@ def disable_if_config_true(func):
 
 
 class FSDPState(_State):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
         self._is_root: Optional[bool] = None  # root set during lazy init
@@ -290,7 +290,11 @@ class FSDPState(_State):
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                self._comm_ctx.reduce_scatter_state = None
+                if self._comm_ctx.reduce_scatter_state is not None:
+                    torch.cuda.current_stream().wait_event(
+                        self._comm_ctx.reduce_scatter_state.event
+                    )
+                    self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:

@@ -10,31 +10,61 @@ from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr
 
+
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
 # so those cases are omitted intentionally
-_GUARD_SOURCE_NN_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
-    GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
+
+# represents nn.Modules tracked with NNModuleVariable (specialized is implicit in the variable name)
+_GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+    # Just to ensure that guard_source() works
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+}
+
+# represents nn.Modules tracked with UnspecializedNNModuleVariable
+_GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    # this happens for an UnspecializedNNModule submodule on a NNModuleVariable
+    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+    # Just to ensure that guard_source() works
+    GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+}
+
+# represents nn.Modules tracked with UnspecializedBuiltinNNModuleVariable
+_GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE = {
+    GuardSource.LOCAL: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    # Just to ensure that guard_source() works
+    GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_FSDP_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
+    GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
     GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
     GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-}
-
-_GUARD_SOURCE_NOT_NN_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL,
-    GuardSource.GLOBAL: GuardSource.GLOBAL,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL,
-    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL,
+    GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
+    GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 
@@ -203,7 +233,13 @@ class GradSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class ParamBufferSource(AttrSource):
     def guard_source(self):
-        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
+
+
+# Special AttrSource to differentiate module._buffers or module._parameters
+@dataclasses.dataclass(frozen=True)
+class UnspecializedParamBufferSource(AttrSource):
+    pass
 
 
 # This source is intended to be used in places where a source is needed but it is expected
@@ -523,7 +559,7 @@ class NNModuleSource(ChainedSource):
         self.base.reconstruct(codegen)
 
     def guard_source(self):
-        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
 
     def name(self):
         return self.base.name()
@@ -532,7 +568,13 @@ class NNModuleSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class UnspecializedNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_NOT_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source()]
+
+
+@dataclasses.dataclass(frozen=True)
+class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -641,6 +683,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+def is_from_unspecialized_param_buffer_source(source: Source):
+    if isinstance(source, UnspecializedParamBufferSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_unspecialized_param_buffer_source(source.base)
+    return False
 
 
 def is_from_flatten_script_object_source(source: Source):

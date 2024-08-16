@@ -249,7 +249,7 @@ static NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
 }
 
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
-  if (dim.has_value() && dim.value().size() != 0) {
+  if (dim.has_value() && !dim.value().empty()) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
     auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
