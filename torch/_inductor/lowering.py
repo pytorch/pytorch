@@ -305,7 +305,7 @@ def _register_lowering(
 
         # kwargs tensors not supported yet unless it's a fallback op
         if not all(
-            (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
+            (fn in fallbacks or in_namespace(fn, "_c10d_functional") or in_namespace(fn, "fsdp")) for fn in aten_fn
         ):
             assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
@@ -6110,6 +6110,26 @@ if hasattr(torch.ops.fsdp, "copy_"):
         src = to_dtype(src, dst.get_dtype())
         src = expand(src, dst.get_size())
         return mutate_to(dst, src)
+
+
+if hasattr(torch.ops.fsdp, "split_with_sizes_copy"):
+
+    @register_lowering(torch.ops.fsdp.split_with_sizes_copy.default)
+    def fsdp_split_with_sizes_copy(
+        all_gather_output: torch.Tensor,
+        all_gather_input_split_sizes: List[int],
+        world_size: int,
+        dim: int,
+        out: List[torch.Tensor],
+    ):
+        ir.FallbackKernel.create(
+            torch.ops.fsdp.split_with_sizes_copy.default,
+            all_gather_output,
+            all_gather_input_split_sizes,
+            world_size,
+            dim=dim,
+            out=out,
+        )
 
 
 @register_lowering(torch.ops.aten.resize)

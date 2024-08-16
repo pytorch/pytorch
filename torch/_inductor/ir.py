@@ -5669,10 +5669,11 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
-        if schema.is_mutable and not can_auto_functionalize(kernel):
-            raise NotImplementedError(
-                f"NYI: Can't generate FallbackKernel for {kernel}"
-            )
+        # TODO(yf225): might need to do this https://github.com/pytorch/pytorch/pull/129422/files for proper support
+        # if schema.is_mutable and not can_auto_functionalize(kernel):
+        #     raise NotImplementedError(
+        #         f"NYI: Can't generate FallbackKernel for {kernel}"
+        #     )
 
         schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)

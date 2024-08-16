@@ -88,7 +88,7 @@ def all_gather_copy_in_cuda(
 
 
 lib.define(
-    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
+    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int world_size, int dim=0, *, Tensor(a!)[] out) -> ()"
 )
 
 
@@ -98,12 +98,35 @@ lib.define(
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
+    world_size: int,
     dim: int,
     out: List[torch.Tensor],
 ) -> None:
+    if all_gather_output.dtype == torch.uint8:
+        out_updated = [t.view(world_size, -1).view(torch.uint8) for t in out]
+    else:
+        out_updated = [t.view(world_size, -1) for t in out]
     torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
+        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out_updated
     )
+
+
+@torch.library.impl(lib, "split_with_sizes_copy", "Functionalize")
+def split_with_sizes_copy_functionalize(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: List[int],
+    world_size: int,
+    dim: int,
+    out: List[torch.Tensor],
+):
+    for x in out:
+        torch._sync(x)
+    all_gather_output_inner = torch._from_functional_tensor(all_gather_output)
+    out_inner = [torch._from_functional_tensor(x) for x in out]
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.split_with_sizes_copy.default(all_gather_output_inner, all_gather_input_split_sizes, world_size, dim, out=out_inner)
 
 
 lib.define(
@@ -256,13 +279,9 @@ def foreach_all_gather_copy_out(
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
-    if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
-    else:
-        out = [t.view(world_size, -1) for t in gen]
+    gen = [t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs]
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
+        all_gather_output, all_gather_input_split_sizes, world_size, dim=1, out=gen
     )
 
 

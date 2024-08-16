@@ -405,6 +405,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
         torch.ops.fsdp.copy_.default,
+        torch.ops.fsdp.split_with_sizes_copy.default,
     ]
     if hasattr(torch.ops.fsdp, "set_"):
         allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
@@ -423,10 +424,13 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
-                if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                if n.target is torch.ops.fsdp.split_with_sizes_copy.default:
+                    assert all(inp in placeholders for inp in n.kwargs["out"])
+                else:
+                    if "set_buffer_donor_" not in str(n.args[0]):
+                        assert (
+                            n.args[0] in placeholders
+                        ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
                 assert (
