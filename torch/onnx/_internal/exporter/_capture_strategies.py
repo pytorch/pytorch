@@ -11,6 +11,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch._export import converter as _torchscript_converter
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -177,8 +178,54 @@ class JitTraceConvertStrategy(CaptureStrategy):
     ) -> torch.export.ExportedProgram:
         del dynamic_shapes  # Unused
 
+        flattened_args, spec = _pytree.tree_flatten((args, kwargs))
+        flattened_args = tuple(flattened_args)
+
+        # Since torch.jit.trace only accepts Tensors as inputs, we filter
+        # out non-Tensor arguments and reconstruct the arguments after entering
+        # the WrappedModel.
+        tensor_placeholder = object()
+        non_tensor_args = [
+            arg if not isinstance(arg, torch.Tensor) else tensor_placeholder
+            for arg in flattened_args
+        ]
+        tensor_args = tuple(
+            arg for arg in flattened_args if isinstance(arg, torch.Tensor)
+        )
+
+        class WrappedModel(torch.nn.Module):
+            """Wrap the model so that it takes flattened arguments."""
+
+            def __init__(self, m):
+                super().__init__()
+                self.model = m
+
+            def forward(self, *_args):
+                # Take the non-Tensor arguments list as a starting point and
+                # replace the tensor_placeholder with the actual tensor arguments
+                # from _args.
+                reconstructed_flattened_args = non_tensor_args.copy()
+                _args_iter = iter(_args)
+                for i, arg in enumerate(reconstructed_flattened_args):
+                    if arg is tensor_placeholder:
+                        reconstructed_flattened_args[i] = next(_args_iter)
+                # Unflatten the arguments and kwargs to pass to the model.
+                unflattened_args, unflattened_kwargs = _pytree.tree_unflatten(
+                    reconstructed_flattened_args, spec
+                )
+                results = self.model(*unflattened_args, **unflattened_kwargs)
+                if not isinstance(results, tuple):
+                    results = (results,)
+                flattened_results, _ = _pytree.tree_flatten(results)
+                if len(flattened_results) == 1:
+                    return flattened_results[0]
+                return tuple(flattened_results)
+
         jit_model = torch.jit.trace(
-            model, example_inputs=args, check_trace=False, strict=False
+            WrappedModel(model),
+            example_inputs=tensor_args,
+            check_trace=False,
+            strict=False,
         )
         if self._dump:
             program_path = self._artifacts_dir / f"onnx_export_{self._timestamp}.pt"
@@ -192,7 +239,9 @@ class JitTraceConvertStrategy(CaptureStrategy):
                 self._verbose_print(
                     f"Torch Script model has been saved to '{program_path}'."
                 )
-        return _torchscript_converter.TS2EPConverter(jit_model, args, kwargs).convert()
+        return _torchscript_converter.TS2EPConverter(
+            jit_model, flattened_args
+        ).convert()
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -214,8 +263,74 @@ class JitTraceConvertStrategy(CaptureStrategy):
         )
 
 
+class LegacyDynamoStrategy(CaptureStrategy):
+    """Strategy implemented by the ONNX team using internal dynamo APIs and custom fx passes."""
+
+    def _capture(
+        self, model, args, kwargs, dynamic_shapes
+    ) -> torch.export.ExportedProgram:
+        # Adapted from https://github.com/pytorch/pytorch/blob/ea42027e0ed7530386ae4222dc599fcaf84a8a05/torch/onnx/_internal/_exporter_legacy.py#L1491
+        # NOTE: Import here to prevent circular dependency
+        from torch.onnx._internal.fx import diagnostics, passes
+
+        graph_module, _ = torch._dynamo.export(
+            model,
+            tracing_mode="symbolic",
+            dynamic_shapes=dynamic_shapes,
+        )(
+            *args,
+            **kwargs,
+        )
+        torch._dynamo.reset()
+
+        diagnostic_context = diagnostics.DiagnosticContext(
+            "torch.onnx.export",
+            torch.__version__,
+        )
+
+        flattened_args, _ = _pytree.tree_flatten((args, kwargs))
+        flattened_args = tuple(flattened_args)
+
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
+        graph_module = passes.Functionalize(
+            diagnostic_context,
+            graph_module,
+            enable_dynamic_axes=bool(dynamic_shapes),
+        ).run(*flattened_args)
+
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        graph_module = passes.RemoveInputMutation(diagnostic_context, graph_module).run(
+            *flattened_args
+        )
+
+        # Use torch.export to recapture the GraphModule into an ExportedProgram.
+        return torch.export.export(graph_module, flattened_args)
+
+    def _enter(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with internal Dynamo apis..."
+        )
+
+    def _success(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ✅"
+        )
+
+    def _failure(self, model, e) -> None:
+        del e  # Unused
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ❌"
+        )
+
+
 CAPTURE_STRATEGIES = (
     TorchExportStrategy,
     TorchExportNonStrictStrategy,
     JitTraceConvertStrategy,
+    LegacyDynamoStrategy,
 )

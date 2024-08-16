@@ -152,7 +152,7 @@ def _set_shape_types(
     values: Sequence[ir.Value],
     meta_vals: Sequence[torch.Tensor],
     complex_to_float: bool = True,
-):
+) -> None:
     if not isinstance(meta_vals, Sequence):
         logger.warning(
             "Expected meta_vals to be a sequence, but got %s. There may be an internal error.",
@@ -167,7 +167,7 @@ def _set_shape_type(
     value: ir.Value,
     meta_val: torch.Tensor | tuple[torch.Tensor],
     complex_to_float: bool,
-):
+) -> None:
     # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
@@ -304,7 +304,7 @@ def _handle_call_function_node(
     graph: ir.Graph,
     node: torch.fx.Node,
     node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]],
-):
+) -> None:
     """Handle a call_function node.
 
     Args:
@@ -357,7 +357,7 @@ def _handle_call_function_node(
 
 def _convert_fx_arg_to_onnx_arg(
     arg, node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]]
-):
+) -> Any:
     """Convert an FX argument to an ONNX compatible argument.
 
     This function
@@ -406,7 +406,7 @@ def _handle_call_function_node_with_lowering(
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
     opset: onnxscript.values.Opset,
-):
+) -> None:
     if node.target == operator.getitem:
         source = node.all_input_nodes[0]
         source_outputs = node_name_to_values[source.name]
@@ -576,7 +576,7 @@ def _get_inputs_and_attributes(
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
-    inputs: list[Any] = []
+    inputs: list[Any] = []  # type: ignore[no-redef]
     input_names: list[str] = []
     attributes: dict[str, Any] = {}
 
@@ -611,15 +611,15 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)
+                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment]
             else:
-                attr = kwarg
+                attr = kwarg  # type: ignore[assignment]
 
             attributes[schema_arg.name] = attr
 
     output_names = [f"{node.name}_{output.name}" for output in node_schema.returns]
 
-    return inputs, attributes, input_names, output_names
+    return inputs, attributes, input_names, output_names  # type: ignore[return-value]
 
 
 def _maybe_start_profiler(should_profile: bool) -> Any:
@@ -815,11 +815,14 @@ def _exported_program_to_onnx_program(
             "pkg.torch.export.graph_signature.InputSpec.persistent"
         ] = str(persistent)
 
-        model.graph.inputs.append(value)  # type: ignore[arg-type]
-        if input_kind != graph_signature.InputKind.USER_INPUT:
+        if input_kind == graph_signature.InputKind.USER_INPUT:
+            # Add only user inputs to the graph
+            # Subsequent passes can decide if they want to add initializers as inputs
+            model.graph.inputs.append(value)  # type: ignore
+        else:
             model.graph.initializers[value_name] = value
 
-    # 3. Add outputs to the graph. Put the user outputs first.
+    # 3. Add user outputs to the graph and assign metadata to all outputs
     user_outputs = [
         spec
         for spec in exported_program.graph_signature.output_specs
@@ -884,7 +887,7 @@ def _exported_program_to_onnx_program(
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
-        initializer = model.graph.initializers.get(name)
+        initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
         if initializer is None:
             logger.warning("Tensor '%s' is not one of the initializers", name)
             continue

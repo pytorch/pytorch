@@ -13,9 +13,9 @@ if TYPE_CHECKING:
     from torch.onnx._internal.exporter import _registration
 
 
-def _get_registered_ops(
+def get_onnx_implemented_overloads(
     registry: _registration.ONNXRegistry,
-) -> set[torch._ops.OperatorBase | Callable]:
+) -> list[torch._ops.OperatorBase]:
     """
     Creates a set of OperatorBase and Callable objects that represent ONNX-supported PyTorch operations.
 
@@ -25,7 +25,7 @@ def _get_registered_ops(
     Returns:
         A collection of OperatorBase and Callable objects representing ONNX-supported PyTorch operations.
     """
-    registered_ops: set[torch._ops.OperatorBase | Callable] = set()
+    registered_ops: list[torch._ops.OperatorBase] = []
     for op_namespace in (torch.ops.aten, torch.ops.prims):
         op_names = dir(op_namespace)
         for op_name in op_names:
@@ -36,7 +36,7 @@ def _get_registered_ops(
             for overload_name in op_overload_packet.overloads():
                 op_overload = getattr(op_overload_packet, overload_name)
                 if registry.is_registered(op_overload):
-                    registered_ops.add(op_overload)
+                    registered_ops.append(op_overload)
     return registered_ops
 
 
@@ -57,7 +57,7 @@ def create_onnx_friendly_decomposition_table(
         decomposition functions.
     """
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
-    onnx_registered_ops = _get_registered_ops(registry)
+    onnx_registered_ops = set(get_onnx_implemented_overloads(registry))
 
     # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
     # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your

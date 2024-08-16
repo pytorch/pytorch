@@ -7,6 +7,7 @@ torch.ops.aten.add(1.0, Tensor) as well, which means we need a mechanism to`
 """
 
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=union-attr
 from __future__ import annotations
 
 import copy
@@ -64,8 +65,8 @@ def _construct_named_inputs_and_attrs(
     #   b. Depending on param.is_input, Record named_inputs[param.name] = arg or named_attrs[param.name] = arg
     #   c. Handle kwargs as well
     #   d. Fill in None if the input is not provided
-    named_inputs: dict[str, Any] = {}
-    named_attrs: dict[str, Any] = {}
+    named_inputs = {}
+    named_attrs = {}
     reversed_args_stack = list(reversed(args))
     for param in signature.params:
         if isinstance(param, _schemas.Parameter):
@@ -77,9 +78,9 @@ def _construct_named_inputs_and_attrs(
                     named_inputs[param.name] = tuple(args)
                     reversed_args_stack.clear()
                 else:
-                    named_inputs[param.name] = reversed_args_stack.pop()
+                    named_inputs[param.name] = reversed_args_stack.pop()  # type: ignore[assignment]
             elif param.name in kwargs:
-                named_inputs[param.name] = kwargs[param.name]
+                named_inputs[param.name] = kwargs[param.name]  # type: ignore[assignment]
             elif param.required:
                 raise ValueError(
                     f"Required parameter '{param.name}' is not provided. "
@@ -91,7 +92,7 @@ def _construct_named_inputs_and_attrs(
                     param.name,
                     signature,
                 )
-                named_inputs[param.name] = None
+                named_inputs[param.name] = None  # type: ignore[assignment]
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
@@ -134,7 +135,7 @@ def _construct_named_inputs_and_attrs(
                 # where an attribute marked as float can be passed as an int.
                 attribute = float(attribute)
             named_attrs[param.name] = attribute
-    return named_inputs, named_attrs
+    return named_inputs, named_attrs  # type: ignore[return-value]
 
 
 def _resolve_parameter_dtypes(
@@ -286,16 +287,16 @@ def _process_python_constants_and_sequences(
             if isinstance(arg, (tuple, list)):
                 # Make the arg hashable
                 arg = tuple(arg)  # noqa: PLW2901
-            constant_value = constant_farm.get((arg, dtype))
+            constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
             if constant_value is None:
-                constant_tensor = ir.tensor(value=arg, dtype=dtype)
+                constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
                 constant_value = opset.Constant(value=constant_tensor)
-                constant_farm[(arg, dtype)] = constant_value
+                constant_farm[(arg, dtype)] = constant_value  # type: ignore[arg-type,index]
         else:
             constant_value = opset.Constant(value=arg)
 
         named_inputs[param.name] = constant_value
-    return named_inputs  # type: ignore[return-type]
+    return named_inputs  # type: ignore[return-value]
 
 
 def _construct_node(
@@ -317,7 +318,7 @@ def _construct_node(
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
     """
-    inputs: list[ir.Value | None] = []
+    inputs = []
     # Flatten variadic inputs
     for value in named_inputs.values():
         if isinstance(value, Sequence):
@@ -347,7 +348,7 @@ class OpRecorder(evaluator.Evaluator):
     def __init__(
         self, opset: onnxscript.values.Opset, constant_farm: dict[Any, ir.Value]
     ):
-        self.nodes = []
+        self.nodes: list[ir.Node] = []
         self.opset = opset
         self.functions: dict[ir.OperatorIdentifier, onnxscript.OnnxFunction] = {}
         self.constant_farm = constant_farm
@@ -393,7 +394,7 @@ class OpRecorder(evaluator.Evaluator):
     def eval(
         self,
         schema: onnx.defs.OpSchema,
-        args: Sequence[AllowedArgType],
+        args: Sequence[AllowedArgType],  # type: ignore[override]
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor]:
         try:
@@ -408,14 +409,14 @@ class OpRecorder(evaluator.Evaluator):
                 src_input = named_inputs["input"]
                 target_type = named_inputs["target_type"]
 
-                dtypes_available = (
+                if (
                     isinstance(src_input, ir.Value)
                     and isinstance(target_type, ir.Value)
                     and src_input.dtype is not None
                     and target_type.dtype is not None
-                )
-                if dtypes_available:
-                    if src_input.dtype == target_type.dtype:  # type: ignore[union-attr]
+                ):
+                    # dtypes are available
+                    if src_input.dtype == target_type.dtype:
                         # Same type. No cast needed
                         return src_input  # type: ignore[return-value]
                     else:

@@ -216,7 +216,8 @@ def get_matching_overload(
     # FIXME: node.target may and builtin and not have a schema
     # FIXME: Handle when we don't know the names of the arguments
     schema_args: dict[str, torch.Argument] = {
-        arg.name: arg for arg in node.target._schema.arguments  # type: ignore[union-attr]
+        arg.name: arg
+        for arg in node.target._schema.arguments  # type: ignore[union-attr]
     }
     failure_messages: list[str] = []
     for overload in overloads:
@@ -268,14 +269,14 @@ def get_matching_overload(
                 # TODO: Handle None attributes
                 # FIXME: Handle symfloat etc.
                 # Handle tensors and Python values
-                if not _param_type_compatible_with_arg(param, arg, assigned_types):
+                if not _param_type_compatible_with_arg(param, arg, assigned_types):  # type: ignore[arg-type]
                     fail_reason = (
                         f"Parameter type not compatible with argument: param=`{param}`, "
                         f"assigned_types=`{assigned_types}`, arg=`{arg}`"
                     )
                     break
             elif isinstance(param, _schemas.AttributeParameter):
-                if not _attribute_type_compatible_with_arg(param, arg):
+                if not _attribute_type_compatible_with_arg(param, arg):  # type: ignore[arg-type]
                     fail_reason = f"Attribute type not compatible with argument: param=`{param}`, arg=`{arg}`"
                     break
         if not fail_reason:

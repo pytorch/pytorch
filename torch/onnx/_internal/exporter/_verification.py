@@ -69,7 +69,7 @@ def verify_onnx_program(
         )
         results.append(
             VerificationInfo(
-                name=name,
+                name=str(name),
                 absolute_difference=absolute_difference,
                 relative_difference=relative_difference,
                 expected_dtype=torch_output.dtype,

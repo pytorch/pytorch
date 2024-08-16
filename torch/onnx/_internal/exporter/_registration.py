@@ -60,7 +60,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
     """Obtain the torch op from <namespace>::<op_name>[.<overload>]"""
     # TODO(justinchuby): Handle arbitrary custom ops
     namespace, opname_overload = qualified_name.split("::")
-    op_name, *overload = opname_overload.split(".", 1)
+    op_name, *maybe_overload = opname_overload.split(".", 1)
     if namespace == "_operator":
         # Builtin functions
         return getattr(operator, op_name)
@@ -68,7 +68,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
         return getattr(math, op_name)
     if namespace == "torchvision":
         try:
-            import torchvision.ops
+            import torchvision.ops  # type: ignore[import-untyped]
         except ImportError:
             logger.warning("torchvision is not installed. Skipping %s", qualified_name)
             return None
@@ -81,8 +81,8 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
             logger.exception("Failed to find torchvision op '%s'", qualified_name)
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
-        if overload:
-            overload = overload[0]
+        if maybe_overload:
+            overload = maybe_overload[0]
         elif "default" in op_packet._overload_names or "" in op_packet._overload_names:
             # Has a default overload
             overload = "default"
@@ -94,7 +94,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
             )
             return None
 
-        return getattr(op_packet, overload)
+        return getattr(op_packet, overload)  # type: ignore[call-overload]
     except AttributeError:
         if qualified_name.endswith("getitem"):
             # This is a special case where we registered the function incorrectly,
@@ -151,8 +151,8 @@ class ONNXRegistry:
                 registration as torchlib_registration,
             )
 
-            torchlib_registry = torchlib_registration.default_registry
-        for qualified_name, aten_overloads_func in torchlib_registry.items():
+            torchlib_registry = torchlib_registration.default_registry  # type: ignore[assignment]
+        for qualified_name, aten_overloads_func in torchlib_registry.items():  # type: ignore[union-attr]
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
@@ -205,12 +205,13 @@ class ONNXRegistry:
             target: The PyTorch node callable target.
             onnx_decomposition: The OnnxDecompMeta to register.
         """
+        target_or_name: str | TorchOp
         if isinstance(target, torch._ops.OpOverload):
             # Get the qualified name of the aten op because torch._ops.OpOverload lookup in
             # a dictionary is unreliable for some reason.
-            target_or_name: str | TorchOp = target.name()
+            target_or_name = target.name()
         else:
-            target_or_name: str | TorchOp = target
+            target_or_name = target
         if onnx_decomposition.is_custom:
             self.functions.setdefault(target_or_name, []).insert(0, onnx_decomposition)
         else:
@@ -249,12 +250,13 @@ class ONNXRegistry:
             A list of OnnxDecompMeta corresponding to the given name, or None if
             the name is not in the registry.
         """
+        target_or_name: str | TorchOp
         if isinstance(target, torch._ops.OpOverload):
             # Get the qualified name of the aten op because torch._ops.OpOverload lookup in
             # a dictionary is unreliable for some reason.
-            target_or_name: str | TorchOp = target.name()
+            target_or_name = target.name()
         else:
-            target_or_name: str | TorchOp = target
+            target_or_name = target
         decomps = self.functions.get(target_or_name, [])
         return sorted(decomps, key=lambda x: x.is_custom, reverse=True)
 
