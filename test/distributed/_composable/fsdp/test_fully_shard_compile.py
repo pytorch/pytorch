@@ -28,6 +28,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
+import torchtune
+import torchtune.models.llama2
 
 
 def _is_op_in_graph(graph, op):
@@ -314,7 +316,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(
-        reorder_for_compute_comm_overlap=True,
+        reorder_for_compute_comm_overlap=False,
         reorder_for_compute_comm_overlap_passes=[
             "sink_waits",
             "raise_comms",
@@ -711,6 +713,159 @@ class TestFullyShardCompile(FSDPTest):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
                         *self._create_transformer_factory_fns(),
+                        "inductor",
+                        fullgraph=fullgraph,
+                    )
+                )
+            if fullgraph:
+                self.assertTrue(
+                    len(triton_codes) == 2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
+                    dict(
+                        overlapped_compute_op_str="aten.native_dropout.",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
+
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.mm("),
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
+                file_check.run(bwd_code)
+            else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                )
+
+    def _create_torchtune_llama_factory_fns(self):
+        vocab_size = 8
+
+        def model_init_fn():
+            torch.manual_seed(self.rank)
+            model = torchtune.models.llama2.lora_llama2_7b(
+                lora_attn_modules=["q_proj", "v_proj"],
+            )
+            from collections import OrderedDict
+
+            str_indices = [str(i) for i in range(len(model.layers._modules))][
+                :1
+            ]  # only pick the first few layers
+            model.layers._modules = OrderedDict(
+                list(zip(str_indices, model.layers._modules.values()))
+            )
+            print(f"model: {model}")
+            torchtune.modules.peft.peft_utils.set_trainable_params(
+                model, torchtune.modules.peft.peft_utils.get_adapter_params(model)
+            )
+
+            fsdp_kwargs = {}
+            # iterating from lowerer modules to higher
+            # eg grouping lora adapters before transformer block
+            for m in reversed(list(model.modules())):
+                if isinstance(m, nn.Linear) and m.weight.requires_grad:
+                    fully_shard(m, reshard_after_forward=True, **fsdp_kwargs)
+                else:
+                    if isinstance(m, torchtune.modules.TransformerDecoderLayer):
+                        fully_shard(m, reshard_after_forward=True, **fsdp_kwargs)
+            fully_shard(model, reshard_after_forward=True, **fsdp_kwargs)
+
+            with torchtune.utils.set_default_dtype(torch.bfloat16):
+                for m in model.modules():
+                    if isinstance(m, torchtune.modules.peft.LoRALinear):
+                        # lora may not be covered in state dict
+                        # if finetune for the 1st time
+                        m.lora_a.to_empty(device="cuda")
+                        m.lora_b.to_empty(device="cuda")
+            # Ensure no params and buffers are on meta device
+            torchtune.utils.validate_no_params_on_meta_device(model)
+
+            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
+
+            # synchronize before training begins
+            torch.distributed.barrier()
+
+            return model, optim
+
+        def input_creation_fn():
+            torch.manual_seed(self.rank)
+            seq_len = torch.randint(1, 255, (1,)).item()
+            inp = torch.randint(
+                0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
+            )
+            return inp
+
+        return model_init_fn, input_creation_fn
+
+    @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_torchtune_llama_backend_inductor(self):
+        for fullgraph in [True]:
+            with self._maybe_add_graph_break_to_sdpa(
+                fullgraph
+            ), self._reinplace_all_gather_with_optional_checks(
+                fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fullgraph
+            ):
+                _, triton_codes = run_and_get_code(
+                    lambda: self._test_traceable_fsdp(
+                        *self._create_torchtune_llama_factory_fns(),
                         "inductor",
                         fullgraph=fullgraph,
                     )
