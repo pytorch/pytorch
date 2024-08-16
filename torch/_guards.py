@@ -129,7 +129,6 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
-            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
