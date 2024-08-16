@@ -75,7 +75,7 @@ CUDA_CLANG_VERSIONS: VersionMap = {
 }
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
-           "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
+           "CppExtension", "CUDAExtension", "SyclExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -496,13 +496,14 @@ class BuildExtension(build_ext):
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
     minimum required compiler flags (e.g. ``-std=c++17``) as well as mixed
-    C++/CUDA compilation (and support for CUDA files in general).
+    C++/CUDA/SYCL compilation (and support for CUDA/SYCL files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
     for ``extra_compile_args`` (rather than the usual list) that maps from
-    languages (``cxx`` or ``nvcc``) to a list of additional compiler flags to
-    supply to the compiler. This makes it possible to supply different flags to
-    the C++ and CUDA compiler during mixed compilation.
+    languages/compilers (the only expected values are ``cxx``, ``nvcc`` or
+    ``sycl``) to a list of additional compiler flags to supply to the compiler.
+    This makes it possible to supply different flags to the C++, CUDA and SYCL
+    compiler during mixed compilation.
 
     ``use_ninja`` (bool): If ``use_ninja`` is ``True`` (default), then we
     attempt to build using the Ninja backend. Ninja greatly speeds up
@@ -548,29 +549,41 @@ class BuildExtension(build_ext):
         compiler_name, compiler_version = self._check_abi()
 
         cuda_ext = False
+        sycl_ext = False
         extension_iter = iter(self.extensions)
         extension = next(extension_iter, None)
-        while not cuda_ext and extension:
+        while not (cuda_ext and sycl_ext) and extension:
             for source in extension.sources:
                 _, ext = os.path.splitext(source)
                 if ext == '.cu':
                     cuda_ext = True
+                elif ext == '.sycl':
+                    sycl_ext = True
+
+                # This check accounts on a case when cuda and sycl sources
+                # are mixed in the same extension. We can stop checking
+                # sources if both are found or there is no more sources.
+                if cuda_ext and sycl_ext:
                     break
+
             extension = next(extension_iter, None)
+
+        if sycl_ext:
+            assert self.use_ninja, "ninja is required to build sycl extensions."
 
         if cuda_ext and not IS_HIP_EXTENSION:
             _check_cuda_version(compiler_name, compiler_version)
 
         for extension in self.extensions:
-            # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
+            # Ensure at least an empty list of flags for 'cxx', 'nvcc' and 'sycl' when
             # extra_compile_args is a dict. Otherwise, default torch flags do
-            # not get passed. Necessary when only one of 'cxx' and 'nvcc' is
-            # passed to extra_compile_args in CUDAExtension, i.e.
+            # not get passed. Necessary when only one of 'cxx', 'nvcc' or 'sycl' is
+            # passed to extra_compile_args in CUDAExtension or SyclExtension, i.e.
             #   CUDAExtension(..., extra_compile_args={'cxx': [...]})
             # or
             #   CUDAExtension(..., extra_compile_args={'nvcc': [...]})
             if isinstance(extension.extra_compile_args, dict):
-                for ext in ['cxx', 'nvcc']:
+                for ext in ['cxx', 'nvcc', 'sycl']:
                     if ext not in extension.extra_compile_args:
                         extension.extra_compile_args[ext] = []
 
@@ -597,8 +610,11 @@ class BuildExtension(build_ext):
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
 
-        # Register .cu, .cuh, .hip, and .mm as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
+        # Register .cu, .cuh, .hip, .mm and .sycl as valid source extensions.
+        # NOTE: At the moment .sycl is not a standard extension for SYCL supported
+        # by compiler. Here we introduce a torch level convention that SYCL sources
+        # should have .sycl file extension.
+        self.compiler.src_extensions += ['.cu', '.cuh', '.hip', '.sycl']
         if torch.backends.mps.is_built():
             self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
@@ -698,9 +714,10 @@ class BuildExtension(build_ext):
             common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
+            with_sycl = any(map(_is_sycl_file, sources))
 
             # extra_postargs can be either:
-            # - a dict mapping cxx/nvcc to extra flags
+            # - a dict mapping cxx/nvcc/sycl to extra flags
             # - a list of extra flags.
             if isinstance(extra_postargs, dict):
                 post_cflags = extra_postargs['cxx']
@@ -731,6 +748,36 @@ class BuildExtension(build_ext):
                 cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
             else:
                 cuda_dlink_post_cflags = None
+
+            sycl_post_cflags = None
+            sycl_cflags = None
+            sycl_dlink_post_cflags = None
+            if with_sycl:
+                sycl_common_cflags = ['-fsycl', '-fsycl-targets=spir64_gen,spir64']
+                sycl_cflags = extra_cc_cflags + common_cflags + sycl_common_cflags
+                if isinstance(extra_postargs, dict):
+                    sycl_post_cflags = extra_postargs['sycl']
+                else:
+                    sycl_post_cflags = list(extra_postargs)
+                # "preview breaking changes" flags allows to support both C++ ABIs
+                sycl_cflags += ['-fpreview-breaking-changes', '-D__INTEL_PREVIEW_BREAKING_CHANGES']
+                append_std17_if_no_std_present(sycl_cflags)
+                if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
+                    sycl_cflags.append('-sycl-std=2020')
+                host_cxx = get_cxx_compiler()
+                host_cflags = extra_cc_cflags + common_cflags + post_cflags
+                append_std17_if_no_std_present(host_cflags)
+                # escaping quoted arguments to pass them thru icpx
+                host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
+                host_cflags = ' '.join(host_cflags)
+                # note that -fsycl-host-compiler-options will be quoted as needed
+                # with shlex.quote below
+                sycl_cflags += [f'-fsycl-host-compiler={host_cxx}', f'-fsycl-host-compiler-options={host_cflags}']
+                sycl_arch_list = os.environ.get('TORCH_XPU_ARCH_LIST', 'pvc,xe-lpg')
+                sycl_dlink_post_cflags = sycl_common_cflags + ['-fsycl-link', f'-Xs "-device {sycl_arch_list}"']
+                sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
+                sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
+
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
@@ -739,9 +786,13 @@ class BuildExtension(build_ext):
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 cuda_dlink_post_cflags=cuda_dlink_post_cflags,
+                sycl_cflags=sycl_cflags,
+                sycl_post_cflags=sycl_post_cflags,
+                sycl_dlink_post_cflags=sycl_dlink_post_cflags,
                 build_directory=output_dir,
                 verbose=True,
-                with_cuda=with_cuda)
+                with_cuda=with_cuda,
+                with_sycl=with_sycl)
 
             # Return *all* object filenames, not just the ones we just built.
             return objects
@@ -898,9 +949,13 @@ class BuildExtension(build_ext):
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 cuda_dlink_post_cflags=cuda_dlink_post_cflags,
+                sycl_cflags=None,
+                sycl_post_cflags=None,
+                sycl_dlink_post_cflags=None,
                 build_directory=output_dir,
                 verbose=True,
-                with_cuda=with_cuda)
+                with_cuda=with_cuda,
+                with_sycl=False)
 
             # Return *all* object filenames, not just the ones we just built.
             return objects
@@ -1234,6 +1289,67 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     return setuptools.Extension(name, sources, *args, **kwargs)
 
+
+def SyclExtension(name, sources, *args, **kwargs):
+    r"""
+    Creates a :class:`setuptools.Extension` for SYCL/C++.
+
+    Convenience method that creates a :class:`setuptools.Extension` with the
+    bare minimum (but often sufficient) arguments to build a SYCL/C++
+    extension.
+
+    All arguments are forwarded to the :class:`setuptools.Extension`
+    constructor.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
+        >>> from torch.utils.cpp_extension import BuildExtension, SyclExtension
+        >>> setup(
+        ...     name='xpu_extension',
+        ...     ext_modules=[
+        ...     SyclExtension(
+        ...                 name='xpu_extension',
+        ...                 sources=['extension.cpp', 'extension_kernel.cpp'],
+        ...                 extra_compile_args={'cxx': ['-g', '-std=c++20', '-fPIC']})
+        ...     ],
+        ...     cmdclass={
+        ...         'build_ext': BuildExtension
+        ...     })
+
+    By default the extension will be compiled to run on all archs of the cards visible during the
+    building process of the extension. If down the road a new card is installed the
+    extension may need to be recompiled. You can override the default behavior using
+    `TORCH_XPU_ARCH_LIST` to explicitly specify which device architectures you want the extension
+    to support:
+
+    ``TORCH_XPU_ARCH_LIST="pvc,xe-lpg" python build_my_extension.py``
+
+    Note that while it's possible to include all supported archs, the more archs get included the
+    slower the building process will be, as it will build a separate kernel image for each arch.
+
+    Note: Ninja is required to build SyclExtension.
+    """
+    library_dirs = kwargs.get("library_dirs", [])
+    library_dirs += library_paths()
+    kwargs["library_dirs"] = library_dirs
+
+    libraries = kwargs.get("libraries", [])
+    libraries.append("c10")
+    libraries.append("c10_xpu")
+    libraries.append("torch")
+    libraries.append("torch_cpu")
+    libraries.append("torch_python")
+    libraries.append("torch_xpu")
+    kwargs["libraries"] = libraries
+
+    include_dirs = kwargs.get("include_dirs", [])
+    include_dirs += include_paths()
+    kwargs["include_dirs"] = include_dirs
+
+    kwargs["language"] = "c++"
+
+    return setuptools.Extension(name, sources, *args, **kwargs)
 
 def include_paths(device_type: str = "cpu") -> list[str]:
     """
@@ -1918,9 +2034,13 @@ def _write_ninja_file_and_compile_objects(
         cuda_cflags,
         cuda_post_cflags,
         cuda_dlink_post_cflags,
+        sycl_cflags,
+        sycl_post_cflags,
+        sycl_dlink_post_cflags,
         build_directory: str,
         verbose: bool,
-        with_cuda: Optional[bool]) -> None:
+        with_cuda: Optional[bool],
+        with_sycl: Optional[bool]) -> None:
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
@@ -1928,6 +2048,8 @@ def _write_ninja_file_and_compile_objects(
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
+    if with_sycl is None:
+        with_sycl = any(map(_is_sycl_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
@@ -1946,15 +2068,15 @@ def _write_ninja_file_and_compile_objects(
         cuda_cflags=cuda_cflags,
         cuda_post_cflags=cuda_post_cflags,
         cuda_dlink_post_cflags=cuda_dlink_post_cflags,
-        sycl_cflags=None,
-        sycl_post_cflags=None,
-        sycl_dlink_post_cflags=None,
+        sycl_cflags=sycl_cflags,
+        sycl_post_cflags=sycl_post_cflags,
+        sycl_dlink_post_cflags=sycl_dlink_post_cflags,
         sources=sources,
         objects=objects,
         ldflags=None,
         library_target=None,
         with_cuda=with_cuda,
-        with_sycl=False)
+        with_sycl=with_sycl)
     if verbose:
         print('Compiling objects...', file=sys.stderr)
     _run_ninja_build(
