@@ -302,12 +302,15 @@ def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     return split_k
 
 
-def _get_decoding_default_config(key) -> List[Tuple[int, int, int]]:
-    default_config = [
-        (32, 2, 3),  # Less Shared Mem
-        (64, 2, 3),  # Baseline config
-    ]
-
+def _get_decoding_default_config(key) -> Tuple[int, int, int]:
+    dtype = key.get_dtype()
+    head_dim = key.get_size()[-1]
+    sm_version = torch.cuda.get_device_capability()
+    default_config = (32, 2, 3)
+    if sm_version >= (9, 0):
+        if head_dim > 128 and dtype == torch.float32:
+            return default_config
+        return (64, 2, 3)
     return default_config
 
 
@@ -369,7 +372,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         buf.realize()
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
-    configs.extend(_get_decoding_default_config(key))
+    configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
     if config.max_autotune:
         configs += [
