@@ -1743,9 +1743,6 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return dec_fn(func)
     return dec_fn
 
-def xfailIfRocm(func):
-    return unittest.expectedFailure(func) if TEST_WITH_ROCM else func
-
 def runOnRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
