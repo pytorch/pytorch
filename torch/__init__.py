@@ -839,6 +839,22 @@ def sym_min(a, b):
         return builtins.min(a, b)
 
 
+def sym_cmod(a, b):
+    """Compute C-style modulus (remainder) between two integers.  Unlike math.remainder,
+    it only works with integers and returns an integer."""
+    # TODO: Maybe support floats too?  Not as important I think
+    if overrides.has_torch_function((a, b)):
+        return overrides.handle_torch_function(sym_cmod, (a, b), a, b)
+    assert isinstance(a, (builtins.int, SymInt))
+    assert isinstance(b, (builtins.int, SymInt))
+    if isinstance(a, SymInt):
+        return a.__cmod__(b)
+    elif isinstance(b, SymInt):
+        return b.__rcmod__(a)
+    else:
+        return abs(a) % abs(b) * (1 - 2 * (a < 0))
+
+
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
 def _get_sym_math_fn(name):
     def fn(a):

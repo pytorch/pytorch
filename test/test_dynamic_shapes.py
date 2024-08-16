@@ -418,6 +418,13 @@ class TestPySymInt(TestCase):
         r = torch.sym_float(x.shape[0])
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
+    def test_cmod(self):
+        shape_env = ShapeEnv()
+        self.assertEqual(torch.sym_cmod(7, 3))
+        self.assertEqual(torch.sym_cmod(-7, 3))
+        self.assertEqual(torch.sym_cmod(7, -3))
+        self.assertEqual(torch.sym_cmod(-7, -3))
+
     def test_aten_ops(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)

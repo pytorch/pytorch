@@ -730,6 +730,7 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    sym_cmod
     sym_ite
 
 Export Path

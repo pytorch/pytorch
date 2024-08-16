@@ -302,6 +302,9 @@ class SymNode:
     def mul(self, other) -> "SymNode":
         return self._mul(other)  # type: ignore[attr-defined]
 
+    def cmod(self, other) -> "SymNode":
+        return self._cmod(other)  # type: ignore[attr-defined]
+
     def mod(self, other) -> "SymNode":
         return self._mod(other)  # type: ignore[attr-defined]
 
@@ -540,6 +543,7 @@ METHOD_TO_OPERATOR = {
     "lshift": operator.lshift,
     "lt": operator.lt,
     "mod": operator.mod,
+    "cmod": torch.sym_cmod,
     "mul": operator.mul,
     "ne": operator.ne,
     "neg": operator.neg,
@@ -666,6 +670,12 @@ def _sympy_floordiv(a, b):
     return FloorDiv(a, b)
 
 
+def _sympy_cmod(a, b):
+    from torch.utils._sympy.functions import Mod
+
+    return Mod(a, b)
+
+
 def _sympy_mod(a, b):
     from torch.utils._sympy.functions import Mod, PythonMod
 
@@ -716,6 +726,7 @@ reflectable_magic_methods = {
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
+    "cmod": _sympy_cmod,
     "pow_by_natural": _sympy_pow_by_natural,
     "float_pow": _sympy_float_pow,
     "and": _sympy_and,
