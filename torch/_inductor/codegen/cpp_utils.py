@@ -83,7 +83,7 @@ LAYOUT_TO_ATEN = {
 
 _IS_WINDOWS = sys.platform == "win32"
 
-INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
+INDEX_TYPE = "int64_t"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
