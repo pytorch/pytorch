@@ -2345,6 +2345,10 @@ class Module:
         use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
+            if hasattr(param, "_local_tensor"):
+                if param._local_tensor.device == torch.device("meta"):
+                    new_device = torch.distributed.distributed_c10d._get_pg_default_device()
+                    param = torch.empty_like(param, device=new_device)
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
