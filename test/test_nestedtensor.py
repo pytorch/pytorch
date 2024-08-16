@@ -2492,6 +2492,53 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: nt1.reshape(2, -1, -1, 2, 2),
         )
 
+    def test_nested_masked_select(self, device):
+        t = torch.randn([3, 3], device=device)
+        mask = torch.tensor([False], device=device)
+
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), torch.tensor([], device=device))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
+
+        mask = torch.tensor([[False], [False], [True]])
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
+
+        mask = torch.tensor(
+            [[False, False, True], [True, False, True], [False, False, True]],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 1, 3, 4], device=device))
+
+        t = torch.randn([2, 3, 3, 1], device=device)
+        mask = torch.tensor(
+            [
+                [
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                ],
+                [
+                    [[False], [True], [True]],
+                    [[False], [True], [True]],
+                    [[True], [True], [True]],
+                ],
+            ],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(
+            njt.offsets(),
+            torch.tensor(
+                [0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13],
+                device=device,
+            ),
+        )
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_narrow(self, device, dtype):
         nt = random_nt_from_dims([5, None, None, None], device=device, dtype=dtype)
@@ -7220,61 +7267,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 self.assertEqual(grads_compile, grads_ref)
 
-    def test_nested_masked_select(self, device):
-        t = torch.randn([3, 3], device=device)
-        mask = torch.tensor([False], device=device)
-
-        njt = torch.nested.masked_select(t, mask)
-        self.assertEqual(njt.values(), torch.tensor([], device=device))
-        self.assertEqual(njt.lengths(), torch.tensor([0, 0, 0], device=device))
-        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
-
-        mask = torch.tensor([[False], [False], [True]])
-        njt = torch.nested.masked_select(t, mask)
-        self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
-        self.assertEqual(njt.lengths(), torch.tensor([0, 0, 3], device=device))
-        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
-
-        mask = torch.tensor(
-            [[False, False, True], [True, False, True], [False, False, True]],
-            device=device,
-        )
-        njt = torch.nested.masked_select(t, mask)
-        self.assertEqual(njt.values(), t.masked_select(mask))
-        self.assertEqual(njt.lengths(), torch.tensor([1, 2, 1], device=device))
-        self.assertEqual(njt.offsets(), torch.tensor([0, 1, 3, 4], device=device))
-
-        t = torch.randn([2, 3, 3, 1], device=device)
-        mask = torch.tensor(
-            [
-                [
-                    [[True], [False], [True]],
-                    [[True], [False], [True]],
-                    [[True], [False], [True]],
-                ],
-                [
-                    [[False], [True], [True]],
-                    [[False], [True], [True]],
-                    [[True], [True], [True]],
-                ],
-            ],
-            device=device,
-        )
-        njt = torch.nested.masked_select(t, mask)
-        self.assertEqual(njt.values(), t.masked_select(mask))
-        self.assertEqual(
-            njt.lengths(),
-            torch.tensor(
-                [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1], device=device
-            ),
-        )
-        self.assertEqual(
-            njt.offsets(),
-            torch.tensor(
-                [0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13],
-                device=device,
-            ),
-        )
+  
 
 
 instantiate_parametrized_tests(TestNestedTensor)

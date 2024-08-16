@@ -1595,24 +1595,20 @@ def masked_select_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     mask = new_kwargs.pop("mask")
 
-    mask_values = None
     if inp.ndim > 2:
         raise RuntimeError("masked_select only support 2-D selections currently")
-    elif inp.shape == mask.shape:
-        mask_values = mask.values()
-    else:
+    elif inp.shape != mask.shape:
         raise RuntimeError(
             f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
         )
-    res_values = inp._values.masked_select(mask_values)
-    mask_cumsum = F.pad(mask_values.cumsum(dim=0), (1, 0))
-    res_offsets = mask_cumsum[inp._offsets]
+    res_values = inp._values.masked_select(mask.values())
+    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))
 
+    args =  extract_kwargs(inp)
+    args["offsets"] = mask_cumsum[inp._offsets]
     return NestedTensor(
         values=res_values,
-        offsets=res_offsets,
-        _metadata_cache=inp._metadata_cache,
-        _ragged_idx=inp._ragged_idx,
+        **args,
     )
 
 

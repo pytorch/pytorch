@@ -432,6 +432,13 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
 
+    def _print_FloatPow(self, expr):
+        return (
+            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
+        )
+
+    _print_PowByNatural = _print_FloatPow
+
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
         p = self.doprint(expr.args[1])
@@ -1669,7 +1676,7 @@ class TritonKernel(SIMDKernel):
 
         index_str = indexing.index_str
         mask_str = indexing.mask_str if indexing.has_mask() else None
-        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+        size_str = texpr(self.rename_indexing(size)) if upper else None
 
         # expr is already wrapped
         line = self.indirect_assert(
@@ -2527,6 +2534,9 @@ class TritonKernel(SIMDKernel):
             inductor_meta["profile_bandwidth"] = config.profile_bandwidth
             inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
             inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
+            inductor_meta[
+                "profile_bandwidth_with_do_bench_using_profiling"
+            ] = config.profile_bandwidth_with_do_bench_using_profiling
         if config.coordinate_descent_tuning:
             inductor_meta[
                 "coordinate_descent_tuning"

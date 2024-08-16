@@ -455,11 +455,10 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).view(-1)
 
     from torch.nested._internal.nested_tensor import (
-        nested_view_from_values_offsets_lengths,
+        nested_view_from_values_offsets,
     )
 
-    return nested_view_from_values_offsets_lengths(
+    return nested_view_from_values_offsets(
         values=res_values,
-        lengths=res_lengths,
         offsets=F.pad(res_lengths.cumsum(dim=0), (1, 0)),
     )
