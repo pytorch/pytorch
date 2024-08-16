@@ -1029,7 +1029,6 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
             if :attr:`device` is ``None`` (default).
 
     """
-    torch.cuda.init()
     ctx = MemPoolContext(pool)
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
