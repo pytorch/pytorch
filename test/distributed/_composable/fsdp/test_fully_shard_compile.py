@@ -7,6 +7,9 @@ import functools
 import unittest
 from unittest import mock
 
+import torchtune
+import torchtune.models.llama2
+
 import torch
 import torch._dynamo.testing
 import torch.distributed._composable.fsdp._fsdp_param
@@ -28,8 +31,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils._triton import has_triton
-import torchtune
-import torchtune.models.llama2
 
 
 def _is_op_in_graph(graph, op):
@@ -801,15 +802,60 @@ class TestFullyShardCompile(FSDPTest):
             )
             from collections import OrderedDict
 
+            """
+            model: TransformerDecoder(
+                (tok_embeddings): Embedding(32000, 4096)
+                (layers): ModuleList(
+                    (0): TransformerDecoderLayer(
+                    (sa_norm): RMSNorm()
+                    (attn): CausalSelfAttention(
+                        (q_proj): LoRALinear(
+                            (dropout): Dropout(p=0.05, inplace=False)
+                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
+                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
+                        )
+                        (k_proj): Linear(in_features=4096, out_features=4096, bias=False)
+                        (v_proj): LoRALinear(
+                            (dropout): Dropout(p=0.05, inplace=False)
+                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
+                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
+                        )
+                        (output_proj): Linear(in_features=4096, out_features=4096, bias=False)
+                        (pos_embeddings): RotaryPositionalEmbeddings()
+                    )
+                    (mlp_norm): RMSNorm()
+                    (mlp): FeedForward(
+                        (w1): Linear(in_features=4096, out_features=11008, bias=False)
+                        (w2): Linear(in_features=11008, out_features=4096, bias=False)
+                        (w3): Linear(in_features=4096, out_features=11008, bias=False)
+                        (activation): SiLU()
+                    )
+                    )
+                )
+                (norm): RMSNorm()
+                (output): Linear(in_features=4096, out_features=32000, bias=False)
+            )
+            """
+
             str_indices = [str(i) for i in range(len(model.layers._modules))][
                 :1
             ]  # only pick the first few layers
             model.layers._modules = OrderedDict(
                 list(zip(str_indices, model.layers._modules.values()))
             )
+            model.layers[0].sa_norm = torch.nn.Identity()
+            model.layers[0].mlp_norm = torch.nn.Identity()
+            model.layers[0].mlp = torch.nn.Identity()
+            model.layers[0].attn.output_proj = torch.nn.Identity()
+            model.layers[0].attn.k_proj = torch.nn.Identity()
+            model.layers[0].attn.v_proj = torch.nn.Identity()
             print(f"model: {model}")
+            # for p in model.parameters():
+            #     p.requires_grad_(True)
+            adapter_params = torchtune.modules.peft.peft_utils.get_adapter_params(model)
+            print(f"adapter_params: {adapter_params}")
             torchtune.modules.peft.peft_utils.set_trainable_params(
-                model, torchtune.modules.peft.peft_utils.get_adapter_params(model)
+                model, adapter_params
             )
 
             fsdp_kwargs = {}
