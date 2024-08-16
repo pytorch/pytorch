@@ -16,7 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -125,7 +125,7 @@ PYTHON_TO_CPP = {
 
 CONTAINER_PYTHON_TO_CPP = {
     "List": "std::vector",
-    "Optional": "c10::optional",
+    "Optional": "std::optional",
 }
 
 DTYPE_LOWP_FP = [
@@ -179,10 +179,16 @@ def reduction_acc_type(reduction_type, dtype):
 
 
 def reduction_combine(
-    reduction_type, var, next_value, index: Optional[sympy.Symbol] = None
+    reduction_type,
+    var,
+    next_value,
+    index: Optional[sympy.Symbol] = None,
+    src_dtype=None,
 ):
+    is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
-        return f"{var} + {next_value}"
+        conjunction = "|" if is_bool else "+"
+        return f"{var} {conjunction} {next_value}"
     if reduction_type == "prod":
         return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
@@ -1175,6 +1181,13 @@ class CppVecOverrides(CppOverrides):
         return f"{a} >> {b}"
 
     @staticmethod
+    def remainder(a, b):
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
+        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -1277,16 +1290,30 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # a and b are integer type
-        _t = f"decltype({a})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if is_float_dtype(a.dtype):
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            return f"at::vec::div_floor_floating_vec({a}, {b})"
+        else:
+            assert all(is_integer_dtype(item.dtype) for item in [a, b])
+            # a and b are integer type
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                # Doing blend to set the remaining bits of b to non-zero
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({b})"
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -1548,7 +1575,7 @@ class CppKernel(Kernel):
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array)};",
+                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, src_dtype=dtype)};",
                 "}",
             ],
         )
@@ -2003,6 +2030,11 @@ class CppVecKernel(CppKernel):
         assert num_vectors >= 1
         return num_vectors
 
+    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
+        # This utility function is used to check if the vector lanes has been
+        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
+        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
+
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
         if num_vectors == 1:
@@ -2261,17 +2293,6 @@ class CppVecKernel(CppKernel):
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
-        if argmax_or_argmin:
-            assert src_dtype in (
-                torch.float32,
-                torch.int64,
-            )
-        else:
-            assert dtype == src_dtype
-        if reduction_type == "any":
-            assert dtype == torch.bool
-        else:
-            assert dtype in [torch.float64, torch.float, torch.int64]
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
 
@@ -2379,6 +2400,7 @@ class CppVecKernel(CppKernel):
                 reduction_init_fn=self.reduction_init_vec,
             )
         tmpvar: Union[str, CSEVariable]
+        is_bool = dtype == torch.bool
         if horizontal_reduction:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
@@ -2393,21 +2415,31 @@ class CppVecKernel(CppKernel):
                 )
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+            elif is_bool:
+                if reduction_type in (
+                    "any",
+                    "sum",
+                    "max",
+                ):
+                    next_value = f"!{acc_vec}.all_zero()"
+                else:
+                    assert reduction_type == "min"
+                    next_value = f"{acc_vec}.all_masked()"
             else:
                 reduce_all_body = (
                     "{ return "
                     + self.reduction_combine_vec(reduction_type, "x", "y")
                     + "; }"
                 )
-                is_any = reduction_type == "any"
+                is_bool = dtype == torch.bool
                 # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = "float" if is_any else DTYPE_TO_CPP[dtype]
+                vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
                 vec = f"at::vec::Vectorized<{vec_dtype}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
             )
             tmpvar = acc
         else:
@@ -2506,7 +2538,11 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}::from(0)"
 
         scalar_init = reduction_init(reduction_type, dtype)
-        return f"{vec_type}({scalar_init})"
+        vec_init = f"{vec_type}({scalar_init})"
+        if dtype == torch.bool:
+            assert reduction_type in ("min", "max", "sum")
+            return f"{self._get_mask_type()}::from({scalar_init})"
+        return vec_init
 
     def reduction_acc_type_vec(self, reduction_type, dtype):
         scalar_type = DTYPE_TO_COMPUTATION_DTYPE[dtype]
@@ -2517,7 +2553,8 @@ class CppVecKernel(CppKernel):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
-        if reduction_type == "any":
+        if dtype == torch.bool:
+            assert reduction_type in ("min", "max", "any", "sum")
             return f"{self._get_mask_type()}"
         return vec_type
 
@@ -2545,21 +2582,31 @@ class CppVecKernel(CppKernel):
         horizontal_reduction: Optional[bool] = None,
         src_dtype: Optional[torch.dtype] = torch.float32,
     ):
+        is_bool = src_dtype == torch.bool
         if reduction_type == "max":
             if self.tail_size:
                 return f"max_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
-                return f"at::vec::maximum({var}, {next_value})"
+                return (
+                    f"{var} | {next_value}"
+                    if is_bool
+                    else f"at::vec::maximum({var}, {next_value})"
+                )
         elif reduction_type == "min":
             if self.tail_size:
                 return f"min_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
-                return f"at::vec::minimum({var}, {next_value})"
+                return (
+                    f"{var} & {next_value}"
+                    if is_bool
+                    else f"at::vec::minimum({var}, {next_value})"
+                )
         elif reduction_type == "sum":
             if self.tail_size:
                 return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
             else:
-                return f"{var} + {next_value}"
+                conjunction = "|" if is_bool else "+"
+                return f"{var} {conjunction} {next_value}"
         elif reduction_type == "prod":
             if self.tail_size:
                 return f"prod_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -2606,7 +2653,7 @@ class CppVecKernel(CppKernel):
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
-                    f"({var}, {next_value}{arg_extra}, {self.tail_size})"
+                    f"({var}, {next_value}{arg_extra}, {cexpr_index(self.tail_size)})"
                 )
             else:
                 return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
@@ -2783,7 +2830,10 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
+            define_line = (
+                f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}"
+                f"[{cexpr_index(self.outer_num_elems * self.inner_num_elems)}];"
+            )
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -2991,22 +3041,7 @@ class CppVecKernelChecker(CppVecKernel):
             return self.simd_vec
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        argmin_argmax_vec = False
-        if reduction_type in ("argmin", "argmax") and src_dtype in (
-            torch.float,
-            torch.int64,
-        ):
-            assert dtype == torch.int64
-            argmin_argmax_vec = True
-
-        if not (
-            argmin_argmax_vec
-            or (src_dtype == torch.bool and reduction_type == "any")
-            or (dtype == torch.float and src_dtype == torch.float)
-            or (dtype == torch.double and src_dtype == torch.double)
-            or (dtype == torch.int64 and src_dtype == torch.int64)
-            and reduction_type in VECTORIZABLE_RTYPES
-        ):
+        if reduction_type not in VECTORIZABLE_RTYPES:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
