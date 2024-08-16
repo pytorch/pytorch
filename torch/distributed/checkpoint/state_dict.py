@@ -572,7 +572,7 @@ def _load_model_state_dict(
             _distribute_state_dict(state_dict, local_state_dict, device=new_device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
-
+    torch.distributed.breakpoint()
     with info.fsdp_context():
         return cast(
             _IncompatibleKeys,
