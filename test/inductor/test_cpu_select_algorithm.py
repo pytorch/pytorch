@@ -27,8 +27,9 @@ from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
 
 try:
     try:
-        from . import test_torchinductor
+        from . import test_cpu_repro, test_torchinductor
     except ImportError:
+        import test_cpu_repro
         import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
@@ -36,6 +37,7 @@ except unittest.SkipTest:
     raise
 
 check_model = test_torchinductor.check_model
+set_num_threads = test_cpu_repro.set_num_threads
 
 aten = torch.ops.aten
 
@@ -55,7 +57,8 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
-        dynamo_config.patch(inline_inbuilt_nn_modules=True),
+        # Fails due to https://github.com/pytorch/pytorch/issues/131929
+        dynamo_config.patch(inline_inbuilt_nn_modules=False),
         inductor_config.patch(
             debug=True,
             max_autotune=True,
@@ -220,7 +223,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -251,13 +253,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             and epilogue != "mul"
             and epilogue != "div"
             or (dtype == torch.half and epilogue == "add" and not bias)
-            or (
-                dtype == torch.float32
-                and epilogue == "add"
-                and not bias
-                and dynamo_config.dynamic_shapes
-                and not dynamo_config.assume_static_by_default
-            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
@@ -266,8 +261,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    div fusion which is not supported for oneDNN linear.
             # 2. For float16, since oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
-            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
-            #    and linear w/o bias plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -799,6 +792,35 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.gemm_cache_blocking": "2,2,2"})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)
+    @parametrize("batch_size", (1024,))
+    @parametrize("in_features", (1024,))
+    @parametrize("out_features", (1024,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_cache_blocking(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
