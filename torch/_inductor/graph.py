@@ -476,7 +476,7 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
+        # For cpu backend and onednn enabled, we always use channels_last for better performance.
         if (
             torch.backends.onednn.enabled
             and torch.backends.onednn.is_available()

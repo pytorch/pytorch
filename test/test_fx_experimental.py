@@ -64,7 +64,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 skipIfNoOnednn = unittest.skipIf(
     not (torch.backends.onednn.enabled and torch.backends.onednn.is_available()),
-    "no MKLDNN",
+    "no ONEDNN",
 )
 
 

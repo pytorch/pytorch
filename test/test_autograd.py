@@ -5657,7 +5657,7 @@ Done""",
                     gradcheck(lambda x: x, (x,), atol=1e-1, fast_mode=fast_mode)
                 )
 
-            # when layout is not mkldnn(aka has strides) and input has a dimension with stride 0. (always raises
+            # when layout is not onednn(aka has strides) and input has a dimension with stride 0. (always raises
             # even if raise_exception=False)
             x = torch.ones(1, dtype=torch.float64, requires_grad=True)
             x = x.expand((2, 2))
@@ -5673,7 +5673,7 @@ Done""",
         not torch.backends.onednn.is_available(), "MKL-DNN build is disabled"
     )
     def test_gradcheck_validates_input_mkldnn(self):
-        # when mkldnn inputs, forward mode testing is not allowed
+        # when onednn inputs, forward mode testing is not allowed
         # Update tolerances below to make sure the gradient match even in single precision floats
         # Use the warning assert to hide the float32 warning
         x = torch.ones(1).to_mkldnn().requires_grad_()
@@ -5681,7 +5681,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "ONEDNN inputs are not support for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -5697,7 +5697,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "ONEDNN inputs are not support for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -5728,10 +5728,10 @@ Done""",
                     fast_mode=fast_mode,
                 )
 
-            # when mkldnn outputs (always raise even if raise_exception=False)
+            # when onednn outputs (always raise even if raise_exception=False)
             root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN output is not supported at gradcheck yet"
+                ValueError, "ONEDNN output is not supported at gradcheck yet"
             ):
                 gradcheck(
                     lambda x: x.to_mkldnn(),

@@ -15,7 +15,7 @@ void onednn_matmul(
     const Tensor &result,
     float beta,
     float alpha) {
-  TORCH_CHECK(false, "onednn_matmul: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_matmul: ATen not compiled with ONEDNN support");
 }
 
 bool use_onednn_bf16_matmul(
@@ -82,7 +82,7 @@ void onednn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
@@ -132,13 +132,13 @@ onednn_gemm(
   }
 
   ideep::attr_t op_attr;
-  // Use mkldnn post ops to perform the add.
+  // Use onednn post ops to perform the add.
   if (beta != 0.0f) {
     op_attr = ideep::attr_t::fuse_sum();
   }
   if (std::is_same_v<scalar_t, float>) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
 
-  // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
+  // NOTE: View as c-contiguous to avoid extra reordering in onednn
   // Use identity: C = AB <=> C^T = B^T A^T
   ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
   if (transa != TransposeType::NoTranspose) {
@@ -273,8 +273,8 @@ void onednn_matmul(
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
-  // but mkldnn matmul primitive only support bias be 1-D tensors
-  // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
+  // but onednn matmul primitive only support bias be 1-D tensors
+  // to address their differences, we use onednn post ops to perform a fused "add" after matrix multiplication is over
   if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
   if (mat1.scalar_type() == at::kFloat) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   // If alpha = 0, dose not need actually do gemm computation
@@ -294,7 +294,7 @@ void onednn_matmul(
   };
 
   // Onednn only optimized for contiguous or transposed (transpose last 2 dim if 3-D tensor) format now
-  // Will remove this "contiguous" after mkldnn have fully supported
+  // Will remove this "contiguous" after onednn have fully supported
   Tensor mat1_ = is_onednn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
   Tensor mat2_ = is_onednn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
   // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
@@ -326,7 +326,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
-  // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
+  // only m * n * b * k(if exist) are large enough we can get benefit from onednn optimized gemm kernel
   static const int64_t onednn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot

@@ -1659,11 +1659,11 @@ def skipCPUIfNoMklSparse(fn):
     )(fn)
 
 
-# Skips a test on CPU if mkldnn is not available.
+# Skips a test on CPU if onednn is not available.
 def skipCPUIfNoOnednn(fn):
     return skipCPUIf(
         not torch.backends.onednn.is_available(),
-        "PyTorch is built without mkldnn support",
+        "PyTorch is built without onednn support",
     )(fn)
 
 

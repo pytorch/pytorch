@@ -8,8 +8,8 @@ import torch
 
 
 # Test whether hardware BF32 math mode enabled. It is enabled only on:
-# - MKLDNN is available
-# - BF16 is supported by MKLDNN
+# - ONEDNN is available
+# - BF16 is supported by ONEDNN
 def bf32_is_not_fp32():
     if not torch.backends.onednn.is_available():
         return False

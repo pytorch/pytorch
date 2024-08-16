@@ -24,12 +24,12 @@ namespace at { namespace native {
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with ONEDNN support");
 }
 
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_stub);
-REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
+REGISTER_NO_CPU_DISPATCH(onednn_convolution_backward_stub);
+REGISTER_NO_CPU_DISPATCH(onednn_convolution_transpose_stub);
+REGISTER_NO_CPU_DISPATCH(onednn_convolution_transpose_backward_stub);
 
 }}
 
@@ -50,11 +50,11 @@ static void check_shape_forward(const Tensor& input,
                                 const IntArrayRef& stride,
                                 const IntArrayRef& dilation,
                                 const int64_t groups) {
-#define MKLDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
-  auto is_padding_neg = MKLDNN_CONV_ARG_CHECK(padding, <);
-  auto is_stride_nonpos = MKLDNN_CONV_ARG_CHECK(stride, <=);
-  auto is_dilation_nonpos = MKLDNN_CONV_ARG_CHECK(dilation, <=);
-#undef MKLDNN_CONV_ARG_CHECK
+#define ONEDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
+  auto is_padding_neg = ONEDNN_CONV_ARG_CHECK(padding, <);
+  auto is_stride_nonpos = ONEDNN_CONV_ARG_CHECK(stride, <=);
+  auto is_dilation_nonpos = ONEDNN_CONV_ARG_CHECK(dilation, <=);
+#undef ONEDNN_CONV_ARG_CHECK
   TORCH_CHECK(!is_padding_neg, "negative padding is not supported");
   TORCH_CHECK(!is_stride_nonpos, "non-positive stride is not supported");
   TORCH_CHECK(!is_dilation_nonpos, "non-positive dilation is not supported");
@@ -117,20 +117,20 @@ static void check_shape_forward(const Tensor& input,
   }
 }
 
-#define MKLDNNTensor(itensor, options)                                  \
+#define ONEDNNTensor(itensor, options)                                  \
   new_with_itensor_onednn(                                              \
       std::move(itensor),                                               \
       optTypeMetaToScalarType(options.dtype_opt()),                     \
       options.device_opt())
 
-// Note [MKLDNN Convolution Memory Formats]
+// Note [ONEDNN Convolution Memory Formats]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// MKLDNN has 3 types of memory formats in convolution:
+// ONEDNN has 3 types of memory formats in convolution:
 //
 // In case memory format passed from PyTorch (aka. user layout)
-// differs from the internal layout which MKLDNN used, a `reorder` is needed;
+// differs from the internal layout which ONEDNN used, a `reorder` is needed;
 // otherwise when user layout is identical to internal layout,
-// MKLDNN uses a memory `view` upon an existing CPU tensor.
+// ONEDNN uses a memory `view` upon an existing CPU tensor.
 //
 // 1. NCHW (CPU tensor, contiguous)
 //  input reorder:  NCHW(user) -> Blocked(internal)
@@ -142,15 +142,15 @@ static void check_shape_forward(const Tensor& input,
 //  weight reorder: OHWI(user) -> Blocked(internal)
 //  output view:    NHWC(internal) -> NHWC(user)
 //
-// 3. Blocked (MKLDNN tensor):
-//  By explicitly converting a tensor to mkldnn, e.g. `x.to_mkldnn()`,
+// 3. Blocked (ONEDNN tensor):
+//  By explicitly converting a tensor to onednn, e.g. `x.to_mkldnn()`,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
 //  For inference case, weight can be prepacked into blocked format by
 //  (so as to save weight reoder overhead):
 //      model = torch.utils.mkldnn.to_mkldnn(model)
 //
-//  For training case, grad_output can be CPU tensor or MKLDNN tensor,
+//  For training case, grad_output can be CPU tensor or ONEDNN tensor,
 //  but weight/bias and grad_weight/grad_bias are always CPU tensor.
 //
 
@@ -267,9 +267,9 @@ static Tensor _mkldnn_convolution(
       op_attr);
 
   if (input_t.is_onednn()) {
-    return MKLDNNTensor(y, input_t.options());
+    return ONEDNNTensor(y, input_t.options());
   } else if (!use_channels_last) {
-    return mkldnn_to_dense(MKLDNNTensor(y, input_t.options()));
+    return onednn_to_dense(ONEDNNTensor(y, input_t.options()));
   } else {
     return output;
   }
@@ -592,7 +592,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
 std::vector<int64_t> _original_deconv_weight_size(
     const Tensor& weight_t,
     int64_t groups) {
-  TORCH_CHECK(weight_t.is_onednn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
+  TORCH_CHECK(weight_t.is_onednn() || weight_t.is_meta(), "expects weight_t to be onednn or meta tensor");
   // The size of weight_t is the prepacked size.
   //  Groups > 1: [g*o, i/g, ...]
   //  Groups == 1: [o, i, ...]
@@ -662,7 +662,7 @@ Tensor _mkldnn_convolution_transpose(
 
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_onednn()) {
-    // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+    // onednn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
@@ -703,9 +703,9 @@ Tensor _mkldnn_convolution_transpose(
         op_attr);
   }
   if (input.is_onednn()) {
-    return MKLDNNTensor(y, input.options());
+    return ONEDNNTensor(y, input.options());
   } else if (!use_channels_last) {
-    return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
+    return onednn_to_dense(ONEDNNTensor(y, input.options()));
   } else {
     return output;
   }
@@ -801,9 +801,9 @@ Tensor mkldnn_convolution_backward_input(
       is_channels_last);
 
   if (grad_output.is_onednn()) {
-    return MKLDNNTensor(grad_x, grad_output.options());
+    return ONEDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
-    return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+    return onednn_to_dense(ONEDNNTensor(grad_x, grad_output.options()));
   } else {
     return grad_input;
   }
@@ -852,13 +852,13 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
 
   if (!is_channels_last) {
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
-        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 
@@ -889,7 +889,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 }
 }
 
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
+REGISTER_ALL_CPU_DISPATCH(onednn_convolution_backward_stub, &mkldnn_convolution_backward);
 
 namespace{
 Tensor mkldnn_convolution_transpose(
@@ -951,9 +951,9 @@ Tensor mkldnn_convolution_transpose_backward_input(
       is_channels_last);
 
   if (grad_output.is_onednn()) {
-    return MKLDNNTensor(grad_x, grad_output.options());
+    return ONEDNNTensor(grad_x, grad_output.options());
   } else if (!is_channels_last){
-    return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
+    return onednn_to_dense(ONEDNNTensor(grad_x, grad_output.options()));
   } else {
     return grad_input;
   }
@@ -1003,13 +1003,13 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 
   if (!is_channels_last) {
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     auto memory_format = onednn_convolution_memory_format(grad_output.ndimension(), is_channels_last);
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
-        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
+        onednn_to_dense(ONEDNNTensor(grad_w, grad_output.options())).to(memory_format),
+        bias_defined ? onednn_to_dense(ONEDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 
@@ -1042,8 +1042,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 }
 }
 
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);
-REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
+REGISTER_ALL_CPU_DISPATCH(onednn_convolution_transpose_stub, &mkldnn_convolution_transpose);
+REGISTER_ALL_CPU_DISPATCH(onednn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(

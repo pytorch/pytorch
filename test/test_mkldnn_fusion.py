@@ -1,4 +1,4 @@
-# Owner(s): ["module: mkldnn"]
+# Owner(s): ["module: onednn"]
 import itertools
 import unittest
 from typing import NamedTuple, List

@@ -1357,7 +1357,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static inline int64_t get_onednn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
-      // Minimum dimension requirement for MKLDNN; derived based on experiments.
+      // Minimum dimension requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1366,7 +1366,7 @@ static inline int64_t get_onednn_matmul_min_dim() {
 #endif
       return 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    const char* ptr = std::getenv("TORCH_ONEDNN_MATMUL_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
   }();
   return value;
@@ -1376,7 +1376,7 @@ static inline int64_t get_onednn_matmul_min_dim() {
 static inline int64_t get_onednn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
-      // Minimum size requirement for MKLDNN; derived based on experiments.
+      // Minimum size requirement for ONEDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
 #if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
@@ -1385,7 +1385,7 @@ static inline int64_t get_onednn_matmul_min_size() {
 #endif
       return 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    const char* ptr = std::getenv("TORCH_ONEDNN_MATMUL_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
   }();
   return value;

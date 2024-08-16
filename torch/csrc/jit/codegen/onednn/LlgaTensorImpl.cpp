@@ -123,11 +123,11 @@ data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
 
 LlgaTensorDesc LlgaTensorDesc::supplementTensorInfo(const at::Tensor& t) const {
   if (t.is_onednn()) {
-    // if input tensor is of mkldnn, it's originated from an upstream
+    // if input tensor is of onednn, it's originated from an upstream
     // LLGA partition which carries opaque layout info
     return get_llga_desc(t).tid(tid_);
   } else {
-    // if input tensor is not an mkldnn tensor, use default layout
+    // if input tensor is not an onednn tensor, use default layout
     auto sizes = t.sizes().vec();
     auto strides = t.strides().vec();
     auto dtype = getLlgaDataType(t.scalar_type());

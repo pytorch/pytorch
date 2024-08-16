@@ -520,7 +520,7 @@ def _reduce_tensor(
     """
     if t.is_onednn:
         # TODO: These tensors don't currently pickle, so we can't cache a
-        # compiled graph containing them. Just fail now. If mkldnn tensors
+        # compiled graph containing them. Just fail now. If onednn tensors
         # get pickling support, we can remove this.
         raise BypassFxGraphCache
 

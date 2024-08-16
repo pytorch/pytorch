@@ -177,7 +177,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
   }
 
   if (use_onednn_matmul(self, other, /*result=*/Tensor())){
-    // mkldnn matmul expect result have sizes info to create ideep tensor
+    // onednn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
     onednn_matmul(self, other, r, /*beta=*/0);
     return r;

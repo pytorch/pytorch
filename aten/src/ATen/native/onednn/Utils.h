@@ -44,7 +44,7 @@ inline std::vector<int64_t> padding_r(
   // PyTorch uses padding/output_padding:
   //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
   //
-  // MKLDNN uses padding_l/padding_r:
+  // ONEDNN uses padding_l/padding_r:
   //   osize = (isize - 1) * stride - padding_l - padding_r + dilation * (kernel_size - 1) + 1
   //
   // So: padding_l = padding, padding_r = padding - output_padding

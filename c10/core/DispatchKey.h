@@ -211,7 +211,7 @@ enum class DispatchKey : uint16_t {
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
   OnednnCPU, // registered at build/aten/src/ATen/RegisterOnednnCPU.cpp
-  // NB: not to be confused with MKLDNN, which is Caffe2 only
+  // NB: not to be confused with ONEDNN, which is Caffe2 only
 
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,

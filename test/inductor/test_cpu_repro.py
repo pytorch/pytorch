@@ -139,7 +139,7 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channles last
+                        # For CPU and onednn enable, we always using channles last
                         nonlocal fmt
                         if (
                             torch.backends.onednn.enabled
@@ -189,7 +189,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
         options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
@@ -215,7 +215,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
@@ -241,7 +241,7 @@ class CPUReproTests(TestCase):
             ):
                 compiled_m(input)
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -263,7 +263,7 @@ class CPUReproTests(TestCase):
                 (x,),
             )
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -366,7 +366,7 @@ class CPUReproTests(TestCase):
             example_inputs = (torch.rand(1, 10),)
             self.common(Model(), example_inputs)
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
         dtypes = []
@@ -389,7 +389,7 @@ class CPUReproTests(TestCase):
                     (v.to(dtype),),
                 )
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed_cpu(self):
         options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
@@ -405,7 +405,7 @@ class CPUReproTests(TestCase):
                 )
 
     @config.patch(freezing=True)
-    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch._C._has_mkldnn, "ONEDNN is not enabled")
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_conv_in_channel_1_dynamic_shapes(self):
@@ -437,7 +437,7 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
-    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch._C._has_mkldnn, "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -3464,7 +3464,7 @@ class CPUReproTests(TestCase):
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
 
-    @unittest.skipIf(not torch.backends.onednn.is_available(), "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), "ONEDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
     def test_linear_with_no_default_contiguous_input(self):

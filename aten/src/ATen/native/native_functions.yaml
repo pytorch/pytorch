@@ -551,7 +551,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: add_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr
-    OnednnCPU: mkldnn_add
+    OnednnCPU: onednn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
   tags: [core, pointwise]
@@ -563,7 +563,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: add_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: add_sparse_csr_
-    OnednnCPU: mkldnn_add_
+    OnednnCPU: onednn_add_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add__Tensor
   tags: pointwise
 
@@ -579,7 +579,7 @@
     SparseCUDA: add_out_sparse_cuda
     SparseCsrCPU, SparseCsrMeta: add_out_sparse_compressed_cpu
     SparseCsrCUDA: add_out_sparse_compressed_cuda
-    OnednnCPU: mkldnn_add_out
+    OnednnCPU: onednn_add_out
     MPS: add_out_mps
   tags: pointwise
 
@@ -1762,7 +1762,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: copy_mkldnn_
+    OnednnCPU: copy_onednn_
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: copy_sparse_compressed_
@@ -2372,7 +2372,7 @@
     CUDA: empty_cuda
     MPS: empty_mps
     Meta: empty_meta_symint
-    OnednnCPU: empty_mkldnn
+    OnednnCPU: empty_onednn
     SparseCPU, SparseCUDA: empty_sparse
     SparseMeta: empty_sparse_symint
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
@@ -4184,7 +4184,7 @@
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_sparse_csr
-    OnednnCPU: mkldnn_mul
+    OnednnCPU: onednn_mul
     ZeroTensor: mul_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
   tags: [core, pointwise]
@@ -4196,7 +4196,7 @@
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_sparse_csr_
-    OnednnCPU: mkldnn_mul_
+    OnednnCPU: onednn_mul_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Tensor
   tags: pointwise
 
@@ -4210,7 +4210,7 @@
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_out_sparse_csr
-    OnednnCPU: mkldnn_mul_out
+    OnednnCPU: onednn_mul_out
   tags: pointwise
   # For C++ only, until we have conversion from C++ numbers to Tensor
 
@@ -4309,7 +4309,7 @@
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
     MPS: batch_norm_mps
-    OnednnCPU: mkldnn_batch_norm
+    OnednnCPU: onednn_batch_norm
 
 - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   dispatch:
@@ -4323,7 +4323,7 @@
     CPU: _batch_norm_legit_cpu
     CUDA: _batch_norm_legit_cuda
     MPS: _batch_norm_legit_mps
-    OnednnCPU: _mkldnn_batch_norm_legit
+    OnednnCPU: _onednn_batch_norm_legit
   autogen: _native_batch_norm_legit_functional
   tags: core
 
@@ -4347,7 +4347,7 @@
     CPU: _batch_norm_legit_no_stats_cpu
     CUDA: _batch_norm_legit_no_stats_cuda
     MPS: _batch_norm_legit_no_stats_mps
-    OnednnCPU: _mkldnn_batch_norm_legit_no_stats
+    OnednnCPU: _onednn_batch_norm_legit_no_stats
   tags: core
 
 - func: _native_batch_norm_legit.no_stats_out(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
@@ -4385,7 +4385,7 @@
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
     MPS: batch_norm_backward_mps
-    OnednnCPU: mkldnn_batch_norm_backward
+    OnednnCPU: onednn_batch_norm_backward
   autogen: native_batch_norm_backward.out
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
@@ -4915,7 +4915,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS: _reshape_alias
-    # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
+    # We don't need to support onednn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
@@ -4997,7 +4997,7 @@
   dispatch:
     CPU, CUDA: relu
     MPS: relu_mps
-    OnednnCPU: mkldnn_relu
+    OnednnCPU: onednn_relu
     QuantizedCPU: relu_quantized_cpu
     QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
@@ -5011,7 +5011,7 @@
   dispatch:
     CPU, CUDA: relu_
     MPS: relu_mps_
-    OnednnCPU: mkldnn_relu_
+    OnednnCPU: onednn_relu_
     QuantizedCPU: relu_quantized_cpu_
     QuantizedCUDA: relu_quantized_cuda_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
@@ -5066,7 +5066,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_gelu
+    OnednnCPU: onednn_gelu
     QuantizedCPU: gelu_quantized_cpu
     QuantizedCUDA: gelu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu
@@ -5085,7 +5085,7 @@
   structured_delegate: gelu_backward.grad_input
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_gelu_backward
+    OnednnCPU: onednn_gelu_backward
     NestedTensorCPU, NestedTensorCUDA: gelu_backwards_nested
   tags: pointwise
 
@@ -5254,7 +5254,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: sigmoid_quantized_cpu
-    OnednnCPU: mkldnn_sigmoid
+    OnednnCPU: onednn_sigmoid
   tags: [core, pointwise]
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
@@ -5262,7 +5262,7 @@
   structured_delegate: sigmoid.out
   variants: function, method
   dispatch:
-    OnednnCPU: mkldnn_sigmoid_
+    OnednnCPU: onednn_sigmoid_
   tags: pointwise
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -5513,7 +5513,7 @@
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   structured_delegate: _softmax.out
   dispatch:
-    OnednnCPU: mkldnn_softmax
+    OnednnCPU: onednn_softmax
     NestedTensorCPU, NestedTensorCUDA: softmax_nested
   tags: core
 
@@ -5986,7 +5986,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: tanh_quantized_cpu
-    OnednnCPU: mkldnn_tanh
+    OnednnCPU: onednn_tanh
     SparseCPU, SparseCUDA: tanh_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_tanh
@@ -5997,7 +5997,7 @@
   structured_delegate: tanh.out
   variants: function, method
   dispatch:
-    OnednnCPU: mkldnn_tanh_
+    OnednnCPU: onednn_tanh_
     SparseCPU, SparseCUDA: tanh_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tanh_sparse_csr_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_tanh_
@@ -6054,7 +6054,7 @@
   variants: function
   structured_delegate: threshold_backward.grad_input
   dispatch:
-    OnednnCPU: mkldnn_relu_backward
+    OnednnCPU: onednn_relu_backward
     SparseCPU, SparseCUDA: threshold_backward_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: threshold_backward_sparse_compressed
     NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
@@ -6616,7 +6616,7 @@
     CPU: _batch_norm_with_update_cpu
     CUDA: _batch_norm_with_update_cuda
     MPS: _batch_norm_with_update_mps
-    OnednnCPU: _batch_norm_with_update_mkldnn
+    OnednnCPU: _batch_norm_with_update_onednn
   autogen: _batch_norm_with_update_functional
 
 - func: _batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
@@ -6635,7 +6635,7 @@
     CPU: _new_batch_norm_backward_cpu
     CUDA: _new_batch_norm_backward_cuda
     MPS: _new_batch_norm_backward_mps
-    OnednnCPU: _new_batch_norm_backward_mkldnn
+    OnednnCPU: _new_batch_norm_backward_onednn
 
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
@@ -6813,7 +6813,7 @@
     CompositeExplicitAutograd: clone
     SparseCPU, SparseCUDA: clone_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: clone_sparse_compressed
-    OnednnCPU: mkldnn_clone
+    OnednnCPU: onednn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
     NestedTensorCPU, NestedTensorCUDA: clone_nested
   autogen: clone.out
@@ -6848,7 +6848,7 @@
     Meta: zero_meta_
     SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: zero_sparse_csr_
-    OnednnCPU: mkldnn_zero_
+    OnednnCPU: onednn_zero_
     NestedTensorCPU, NestedTensorCUDA: zero_nested_
   autogen: zero, zero.out
 
@@ -7237,7 +7237,7 @@
   dispatch:
     SparseCPU, SparseCUDA: sparse_to_dense
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_dense
-    OnednnCPU: mkldnn_to_dense
+    OnednnCPU: onednn_to_dense
   autogen: _to_dense.out
 
 - func: to_dense_backward(Tensor grad, Tensor input, bool? masked_grad=None) -> Tensor
@@ -7488,7 +7488,7 @@
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
-    CPU: dense_to_mkldnn
+    CPU: dense_to_onednn
   autogen: to_mkldnn.out
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
@@ -8031,7 +8031,7 @@
   device_guard: False
   dispatch:
     ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS: view
-    OnednnCPU: mkldnn_view
+    OnednnCPU: onednn_view
     NestedTensorCPU, NestedTensorCUDA: view_nested
   tags: core
 
@@ -12022,7 +12022,7 @@
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
     MPS: adaptive_avg_pool2d_out_mps
-    OnednnCPU: mkldnn_adaptive_avg_pool2d_out_stub
+    OnednnCPU: onednn_adaptive_avg_pool2d_out_stub
 
 - func: adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   python_module: nn
@@ -12035,7 +12035,7 @@
 
 - func: mkldnn_adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    OnednnCPU: mkldnn_adaptive_avg_pool2d_out
+    OnednnCPU: onednn_adaptive_avg_pool2d_out
 
 - func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   dispatch:
@@ -12155,13 +12155,13 @@
     CPU: avg_pool2d_out_cpu
     CUDA: avg_pool2d_out_cuda
     MPS: avg_pool2d_out_mps
-    OnednnCPU: mkldnn_avg_pool2d_out
+    OnednnCPU: onednn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
   structured_delegate: avg_pool2d.out
   dispatch:
-    OnednnCPU: mkldnn_avg_pool2d
+    OnednnCPU: onednn_avg_pool2d
     QuantizedCPU: avg_pool2d_quantized_cpu
   tags: core
 
@@ -12172,13 +12172,13 @@
     CPU: avg_pool2d_backward_out_cpu
     CUDA: avg_pool2d_backward_out_cuda
     MPS: avg_pool2d_backward_out_mps
-    OnednnCPU: mkldnn_avg_pool2d_backward_out
+    OnednnCPU: onednn_avg_pool2d_backward_out
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
   structured_delegate: avg_pool2d_backward.grad_input
   dispatch:
-    OnednnCPU: mkldnn_avg_pool2d_backward
+    OnednnCPU: onednn_avg_pool2d_backward
   tags: core
 
 - func: avg_pool3d.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -12187,13 +12187,13 @@
   dispatch:
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
-    OnednnCPU: mkldnn_avg_pool3d_out
+    OnednnCPU: onednn_avg_pool3d_out
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
   structured_delegate: avg_pool3d.out
   dispatch:
-    OnednnCPU: mkldnn_avg_pool3d
+    OnednnCPU: onednn_avg_pool3d
     QuantizedCPU: avg_pool3d_quantized_cpu
   tags: core
 
@@ -12203,13 +12203,13 @@
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
-    OnednnCPU: mkldnn_avg_pool3d_backward_out
+    OnednnCPU: onednn_avg_pool3d_backward_out
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
   structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
-    OnednnCPU: mkldnn_avg_pool3d_backward
+    OnednnCPU: onednn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d.output(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -12904,7 +12904,7 @@
 # multiply with the input; this is very memory inefficient!  However,
 # occasionally, we really don't have anything better, so it's helpful
 # to have these fallbacks when there is no more optimized implementation
-# in cudnn or mkldnn, etc.  Both thnn_ and slow_ convolutions fall
+# in cudnn or onednn, etc.  Both thnn_ and slow_ convolutions fall
 # into this bucket.
 #
 # The difference between these two designations, is that thnn_ refers

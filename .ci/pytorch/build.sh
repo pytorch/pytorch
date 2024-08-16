@@ -66,7 +66,7 @@ fi
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
-  # Also leave out two builds to make sure non-mkldnn builds still work.
+  # Also leave out two builds to make sure non-onednn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     export USE_ONEDNN=1
   else

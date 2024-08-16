@@ -877,7 +877,7 @@ if torch._C._has_mkldnn:
 
     def _is_packable_convolution(match):
         """
-        Check if the node is supported for MKLDNN convolution.
+        Check if the node is supported for ONEDNN convolution.
         """
         conv_node = match.output_node()
         input_meta_value = conv_node.args[0].meta.get("val")
@@ -908,7 +908,7 @@ if torch._C._has_mkldnn:
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
-            # TODO: Support dynamic shape case for MKLDNN conv transpose.
+            # TODO: Support dynamic shape case for ONEDNN conv transpose.
             if has_free_symbols(input_size):
                 return False
             groups = conv_node.args[-1]
@@ -928,10 +928,10 @@ if torch._C._has_mkldnn:
 
     def _is_packable_linear(match):
         """
-        Check if the node is supported for MKLDNN linear.
+        Check if the node is supported for ONEDNN linear.
         """
         linear_node = match.output_node()
-        # mkldnn linear only supports beta=1or0 and alpha=1
+        # onednn linear only supports beta=1or0 and alpha=1
         if linear_node.target == aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
@@ -956,7 +956,7 @@ if torch._C._has_mkldnn:
             torch.float16,
         )
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        # on aarch64, use mkldnn op for fp32 as well if acl is enabled
+        # on aarch64, use onednn op for fp32 as well if acl is enabled
         if (
             not is_lp_weight
             and not onednn._is_onednn_acl_supported()
