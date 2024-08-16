@@ -554,22 +554,9 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
                 options=StateDictOptions(full_state_dict=True, cpu_offload=True),
             )
 
-            # full state dict is empty on ranks except rank 0
-            if self.rank == 0:
-                # TODO: this comparison should be equal once strided sharding is ready
-                with self.assertRaises(AssertionError):
-                    self.assertEqual(base_msd, tp_full_msd)
-            else:
-                self.assertEqual(base_msd, tp_full_msd)
-
-            if self.rank == 0:
-                # TODO: this comparison should be equal once strided sharding is ready
-                with self.assertRaises(AssertionError):
-                    self.assertEqual(base_osd, tp_full_osd)
-            else:
-                self.assertEqual(base_osd, tp_full_osd)
-
             # Compare full state dict to make sure they are the same.
+            self.assertEqual(base_msd, tp_full_msd)
+            self.assertEqual(base_osd, tp_full_osd)
             self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
             self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
 
