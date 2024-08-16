@@ -10571,28 +10571,66 @@ class CommonTemplate:
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
 
+    @requires_gpu()
+    @config.patch(implicit_fallbacks=True)
+    def test_mutable_custom_op_fixed_layout_requires_clone(self):
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            counters.clear()
+
+            mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=GPU_TYPE)
+            inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
+            expected_stride = mod(inp).clone().stride()
+
+            lib.define(
+                "bar(Tensor x) -> Tensor",
+            )
+
+            @torch.library.impl(lib, "bar", "CompositeExplicitAutograd")
+            def _(x):
+                return x.clone()
+
+            lib.define(
+                "add_one(Tensor(a!) x) -> ()",
+                tags=torch.Tag.needs_fixed_stride_order,
+            )
+
+            @torch.library.impl(lib, "add_one", "CompositeExplicitAutograd")
+            def _(x):
+                self.assertEqual(x.stride(), expected_stride)
+                x.copy_(x + 1)
+
+            def fn(x):
+                z = mod(x)
+                output = torch.ops.mylib.bar(z)
+                torch.ops.mylib.add_one(output)
+                return output**2
+
+            with torch.no_grad():
+                self.common(fn, (inp,), check_lowp=False)
+            # one for the convolution
+            # one for the add_one mutated input.
+            self.assertEqual(counters["inductor"]["require_stride_order_clones"], 2)
+
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
         counters.clear()
         with torch.library._scoped_library("mylib", "DEF") as lib:
             lib.define(
-                "copy_(Tensor(a!) ret, Tensor tensors, int dim) -> ()",
+                "copy_(Tensor(a!) dst, Tensor src) -> ()",
                 tags=torch.Tag.needs_fixed_stride_order,
             )
 
             @torch.library.impl(lib, "copy_", "Meta")
-            def _(ret, tensors, dim):
+            def _(dst, src):
                 return None
 
-            @torch.library.impl(lib, "copy_", "CPU")
-            def _(ret, tensors, dim):
-                ret.copy_(tensors)
+            @torch.library.impl(lib, "copy_", "CompositeExplicitAutograd")
+            def _(dst, src):
+                dst.copy_(src)
 
             def f(x):
                 full_default_3 = torch.full([3], 7.0, device="cpu")
-                chunk_cat_default_1 = torch.ops.mylib.copy_.default(
-                    full_default_3, x, 0
-                )
+                chunk_cat_default_1 = torch.ops.mylib.copy_.default(full_default_3, x)
                 mul_out = torch.mul(full_default_3, full_default_3)
                 return mul_out
 
