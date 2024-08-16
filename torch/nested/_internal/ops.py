@@ -1604,7 +1604,7 @@ def masked_select_default(func, *args, **kwargs):
     res_values = inp._values.masked_select(mask.values())
     mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))
 
-    args =  extract_kwargs(inp)
+    args = extract_kwargs(inp)
     args["offsets"] = mask_cumsum[inp._offsets]
     return NestedTensor(
         values=res_values,
