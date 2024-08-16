@@ -142,7 +142,6 @@ def disallow_in_graph(fn):
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
-    pass
 
 
 def forbid_in_graph(fn):
@@ -348,7 +347,6 @@ def _allow_in_graph_einops():
         )
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
-        pass
     except ImportError:
         # einops <= 0.6.1
         allow_in_graph(einops.rearrange)
