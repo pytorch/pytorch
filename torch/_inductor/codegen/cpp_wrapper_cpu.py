@@ -2403,8 +2403,7 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            # uint64_t is long on Linux, but long long on MacOS and Windows
-            return f"{val}LL" if sys.platform in ["darwin", "win32"] else f"{val}L"
+            return f"{val}LL"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
