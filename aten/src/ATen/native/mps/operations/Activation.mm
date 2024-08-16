@@ -49,17 +49,16 @@ Tensor relu_mps(const Tensor& self) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
-  if (self.numel() == 0) {
-    return self;
-  }
-
-  MPSStream* stream = getCurrentMPSStream();
-
   bool executeGatherOp =
       !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
         self.is_contiguous(MemoryFormat::ChannelsLast3d));
   Tensor output = at::empty_like(self, executeGatherOp ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
 
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
     string key = "relu" + getTensorsStringKey({self});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
