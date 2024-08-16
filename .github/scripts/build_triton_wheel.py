@@ -101,7 +101,7 @@ def build_triton(
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-        patch_setup_py(triton_pythondir / "triton" / "__init__.py")
+        patch_setup_py(triton_pythondir / "triton" / "python" / "setup.py")
 
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
