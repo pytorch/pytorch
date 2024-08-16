@@ -15,6 +15,9 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <ATen/Config.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

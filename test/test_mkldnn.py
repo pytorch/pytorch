@@ -1470,9 +1470,9 @@ class TestMkldnn(TestCase):
         return params_list
 
     def _cast_dtype(self, input, dtype):
-        if dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if dtype == torch.bfloat16:
             input = input.to(torch.bfloat16)
-        elif dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        elif dtype == torch.half:
             input = input.to(torch.half)
         return input
 
@@ -1482,13 +1482,10 @@ class TestMkldnn(TestCase):
 
         params_list = self._lstm_params_list()
         for dtype in types:
-            bf16 = dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()
-            fp16 = dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            bf16 = dtype == torch.bfloat16
+            fp16 = dtype == torch.half
             rtol = 1.3e-6
             atol = 1e-5
-            lowp_dtype = torch.bfloat16
-            if fp16:
-                lowp_dtype = torch.half
 
             if bf16:
                 rtol = 0.02
@@ -1521,9 +1518,7 @@ class TestMkldnn(TestCase):
 
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
-                with torch.amp.autocast(
-                    "cpu", enabled=bf16 or fp16, dtype=lowp_dtype
-                ), (torch.no_grad() if not training else nullcontext()):
+                with torch.no_grad() if not training else nullcontext():
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
                         output1, (hn1, cn1) = self._cast_dtype(model1, dtype)(
@@ -1535,7 +1530,13 @@ class TestMkldnn(TestCase):
                         )
 
                     torch.manual_seed(seed)
-                    output2, (hn2, cn2) = model2(input2, (h2, c2))
+                    output2, (hn2, cn2) = self._cast_dtype(model2, dtype)(
+                        self._cast_dtype(input2, dtype),
+                        (
+                            self._cast_dtype(h2, dtype),
+                            self._cast_dtype(c2, dtype),
+                        ),
+                    )
                     self.assertEqual(output1, output2, rtol=rtol, atol=atol)
                     self.assertEqual(hn1, hn2, rtol=rtol, atol=atol)
                     self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
@@ -1550,12 +1551,10 @@ class TestMkldnn(TestCase):
 
                         self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
                         for name, para in model1.named_parameters():
-                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), dtype))
+                            self.assertEqual(para, getattr(model2, name))
                             self.assertEqual(
                                 para.grad,
-                                self._cast_dtype(
-                                    getattr(model2, name).grad, dtype
-                                ),
+                                getattr(model2, name).grad,
                                 rtol=rtol,
                                 atol=atol,
                             )
