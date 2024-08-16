@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <cute/tensor.hpp>
+#include <cute/algorithm/copy.hpp>
 
 #include <cutlass/cutlass.h>
 #include <cutlass/array.h>
