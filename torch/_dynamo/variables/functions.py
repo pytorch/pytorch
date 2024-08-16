@@ -958,20 +958,27 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
         handler = self._get_polyfill_handlers().get(self.fn)
         if handler:
-            return UserFunctionVariable(handler).call_function(tx, args, kwargs)
+            assert callable(handler)
+            return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
 
-        if callable(getattr(self.fn, "__torch_dynamo_polyfill__", None)):
+        source = None
+        handler = getattr(self.fn, "__torch_dynamo_polyfill__", None)
+        if callable(handler):
             source = AttrSource(self.source, "__torch_dynamo_polyfill__")
-            return UserFunctionVariable(
-                self.fn.__torch_dynamo_polyfill__, source=source
-            ).call_function(tx, args, kwargs)
+        else:
+            handler = getattr(self.fn, "__python_implementation__", None)
+            assert callable(handler)
+            source = AttrSource(self.source, "__python_implementation__")
 
-        source = AttrSource(self.source, "__python_implementation__")
-        return UserFunctionVariable(
-            self.fn.__python_implementation__, source=source
-        ).call_function(tx, args, kwargs)
+        if source:
+            return UserFunctionVariable.create_with_source(
+                handler, source=source
+            ).call_function(tx, args, kwargs)
+        return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
 
     def as_python_constant(self):
         return self.fn.as_python_constant()

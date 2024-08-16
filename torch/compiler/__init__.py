@@ -9,6 +9,7 @@ __all__ = [
     "assume_constant_result",
     "reset",
     "allow_in_graph",
+    "substitute_in_graph",
     "list_backends",
     "disable",
     "cudagraph_mark_step_begin",
