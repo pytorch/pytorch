@@ -8330,7 +8330,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # for bf16 accumulation in gemm ref path
         def check_correctness(fn, dtype, *args):
             expected = fn(*args).to(dtype=dtype)
-            with torch.backends.mkldnn.flags(enabled=False):
+            with torch.backends.onednn.flags(enabled=False):
                 def test():
                     lower_args = (arg.to(dtype=dtype) for arg in args)
                     tmp_result = fn(*lower_args)

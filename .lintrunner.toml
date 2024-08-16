@@ -1641,7 +1641,7 @@ include_patterns = [
     "aten/src/ATen/native/xnnpack/*.h",
     "aten/src/ATen/native/metal/MetalPrepackOpContext.h",
     "aten/src/ATen/native/mps/Copy.h",
-    "aten/src/ATen/native/mkldnn/**/*.h",
+    "aten/src/ATen/native/onednn/**/*.h",
 ]
 exclude_patterns = [
     "aten/src/ATen/Context.h",

@@ -4,8 +4,8 @@
 #include <mkl.h>
 #endif
 
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #endif
 #include <ATen/native/verbose_wrapper.h>
 
@@ -24,8 +24,8 @@ int _mkl_set_verbose(int enable [[maybe_unused]]) {
 #endif
 }
 
-int _mkldnn_set_verbose(int level [[maybe_unused]]) {
-#if AT_MKLDNN_ENABLED()
+int _onednn_set_verbose(int level [[maybe_unused]]) {
+#if AT_ONEDNN_ENABLED()
   return at::native::set_verbose(level);
 #else
   return 0;

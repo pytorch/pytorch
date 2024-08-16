@@ -1600,11 +1600,11 @@ def disablecuDNN(fn):
     return disable_cudnn
 
 
-def disableMkldnn(fn):
+def disableOnednn(fn):
     @wraps(fn)
     def disable_mkldnn(self, *args, **kwargs):
-        if torch.backends.mkldnn.is_available():
-            with torch.backends.mkldnn.flags(enabled=False):
+        if torch.backends.onednn.is_available():
+            with torch.backends.onednn.flags(enabled=False):
                 return fn(self, *args, **kwargs)
         return fn(self, *args, **kwargs)
 
@@ -1660,9 +1660,9 @@ def skipCPUIfNoMklSparse(fn):
 
 
 # Skips a test on CPU if mkldnn is not available.
-def skipCPUIfNoMkldnn(fn):
+def skipCPUIfNoOnednn(fn):
     return skipCPUIf(
-        not torch.backends.mkldnn.is_available(),
+        not torch.backends.onednn.is_available(),
         "PyTorch is built without mkldnn support",
     )(fn)
 

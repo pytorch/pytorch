@@ -472,7 +472,7 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             if isinstance(inputs[1], torch.Tensor):
                 W = inputs[1]
-                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
+                new_inputs[1] = W.to_dense() if W.is_onednn else W
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):

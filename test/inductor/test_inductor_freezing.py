@@ -781,7 +781,7 @@ class OptimizeForInferenceTemplate(TestCase):
             mod(*inp)
 
         # Only check the assertion for CUDA.
-        # For CPU, we may get torch.ops.mkldnn._convolution_pointwise.default
+        # For CPU, we may get torch.ops.onednn._convolution_pointwise.default
         # in the joint graph rather than torch.ops.aten.convolution.default.
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.

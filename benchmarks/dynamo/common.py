@@ -4193,7 +4193,7 @@ def run(runner, args, original_dir=None):
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
-        torch.backends.mkldnn.deterministic = True
+        torch.backends.onednn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()

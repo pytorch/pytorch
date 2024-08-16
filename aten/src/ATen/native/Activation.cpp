@@ -15,9 +15,9 @@
 
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/Utils.h>
+#if AT_ONEDNN_ENABLED()
+#include <ATen/native/onednn/ONEDNNCommon.h>
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -371,17 +371,17 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-#if AT_MKLDNN_ENABLED()
-static bool use_mkldnn(const Tensor& input) {
-  if (!at::globalContext().userEnabledMkldnn()) {
+#if AT_ONEDNN_ENABLED()
+static bool use_onednn(const Tensor& input) {
+  if (!at::globalContext().userEnabledOnednn()) {
     return false;
   }
   if (!input.is_contiguous() || input.numel() <= 1) {
     return false;
   }
-  return (input.is_mkldnn()) || // input is mkldnn Tensor
+  return (input.is_onednn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
-    (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+    (((input.scalar_type() == kBFloat16) && onednn_bf16_device_check()) ||
     (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
 }
 #endif
@@ -390,14 +390,14 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, c10::string_view approximate, const Tensor& result
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
+#if AT_ONEDNN_ENABLED()
+  if (use_onednn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
 #ifdef __aarch64__
-  } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
+  } else if (use_onednn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
@@ -415,8 +415,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
-#if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
+#if AT_ONEDNN_ENABLED()
+  if (use_onednn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
