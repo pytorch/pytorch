@@ -445,10 +445,10 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     >>> tensor = torch.randn(6, 5)
     >>> mask = torch.tensor([False])
     >>> nt = torch.nested_select(tensor, mask)
-    >>> torch.Size([3, j4])
+    torch.Size([3, j3])
     >>> # Length of each item in the batch:
     >>> offsets.diff()
-    >>> tensor([0, 0, 0, 0, 0, 0])
+    tensor([0, 0, 0, 0, 0, 0])
     """
     if tensor.layout != torch.strided:
         raise RuntimeError(
