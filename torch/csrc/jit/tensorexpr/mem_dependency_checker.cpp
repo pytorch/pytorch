@@ -4,6 +4,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <utility>
 
 namespace torch::jit::tensorexpr::analysis {
 
@@ -324,15 +325,15 @@ DependencySet MemDependencyChecker::getAllWriteDependencies(
   return writes;
 }
 
-bool MemDependencyChecker::dependsDirectly(ExprPtr A, StmtPtr B) {
+bool MemDependencyChecker::dependsDirectly(const ExprPtr& A, const StmtPtr& B) {
   return dependsDirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsDirectly(StmtPtr A, StmtPtr B) {
+bool MemDependencyChecker::dependsDirectly(const StmtPtr& A, const StmtPtr& B) {
   return dependsDirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsDirectly(BufPtr O, StmtPtr B) {
+bool MemDependencyChecker::dependsDirectly(const BufPtr& O, const StmtPtr& B) {
   auto outputAccess = output(O);
   auto bWrites = getAllWritesWithin(B);
 
@@ -345,7 +346,7 @@ bool MemDependencyChecker::dependsDirectly(BufPtr O, StmtPtr B) {
   return false;
 }
 
-bool MemDependencyChecker::dependsDirectly(StmtPtr A, BufPtr I) {
+bool MemDependencyChecker::dependsDirectly(const StmtPtr& A, const BufPtr& I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -358,7 +359,7 @@ bool MemDependencyChecker::dependsDirectly(StmtPtr A, BufPtr I) {
   return false;
 }
 
-bool MemDependencyChecker::dependsDirectly(ExprPtr A, BufPtr I) {
+bool MemDependencyChecker::dependsDirectly(const ExprPtr& A, const BufPtr& I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -377,15 +378,21 @@ bool MemDependencyChecker::dependsDirectly(
   return A->hasDependency(B) && B->isWrite();
 }
 
-bool MemDependencyChecker::dependsIndirectly(ExprPtr A, StmtPtr B) {
+bool MemDependencyChecker::dependsIndirectly(
+    const ExprPtr& A,
+    const StmtPtr& B) {
   return dependsIndirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsIndirectly(StmtPtr A, StmtPtr B) {
+bool MemDependencyChecker::dependsIndirectly(
+    const StmtPtr& A,
+    const StmtPtr& B) {
   return dependsIndirectlyHelper(A, B);
 }
 
-bool MemDependencyChecker::dependsIndirectly(BufPtr O, StmtPtr B) {
+bool MemDependencyChecker::dependsIndirectly(
+    const BufPtr& O,
+    const StmtPtr& B) {
   auto outputAccess = output(O);
 
   DependencySet dependencies;
@@ -401,7 +408,9 @@ bool MemDependencyChecker::dependsIndirectly(BufPtr O, StmtPtr B) {
   return false;
 }
 
-bool MemDependencyChecker::dependsIndirectly(StmtPtr A, BufPtr I) {
+bool MemDependencyChecker::dependsIndirectly(
+    const StmtPtr& A,
+    const BufPtr& I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -410,7 +419,9 @@ bool MemDependencyChecker::dependsIndirectly(StmtPtr A, BufPtr I) {
   return aDeps.count(inputAccess) != 0;
 }
 
-bool MemDependencyChecker::dependsIndirectly(ExprPtr A, BufPtr I) {
+bool MemDependencyChecker::dependsIndirectly(
+    const ExprPtr& A,
+    const BufPtr& I) {
   auto aReads = getAllReadsWithin(A);
   auto inputAccess = input(I);
 
@@ -419,7 +430,7 @@ bool MemDependencyChecker::dependsIndirectly(ExprPtr A, BufPtr I) {
   return aDeps.count(inputAccess) != 0;
 }
 
-bool MemDependencyChecker::dependsIndirectly(BufPtr O, BufPtr I) {
+bool MemDependencyChecker::dependsIndirectly(const BufPtr& O, const BufPtr& I) {
   auto outputAccess = output(O);
   auto inputAccess = input(I);
 
@@ -442,7 +453,8 @@ bool MemDependencyChecker::dependsIndirectly(
   return true;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(StmtPtr A) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
+    const StmtPtr& A) const {
   auto bound = stmtToAccess_.equal_range(A);
   for (auto it = bound.first; it != bound.second; ++it) {
     if (it->second->expr() == nullptr) {
@@ -452,7 +464,8 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(StmtPtr A) const {
   return nullptr;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(ExprPtr A) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
+    const ExprPtr& A) const {
   // TODO exprs can have multiple accesses... we're returning the first but that
   // isn't great. Can't do much here.
   auto bound = exprToAccess_.equal_range(A);
@@ -464,7 +477,7 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(ExprPtr A) const {
 }
 
 std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
-    accessesWithin(StmtPtr A) const {
+    accessesWithin(const StmtPtr& A) const {
   auto it = scopeToAccesses_.find(A);
   if (it != scopeToAccesses_.end()) {
     return std::unordered_set<std::shared_ptr<AccessInfo>>(
@@ -480,11 +493,11 @@ std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
 }
 
 std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
-    accessesWithin(ExprPtr A) const {
+    accessesWithin(const ExprPtr& A) const {
   return {accessFor(A)};
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::input(BufPtr b) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::input(const BufPtr& b) const {
   auto it = inputs_.find(b);
   if (it == inputs_.end()) {
     return nullptr;
@@ -492,7 +505,8 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::input(BufPtr b) const {
   return it->second;
 }
 
-std::shared_ptr<AccessInfo> MemDependencyChecker::output(BufPtr b) const {
+std::shared_ptr<AccessInfo> MemDependencyChecker::output(
+    const BufPtr& b) const {
   auto it = outputs_.find(b);
   if (it == outputs_.end()) {
     return nullptr;
@@ -1037,7 +1051,7 @@ void MemDependencyChecker::insertBuffers(
     std::unordered_map<BufPtr, std::shared_ptr<AccessInfo>>& bufs,
     AccessType type) {
   for (auto& pair : bufs) {
-    BufPtr b = pair.first;
+    const BufPtr& b = pair.first;
     VarPtr var = b->base_handle();
     IndexBounds bounds;
     for (const auto& d : b->dims()) {
@@ -1280,7 +1294,7 @@ class VarBoundBinder : public IRVisitor {
  public:
   VarBoundBinder(const VarBoundMap& vars) : vars_(vars) {}
 
-  Bound getBounds(ExprPtr e) {
+  Bound getBounds(const ExprPtr& e) {
     min_ = e;
     max_ = e;
     e->accept(this);

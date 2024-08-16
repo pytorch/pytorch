@@ -64,7 +64,6 @@ StmtPtr StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 class TORCH_API Block : public StmtNode<Block> {
  public:
   static BlockPtr make(const std::vector<StmtPtr>& stmts) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<StmtPtr> valid_stmts;
     for (auto& stmt : stmts) {
       if (!stmt) {
@@ -164,9 +163,7 @@ class TORCH_API Block : public StmtNode<Block> {
           "Block replace Stmt with existing parent", std::move(new_stmt));
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<StmtPtr> stmts(stmts_.begin(), stmts_.end());
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<StmtPtr> cloned_stmts(stmts.size());
     bool found = false;
     for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
@@ -210,7 +207,6 @@ class TORCH_API Block : public StmtNode<Block> {
     init(stmts);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Block(const std::vector<StmtPtr>& stmts) {
     init(stmts);
   }
@@ -259,7 +255,6 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   static BlockPtr getSharedParent(StmtPtr p1, StmtPtr p2) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::unordered_set<BlockPtr> enclosing;
 
     StmtPtr p1_p = std::move(p1);
@@ -843,7 +838,6 @@ class TORCH_API For : public StmtNode<For> {
 // TODO: make IR nodes extensible.
 class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AtomicAdd(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
       : buf_(std::move(buf)),
         indices_(std::move(indices)),
@@ -948,7 +942,6 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
     args_ = std::move(args);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExternalCall(
       BufPtr buf,
       std::string func_name,
@@ -1002,7 +995,6 @@ class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
     args_ = std::move(args);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExternalCallWithAlloc(
       std::string func_name,
       std::vector<BufPtr> buf_out_args,

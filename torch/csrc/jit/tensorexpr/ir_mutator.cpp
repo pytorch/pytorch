@@ -249,7 +249,7 @@ ExprPtr IRMutator::mutate(const IfThenElsePtr& v) {
 ExprPtr IRMutator::mutate(const IntrinsicsPtr& v) {
   std::vector<ExprPtr> params(v->nparams());
   bool any_change = false;
-  for (int i = 0; i < v->nparams(); i++) {
+  for (size_t i = 0; i < v->nparams(); i++) {
     const ExprPtr& value = v->param(i);
     const ExprPtr& value_new = value->accept_mutator(this);
     if (value != value_new) {

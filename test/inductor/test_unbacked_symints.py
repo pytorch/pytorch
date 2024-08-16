@@ -191,6 +191,9 @@ class TestUnbackedSymints(InductorTestCase):
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
+        # reset in case we run both cpu and cuda tests
+        torch._inductor.metrics.reset()
+
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
         def fn(x, y, repeats):
             u0 = repeats.item()
@@ -212,7 +215,7 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize(

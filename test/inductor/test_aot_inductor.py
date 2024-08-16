@@ -3252,11 +3252,6 @@ CPU_TEST_FAILURES = {
     "test_index_put_with_none_index": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
-    # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
-    # https://github.com/pytorch/pytorch/issues/122986
-    "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
-    # The same issue as https://github.com/pytorch/pytorch/issues/122986
-    "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -3304,6 +3299,8 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
+    # fp8 to be re-enabled for AOTI
+    "test_fp8": fail_cuda(is_skip=True),
 }
 
 

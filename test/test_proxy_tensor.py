@@ -1056,8 +1056,8 @@ def forward(self, s0_1, s1_1, x_1, y_1):
             self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     return ((sym_size_int, sym_size_int_1), empty)""")
 
     def test_unary(self):
@@ -1355,8 +1355,8 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
+    mul_4 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = index_put_ = None
