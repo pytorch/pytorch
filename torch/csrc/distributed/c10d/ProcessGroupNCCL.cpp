@@ -470,6 +470,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const std::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
     bool enableTiming,
+    bool cudaEventCacheEnabled,
     DebugLevel distDebugLevel)
     : Work(rank, opType, profilingTitle, inputs),
       device_(device),
@@ -481,10 +482,20 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (enableTiming) {
-    ncclStartEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
+    if (cudaEventCacheEnabled) {
+      ncclStartEvent_ = ProcessGroupNCCL::CUDAEventCache::get().create(
+          device.index(), enableTiming);
+    } else {
+      ncclStartEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
+    }
   }
-  ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
-      enableTiming ? cudaEventDefault : cudaEventDisableTiming);
+  if (cudaEventCacheEnabled) {
+    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get().create(
+        device.index(), enableTiming);
+  } else {
+    ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
+        enableTiming ? cudaEventDefault : cudaEventDisableTiming);
+  }
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -752,6 +763,39 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
+ProcessGroupNCCL::CUDAEventCache::CUDAEventCache()
+    : caches_(at::cuda::device_count()) {}
+
+std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
+    int device,
+    bool timing) {
+  auto& deviceCache = caches_[device];
+  auto deleter = [this, device, timing](at::cuda::CUDAEvent* event) {
+    auto& deviceCache = caches_[device];
+    std::lock_guard<std::mutex> lock(deviceCache.mutex);
+    deviceCache.events[timing ? 1 : 0].push_back(event);
+  };
+  at::cuda::CUDAEvent* event = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(deviceCache.mutex);
+    auto& events = deviceCache.events[timing ? 1 : 0];
+    if (!events.empty()) {
+      event = events.back();
+      events.pop_back();
+    }
+  }
+  if (!event) {
+    event = new at::cuda::CUDAEvent(
+        timing ? cudaEventDefault : cudaEventDisableTiming);
+  }
+  return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
+}
+
+static ProcessGroupNCCL::CUDAEventCache& get() {
+  static ProcessGroupNCCL::CUDAEventCache cache;
+  return cache;
+}
+
 static std::atomic<size_t> process_group_id = 0;
 
 constexpr const char* MULTI_DEVICE_ERROR_MSG =
@@ -801,6 +845,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
+  cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, false));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
@@ -891,6 +936,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
             << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
+            << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_
             << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
             << logCppStackOnUncleanShutdown_;
 
@@ -2403,6 +2449,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
                                 : std::nullopt,
       desyncDebug_,
       enableTiming_.load(),
+      cudaEventCacheEnabled_.load(),
       dist_debug_level_);
   if (record) {
     bool isP2P = isP2POp(opType);
