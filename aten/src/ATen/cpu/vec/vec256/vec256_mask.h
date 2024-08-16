@@ -66,7 +66,7 @@ struct VecMaskLoad<
     mask_t,
     1,
     typename std::enable_if<
-        std::is_same_v<T, int64_t> ||
+        (std::is_same_v<T, int64_t> && sizeof(int64_t) == sizeof(long long)) ||
         std::is_same_v<T, double>>::type> {
   static inline VectorizedN<T, 2> apply(
       const T* ptr,
@@ -99,14 +99,12 @@ struct VecMaskCast<int, 1, float, 1> {
     return Vectorized<int>(_mm256_castps_si256(vec_mask[0]));
   }
 };
-
 template <>
 struct VecMaskCast<float, 2, int, 2> {
   static inline VecMask<float, 2> apply(const VecMask<int, 2>& vec_mask) {
     return VectorizedN<float, 2>(_mm256_castsi256_ps(vec_mask[0]), _mm256_castsi256_ps(vec_mask[1]));
   }
 };
-
 template <>
 struct VecMaskCast<int, 2, float, 2> {
   static inline VecMask<int, 2> apply(const VecMask<float, 2>& vec_mask) {
@@ -114,6 +112,25 @@ struct VecMaskCast<int, 2, float, 2> {
   }
 };
 
+template <>
+struct VecMaskCast<int64_t, 2, double, 2> {
+  static inline VecMask<int64_t, 2> apply(const VecMask<double, 2>& vec_mask) {
+    VectorizedN<int64_t, 2> result;
+    result[0] = _mm256_castpd_si256(vec_mask[0]);
+    result[1] = _mm256_castpd_si256(vec_mask[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecMaskCast<double, 2, int64_t, 2> {
+  static inline VecMask<double, 2> apply(const VecMask<int64_t, 2>& vec_mask) {
+    VectorizedN<double, 2> result;
+    result[0] = _mm256_castsi256_pd(vec_mask[0]);
+    result[1] = _mm256_castsi256_pd(vec_mask[1]);
+    return result;
+  }
+};
 template <typename dst_t>
 struct VecMaskCast<dst_t, 1, int64_t, 2> {
   static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
@@ -121,7 +138,6 @@ struct VecMaskCast<dst_t, 1, int64_t, 2> {
     return VecMask<int, 1>(int_vec).cast<dst_t, 1>();
   }
 };
-
 template <typename mask_t>
 struct VecMaskCast<int64_t, 2, mask_t, 1> {
   static inline VecMask<int64_t, 2> apply(const VecMask<mask_t, 1>& vec_mask) {
@@ -130,27 +146,20 @@ struct VecMaskCast<int64_t, 2, mask_t, 1> {
     return int64_vec;
   }
 };
-
 template <>
 struct VecMaskCast<double, 2, float, 1> {
   static inline VecMask<double, 2> apply(const VecMask<float, 1>& vec_mask) {
-    VectorizedN<double, 2> result;
-    result[0] = _mm256_cvtps_pd(_mm256_extractf128_ps(vec_mask[0], 0));
-    result[1] = _mm256_cvtps_pd(_mm256_extractf128_ps(vec_mask[0], 1));
-    return result;
+    auto int64_mask = VecMaskCast<int64_t, 2, float, 1>::apply(vec_mask);
+    return VecMaskCast<double, 2, int64_t, 2>::apply(int64_mask);
   }
 };
-
 template <>
 struct VecMaskCast<float, 1, double, 2> {
   static inline VecMask<float, 1> apply(const VecMask<double, 2>& vec_mask) {
-    VectorizedN<float, 1> result;
-    result[0] = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(vec_mask[0])), _mm256_cvtpd_ps(vec_mask[1]), 1);
-    return result;
+    auto int64_mask = VecMaskCast<int64_t, 2, double, 2>::apply(vec_mask);
+    return VecMaskCast<float, 1, int64_t, 2>::apply(int64_mask);
   }
 };
-
-// TODO: add specialization of VecMaskCast for int64_t <-> double
 
 template <typename mask_t>
 struct VecMaskCast<int64_t, 4, mask_t, 2> {
