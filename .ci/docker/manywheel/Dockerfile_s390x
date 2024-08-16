@@ -56,6 +56,7 @@ RUN yum install -y \
   libjpeg-devel \
   libxslt-devel \
   libxml2-devel \
+  openssl-devel \
   valgrind
 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
@@ -69,15 +70,6 @@ RUN git config --global --add safe.directory "*"
 
 # installed python doesn't have development parts. Rebuild it from scratch
 RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
-
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 
 # EPEL for cmake
 FROM base as patchelf
@@ -93,7 +85,7 @@ ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
 ENV SSL_CERT_FILE=
 RUN bash build_scripts/build.sh && rm -r build_scripts
 
-FROM openssl as final
+FROM base as final
 COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
 COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
