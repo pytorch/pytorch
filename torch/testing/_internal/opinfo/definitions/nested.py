@@ -275,7 +275,7 @@ njt_sample_inputs = {
 def translate_opinfo(op):
     new_op = copy(op)
     new_op.supports_njt = True
-    
+
     if op.full_name in njt_sample_inputs:
         new_op.sample_inputs_func = njt_sample_inputs[op.full_name]
         # TODO: make the reference customizeable

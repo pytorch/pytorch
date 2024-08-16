@@ -412,15 +412,6 @@ Example::
     return nested_view_from_values_offsets_lengths(
         values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
 
-
-# This library impl is here so pytorch picks it up when initializing, otherwise users had to import
-# torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
-# fun circular dependency hell, so this is the next best thing
-@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type, misc]
-def _aten_nested_get_jagged_dummy(x: Tensor) -> Tensor:
-    return _nt_view_dummy()
-
-
 def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     r"""
     Constructs a nested tensor given a strided tensor input and a strided mask, the resulting jagged layout nested tensor

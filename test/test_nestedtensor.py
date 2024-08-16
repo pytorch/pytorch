@@ -7173,7 +7173,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
             if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                self.assertEqualIgnoringNestedInts
+                self.assertEqualIgnoringNestedInts(out_compile, out_ref)
             else:
                 self.assertEqual(out_compile, out_ref)
 
