@@ -350,6 +350,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -445,6 +446,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.aligned_inputs: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+
+        # Below field is related to printing debug intermediate tensor values info for debugging
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -1318,43 +1322,43 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                strides = [
-                    s.node.expr if isinstance(s, torch.SymInt) else s
-                    for s in n.meta["val"].stride()
-                ]
-                # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
-                if not isinstance(result.data, ir.ReinterpretView):
-                    result = ir.ExternKernel.require_exact_strides(
-                        result, exact_strides=strides
-                    )
-                else:
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
-                        n.meta["val"]
-                    )
-                    unbacked_symbols_in_strides = (
-                        len(free_unbacked_symbols(strides)) > 0
-                    )
-                    # requiring a stride order for a non-dense output wouldn't
-                    # recreate the same strides, and would fail with view, defer for now.
+                strides = n.meta["val"].stride()
+
+                if len(strides):
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     )
-                    if (
-                        not unbacked_symbols_in_strides
-                        and dense
-                        and len(strides)
-                        and len(result.get_size()) == 4
-                        and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    ):
-                        strides = ir.get_new_stride_with_stride_order(
-                            strides, ir.NHWC_STRIDE_ORDER
+                    if not isinstance(result.data, ir.ReinterpretView):
+                        result = ir.ExternKernel.require_exact_strides(
+                            result, strides, allow_padding=allow_padding
                         )
-                    result = ir.ExternKernel.require_exact_strides(
-                        result, strides, allow_padding=allow_padding
-                    )
+                    else:
+                        # For outputs, we should use the exact strides https://github.com/pytorch/pytorch/issues/130394
+                        dense = torch._prims_common.is_non_overlapping_and_dense(
+                            n.meta["val"]
+                        )
+                        unbacked_symbols_in_strides = (
+                            len(free_unbacked_symbols(strides)) > 0
+                        )
+                        if (
+                            not unbacked_symbols_in_strides
+                            and dense
+                            and len(strides)
+                            and len(result.get_size()) == 4
+                            and n in self.nodes_prefer_channels_last
+                            and n.name not in self.user_visible_outputs
+                            and not is_input_for_as_strided
+                        ):
+                            strides = ir.get_new_stride_with_stride_order(
+                                strides, ir.NHWC_STRIDE_ORDER
+                            )
+
+                        if not unbacked_symbols_in_strides and len(strides):
+                            stride_order = ir.get_stride_order(strides)
+                            result = ir.ExternKernel.require_stride_order(
+                                result, stride_order, allow_padding=allow_padding
+                            )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -1734,6 +1738,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
+
+        log.debug(
+            "Finished codegen for all nodes. The list of kernel names available: %s",
+            V.graph.all_codegen_kernel_names,
+        )
+
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
         return result
@@ -1873,4 +1883,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list

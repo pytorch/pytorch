@@ -73,6 +73,7 @@ from ..trace_rules import (
     is_numpy_type_info,
 )
 from ..utils import (
+    _extract_tensor_dict,
     build_checkpoint_variable,
     clone_input,
     common_constant_types,
@@ -166,11 +167,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import (
-    FSDPManagedNNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
@@ -1149,9 +1146,9 @@ class VariableBuilder:
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
-                tensor_variable.proxy.node.meta["tensor_dict"] = value[
-                    i
-                ].__dict__.copy()
+                tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
+                    value[i]
+                )
 
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
@@ -1286,11 +1283,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
-            else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
-
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1319,7 +1312,6 @@ class VariableBuilder:
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1360,12 +1352,7 @@ class VariableBuilder:
         if (
             config.inline_inbuilt_nn_modules
             and not is_static_input
-            and (
-                isinstance(value, torch.nn.Parameter)
-                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
-                # compatible with previous behavior.
-                or (source and source.guard_source().is_unspecialized_nn_module())
-            )
+            and isinstance(value, torch.nn.Parameter)
         ):
             self.mark_static_input(value, guard=False)
 
@@ -1514,7 +1501,7 @@ class VariableBuilder:
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
-        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
+        tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
 
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
@@ -1542,7 +1529,6 @@ class VariableBuilder:
                 # One can not easily make nditer elements writable,
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
-                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
@@ -2559,9 +2545,7 @@ def wrap_to_fake_tensor_and_record(
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
-            e,
-            is_tensor,
-            tensor_source=source,
+            e, is_tensor, guard_source=source.guard_source()
         )
 
         if not parent_context:

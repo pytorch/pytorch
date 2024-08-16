@@ -73,8 +73,8 @@ from .dependencies import (
     var_builder,
 )
 from .ops_handler import OpCounterCSE
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
-from .runtime.runtime_utils import do_bench
 from .utils import (
     argsort,
     cache_on_self,
@@ -3989,7 +3989,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(algo, args, {"out": out})
+        return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -4436,6 +4436,9 @@ class ExternKernel(InputsKernel):
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):
         self.cpp_kernel_name = cpp_kernel_name
+        self.cpp_kernel_overload_name = None
+        self.cpp_kernel_key = None
+        self.cpp_op_schema = None
         if not V.graph.cpp_wrapper or not isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
@@ -4717,7 +4720,14 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_exact_strides(cls, x, exact_strides, allow_padding=False):
         assert exact_strides is not None
-        order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+        unbacked_symbols_in_strides = len(free_unbacked_symbols(exact_strides)) > 0
+        if not unbacked_symbols_in_strides:
+            order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+        else:
+            order = None
+        exact_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+        ]
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
         if is_storage_and_layout(x):
@@ -4735,7 +4745,7 @@ class ExternKernel(InputsKernel):
                 return x
             elif isinstance(x.get_layout(), FixedLayout) and (
                 list(x.get_layout().stride) == list(exact_strides)
-                or x.get_layout().is_stride_ordered(order)
+                or (order and x.get_layout().is_stride_ordered(order))
             ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
@@ -4746,7 +4756,11 @@ class ExternKernel(InputsKernel):
                 elif isinstance(x.get_layout().real_layout(), FixedLayout):
                     return x
         # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+        if (
+            isinstance(x, InputBuffer)
+            and order
+            and x.get_layout().is_stride_ordered(order)
+        ):
             return x
         if (
             isinstance(x, TensorBox)
@@ -4754,6 +4768,7 @@ class ExternKernel(InputsKernel):
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
             and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+            and order
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
@@ -4769,7 +4784,8 @@ class ExternKernel(InputsKernel):
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
-        assert is_stride_order_storage_and_layout(x, order)
+        if order:
+            assert is_stride_order_storage_and_layout(x, order)
         return x
 
     @classmethod
@@ -4859,16 +4875,33 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
-    def codegen_const_args(self):
+    def codegen_const_args(self, names: Optional[List[str]] = None):
         if V.graph.cpp_wrapper:
             result = []
+            # Aten ops follow the convention that tensor args are before non-tensor args,
+            # in which case the following 'len(self.inputs) + i' logic works. But this
+            # may not be true for other ops, and if that is the case, caller needs to
+            # pass in a list of const arg names for arg_properties lookup.
+            name_to_arg_properties = None
+            if names and self.arg_properties:
+                assert len(self.constant_args) == len(
+                    names
+                ), "names passed to codegen_const_args does not match self.constant_args"
+                name_to_arg_properties = {
+                    arg.get("name"): arg for arg in self.arg_properties
+                }
+
             for i, x in enumerate(self.constant_args):
-                idx = len(self.inputs) + i
-                type_ = (
-                    self.arg_properties[idx].get("type")
-                    if self.arg_properties and idx < len(self.arg_properties)
-                    else None
-                )
+                if name_to_arg_properties is not None:
+                    prop = name_to_arg_properties.get(names[i])  # type: ignore[index]
+                    type_ = prop.get("type") if prop else None
+                else:
+                    idx = len(self.inputs) + i
+                    type_ = (
+                        self.arg_properties[idx].get("type")
+                        if self.arg_properties and idx < len(self.arg_properties)
+                        else None
+                    )
                 result.append(
                     V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
                 )
@@ -5298,9 +5331,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.writeline(
-            f"{self.get_kernel_name()}({dst}, {src}, {non_blocking}){wrapper.ending}"
-        )
+        wrapper.codegen_device_copy(src, dst)
 
     def should_allocate(self):
         return False
