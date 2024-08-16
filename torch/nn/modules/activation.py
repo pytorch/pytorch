@@ -1492,15 +1492,17 @@ class PReLU(Module):
         >>> output = m(input)
     """
 
-    __constants__ = ['num_parameters']
+    __constants__ = ["num_parameters"]
     num_parameters: int
+    weight: Optional[Parameter]
+    init: Union[float, int]
 
     def __init__(self, num_parameters: int = 1, init: float = 0.25,
                  device=None, dtype=None,**kwargs) -> None:
-        if 'requires_grad' in kwargs:
-            raise TypeError(f"PReLU does not accept the keyword argument 'requires_grad'. "
-                            "To enable gradients, set requires_grad=True on the input tensor or "
-                            "on the parameters individually.")
+        if kwargs:
+            unexpected_args = ', '.join(str(key) for key in kwargs.keys())
+            raise TypeError(f"Unexpected keyword arguments: {unexpected_args}. "
+                            "PReLU does not accept these arguments.")
         else:
           raise TypeError(f"Unexpected keyword arguments: {', '.join(kwargs.keys())}. "
                             "PReLU does not accept these arguments.")
@@ -1511,7 +1513,7 @@ class PReLU(Module):
             raise TypeError(f"Expected num_parameters to be an integer, but got {type(num_parameters).__name__}.")
         if num_parameters < 1:
             raise ValueError(f"num_parameters should be a positive integer greater than 0, but got {num_parameters}.")
-        else:    
+        else:
           self.num_parameters = num_parameters
         super().__init__()
         
