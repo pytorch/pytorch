@@ -3422,29 +3422,29 @@ class CppKernelDispatcher(CppKernel):
                 suffix_buf = BracesBuffer()
                 assert outer_loop  # type: ignore[possibly-undefined]
                 with contextlib.ExitStack() as stack:
-                    main_loop_kernel.codegen_conditions(
+                    if main_loop_kernel.codegen_conditions(
                         suffix_buf, "C10_LIKELY", outer_loop.var
-                    )
-                    stack.enter_context(suffix_buf.indent())
-                    suffix_buf.splice(main_loop_kernel.reduction_suffix)
+                    ):
+                        stack.enter_context(suffix_buf.indent())
+                        suffix_buf.splice(main_loop_kernel.reduction_suffix)
                 with contextlib.ExitStack() as stack:
-                    tail_loop_kernel.codegen_conditions(
+                    if tail_loop_kernel.codegen_conditions(
                         suffix_buf, "C10_UNLIKELY", outer_loop.var
-                    )
-                    stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == CppKernel:
-                        # the suffix also need to store tmp_acc_arr
-                        suffix_buf.splice(
-                            transform_kernel_codes_under_inner_loop(
-                                tail_loop_kernel.reduction_suffix,
-                                outer_loop.var,
-                                f"{outer_loop.var}_tail",
-                                outer_loop.tiling_offset,
-                                outer_loop.size,
+                    ):
+                        stack.enter_context(suffix_buf.indent())
+                        if type(tail_loop_kernel) == CppKernel:
+                            # the suffix also need to store tmp_acc_arr
+                            suffix_buf.splice(
+                                transform_kernel_codes_under_inner_loop(
+                                    tail_loop_kernel.reduction_suffix,
+                                    outer_loop.var,
+                                    f"{outer_loop.var}_tail",
+                                    outer_loop.tiling_offset,
+                                    outer_loop.size,
+                                )
                             )
-                        )
-                    else:
-                        suffix_buf.splice(tail_loop_kernel.reduction_suffix)
+                        else:
+                            suffix_buf.splice(tail_loop_kernel.reduction_suffix)
                     self.reduction_suffix = suffix_buf
             else:
                 aggregate_buffers("reduction_prefix")
