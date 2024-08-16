@@ -5,6 +5,75 @@
 #include <cuda_bf16.h>
 #endif
 
+// ROCm 6.3 is planned to have these functions, but until then here they are.
+#if defined(USE_ROCM) && ROCM_VERSION < 60300
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
+
+__device__ inline __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
+  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
+  typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+  __hip_bfloat162_raw bf2_v = value;
+  vec_short2 s2_in{bf2_v.x, bf2_v.y};
+  vec_short2 s2_ret = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, s2_in);
+  return __hip_bfloat162_raw{s2_ret[0], s2_ret[1]};
+#else
+  static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
+  union u_hold {
+    __hip_bfloat162_raw h2r;
+    unsigned int u32;
+  };
+  u_hold old_val, new_val;
+  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  do {
+    new_val.h2r = __hadd2(old_val.h2r, value);
+  } while (!__hip_atomic_compare_exchange_strong(
+        (unsigned int*)address, &old_val.u32, new_val.u32,
+        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+  return old_val.h2r;
+#endif
+}
+
+__device__ inline __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
+  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
+  // The api expects an ext_vector_type of half
+  typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
+  static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
+  union {
+    __half2_raw h2r;
+    vec_fp162 fp16;
+  } u {value};
+  vec_fp162 ret = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+  return __half2{ret[0], ret[1]};
+#else
+  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
+  union u_hold {
+    __half2_raw h2r;
+    unsigned int u32;
+  };
+  u_hold old_val, new_val;
+  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  do {
+    new_val.h2r = __hadd2(old_val.h2r, value);
+  } while (!__hip_atomic_compare_exchange_strong(
+        (unsigned int*)address, &old_val.u32, new_val.u32,
+        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+  return old_val.h2r;
+#endif
+}
+#define ATOMICADD unsafeAtomicAdd
+#define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
+#define NATIVE_BFLOAT16 __hip_bfloat16
+#define NATIVE_BFLOAT162 __hip_bfloat162
+#else
+#define ATOMICADD atomicAdd
+#define NATIVE_ZERO_BF16 __int2bfloat16_rz(0)
+#define NATIVE_BFLOAT16 __nv_bfloat16
+#define NATIVE_BFLOAT162 __nv_bfloat162
+#endif
+
 namespace at {
 namespace native {
 
@@ -47,9 +116,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (                      \
-    (defined(USE_ROCM)) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
@@ -62,17 +129,24 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     __half2 value2;
     value2.x = static_cast<__half>(value);
     value2.y = __int2half_rz(0);
-    atomicAdd(reinterpret_cast<__half2*>(target_addr), value2);
+    ATOMICADD(reinterpret_cast<__half2*>(target_addr), value2);
 
   } else if (!low_byte && index > 0) {
     __half2 value2;
     value2.x = __int2half_rz(0);
     value2.y = static_cast<__half>(value);
-    atomicAdd(reinterpret_cast<__half2*>(target_addr - 1), value2);
+    ATOMICADD(reinterpret_cast<__half2*>(target_addr - 1), value2);
 
   } else {
-    atomicAdd(
-        reinterpret_cast<__half*>(tensor) + index, static_cast<__half>(value));
+#ifdef USE_ROCM
+    gpuAtomicAddNoReturn(
+        reinterpret_cast<at::Half*>(tensor) + index,
+        static_cast<at::Half>(value));
+#else
+    atomicAddNoReturn(
+        reinterpret_cast<__half*>(tensor) + index,
+        static_cast<__half>(value));
+#endif
   }
 #endif
 }
@@ -87,32 +161,37 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (                      \
-    (defined(USE_ROCM)) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::BFloat16*>(tensor) + index,
       static_cast<at::BFloat16>(value));
 #else
   // Accounts for the chance tensor falls on an odd 16 bit alignment (ie, not 32 bit aligned)
-  __nv_bfloat16* target_addr = reinterpret_cast<__nv_bfloat16*>(tensor + index);
-  bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__nv_bfloat162) == 0);
+  NATIVE_BFLOAT16* target_addr = reinterpret_cast<NATIVE_BFLOAT16*>(tensor + index);
+  bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(NATIVE_BFLOAT162) == 0);
 
   if (low_byte && index < (numel - 1)) {
-    __nv_bfloat162 value2;
-    value2.x = *reinterpret_cast<__nv_bfloat16*>(&value);
-    value2.y = __int2bfloat16_rz(0);
-    atomicAdd(reinterpret_cast<__nv_bfloat162*>(target_addr), value2);
+    NATIVE_BFLOAT162 value2;
+    value2.x = *reinterpret_cast<NATIVE_BFLOAT16*>(&value);
+    value2.y = NATIVE_ZERO_BF16;
+    ATOMICADD(reinterpret_cast<NATIVE_BFLOAT162*>(target_addr), value2);
 
   } else if (!low_byte && index > 0) {
-    __nv_bfloat162 value2;
-    value2.x = __int2bfloat16_rz(0);
-    value2.y = *reinterpret_cast<__nv_bfloat16*>(&value);
-    atomicAdd(reinterpret_cast<__nv_bfloat162*>(target_addr - 1), value2);
+    NATIVE_BFLOAT162 value2;
+    value2.x = NATIVE_ZERO_BF16;
+    value2.y = *reinterpret_cast<NATIVE_BFLOAT16*>(&value);
+    ATOMICADD(reinterpret_cast<NATIVE_BFLOAT162*>(target_addr - 1), value2);
 
   } else {
+#ifdef USE_ROCM
+    gpuAtomicAddNoReturn(
+        reinterpret_cast<at::BFloat16*>(tensor) + index,
+        static_cast<at::BFloat16>(value));
+#else
     atomicAdd(
-        reinterpret_cast<__nv_bfloat16*>(tensor) + index, *reinterpret_cast<__nv_bfloat16*>(&value));
+        reinterpret_cast<NATIVE_BFLOAT16*>(tensor) + index,
+        *reinterpret_cast<NATIVE_BFLOAT16*>(&value));
+#endif
   }
 #endif
 }
@@ -144,6 +223,11 @@ __device__ __forceinline__ void fastAtomicAdd(
     gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
+
+#undef ATOMICADD
+#undef NATIVE_ZERO_BF16
+#undef NATIVE_BFLOAT16
+#undef NATIVE_BFLOAT162
 
 } // namespace native
 } // namespace at
