@@ -3720,8 +3720,7 @@ def huber_loss(
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
-            huber_loss,
-            (input, target, reduction, delta, weights),
+            huber_loss(input, target, weights),
             input,
             target,
             reduction=reduction,
@@ -3774,22 +3773,24 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    weights: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean', weights=None) -> Tensor
 
-    Function that takes the mean element-wise absolute value difference.
+    Function that calculates the mean element-wise absolute value difference, with optional weighting.
 
     See :class:`~torch.nn.L1Loss` for details.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            (input, target),
+            (input, target, weights),
             input,
             target,
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            weights=weights,
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3802,9 +3803,28 @@ def l1_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-    return torch._C._nn.l1_loss(
-        expanded_input, expanded_target, _Reduction.get_enum(reduction)
-    )
+
+    if weights is not None:
+        if weights.size() != input.size():
+            raise ValueError("Weights and input must have the same size.")
+
+        absolute_errors = torch.abs(expanded_input - expanded_target)
+        weighted_absolute_errors = absolute_errors * weights
+
+        if reduction == "none":
+            return weighted_absolute_errors
+        elif reduction == "sum":
+            return torch.sum(weighted_absolute_errors)
+        elif reduction == "mean":
+            return torch.sum(weighted_absolute_errors) / torch.sum(weights)
+        else:
+            raise ValueError(
+                f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
+            )
+    else:
+        return torch._C._nn.l1_loss(
+            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+        )
 
 
 def mse_loss(
@@ -3836,7 +3856,7 @@ def mse_loss(
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             mse_loss,
-            (input, target, size_average, reduce, reduction, weights),
+            (input, target, weights),
             input,
             target,
             size_average=size_average,
@@ -3880,78 +3900,6 @@ def mse_loss(
         return torch._C._nn.mse_loss(
             expanded_input, expanded_target, _Reduction.get_enum(reduction)
         )
-
-
-def mae_loss(
-    input: Tensor,
-    target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
-    reduction: str = "mean",
-    weights: Optional[Tensor] = None,
-) -> Tensor:
-    r"""mae_loss(input, target, size_average=None, reduce=None, reduction='mean', weights=None) -> Tensor
-
-    Calculates the mean absolute error, with optional weighting.
-
-    Args:
-        input (Tensor): Predicted values.
-        target (Tensor): Ground truth values.
-        size_average (bool, optional): Deprecated (use reduction).
-        reduce (bool, optional): Deprecated (use reduction).
-        reduction (str, optional): Specifies the reduction to apply to the output:
-                                   'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
-                                   'sum': the output will be summed. 'none': no reduction will be applied.
-                                   Default: 'mean'.
-        weights (Tensor, optional): Weights for each sample. Default: None.
-
-    Returns:
-        Tensor: Mean Absolute Error loss (optionally weighted).
-    """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            mae_loss,
-            (input, target, size_average, reduce, reduction, weights),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-            weights=weights,
-        )
-
-    if not (target.size() == input.size()):
-        warnings.warn(
-            f"Using a target size ({target.size()}) that is different from the input size ({input.size()}). "
-            "This may lead to incorrect results due to broadcasting. "
-            "Please ensure they have the same size.",
-            stacklevel=2,
-        )
-
-    # Handle deprecated size_average and reduce parameters
-    if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
-
-    if weights is not None:
-        if weights.size() != input.size():
-            raise ValueError("Weights and input must have the same size.")
-
-        # Calculate weighted absolute errors
-        absolute_errors = torch.abs(input - target)
-        weighted_absolute_errors = absolute_errors * weights
-
-        if reduction == "none":
-            return weighted_absolute_errors
-        elif reduction == "sum":
-            return torch.sum(weighted_absolute_errors)
-        elif reduction == "mean":
-            return torch.sum(weighted_absolute_errors) / torch.sum(weights)
-        else:
-            raise ValueError(
-                f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
-            )
-    else:
-        return torch._C._nn.l1_loss(input, target, _Reduction.get_enum(reduction))
 
 
 def margin_ranking_loss(
