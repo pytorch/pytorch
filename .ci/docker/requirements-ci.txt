@@ -318,3 +318,13 @@ sympy==1.13.1 ; python_version >= "3.9"
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
 #Pinned versions:
 #test that import:
+
+onnx==1.16.1
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+onnxscript==0.1.0.dev20240816
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
