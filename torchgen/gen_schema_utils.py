@@ -15,6 +15,11 @@ from torchgen.model import (
 )
 
 
+# Note: These aren't actually used in torchgen, they're some utilities for generating a schema
+# from real arguments. For example, this is used to generate HigherOrderOperators' schema since
+# their schemas can vary for different instances of the same HOP.
+
+
 class TypeGen:
     convert_to_base_ty = {
         int: BaseTy.int,
