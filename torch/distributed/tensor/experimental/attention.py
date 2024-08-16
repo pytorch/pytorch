@@ -24,8 +24,8 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
