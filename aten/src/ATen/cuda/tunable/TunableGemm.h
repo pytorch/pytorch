@@ -23,13 +23,6 @@
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
 
-#ifdef USE_ROCM
-#include <rocm-core/rocm_version.h>
-#endif
-
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-
 namespace at::cuda::tunable {
 
 template <typename T>
@@ -175,71 +168,6 @@ inline std::string TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
-#ifdef USE_ROCM
-static void AddRocblasValidator() {
-  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-  if (validators.find("ROCBLAS_VERSION") == validators.end()) {
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-        "ROCBLAS_VERSION",
-        [rocblas_version]() { return rocblas_version; },
-        [rocblas_version](auto&& k) {
-          TUNABLE_LOG1("ROCBLAS_VERSION validation: expect ", k, " to match ", rocblas_version);
-          return rocblas_version == k ? OK : FAIL;
-        });
-  }
-}
-
-static void AddHipblasltValidator() {
-  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-  if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-    int version;
-    std::string revision(128, '\0');
-    auto handle = at::cuda::getCurrentCUDABlasLtHandle();
-    hipblasLtGetVersion(handle, &version);
-    hipblasLtGetGitRevision(handle, revision.data());
-    std::string hipblaslt_version =
-        c10::str(version, "-", revision.c_str());
-    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-        "HIPBLASLT_VERSION",
-        [hipblaslt_version]() { return hipblaslt_version; },
-        [hipblaslt_version](auto&& k) {
-          TUNABLE_LOG1("HIPBLASLT_VERSION validation: expect ", k, " to match ", hipblaslt_version);
-          return hipblaslt_version == k ? OK : FAIL;
-        });
-  }
-}
-
-static void AddRocmValidator() {
-  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-  if (validators.find("ROCM_VERSION") == validators.end()) {
-    std::string rocm_version = ROCM_BUILD_INFO;
-    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-        "ROCM_VERSION",
-        [rocm_version]() { return rocm_version; },
-        [rocm_version](auto&& k) {
-          TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
-          return rocm_version == k ? OK : FAIL;
-        });
-  }
-
-  if (validators.find("GCN_ARCH_NAME") == validators.end()) {
-    std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
-    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-        "GCN_ARCH_NAME",
-        [gcn_arch_name]() { return gcn_arch_name; },
-        [gcn_arch_name](auto&& k) {
-          TUNABLE_LOG1("GCN_ARCH_NAME validation: expect ", k, " to match ", gcn_arch_name);
-          return gcn_arch_name == k ? OK : FAIL;
-        });
-  }
-}
-#endif
-
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
@@ -247,20 +175,15 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
-    bool rocm_validators = false;
-
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
     if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
-      rocm_validators = true;
       for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
-      AddRocblasValidator();
     }
 
     static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
-      rocm_validators = true;
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -269,11 +192,6 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
           this->RegisterOp(std::move(name), std::move(op));
         }
       }
-      AddHipblasltValidator();
-    }
-
-    if (rocm_validators) {
-      AddRocmValidator();
     }
 #endif
   }
@@ -290,20 +208,15 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
 
 #ifdef USE_ROCM
-    bool rocm_validators = false;
-
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
     if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
-      rocm_validators = true;
       for (auto&& [name, op] : GetRocBlasGemmStridedBatchedTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
-      AddRocblasValidator();
     }
 
     static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
-      rocm_validators = true;
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -312,11 +225,6 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
           this->RegisterOp(std::move(name), std::move(op));
         }
       }
-      AddHipblasltValidator();
-    }
-
-    if (rocm_validators) {
-      AddRocmValidator();
     }
 #endif
   }
@@ -336,8 +244,6 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
     }
-    AddHipblasltValidator();
-    AddRocmValidator();
 #endif
   }
 
@@ -349,8 +255,5 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
             "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
-
-#undef XSTRINGIFY
-#undef STRINGIFY
 
 } // namespace at::cuda::tunable
