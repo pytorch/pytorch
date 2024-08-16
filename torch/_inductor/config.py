@@ -311,8 +311,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+# DEPRECATED, DO NOT USE
+search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -746,6 +746,19 @@ class cpp:
     # mitigate the sync overhead and memory usage.
     # When set to 0, the number of slices is unlimited.
     gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
+
+    # For perf tuning and debugging purpose, configure the pre-defined cache blocking for
+    # MxNxK dims respectively. The blockings are separated by comma and the unit is
+    # the number of register blocks.
+    # For example, "4,1,10" means 4 register blocks on M, 1 on N and 10 on K respectively.
+    gemm_cache_blocking = os.environ.get("TORCHINDUCTOR_CPP_GEMM_CACHE_BLOCKING", None)
+
+    # For perf tuning and debugging purpose, configure the pre-defined thread blocking factors for
+    # MxNxK dims respectively. The factors are separated by comma and their product
+    # should be the same as the total number of threads.
+    # For example, if the total number of threads is 56, "7,4,2" means the work is
+    # decomposed into 7x4x2 thread blocks along MxNxK of a GEMM.
+    gemm_thread_factors = os.environ.get("TORCHINDUCTOR_CPP_GEMM_THREAD_FACTORS", None)
 
 
 # config specific to codegen/triton.py
