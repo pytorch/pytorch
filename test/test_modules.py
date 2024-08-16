@@ -239,7 +239,8 @@ class TestModule(TestCase):
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
-                    m_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    m_copy = torch.load(f, weights_only=False)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
 
