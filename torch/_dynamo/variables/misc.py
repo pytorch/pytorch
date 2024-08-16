@@ -1109,7 +1109,6 @@ class PythonModuleVariable(VariableTracker):
 
         attr_value = getattr(self.value, name)
 
-        breakpoint()
         if self.source:
             new_source = AttrSource(self.source, name)
             return VariableBuilder(tx, new_source)(attr_value)
