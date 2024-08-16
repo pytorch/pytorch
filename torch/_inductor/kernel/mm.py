@@ -18,7 +18,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.common import BackendFeature
-from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout, is_triton
@@ -175,9 +175,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -202,13 +202,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-        choice = mm_autoheuristic(
-            mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
+        ah_choices = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mm_operations(),
+            None,
+            top_k=10,
         )
         if not torch._inductor.config.collect_autoheuristic(name):
             # if we are collecting data, we do not want to modify choices
-            if choice is not None:
-                choices.insert(0, choice)
+            if ah_choices is not None and len(ah_choices) > 0:
+                choices = ah_choices
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
@@ -267,7 +277,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         choices = []
 
     if use_cutlass:
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
@@ -368,7 +378,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
             != 0
         ):
-            CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
                 choices,
                 layout,
                 [mat1, mat2, inp_expanded],
@@ -376,7 +386,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
@@ -505,7 +515,17 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mm_autoheuristic(
-    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition
+    mat1,
+    mat2,
+    m,
+    n,
+    k,
+    choices,
+    name,
+    input_nodes,
+    ops,
+    precondition,
+    top_k: Optional[int] = None,
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
@@ -544,6 +564,8 @@ def mm_autoheuristic(
         augment_context=ops,
         precondition=precondition,
     )
+    if top_k is not None:
+        return autoheuristic.get_top_k_choices_caller(top_k)
     return autoheuristic.get_choice_caller()
 
 
@@ -611,7 +633,10 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             )
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 
