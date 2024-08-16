@@ -3184,6 +3184,7 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.export.unflatten",
     "torch.optim",
 }
 
@@ -3199,6 +3200,7 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
+        "torch.distributed._composable.fsdp",
     }
 
 
@@ -3224,6 +3226,7 @@ MOD_INLINELIST = {
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export._tree_utils",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
@@ -3249,6 +3252,7 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
+    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
