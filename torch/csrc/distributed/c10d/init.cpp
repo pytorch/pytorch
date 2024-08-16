@@ -1048,12 +1048,12 @@ This class does not support ``__members__`` property.)");
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
           "buffer_ptrs_dev",
-          [](c10::intrusive_ptr<SymmetricMemory> symm_mem) {
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
           })
       .def_property_readonly(
           "signal_pad_ptrs_dev",
-          [](c10::intrusive_ptr<SymmetricMemory> symm_mem) {
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
