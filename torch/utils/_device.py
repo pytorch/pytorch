@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 from typing import Optional
 import torch
-from torch.overrides import TorchFunctionMode
+from torch.overrides import TorchFunctionMode, _pop_mode, _push_mode
 from torch.utils._contextlib import context_decorator
+from torch._C import _len_torch_function_stack
 import functools
 
 CURRENT_DEVICE: Optional[torch.device] = None
@@ -70,7 +71,19 @@ class DeviceContext(TorchFunctionMode):
     def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE
         CURRENT_DEVICE = self.old_device
-        return super().__exit__(exc_type, exc_val, exc_tb)
+        cur_stack = []
+        # Invariant: there should only be one DeviceContext on the stack at any time
+        # search the stack for the device context and pop it, restore previous stack
+        # entries popped while searching
+        for _ in range(_len_torch_function_stack()):
+            mode = _pop_mode()
+            if mode is self:
+                break
+            else:
+                cur_stack.append(mode)
+
+        for mode in reversed(cur_stack):
+            _push_mode(mode)
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
