@@ -5,8 +5,9 @@ a100_data='a100_mm.zip'
 h100_data='h100_mm.zip'
 datasets=("${a100_data}" "${h100_data}")
 for dataset in "${datasets[@]}"; do
+    rm -f ${dataset}
     url="${base_url}${dataset}"
     wget ${url}
-    unzip ${dataset}
+    unzip -o ${dataset}
     rm ${dataset}
 done
