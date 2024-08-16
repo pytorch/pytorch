@@ -754,7 +754,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not tx.symbolic_torch_function_mode_stack:
                 raise unimplemented("Popping from an empty torch function mode stack")
             TorchFunctionModeStackVariable.register_mutation(tx)
-            return tx.symbolic_torch_function_mode_stack.popleft()
+            return tx.symbolic_torch_function_mode_stack.pop()
 
         @register(torch._C._push_on_torch_function_stack)
         def handle_push_torch_function(
@@ -762,7 +762,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
-            tx.symbolic_torch_function_mode_stack.appendleft(args[0])
+            tx.symbolic_torch_function_mode_stack.append(args[0])
             return ConstantVariable.create(None)
 
         return handlers
