@@ -2421,7 +2421,7 @@ class CppVecKernel(CppKernel):
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
             kwargs = {
-                "next_var": value,
+                "next_value": value,
                 "index": index,
                 "horizontal_reduction": horizontal_reduction,
                 "src_dtype": src_dtype,
