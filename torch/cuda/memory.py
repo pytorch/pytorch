@@ -1030,7 +1030,6 @@ class MemPool(_MemPool):
                 (default).
 
         """
-        torch.cuda.init()
         device_index = (
             torch.cuda.current_device() if device is None else _get_device_index(device)
         )
@@ -1051,7 +1050,6 @@ class MemPool(_MemPool):
                 (default).
 
         """
-        torch.cuda.init()
         device_index = (
             torch.cuda.current_device() if device is None else _get_device_index(device)
         )
@@ -1069,7 +1067,6 @@ class MemPool(_MemPool):
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        torch.cuda.init()
         ctx = MemPoolContext(self)
         snapshot = torch.cuda.memory_snapshot()
         del ctx
@@ -1082,7 +1079,6 @@ class MemPool(_MemPool):
         When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
         back to the system. Use release() function to mark a pool as freeable.
         """
-        torch.cuda.init()
         ctx = MemPoolContext(self)
         torch.cuda.empty_cache()
         del ctx
@@ -1100,7 +1096,6 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
             if :attr:`device` is ``None`` (default).
 
     """
-    torch.cuda.init()
     ctx = MemPoolContext(pool)
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
