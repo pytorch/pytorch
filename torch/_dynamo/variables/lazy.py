@@ -10,7 +10,7 @@ from .tensor import SymNodeVariable
 class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self, value, source):
+    def __init__(self, value, source) -> None:
         if not isinstance(value, LazySymNodeFormatString):
             assert source
         self.value = value
@@ -52,7 +52,7 @@ class LazyVariableTracker(VariableTracker):
     def create(value, source, **options):
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
-    def __init__(self, _cache, **kwargs):
+    def __init__(self, _cache, **kwargs) -> None:
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
@@ -79,7 +79,7 @@ class LazyVariableTracker(VariableTracker):
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.is_realized():
             return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
@@ -135,7 +135,7 @@ class LazyVariableTracker(VariableTracker):
 class LazySymNodeFormatString:
     def __init__(
         self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
-    ):
+    ) -> None:
         from .constant import ConstantVariable
 
         self.sym_node_var = sym_node_variable
@@ -143,7 +143,7 @@ class LazySymNodeFormatString:
             "{:" + fmt_spec_var.as_python_constant() + "}"
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str.format(
             self.fmt_var.as_python_constant(),
             str(self.sym_node_var.evaluate_expr()),

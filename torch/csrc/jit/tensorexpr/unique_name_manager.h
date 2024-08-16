@@ -7,9 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class VarHandle;
 class Var;
@@ -19,7 +17,6 @@ using VarNameMap = std::unordered_map<VarPtr, std::string>;
 // A manager to get unique names from vars.
 // It starts with the name hints of the var and append "_" + $counter until it
 // hits a unique name.
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API UniqueNameManager {
  public:
   const std::string& get_unique_name(const VarHandle& v);
@@ -33,6 +30,4 @@ class TORCH_API UniqueNameManager {
   std::unordered_set<std::string> all_unique_names_;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

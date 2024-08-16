@@ -112,7 +112,6 @@ ExprPtr IRCloner::mutate(const CompareSelectPtr& v) {
       v->bias());
 }
 
-// NOLINTNEXTLINE
 #define IMM_MUTATE_DEFINE(_1, Name)                 \
   ExprPtr IRCloner::mutate(const Name##ImmPtr& v) { \
     return v;                                       \
@@ -162,7 +161,7 @@ ExprPtr IRCloner::mutate(const BufPtr& v) {
 }
 
 ExprPtr IRCloner::mutate(const BroadcastPtr& v) {
-  int lanes = v->lanes();
+  auto lanes = v->lanes();
   ExprPtr value_new = v->value()->accept_mutator(this);
   return alloc<Broadcast>(value_new, lanes);
 }

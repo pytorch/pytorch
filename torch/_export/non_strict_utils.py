@@ -20,7 +20,7 @@ from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _tree_map
+from torch.export.dynamic_shapes import _tree_map_with_path
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -213,11 +213,11 @@ def _flatten_dynamic_shapes(
 ) -> List[Any]:
     flat_shapes = []
 
-    def _tree_map_helper(t, shape):
+    def _tree_map_helper(path, t, shape):
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
 
 

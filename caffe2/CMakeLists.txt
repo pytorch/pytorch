@@ -1065,6 +1065,10 @@ if(USE_XPU)
       target_link_libraries(torch_xpu PRIVATE
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
+
+    # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
+    include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+
   endif()
 endif()
 
