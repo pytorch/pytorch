@@ -3184,6 +3184,7 @@ LEGACY_MOD_INLINELIST = {
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.export.unflatten",
     "torch.optim",
 }
 
@@ -3224,6 +3225,7 @@ MOD_INLINELIST = {
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export._tree_utils",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",

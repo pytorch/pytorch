@@ -16,7 +16,7 @@ class DebugPrinterManager:
     def __init__(
         self,
         enable_debug_printer: bool,
-        args_to_print: List[str] | None = None,
+        args_to_print: Optional[List[str]] = None,
         kernel_name: str = "",
         kernel=None,
         arg_signatures: Optional[List[type]] = None,
