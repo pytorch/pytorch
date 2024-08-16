@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 8 to opset 9]
@@ -39,6 +38,7 @@ import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
+
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
 

@@ -3,21 +3,16 @@
 from __future__ import annotations
 
 import abc
-
 import dataclasses
 import inspect
 import logging
-from types import ModuleType
-
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.fx
 import torch.fx.traceback as fx_traceback
-
 from torch import _prims_common, _refs
-
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     wrappers as _prims_common_wrappers,
@@ -26,9 +21,13 @@ from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _spec
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
+
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
 
 logger = logging.getLogger(__name__)
 
@@ -1716,7 +1715,7 @@ class InsertTypePromotion(_pass.Transform):
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
+        with fake_tensor.unset_fake_temporarily(), (
             fake_mode
         ), fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)

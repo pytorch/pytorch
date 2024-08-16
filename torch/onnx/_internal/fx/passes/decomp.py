@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import contextlib
-
-from typing import Callable, Mapping
+from typing import Callable, Mapping, TYPE_CHECKING
 
 import torch
 import torch._ops
-import torch.fx
 from torch._dispatch import python as python_dispatch
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
+
+
+if TYPE_CHECKING:
+    import torch.fx
 
 
 class Decompose(_pass.Transform):
@@ -64,7 +66,7 @@ class Decompose(_pass.Transform):
 
         # Apply decomposition table to the input graph.
         assert fake_mode is not None  # for mypy
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), python_dispatch.enable_python_dispatcher(), (
+        with fake_tensor.unset_fake_temporarily(), python_dispatch.enable_python_dispatcher(), (
             fake_mode
         ):
             decomposed_module = proxy_tensor.make_fx(

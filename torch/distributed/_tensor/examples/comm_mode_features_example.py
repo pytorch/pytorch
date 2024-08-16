@@ -1,14 +1,15 @@
+"""
+To run the example, use the following command:
+torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.py -e MLP_operation_tracing
+"""
+import argparse
 import os
-
 from typing import Callable, Dict, Union
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.examples.comm_mode_features_example_argparser import args
-
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -21,7 +22,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     NUM_DEVICES,
     Transformer,
 )
-
 from torch.utils.checkpoint import checkpoint
 
 
@@ -184,8 +184,8 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the module level collective tracing information
-        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
-        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=0)
 
     def example_transformer_module_tracing(self) -> None:
         """
@@ -272,8 +272,8 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the module level collective tracing information
-        print(comm_mode.generate_comm_debug_tracing_table(noise_level=1))
-        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=1)
+        print(comm_mode.generate_comm_debug_tracing_table(noise_level=0))
+        comm_mode.log_comm_debug_tracing_table_to_file(noise_level=0)
 
     def example_MLP_operation_tracing(self) -> None:
         """
@@ -597,7 +597,7 @@ class CommDebugModeExample:
         # print the operation level collective tracing information
         print(comm_mode.generate_comm_debug_tracing_table(noise_level=2))
         comm_mode.log_comm_debug_tracing_table_to_file(
-            noise_level=2, file_name="transformer_operation_log.txt"
+            noise_level=1, file_name="transformer_operation_log.txt"
         )
 
     def example_MLP_json_dump(self) -> None:
@@ -630,7 +630,8 @@ class CommDebugModeExample:
         with comm_mode:
             output = model(inp)
 
-        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=2)
+        comm_mode.generate_json_dump(file_name="transformer_log.json", noise_level=1)
+        comm_mode.generate_json_dump(file_name="transformer_log_2.json", noise_level=2)
 
     def example_activation_checkpointing(self) -> None:
         """
@@ -733,4 +734,24 @@ if __name__ == "__main__":
     world_size = int(os.environ["WORLD_SIZE"])
     assert world_size == 4  # our example uses 4 worker ranks
 
-    run_example(world_size, rank, args())
+    parser = argparse.ArgumentParser(
+        description="comm_mode_feature examples",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    example_prompt = (
+        "choose one comm_mode_feature example from below:\n"
+        "\t1. MLP_distributed_sharding_display\n"
+        "\t2. MLPStacked_distributed_sharding_display\n"
+        "\t3. MLP_module_tracing\n"
+        "\t4. transformer_module_tracing\n"
+        "\t5. MLP_operation_tracing\n"
+        "\t6. transformer_operation_tracing\n"
+        "\t7. MLP_json_dump\n"
+        "\t8. transformer_json_dump\n"
+        "\t9. activation_checkpointing\n"
+        "e.g. you want to try the MLPModule sharding display example, please input 'MLP_distributed_sharding_display'\n"
+    )
+    parser.add_argument("-e", "--example", help=example_prompt, required=True)
+    example = parser.parse_args().example
+
+    run_example(world_size, rank, example)

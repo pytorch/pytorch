@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 14.
@@ -25,6 +24,7 @@ import torch
 from torch.onnx import _constants, _type_utils, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
+
 
 __all__ = [
     "hardswish",
@@ -133,7 +133,7 @@ def quantized_hardswish(g: jit_utils.GraphContext, x, op_scale, op_zero_point):
 # aten_scaled_dot_product_attention
 # NOTE: Need op.Trilu
 @_onnx_symbolic("aten::scaled_dot_product_attention")
-@symbolic_helper.parse_args("v", "v", "v", "v", "f", "b", "v")
+@symbolic_helper.parse_args("v", "v", "v", "v", "f", "b", "v", "b")
 def scaled_dot_product_attention(
     g: jit_utils.GraphContext,
     query: torch._C.Value,
@@ -143,10 +143,14 @@ def scaled_dot_product_attention(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     scale: torch._C.Value | None = None,
+    enable_gqa: bool = False,
 ):
     assert (not is_causal) or (
         is_causal and symbolic_helper._is_none(attn_mask)
     ), "is_causal and attn_mask cannot be set at the same time"
+    assert (
+        not enable_gqa
+    ), "conversion of scaled_dot_product_attention not implemented if enable_gqa is True"
 
     scale = symbolic_helper._maybe_get_const(scale, "f")
     if symbolic_helper._is_none(scale):

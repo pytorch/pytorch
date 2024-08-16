@@ -27,6 +27,7 @@ from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_h
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
 
+
 if TYPE_CHECKING:
     from torch.types import Number
 

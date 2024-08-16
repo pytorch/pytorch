@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 18.
 
@@ -27,6 +26,7 @@ import torch
 from torch import _C
 from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
