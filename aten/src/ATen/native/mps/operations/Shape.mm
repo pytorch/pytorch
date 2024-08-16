@@ -67,16 +67,6 @@ TORCH_IMPL_FUNC(topk_out_mps)
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1), "selected index k out of range");
 
-  if (!is_macos_13_or_newer() && (k > 16)) {
-    TORCH_WARN_ONCE("torch.topk support for k>16 by MPS on MacOS 13+, please upgrade");
-    Tensor cpu_indices = indices.clone().to("cpu");
-    Tensor cpu_values = values.clone().to("cpu");
-    at::topk_out(cpu_values, cpu_indices, self.to(at::Device(kCPU)), k, dim_, largest, sorted);
-    values.copy_(cpu_values);
-    indices.copy_(cpu_indices);
-    return;
-  }
-
   if (self.dim() == 0 && self.numel() == 1) {
     values.copy_(self);
     indices.zero_();
@@ -113,85 +103,28 @@ TORCH_IMPL_FUNC(topk_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
-      if (is_macos_13_or_newer()) {
-        MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
-        MPSDataType dataType = getMPSDataType(self);
-        // #issue 104398441 sortWithTensor and argsortWithTensor
-        if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
-          dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
-          castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
-        }
-        MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
-                                                           axis:(NSUInteger)dim
-                                                     descending:largest
-                                                           name:nil];
-        sortedTensor = [mpsGraph sliceTensor:sortedTensor
-                                   dimension:(NSUInteger)dim
-                                       start:((NSUInteger)0)length:k
-                                        name:nil];
-        MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
-                                                                 axis:(NSInteger)dim
-                                                           descending:largest
-                                                                 name:@"argmax_out"];
-        argSortedTensor = [mpsGraph sliceTensor:argSortedTensor dimension:dim start:((NSUInteger)0)length:k name:nil];
-        newCachedGraph->valuesTensor = sortedTensor;
-        newCachedGraph->indicesTensor = argSortedTensor;
-
-      } else {
-        if ((dim_ != -1 && dim_ != self.dim() - 1) && (!largest)) {
-          // transpose and negate
-          MPSGraphTensor* transposedInput = [mpsGraph transposeTensor:newCachedGraph->selfTensor
-                                                            dimension:(NSUInteger)self.dim() - 1
-                                                        withDimension:(NSUInteger)dim_
-                                                                 name:nil];
-          MPSGraphTensor* identity = [mpsGraph identityWithTensor:transposedInput name:nil];
-          MPSGraphTensor* negatedTransposedInput = [mpsGraph negativeWithTensor:identity name:nil];
-          NSArray<MPSGraphTensor*>* outputMPSGraphTensors = [mpsGraph topKWithSourceTensor:negatedTransposedInput
-                                                                                         k:((NSUInteger)k)name:nil];
-          MPSGraphTensor* valuesNegatedTransposed = outputMPSGraphTensors[0];
-          MPSGraphTensor* indicesTransposed = outputMPSGraphTensors[1];
-          MPSGraphTensor* valuesNegated = [mpsGraph transposeTensor:valuesNegatedTransposed
-                                                          dimension:(NSUInteger)self.dim() - 1
-                                                      withDimension:(NSUInteger)dim_
-                                                               name:nil];
-          newCachedGraph->valuesTensor = [mpsGraph negativeWithTensor:valuesNegated name:nil];
-          newCachedGraph->indicesTensor = [mpsGraph transposeTensor:indicesTransposed
-                                                          dimension:(NSUInteger)self.dim() - 1
-                                                      withDimension:(NSUInteger)dim_
-                                                               name:nil];
-        } else if (dim_ != -1 && dim_ != self.dim() - 1) {
-          MPSGraphTensor* transposedInput = [mpsGraph transposeTensor:newCachedGraph->selfTensor
-                                                            dimension:(NSUInteger)self.dim() - 1
-                                                        withDimension:(NSUInteger)dim_
-                                                                 name:nil];
-          MPSGraphTensor* identity = [mpsGraph identityWithTensor:transposedInput name:nil];
-          NSArray<MPSGraphTensor*>* outputMPSGraphTensors = [mpsGraph topKWithSourceTensor:identity
-                                                                                         k:((NSUInteger)k)name:nil];
-          MPSGraphTensor* valuesTransposed = outputMPSGraphTensors[0];
-          MPSGraphTensor* indicesTransposed = outputMPSGraphTensors[1];
-          newCachedGraph->valuesTensor = [mpsGraph transposeTensor:valuesTransposed
-                                                         dimension:(NSUInteger)self.dim() - 1
-                                                     withDimension:(NSUInteger)dim_
-                                                              name:nil];
-          newCachedGraph->indicesTensor = [mpsGraph transposeTensor:indicesTransposed
-                                                          dimension:(NSUInteger)self.dim() - 1
-                                                      withDimension:(NSUInteger)dim_
-                                                               name:nil];
-        } else if (!largest) {
-          // only negate
-          MPSGraphTensor* negatedInput = [mpsGraph negativeWithTensor:newCachedGraph->selfTensor name:nil];
-          NSArray<MPSGraphTensor*>* outputMPSGraphTensors = [mpsGraph topKWithSourceTensor:negatedInput
-                                                                                         k:((NSUInteger)k)name:nil];
-          MPSGraphTensor* valuesNegated = outputMPSGraphTensors[0];
-          newCachedGraph->valuesTensor = [mpsGraph negativeWithTensor:valuesNegated name:nil];
-          newCachedGraph->indicesTensor = outputMPSGraphTensors[1];
-        } else {
-          NSArray<MPSGraphTensor*>* outputMPSGraphTensors = [mpsGraph topKWithSourceTensor:newCachedGraph->selfTensor
-                                                                                         k:((NSUInteger)k)name:nil];
-          newCachedGraph->valuesTensor = outputMPSGraphTensors[0];
-          newCachedGraph->indicesTensor = outputMPSGraphTensors[1];
-        }
+      MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
+      MPSDataType dataType = getMPSDataType(self);
+      // #issue 104398441 sortWithTensor and argsortWithTensor
+      if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
+        dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+        castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
       }
+      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
+                                                         axis:(NSUInteger)dim
+                                                   descending:largest
+                                                         name:nil];
+      sortedTensor = [mpsGraph sliceTensor:sortedTensor
+                                 dimension:(NSUInteger)dim
+                                     start:((NSUInteger)0)length:k
+                                      name:nil];
+      MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
+                                                               axis:(NSInteger)dim
+                                                         descending:largest
+                                                               name:@"argmax_out"];
+      argSortedTensor = [mpsGraph sliceTensor:argSortedTensor dimension:dim start:((NSUInteger)0)length:k name:nil];
+      newCachedGraph->valuesTensor = sortedTensor;
+      newCachedGraph->indicesTensor = argSortedTensor;
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->selfTensor, self);
     // Outputs as placeholders
@@ -378,9 +311,6 @@ TORCH_IMPL_FUNC(cat_out_mps)
     }
 
     auto outputDataType = getMPSScalarType(out.scalar_type());
-    if (!is_macos_13_or_newer() && out.scalar_type() == kBool) {
-      outputDataType = MPSDataTypeInt8;
-    }
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, out, /*mpsShape=*/nil, /*gatherTensorData=*/false, outputDataType);
 
