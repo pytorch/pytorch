@@ -410,7 +410,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         def func(foo):
             event.wait()
-            return foo + 1
+            return foo + 1, event
 
         x = torch.randn((1024, 1024), device="cuda")
         cnts = torch._dynamo.testing.CompileCounter()
