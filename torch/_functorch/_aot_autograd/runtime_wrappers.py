@@ -1273,9 +1273,9 @@ def merge_view_inputs(
         return True
 
     assert len(fwd_inputs) == len(mutated_input_info)
-    if not [info for info in mutated_input_info if info.mutates_data]:
-        # Return early when there are no mutations.
-        return fwd_inputs, None
+    # if not [info for info in mutated_input_info if info.mutates_data]:
+    #     # Return early when there are no mutations.
+    #     return fwd_inputs, None
 
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
     base_args = []
@@ -1286,6 +1286,12 @@ def merge_view_inputs(
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
+
+    for storage_ref, idxs in storage_ref_to_idx.items():
+        print(f"storage_ref: {storage_ref}, idxs: {idxs}")
+        for idx in idxs:
+            print(f"fwd_inputs[idx].shape: {fwd_inputs[idx].shape}")
+
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:

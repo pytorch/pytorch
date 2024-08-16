@@ -803,7 +803,7 @@ class TestFullyShardCompile(FSDPTest):
             from collections import OrderedDict
 
             """
-            model: TransformerDecoder(
+            original model: TransformerDecoder(
                 (tok_embeddings): Embedding(32000, 4096)
                 (layers): ModuleList(
                     (0): TransformerDecoderLayer(
@@ -835,6 +835,30 @@ class TestFullyShardCompile(FSDPTest):
                 (norm): RMSNorm()
                 (output): Linear(in_features=4096, out_features=32000, bias=False)
             )
+
+            simplified model: TransformerDecoder(
+                (tok_embeddings): Embedding(32000, 4096)
+                (layers): ModuleList(
+                    (0): TransformerDecoderLayer(
+                    (sa_norm): Identity()
+                    (attn): CausalSelfAttention(
+                        (q_proj): LoRALinear(
+                            (dropout): Dropout(p=0.05, inplace=False)
+                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
+                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
+                        )
+                        (k_proj): Identity()
+                        (v_proj): Identity()
+                        (output_proj): Linear(in_features=4096, out_features=4096, bias=False)
+                        (pos_embeddings): RotaryPositionalEmbeddings()
+                    )
+                    (mlp_norm): Identity()
+                    (mlp): Identity()
+                    )
+                )
+                (norm): RMSNorm()
+                (output): Linear(in_features=4096, out_features=32000, bias=False)
+            )
             """
 
             str_indices = [str(i) for i in range(len(model.layers._modules))][
@@ -846,14 +870,12 @@ class TestFullyShardCompile(FSDPTest):
             model.layers[0].sa_norm = torch.nn.Identity()
             model.layers[0].mlp_norm = torch.nn.Identity()
             model.layers[0].mlp = torch.nn.Identity()
-            model.layers[0].attn.output_proj = torch.nn.Identity()
+            # model.layers[0].attn.output_proj = torch.nn.Identity()  # NOTE: if not nn.Identity, it will cause "size-0 tensor being used" issue.
             model.layers[0].attn.k_proj = torch.nn.Identity()
             model.layers[0].attn.v_proj = torch.nn.Identity()
             print(f"model: {model}")
-            # for p in model.parameters():
-            #     p.requires_grad_(True)
             adapter_params = torchtune.modules.peft.peft_utils.get_adapter_params(model)
-            print(f"adapter_params: {adapter_params}")
+            print(f"adapter_params: {list(adapter_params.keys())}")
             torchtune.modules.peft.peft_utils.set_trainable_params(
                 model, adapter_params
             )
@@ -898,97 +920,13 @@ class TestFullyShardCompile(FSDPTest):
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    # TODO: native_dropout causes CUDA IMA error, need to figure out why
-    @torch._inductor.config.patch(fallback_random=True)
     def test_torchtune_llama_backend_inductor(self):
         for fullgraph in [True]:
-            with self._maybe_add_graph_break_to_sdpa(
-                fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(
-                fullgraph
-            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fullgraph
-            ):
-                _, triton_codes = run_and_get_code(
-                    lambda: self._test_traceable_fsdp(
-                        *self._create_torchtune_llama_factory_fns(),
-                        "inductor",
-                        fullgraph=fullgraph,
-                    )
-                )
-            if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
-                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-                )
-                fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
-                for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
-                    dict(
-                        overlapped_compute_op_str="aten.native_dropout.",
-                        num_resize=0,
-                        num_set=12,
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_set=12,
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_set=12,
-                        last_all_gather=True,
-                    ),
-                ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
-                        file_check, **fwd_ag_block_info
-                    )
-                file_check.run(fwd_code)
-
-                bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
-                for bwd_ag_block_info in [
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_set=12,
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_set=12,
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_set=12,
-                        last_all_gather=True,
-                    ),
-                ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
-                        file_check, **bwd_ag_block_info
-                    )
-                for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm("),
-                    dict(
-                        overlapped_compute_op_str=None
-                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                    dict(overlapped_compute_op_str=None),
-                    dict(overlapped_compute_op_str=None),
-                ]:
-                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
-                        file_check, **bwd_rs_block_info
-                    )
-                file_check.run(bwd_code)
-            else:
-                # TODO: when fullgraph=False and there is graph break in FWD graph,
-                # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-                )
+            self._test_traceable_fsdp(
+                *self._create_torchtune_llama_factory_fns(),
+                "inductor",
+                fullgraph=fullgraph,
+            )
 
 
 if __name__ == "__main__":

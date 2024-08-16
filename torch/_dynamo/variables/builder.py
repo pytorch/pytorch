@@ -2571,13 +2571,18 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
         log.debug(
-            "wrap_to_fake %s %s %s %s",
+            "wrap_to_fake %s, real_tid: %s, sid: %s, ssize_or_sum: %s, %s %s %s",
             source.name(),
+            id(e),
+            id(e.untyped_storage()),
+            e.sum().item() if e.untyped_storage().size() > 0 else -1,
             tuple(e.shape),
             symbolic_context,
             type(e),
         )
         fake_e = wrap_fake_exception(
+            # TODO(yf225): we should dedup using storage id, right?
+            # otherwise for tensors with same storage id but different tensor id, they are different fake tensors!
             lambda: tx.fake_mode.from_tensor(
                 e,
                 source=source,
