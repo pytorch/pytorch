@@ -547,7 +547,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(
             f"""
                 {aot_config_comment}
-                from ctypes import c_void_p, c_long
+                from ctypes import c_void_p, c_long, c_int
                 import torch
                 import math
                 import random
