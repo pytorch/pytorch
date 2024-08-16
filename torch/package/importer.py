@@ -18,13 +18,9 @@ __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"
 class ObjNotFoundError(Exception):
     """Raised when an importer cannot find an object by searching for its name."""
 
-    pass
-
 
 class ObjMismatchError(Exception):
     """Raised when an importer found a different object with the same name as the user-provided one."""
-
-    pass
 
 
 class Importer(ABC):
@@ -56,7 +52,6 @@ class Importer(ABC):
 
         The contract is the same as for importlib.import_module.
         """
-        pass
 
     def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
         """Given an object, return a name that can be used to retrieve the

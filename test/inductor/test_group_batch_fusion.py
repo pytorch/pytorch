@@ -19,7 +19,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
