@@ -2185,14 +2185,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
 
-        #ifdef _WIN32
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return result;
         }
-        #else
+
+        #ifdef __APPLE__
         template <> inline long parse_arg<long>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
