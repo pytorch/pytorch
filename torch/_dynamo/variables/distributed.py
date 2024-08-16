@@ -32,7 +32,7 @@ class DistributedVariable(VariableTracker):
     and hold the tracking value for the corresponding distributed object.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
@@ -274,6 +274,8 @@ class ProcessGroupVariable(DistributedVariable):
             return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
             return variables.ConstantVariable.create(self.value.size())
+        if name == "_get_backend_name":
+            return variables.ConstantVariable.create(self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -362,7 +364,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
         **options,
-    ):
+    ) -> None:
         super().__init__(**options)
         self.proxy = proxy
         self.module = module

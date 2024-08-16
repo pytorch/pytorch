@@ -38,7 +38,7 @@ class ProfileMetrics:
             self.fusions / max(1, other.fusions),
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.operators:4.0%} ops {self.microseconds:4.0%} time"
 
     def tocsv(self):
@@ -46,7 +46,7 @@ class ProfileMetrics:
 
 
 class ProfileResult:
-    def __init__(self, captured, total, unique_graphs):
+    def __init__(self, captured, total, unique_graphs) -> None:
         self.captured: ProfileMetrics = captured or ProfileMetrics()
         self.total: ProfileMetrics = total or ProfileMetrics()
         self.unique_graphs: int = unique_graphs
@@ -60,7 +60,7 @@ class ProfileResult:
     def percent(self):
         return self.captured / self.total
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"{self.unique_graphs:2} graphs {self.captured.graphs:2} graph calls "
             f"{self.captured.operators:4}/{self.total.operators:4} = "

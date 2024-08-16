@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
   if (dtype == c10::kQInt8) {
@@ -35,4 +35,4 @@ int64_t cudnn_version() {
   return CUDNN_VERSION;
 }
 
-}}  // namespace at::cudnn
+} // namespace at::native

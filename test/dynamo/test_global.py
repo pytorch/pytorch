@@ -225,7 +225,10 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         reset_name()
 
     def test_store_global_crossfile_inline(self):
-        import mock_store_global_crossfile_inline
+        try:
+            from . import mock_store_global_crossfile_inline
+        except ImportError:
+            import mock_store_global_crossfile_inline
 
         @torch.compile()
         def fn(x):

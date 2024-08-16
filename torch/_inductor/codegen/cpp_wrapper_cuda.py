@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -43,8 +43,6 @@ class CppWrapperCuda(CppWrapperCpu):
         super().write_header()
 
         self.header.splice("#include <filesystem>")
-        self.header.splice("typedef at::Half half;")
-        self.header.splice("typedef at::BFloat16 bfloat16;")
         if config.abi_compatible:
             self.header.splice(
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
@@ -192,16 +190,27 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
-    def generate_default_grid(self, name: str, grid: List[Any], cuda: bool = True):
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwargs,
+    ):
         """
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics.
         """
         if not cuda:
             return grid
-        assert isinstance(grid, list), f"expected {grid=} to be a list"
+        assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
-        grid_fn = default_grid(*grid)
+        grid_callable = grid_callable or default_grid
+        if not grid_extra_kwargs:
+            grid_fn = grid_callable(*grid)
+        else:
+            grid_fn = grid_callable(*grid, **grid_extra_kwargs)
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
@@ -225,6 +234,7 @@ class CppWrapperCuda(CppWrapperCpu):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types

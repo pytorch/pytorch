@@ -584,12 +584,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // TODO: remove this, there are no codegenerated checks for devices yet
-  sparse::impl::_check_is_cpu(self, "self");
-  sparse::impl::_check_is_cpu(mat1, "mat1");
-  sparse::impl::_check_is_cpu(mat2, "mat2");
-  sparse::impl::_check_is_cpu(result, "result");
-
   // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
   // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
   // TODO: remove code duplication and unify code

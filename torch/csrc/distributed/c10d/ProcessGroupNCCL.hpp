@@ -46,6 +46,8 @@ static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
     "NCCL_BLOCKING_WAIT"};
 
+// TODO: We want to eventually remove this variable and make users to use
+// the default value (3 - SkipCleanUp).
 // Control whether or not we perform Async Error Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
@@ -99,7 +101,7 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
-// Control the interval inside the watchdog thread to check the coordinated
+// Control the interval inside the monitoring thread to check the coordinated
 // signal from other ranks, e.g. to dump the debugging information.
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
@@ -341,6 +343,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
 
+    // Ephemeral timeouts are owned by exactly one work,
+    // and reset after that work completes.
+    // There may be more than one ephemeral timeout active at the same time,
+    // and this variable is used to track the ownership of ephemeral timeout.
+    std::chrono::milliseconds ownedEphermeralTimeout_ =
+        std::chrono::milliseconds(0);
+
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
 
@@ -470,8 +479,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
+  // This function returns a local uid for ProcessGroupNCCL.
   uint64_t getUid() {
-    return static_cast<uint64_t>(uid_);
+    return static_cast<uint64_t>(local_id_);
   }
 
   c10::intrusive_ptr<Options> getOptions() {
@@ -642,6 +652,24 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void performNocolorSplit(at::Device device);
 
+  // This method adds a temporary extension for the timeout period,
+  // applying to all collectives between the calling of this API and
+  // the completion of the first collective on the GPU. While this feature
+  // provides flexibility in specific scenarios, it introduces statefulness
+  // to timeout setting. Therefore, it is advisable to use this API sparingly
+  // and consider alternative approaches, such as directly setting the timeout
+  // or utilizing a barrier collective (one can set any timeout to the barrier),
+  // whenever feasible.
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout);
+
+  // This function is only intended for testing purposes because we don't
+  // want to expose the `WorkNCCL` via pybind. It verifies whether the
+  // `opTimeout_` of the provided WorkNCCL instance is the same as the specified
+  // timeout.
+  bool verifyWorkTimeoutForTest(
+      const c10::intrusive_ptr<Work> work,
+      const std::chrono::milliseconds& timeout);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -801,6 +829,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the global ranks of a PG.
   const std::vector<uint64_t>& groupRanks() const;
 
+  // Util function to assign timeout to each work.
+  void assignTimeoutToWork(
+      const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
+      const c10::intrusive_ptr<Options>& option);
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -838,6 +871,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Store> globalStore_;
 
   bool storeError_{false};
+
+  // The lock which protects the write/read of
+  // ephemeralTimeoutActive_/ephemeralTimeoutInflight_.
+  // TODO(fduwjj): We need to have an audit on all mutexes we are adding here.
+  // And consolidate them if possible.
+  std::mutex mtxTimeoutExtension_;
+
+  // The ephemeral timeout added on top of existing timeout for works issued
+  // before first work finishes.
+  std::chrono::milliseconds ephemeralTimeoutActive_ =
+      std::chrono::milliseconds(0);
+
+  // The ephemeral timeout addition which has been already applied to work.
+  std::chrono::milliseconds ephemeralTimeoutInflight_ =
+      std::chrono::milliseconds(0);
 
   const c10::intrusive_ptr<Options> options_;
 
@@ -1074,7 +1122,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-  size_t uid_;
+  // The number of ProcessGroupNCCL created on the current rank.
+  size_t local_id_;
 
   std::string logPrefix_;
 

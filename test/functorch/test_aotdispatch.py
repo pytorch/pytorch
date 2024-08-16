@@ -841,8 +841,10 @@ def forward(self, primals_1):
 
         a = torch.ones(4, requires_grad=True)
         a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
         aa = TwoTensor(a, a2)
-        aa2 = aa.clone().detach().requires_grad_()
+        aa2 = TwoTensor(a3, a4)
         aaaa = TwoTensor(aa, aa2)
         out = f(aaaa)
         self.assertTrue(isinstance(out, TwoTensor))

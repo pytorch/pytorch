@@ -2780,7 +2780,17 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             assert tensor.ndim == 1  # we've already checked this above
             # Don't suggest the legacy behavior in the error message
             torch._check(
-                tensor.shape[0] == 0,
+                # NB: it is not enough to simply assert that tensor.shape[0] == 0;
+                # this MUST be true even under guard size oblivious.
+                # Effectively, we must actually know that the shape is zero,
+                # passing an unbacked SymInt which we will defer a runtime
+                # assert on won't cut it.  This is a policy decision (size
+                # oblivious semantics say that u0 tensors never are inferred
+                # to be zero size, even if they must be that for the cat to go
+                # through), and is load bearing for our Inductor lowerings
+                # (which assume that size oblivious tests are OK to determine
+                # if a shape is permissibly zero.)
+                guard_size_oblivious(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",

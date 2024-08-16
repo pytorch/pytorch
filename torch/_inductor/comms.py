@@ -132,7 +132,7 @@ def _schedule_for_comm(
             scores_1[snode.get_name()] = 1
 
     class Runnable:
-        def __init__(self, snode):
+        def __init__(self, snode) -> None:
             self.snode = snode
             name = next(iter(snode.get_operation_names()))
             fused_name = name_to_fused_node[name].get_name()

@@ -42,7 +42,7 @@ jobs:
           python-version: "3.9"
 
       - name: Install requirements
-        shell: bash -l {0}
+        shell: bash
         run: |
           set -euxo pipefail
           ${CONDA_RUN} pip install -r llm-target-determinator/requirements.txt
@@ -50,7 +50,7 @@ jobs:
           ${CONDA_RUN} pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
-        shell: bash -l {0}
+        shell: bash
         run: |
           set -euxo pipefail
           cd "${GITHUB_WORKSPACE}/codellama"
@@ -76,7 +76,7 @@ jobs:
       - name: Run Retriever
         id: run_retriever
         continue-on-error: true  # ghstack not currently supported due to problems getting git diff
-        shell: bash -l {0}
+        shell: bash
         run: |
           set -euxo pipefail
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator

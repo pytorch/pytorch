@@ -14,9 +14,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 // A class that analyzes the given program relevant for Block backend.
 class BlockAnalysis : public IRVisitor {
@@ -145,6 +143,4 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
