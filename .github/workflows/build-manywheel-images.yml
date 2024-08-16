@@ -223,6 +223,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
@@ -282,6 +285,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
