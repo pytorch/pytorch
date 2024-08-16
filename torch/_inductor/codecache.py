@@ -1314,7 +1314,7 @@ class FxGraphCache:
                         torch.distributed.is_available()
                         and torch.distributed.is_initialized()
                     ):
-                        increased_timeout_sec = (
+                        increased_timeout_sec = int(
                             time_taken_ns // 1e9
                         )  # convert to seconds
                         cache_info["ephemeral_timeout_increase"] = increased_timeout_sec
