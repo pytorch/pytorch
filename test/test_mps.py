@@ -10860,7 +10860,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertFalse(nz.requires_grad)
 
     def test_nonzero_multi_threading(self):
-        # Test that MPS does not crash if nonzero called concurrently
+        # Test that MPS doesn't crash if nonzero called concurrently
         # See https://github.com/pytorch/pytorch/issues/100285
         x = torch.rand(3, 3, device="mps")
         t1 = threading.Thread(target=torch.nonzero, args=(x,))
