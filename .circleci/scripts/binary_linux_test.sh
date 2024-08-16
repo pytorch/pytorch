@@ -52,13 +52,6 @@ if [[ "\$python_nodot" = *39* ]]; then
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "\$python_nodot" = *38* ]]; then
-  # sympy 1.12.1 is the last version that supports Python 3.8
-  SYMPY_PIN="==1.12.1"
-else
-  SYMPY_PIN=">=1.13.0"
-fi
-
 # Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
 mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
@@ -88,7 +81,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
-      "sympy\${SYMPY_PIN}" \
+      sympy>=1.12 \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then

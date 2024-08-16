@@ -29,7 +29,7 @@ class ROCmTemplate(KernelTemplate):
         input_nodes: List[Buffer],
         layout: Layout,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
 
         Baseclass for ROCm C++ Templates, derived from KernelTemplate. Not to be instantiated directly.

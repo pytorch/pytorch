@@ -4045,7 +4045,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)
@@ -4071,7 +4071,7 @@ class TestSerialization(TestCase, SerializationMixin):
                      "CUDA is unavailable or NamedTemporaryFile on Windows")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(3, 1024)
                 self.fc2 = torch.nn.Linear(1024, 5)
@@ -4132,6 +4132,17 @@ class TestSerialization(TestCase, SerializationMixin):
             y['odd'][0] = torch.tensor(0.25, dtype=dtype)
             y['even'][0] = torch.tensor(-0.25, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+
+    @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
+    @parametrize('weights_only', (True, False))
+    def test_serialization_byte_literal(self, byte_literals, weights_only):
+        """ Tests that byte literal can be serialized.
+        See: https://github.com/pytorch/pytorch/issues/133163"""
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(byte_literals, f)
+            f.seek(0)
+            y = torch.load(f, weights_only=weights_only)
+            self.assertEqual(y, byte_literals)
 
     @parametrize('filename', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")

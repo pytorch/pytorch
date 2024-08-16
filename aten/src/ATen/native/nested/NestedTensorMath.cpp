@@ -538,6 +538,46 @@ Tensor softmax_nested(
   return output;
 }
 
+Tensor NestedTensor_all(
+    const Tensor& input,
+    const int64_t dim,
+    const bool keepdim) {
+  auto input_ptr = get_nested_tensor_impl(input);
+  int64_t ntensors = input_ptr->size(0);
+  if (ntensors == 0) {
+    return input.clone();
+  }
+  int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
+  TORCH_CHECK(
+      positive_dim >= 1,
+      "Cannot apply all across nested dimension 0");
+  const Tensor& buffer = input_ptr->get_unsafe_storage_as_tensor(),
+      & sizemat = input_ptr->get_nested_sizes();
+
+
+  Tensor output_buffer = buffer.new_empty(buffer.sizes());
+
+  Tensor output_size = sizemat.clone();
+  if (keepdim) {
+    output_size.select(1, positive_dim - 1).fill_(1);
+  } else {
+    output_size = output_size.slice(1, 0, positive_dim - 1);
+  }
+
+  Tensor output = wrap_buffer(output_buffer, output_size.contiguous());
+
+  std::vector<Tensor> input_unbind = input.unbind(),
+      output_unbind = output.unbind();
+  for (int64_t i = 0; i < ntensors; i++) {
+    at::all_out(
+        output_unbind[i],
+        input_unbind[i],
+        positive_dim - 1,
+        keepdim);
+  }
+  return output;
+}
+
 Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_ptr = get_nested_tensor_impl(self);
   // check input dimensions

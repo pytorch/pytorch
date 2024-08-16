@@ -42,8 +42,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
-from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
     Argument,
@@ -93,7 +93,7 @@ from .schema import (  # type: ignore[attr-defined]
     UserOutputSpec,
 )
 from .union import _Union
-
+from ..utils import remove_proxy_from_state_dict
 
 __all__ = [
     "serialize",
@@ -179,8 +179,6 @@ _SYM_INT_OPS = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
-    torch.ops.aten.sym_size.int,
-    torch.ops.aten.sym_stride.int,
 }
 
 
@@ -193,6 +191,10 @@ _SYM_BOOL_OPS = {
     operator.gt,
     torch.sym_not,
 }
+
+
+assert not any(isinstance(op, torch._ops.OpOverload) for op in _SYM_INT_OPS)
+assert not any(isinstance(op, torch._ops.OpOverload) for op in _SYM_BOOL_OPS)
 
 
 @dataclass
@@ -319,7 +321,8 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
-    artifact = torch.load(buffer)
+    # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
+    artifact = torch.load(buffer, weights_only=False)
     assert isinstance(artifact, (tuple, dict))
     return artifact
 
@@ -608,8 +611,12 @@ class GraphModuleSerializer(metaclass=Final):
         )
 
     def serialize_sym_op_inputs(self, op, args) -> List[NamedArgument]:
+        if isinstance(op, torch._ops.OpOverload):
+            args_names = [arg.name for arg in op._schema.arguments]
+        else:
+            assert op in _SYM_INT_OPS or op in _SYM_BOOL_OPS
+            args_names = list(inspect.signature(op).parameters.keys())
         serialized_args = []
-        args_names = inspect.signature(op).parameters.keys()
         for args_name, arg in zip(args_names, args):
             serialized_args.append(
                 NamedArgument(name=args_name, arg=self.serialize_input(arg))
@@ -1359,7 +1366,7 @@ class ExportedProgramSerializer(metaclass=Final):
         Args:
             exported_program: Exported Program to serialize
         """
-        exported_program._validate()
+        exported_program.validate()
 
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature, exported_program.module_call_graph
@@ -1393,9 +1400,13 @@ class ExportedProgramSerializer(metaclass=Final):
         # Test canonical form is well defined.
         canonicalize(serialized_ep)
 
+        # Proxy cannot be dumped, so we remove them.
+        new_state_dict = remove_proxy_from_state_dict(
+            exported_program.state_dict, in_place=False
+        )
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(exported_program.state_dict),
+            serialize_torch_artifact(new_state_dict),
             serialize_torch_artifact(constants),
             serialize_torch_artifact(exported_program.example_inputs),
         )
@@ -1413,7 +1424,7 @@ class GraphModuleDeserializer(metaclass=Final):
         constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
         example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: Dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()
@@ -1481,7 +1492,10 @@ class GraphModuleDeserializer(metaclass=Final):
             if val.expr_str in self.symbol_name_to_symbol:
                 sym = self.symbol_name_to_symbol[val.expr_str]
             else:
-                sym = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
+                sym = sympy.sympify(
+                    val.expr_str,
+                    locals={**self.sympy_functions, **self.symbol_name_to_symbol},
+                )
                 # NOTE(avik): Assumptions on symbols are not explicitly serialized.
                 # This seems dangerous: it might cause unknown differences in shape env behavior
                 # on deserialization? Probably deserves a follow-up.
@@ -1843,6 +1857,34 @@ class GraphModuleDeserializer(metaclass=Final):
                 allow_non_fake_inputs=True,
                 shape_env=self.shape_env,
             )
+            self.sympy_functions = {
+                # all torch.utils._sympy.functions should go here
+                # TODO(avik): find a better way to keep this collection in sync;
+                # e.g.., `exec('from torch.utils._sympy.functions import *', ...)`
+                # would work as long as the public API of that module is complete
+                "FloorDiv": torch.utils._sympy.functions.FloorDiv,
+                "ModularIndexing": torch.utils._sympy.functions.ModularIndexing,
+                "Where": torch.utils._sympy.functions.Where,
+                "PythonMod": torch.utils._sympy.functions.PythonMod,
+                "Mod": torch.utils._sympy.functions.Mod,
+                "CleanDiv": torch.utils._sympy.functions.CleanDiv,
+                "CeilToInt": torch.utils._sympy.functions.CeilToInt,
+                "FloorToInt": torch.utils._sympy.functions.FloorToInt,
+                "CeilDiv": torch.utils._sympy.functions.CeilDiv,
+                "LShift": torch.utils._sympy.functions.LShift,
+                "RShift": torch.utils._sympy.functions.RShift,
+                "PowByNatural": torch.utils._sympy.functions.PowByNatural,
+                "FloatPow": torch.utils._sympy.functions.FloatPow,
+                "FloatTrueDiv": torch.utils._sympy.functions.FloatTrueDiv,
+                "IntTrueDiv": torch.utils._sympy.functions.IntTrueDiv,
+                "IsNonOverlappingAndDenseIndicator": torch.utils._sympy.functions.IsNonOverlappingAndDenseIndicator,
+                "TruncToFloat": torch.utils._sympy.functions.TruncToFloat,
+                "TruncToInt": torch.utils._sympy.functions.TruncToInt,
+                "RoundToInt": torch.utils._sympy.functions.RoundToInt,
+                "RoundDecimal": torch.utils._sympy.functions.RoundDecimal,
+                "ToFloat": torch.utils._sympy.functions.ToFloat,
+                "Identity": torch.utils._sympy.functions.Identity,
+            }
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
             self.constants = deserialize_torch_artifact(constants)
             self.signature = self.deserialize_signature(serialized_graph_module.signature)

@@ -1,1 +1,1 @@
-from .modules import *  # noqa: F403
+from torch.nn.quantized._reference.modules import *  # noqa: F403

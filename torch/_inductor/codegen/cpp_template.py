@@ -30,7 +30,7 @@ class CppTemplate(KernelTemplate):
         layout: ir.Layout,
         num_threads: int,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
@@ -114,9 +114,10 @@ class CppTemplate(KernelTemplate):
                 #include "c10/util/Unroll.h"
             """
         )
-        enable_kernel_profile = (
-            config.cpp.enable_kernel_profile and sys.platform == "linux"
-        )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         if enable_kernel_profile:
             res.writelines(["#include <ATen/record_function.h>"])
         return res

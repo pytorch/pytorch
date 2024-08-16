@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_bn_configs,
@@ -15,6 +16,7 @@ from ._common_operator_config_utils import (
     _get_tensor_info_op_configs,
 )
 from .backend_config import BackendConfig, DTypeConfig
+
 
 __all__ = [
     "get_test_only_legacy_native_backend_config",
@@ -102,6 +104,7 @@ weight_only_quint4x2_dtype_config = DTypeConfig(
 # |  BACKEND CONFIGS  |
 # =====================
 
+
 def get_test_only_legacy_native_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack) with various additional fp16 ops.
@@ -124,7 +127,7 @@ def get_test_only_legacy_native_backend_config() -> BackendConfig:
     ]
     share_qparams_op_dtype_configs = [
         default_op_quint8_dtype_config,
-        default_op_fp16_dtype_config
+        default_op_fp16_dtype_config,
     ]
     tensor_info_op_dtype_configs = [
         default_op_quint8_dtype_config,
@@ -138,19 +141,30 @@ def get_test_only_legacy_native_backend_config() -> BackendConfig:
         weight_only_quint4x2_dtype_config,
     ]
     layer_norm_op_dtype_configs = [input_output_only_quint8_dtype_config]
-    return BackendConfig("_native_and_fp16") \
-        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs)) \
-        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
-        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
-        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_tensor_info_op_configs(tensor_info_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_ln_configs(layer_norm_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
+    return (
+        BackendConfig("_native_and_fp16")
+        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs))
+        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs))
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs))
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(
+            _get_share_qparams_op_configs(share_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(
+            _get_tensor_info_op_configs(tensor_info_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_ln_configs(layer_norm_op_dtype_configs))
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_embedding_op_configs(embedding_op_dtype_configs)
+        )
+    )
+
 
 def get_native_backend_config() -> BackendConfig:
     """
@@ -177,25 +191,37 @@ def get_native_backend_config() -> BackendConfig:
         weight_only_quint4x2_dtype_config,
     ]
     layer_norm_op_dtype_configs = [input_output_only_quint8_dtype_config]
-    return BackendConfig("native") \
-        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs)) \
-        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
-        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
-        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_tensor_info_op_configs(tensor_info_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_ln_configs(layer_norm_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
+    return (
+        BackendConfig("native")
+        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs))
+        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs))
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs))
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(
+            _get_share_qparams_op_configs(share_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(
+            _get_tensor_info_op_configs(tensor_info_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_ln_configs(layer_norm_op_dtype_configs))
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_embedding_op_configs(embedding_op_dtype_configs)
+        )
+    )
+
 
 def get_native_backend_config_dict():
     """
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack) in dictionary form.
     """
     return get_native_backend_config().to_dict()
+
 
 def get_test_only_legacy_native_backend_config_dict():
     """

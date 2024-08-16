@@ -338,6 +338,12 @@ error_on_nested_fx_trace = True
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
+# If true, enables feature that captures PyTorch sparsity in the
+# exported FX graph. This flag should become the default eventually
+# and be removed, but currently provides a way to fall back to old
+# graph breaking behavior.
+capture_sparse_compute = False if is_fbcode() else True
+
 # If true, error if we try to compile a function that has
 # been seen before.
 # [@compile_ignored: runtime_behaviour]
@@ -365,9 +371,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
-inline_inbuilt_nn_modules = (
-    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
-)
+inline_inbuilt_nn_modules = not is_fbcode()
 
 
 def default_debug_dir_root():
@@ -454,6 +458,17 @@ fake_tensor_cache_crosscheck_enabled = (
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
+# Enables use of collectives *during* compilation to synchronize behavior
+# across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
+# behavior, making it so that we infer that if an input is dynamic by
+# inspecting whether or not its input size varies across ranks.  Because
+# this synchronization uses collectives, all ranks must run compilation at
+# the same time; ranks must not diverge with graph breaks.  This can be most
+# reliably achieved by ensuring PT2 only is run on SPMD programs.  If this
+# invariant is inviolated, you will likely deadlock NCCL and encounter a
+# NCCL timeout.
+enable_compiler_collectives = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
@@ -462,5 +477,6 @@ if TYPE_CHECKING:
 
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

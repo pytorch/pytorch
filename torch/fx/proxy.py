@@ -8,6 +8,7 @@ import torch
 import inspect
 import operator
 import collections
+import logging
 
 from dataclasses import is_dataclass, fields
 
@@ -25,6 +26,9 @@ __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
            'ScopeContextManager']
 
 
+log = logging.getLogger(__name__)
+
+
 @compatibility(is_backward_compatible=False)
 class Scope:
     """ Scope object that records the module path and the module type
@@ -38,7 +42,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sub = Sub()
 
             def forward(self, x):
@@ -96,6 +100,7 @@ _COPY_META_FIELDS = [
     "from_node",
     "quantization_tag",
     "_numeric_debug_handle",
+    "partitioner_tag"
 ]
 
 
@@ -135,6 +140,7 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
@@ -174,6 +180,8 @@ class TracerBase:
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
+
+        log.debug("create_node %s", node)
         return node
 
     @compatibility(is_backward_compatible=True)
@@ -396,6 +404,25 @@ class Proxy:
         # note: not added to the graph yet, if this is a method call
         # we peephole optimize to the method invocation
         return Attribute(self, k)
+
+    def __getstate__(self) -> Dict:
+        raise NotImplementedError(
+            """__getstate__ not implemented for Proxy. """
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
+
+    def __deepcopy__(self, memo) -> Dict:
+        raise NotImplementedError(
+            """__deepcopy__ not implemented for Proxy. """
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
+
+    def __setstate__(self, d):
+        # This is called when being unpickled/loaded.
+        raise NotImplementedError(
+            """__setstate__ not implemented for Proxy. """
+            f"""Proxy is created for {self.node.name}, {self.node.target}. Please remove "proxy" from __dict__."""
+        )
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)

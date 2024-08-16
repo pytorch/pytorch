@@ -4423,9 +4423,7 @@ class TestBinaryUfuncs(TestCase):
             test_helper(x, q)
 
     @onlyCUDA
-    @dtypes(
-        torch.chalf,
-    )
+    @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
         # Ideally, this should be covered by `test_complex_half_reference_testing`

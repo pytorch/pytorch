@@ -118,7 +118,7 @@ struct EValue {
       at::ArrayRef<double> as_double_list;
       at::ArrayRef<bool> as_bool_list;
       EValObjectList<at::Tensor> as_tensor_list;
-      EValObjectList<at::optional<at::Tensor>> as_list_optional_tensor;
+      EValObjectList<std::optional<at::Tensor>> as_list_optional_tensor;
     } copyable_union;
 
     // Since a Tensor just holds a TensorImpl*, there's no value to use Tensor*
@@ -347,7 +347,7 @@ struct EValue {
   }
 
   /****** List Optional Tensor Type ******/
-  /*implicit*/ EValue(EValObjectList<at::optional<at::Tensor>> t)
+  /*implicit*/ EValue(EValObjectList<std::optional<at::Tensor>> t)
       : tag(Tag::ListOptionalTensor) {
     payload.copyable_union.as_list_optional_tensor = t;
   }
@@ -356,7 +356,7 @@ struct EValue {
     return tag == Tag::ListOptionalTensor;
   }
 
-  at::ArrayRef<at::optional<at::Tensor>> toListOptionalTensor() {
+  at::ArrayRef<std::optional<at::Tensor>> toListOptionalTensor() {
     return payload.copyable_union.as_list_optional_tensor.get();
   }
 
@@ -383,9 +383,9 @@ struct EValue {
    * an uninitialized state.
    */
   template <typename T>
-  inline at::optional<T> toOptional() {
+  inline std::optional<T> toOptional() {
     if (this->isNone()) {
-      return at::nullopt;
+      return std::nullopt;
     }
     return this->to<T>();
   }
@@ -455,15 +455,15 @@ EVALUE_DEFINE_TO(double, toDouble)
 EVALUE_DEFINE_TO(at::string_view, toString)
 EVALUE_DEFINE_TO(at::ScalarType, toScalarType)
 EVALUE_DEFINE_TO(at::MemoryFormat, toMemoryFormat)
-EVALUE_DEFINE_TO(at::optional<at::Tensor>, toOptional<at::Tensor>)
+EVALUE_DEFINE_TO(std::optional<at::Tensor>, toOptional<at::Tensor>)
 EVALUE_DEFINE_TO(at::ArrayRef<int64_t>, toIntList)
 EVALUE_DEFINE_TO(
-    at::optional<at::ArrayRef<int64_t>>,
+    std::optional<at::ArrayRef<int64_t>>,
     toOptional<at::ArrayRef<int64_t>>)
 EVALUE_DEFINE_TO(
-    at::optional<at::ArrayRef<double>>,
+    std::optional<at::ArrayRef<double>>,
     toOptional<at::ArrayRef<double>>)
-EVALUE_DEFINE_TO(at::ArrayRef<at::optional<at::Tensor>>, toListOptionalTensor)
+EVALUE_DEFINE_TO(at::ArrayRef<std::optional<at::Tensor>>, toListOptionalTensor)
 EVALUE_DEFINE_TO(at::ArrayRef<double>, toDoubleList)
 #undef EVALUE_DEFINE_TO
 

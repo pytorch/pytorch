@@ -55,7 +55,7 @@ class Joinable(ABC):
     """
 
     @abstractmethod
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
