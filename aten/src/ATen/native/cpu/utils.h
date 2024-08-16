@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Parallel.h>
-#include <ATen/core/TensorAccessor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/llvmMathExtras.h>
 
@@ -9,7 +8,8 @@
 #include <fbgemm/Fbgemm.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 template <typename T>
 inline void _store(T* dst, at::vec::Vectorized<T> src) {
@@ -194,4 +194,5 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace at::native
+} // namespace native
+} // namespace at
