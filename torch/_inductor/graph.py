@@ -1233,6 +1233,8 @@ class GraphLowering(torch.fx.Interpreter):
             if old_arg is new_arg:
                 return
             if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                # The lowering for copy_ is smart enough to "replace" old_arg with
+                # new_arg in all future uses so a copy_ kernel never gets emitted.
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
 
         schema = fx_node.target._schema

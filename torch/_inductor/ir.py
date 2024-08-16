@@ -4684,7 +4684,6 @@ class ExternKernel(InputsKernel):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
-        # Realize the node, otherwise we can't plan its layout.
         try:
             x.realize()
         except NotImplementedError:
@@ -4746,8 +4745,9 @@ class ExternKernel(InputsKernel):
                 return cls.require_stride_order(x, order, allow_padding=allow_padding)
             except NotImplementedError:
                 pass
+        # Although this is a clone, inductor is good about fusing clones into previous
+        # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)
-        torch._dynamo.utils.counters["inductor"]["require_stride_order_clones"] += 1
         as_storage_and_layout(
             x,
             freeze=True,

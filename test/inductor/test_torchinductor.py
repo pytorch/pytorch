@@ -38,7 +38,7 @@ from torch._dynamo.testing import (
     same,
     skipIfPy312,
 )
-from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._dynamo.utils import ifdynstaticdefault
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
@@ -10573,20 +10573,28 @@ class CommonTemplate:
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
-    def test_mutable_custom_op_fixed_layout_requires_clone(self):
+    def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
-            counters.clear()
-
             mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=GPU_TYPE)
             inp = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
             expected_stride = mod(inp).clone().stride()
 
             lib.define(
-                "bar(Tensor x) -> Tensor",
+                "bar(Tensor x, bool is_compiling) -> Tensor",
             )
 
+            bar_strides = []
+
             @torch.library.impl(lib, "bar", "CompositeExplicitAutograd")
-            def _(x):
+            def _(x, is_compiling):
+                if is_compiling:
+                    bar_strides.append(x.stride())
+                result = x.clone()
+                assert x.stride() == result.stride()
+                return result
+
+            @torch.library.impl(lib, "bar", "Meta")
+            def _(x, is_compiling):
                 return x.clone()
 
             lib.define(
@@ -10600,20 +10608,23 @@ class CommonTemplate:
                 x.copy_(x + 1)
 
             def fn(x):
+                # Inductor changes the conv to be channels-last
                 z = mod(x)
-                output = torch.ops.mylib.bar(z)
+                output = torch.ops.mylib.bar(z, torch._dynamo.is_compiling())
                 torch.ops.mylib.add_one(output)
                 return output**2
 
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
-            # one for the convolution
-            # one for the add_one mutated input.
-            self.assertEqual(counters["inductor"]["require_stride_order_clones"], 2)
+
+            # For this test to be valid, Inductor must have changed the conv
+            # to be channels-last. If this assertion ever fails then we need
+            # a new test case.
+            self.assertEqual(len(bar_strides), 1)
+            self.assertNotEqual(bar_strides[0], expected_stride)
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
-        counters.clear()
         with torch.library._scoped_library("mylib", "DEF") as lib:
             lib.define(
                 "copy_(Tensor(a!) dst, Tensor src) -> ()",
@@ -10640,7 +10651,6 @@ class CommonTemplate:
             compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
             compiled_inductor_out = compiled_inductor_f(x)
             self.assertEqual(compiled_inductor_out, eager_out)
-            self.assertEqual(counters["inductor"]["require_stride_order_clones"], 0)
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
