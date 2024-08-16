@@ -30,6 +30,7 @@ class FakeTensorProp(torch.fx.Interpreter):
             mode = FakeTensorMode()
         self._mode = mode
         mode.epoch += 1
+        mode.reset_nt_tensor_id_counter()
 
     def run_node(self, n: Node):
         from torch.fx.experimental.symbolic_shapes import rebind_unbacked, compute_unbacked_bindings

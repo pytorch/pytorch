@@ -962,6 +962,9 @@ def aot_module_simplified(
     params_flat = list(params_flat)
     params_len = len(params_flat)
 
+    if cudagraphs is None:
+        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:

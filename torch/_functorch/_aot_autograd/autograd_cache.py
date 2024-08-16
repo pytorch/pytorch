@@ -280,8 +280,6 @@ class CompiledForward(FXGraphCacheLoadable):
     Cacheable entry for a forward function
     """
 
-    pass
-
 
 @dataclass
 class CompiledBackward(FXGraphCacheLoadable):

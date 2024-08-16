@@ -16,7 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -1182,6 +1182,13 @@ class CppVecOverrides(CppOverrides):
         return f"{a} >> {b}"
 
     @staticmethod
+    def remainder(a, b):
+        assert (
+            a.dtype == b.dtype
+        ), "remainder vec implementation expect the same inputs' dtype."
+        return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -1284,16 +1291,30 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def floordiv(a, b):
-        # a and b are integer type
-        _t = f"decltype({a})"
-        quot = f"{a} / {b}"
-        has_rem = f"({a} % {b} != {_t}(0))"
-        is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-        return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+        if is_float_dtype(a.dtype):
+            assert (
+                a.dtype == b.dtype
+            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            return f"at::vec::div_floor_floating_vec({a}, {b})"
+        else:
+            assert all(is_integer_dtype(item.dtype) for item in [a, b])
+            # a and b are integer type
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                # Doing blend to set the remaining bits of b to non-zero
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            quot = f"{a} / {b}"
+            has_rem = f"({a} % {b} != {_t}(0))"
+            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
+            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
 
     @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
+        if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({b})"
+            b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
         return f"{a} / {b}"
 
     @staticmethod
@@ -2010,6 +2031,11 @@ class CppVecKernel(CppKernel):
         assert num_vectors >= 1
         return num_vectors
 
+    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
+        # This utility function is used to check if the vector lanes has been
+        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
+        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
+
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
         if num_vectors == 1:
@@ -2721,11 +2747,30 @@ class CppTile2DKernel(CppVecKernel):
 
     overrides = CppTile2DOverrides  # type: ignore[assignment]
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor,
+        tiling_indices,
+        tiling_dtype,
+        inner_tail_size=None,
+        outer_tail_size=None,
+    ):
         super().__init__(
-            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+            args,
+            num_threads,
+            tiling_factor,
+            tiling_indices[1],
+            tiling_dtype,
+            inner_tail_size,
         )
         self.tiling_indices = tiling_indices
+        self.inner_tail_size = inner_tail_size
+        self.outer_tail_size = outer_tail_size
+        self.inner_num_elems = inner_tail_size if inner_tail_size else tiling_factor
+        self.outer_num_elems = outer_tail_size if outer_tail_size else tiling_factor
+        self.inner_is_tiling_idx = True
 
     def inner_itervar(self):
         return sympy_index_symbol(f"{self.itervars[self.outer_idx]}_inner")
@@ -2750,13 +2795,22 @@ class CppTile2DKernel(CppVecKernel):
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
         ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
-        ld_dst = f"{factor}"
+        ld_dst = f"{self.num_elems}"
         if is_store:
             src, dst = dst, src
             ld_src, ld_dst = ld_dst, ld_src
 
         need_define = True
-        load_or_store = f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
+        if self.inner_is_tiling_idx ^ is_store:
+            load_or_store = (
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.inner_num_elems},{self.outer_num_elems}>"
+                f"({src}, {ld_src}, {dst}, {ld_dst});"
+            )
+        else:
+            load_or_store = (
+                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{self.outer_num_elems},{self.inner_num_elems}>"
+                f"({src}, {ld_src}, {dst}, {ld_dst});"
+            )
         if is_store:
             tile_var = self.cse.newvar()
         elif load_or_store not in self.cse.cache:
@@ -2766,7 +2820,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{self.outer_num_elems}*{self.inner_num_elems}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -2787,7 +2841,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, index, is_store=False
             )
             # vector load inside the kernel inner loop
-            loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
+            loadbuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
             dtype = V.graph.get_dtype(name)
             line = self._get_vec_load_line(loadbuf, 0, dtype)  # type: ignore[arg-type]
             csevar = self.cse.generate(self.loads, line)
@@ -2811,11 +2865,12 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, index, is_store=True
             )
             # vector store inside the kernel inner loop
-            storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
-            if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
-                line = f"{value}.store({storebuf}, {self.tiling_factor});"
-            elif V.graph.get_dtype(name) in (torch.uint8, torch.int8):
-                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            storebuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
+            if self.tail_size or V.graph.get_dtype(name) in DTYPE_LOWP_FP + [
+                torch.uint8,
+                torch.int8,
+            ]:
+                line = f"{value}.store({storebuf}, {self.num_elems});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -2825,9 +2880,14 @@ class CppTile2DKernel(CppVecKernel):
 
     def codegen_inner_loops(self, code):
         inner = self.inner_itervar()
-        code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
-        )
+        if self.inner_is_tiling_idx:
+            code.writeline(
+                f"for (long {inner} = 0; {inner} < {self.outer_num_elems}; {inner}++)"
+            )
+        else:
+            code.writeline(
+                f"for (long {inner} = 0; {inner} < {self.inner_num_elems}; {inner}++)"
+            )
 
     def set_ranges(self, group, reduction_group):
         vars = super().set_ranges(group, reduction_group)
@@ -2837,6 +2897,14 @@ class CppTile2DKernel(CppVecKernel):
             if self.tiling_indices[1] < self.reduction_depth
             else reversed(self.tiling_indices)
         )
+        if self.tiling_idx == self.tiling_indices[0]:
+            self.tail_size = self.outer_tail_size
+            self.num_elems = self.outer_num_elems
+            self.inner_is_tiling_idx = False
+        else:
+            self.tail_size = self.inner_tail_size
+            self.num_elems = self.inner_num_elems
+            self.inner_is_tiling_idx = True
         return vars
 
     def transform_indexing(self, index: sympy.Expr) -> sympy.Expr:
@@ -2887,6 +2955,8 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float,
             torch.bfloat16,
             torch.float16,
+            torch.uint8,
+            torch.int8,
         ]
 
     def disable_vec(self, msg=None):
@@ -3538,25 +3608,65 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] == len(self.itervars) - 1
                     and tiling_factors[0] == tiling_factors[1]
                 )
-                tile2d_kernel = codegen_kernel(
-                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
-                )
-                vec_kernel = codegen_kernel(
-                    CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
-                )
                 metrics.generated_cpp_vec_kernel_count += 2
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                outer_tail_loop.set_kernel(scalar_kernel)
                 (
                     inner_main_loop,
                     inner_tail_loop,
                 ) = outer_main_loop.split_with_tiling(
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
+                tile2d_kernel = codegen_kernel(
+                    CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                )
                 inner_main_loop.set_kernel(tile2d_kernel)
-                inner_tail_loop.set_kernel(vec_kernel)
+
+                if could_masked_vec:
+                    (
+                        inner_main_loop_of_outer_tail_loop,
+                        inner_tail_loop_of_outer_tail_loop,
+                    ) = outer_tail_loop.split_with_tiling(
+                        tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
+                    )
+
+                    for tail_loop in (
+                        inner_tail_loop,
+                        outer_tail_loop,
+                        inner_tail_loop_of_outer_tail_loop,
+                    ):
+                        tail_loop.steps = tail_loop.size - tail_loop.offset
+
+                    for tail_loop, inner_tail_size, outer_tail_size in (
+                        (inner_tail_loop, inner_tail_loop.steps, None),
+                        (
+                            inner_main_loop_of_outer_tail_loop,
+                            None,
+                            outer_tail_loop.steps,
+                        ),
+                        (
+                            inner_tail_loop_of_outer_tail_loop,
+                            inner_tail_loop_of_outer_tail_loop.steps,
+                            outer_tail_loop.steps,
+                        ),
+                    ):
+                        masked_tile2d_kernel = codegen_kernel(
+                            CppTile2DKernel,
+                            tiling_factors[0],
+                            tiling_indices,
+                            vec_dtype,
+                            inner_tail_size,
+                            outer_tail_size,
+                        )
+                        tail_loop.set_kernel(masked_tile2d_kernel)
+                else:
+                    vec_kernel = codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
+                    inner_tail_loop.set_kernel(vec_kernel)
+
+                    outer_tail_loop.set_kernel(scalar_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
         for body in loop_bodies:
