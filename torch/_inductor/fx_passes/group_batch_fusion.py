@@ -36,7 +36,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 aten = torch.ops.aten
 
@@ -157,15 +156,11 @@ class GroupFusion(GroupBatchFusionBase):
     Fuse ops in a group way, e.g, fuse mm/addmm of arbitrary input shapes with fbgemm.gmm.
     """
 
-    pass
-
 
 class BatchFusion(GroupBatchFusionBase):
     """
     Fuse ops in a batch way, e.g, fuse mm/addmm of same input shapes with bmm.
     """
-
-    pass
 
 
 class BatchPointwiseOpsFusionFactory(BatchFusion):
@@ -916,20 +911,24 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                     args=(stack_inputs,),
                     kwargs={"inplace": subset[0].kwargs.get("inplace", False)},
                 )
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"],
+                    inplace=subset[0].kwargs.get("inplace", False),
+                )
             else:
                 batch_op = graph.call_function(
                     self.op,
                     args=(stack_inputs,),
                 )
-            if is_node_meta_valid(batch_op):
-                batch_op.meta["example_value"] = self.op(batch_op.meta["example_value"])
+                batch_op.meta["example_value"] = self.op(
+                    stack_inputs.meta["example_value"]
+                )
             unbind_op = graph.call_function(
                 torch.unbind, args=(batch_op,), kwargs={"dim": 0}
             )
-            if is_node_meta_valid(unbind_op):
-                unbind_op.meta["example_value"] = torch.unbind(
-                    unbind_op.meta["example_value"], dim=0
-                )
+            unbind_op.meta["example_value"] = torch.unbind(
+                batch_op.meta["example_value"], dim=0
+            )
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(unbind_op):
                     getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
