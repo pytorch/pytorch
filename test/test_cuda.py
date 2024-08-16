@@ -623,27 +623,6 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
-    def test_generic_device_behavior(self):
-        current_device = torch.current_device()
-        torch.set_device(current_device)
-        self.assertEqual(current_device, torch.current_device())
-        if torch.cuda.is_available():
-            self.assertTrue(torch.has_accelerator())
-            self.assertEqual(torch.current_accelerator(), "cuda")
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_generic_multi_device_behavior(self):
-        current_device = torch.current_device()
-        target_device = (current_device + 1) % torch.device_count()
-
-        with torch.DeviceGuard(target_device):
-            self.assertEqual(target_device, torch.current_device())
-        self.assertEqual(current_device, torch.current_device())
-
-        s1 = torch.Stream(target_device)
-        torch.set_stream(s1)
-        self.assertEqual(target_device, torch.current_device())
-
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
         self.assertEqual(stream.device_index, torch.cuda.current_device())
@@ -674,19 +653,6 @@ class TestCuda(TestCase):
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_cuda.cpu(), a + b)
         self.assertTrue(event1.elapsed_time(event2) > 0)
-
-        stream1 = torch.Stream()
-        stream2 = torch.Stream()
-        torch.set_stream(stream1)
-        self.assertEqual(torch.current_stream(), stream1)
-        with torch.StreamGuard(stream2):
-            self.assertEqual(torch.current_stream(), stream2)
-            a_cuda = a.to("cuda", non_blocking=True)
-            b_cuda = b.to("cuda", non_blocking=True)
-        self.assertEqual(torch.current_stream(), stream1)
-        event1.record(stream2)
-        torch.synchronize()
-        self.assertTrue(event1.query())
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()

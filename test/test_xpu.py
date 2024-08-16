@@ -186,16 +186,6 @@ print(torch.xpu.device_count())
             self.assertEqual(s0, torch.xpu.current_stream())
         self.assertEqual(s2, torch.xpu.current_stream())
 
-        s0 = torch.xpu.Stream()
-        torch.set_stream(s0)
-        s1 = torch.current_stream()
-        self.assertEqual(s0, s1)
-        s2 = torch.xpu.Stream()
-        torch.set_stream(s2)
-        with torch.StreamGuard(s0):
-            self.assertEqual(s0, torch.current_stream())
-        self.assertEqual(s2, torch.current_stream())
-
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
         s0 = torch.xpu.Stream(device=0, priority=low)
@@ -223,27 +213,6 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
-
-    def test_generic_device_behavior(self):
-        current_device = torch.current_device()
-        torch.set_device(current_device)
-        self.assertEqual(current_device, torch.current_device())
-        if torch.xpu.is_available():
-            self.assertTrue(torch.has_accelerator())
-            self.assertEqual(torch.current_accelerator(), "xpu")
-
-    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
-    def test_generic_multi_device_behavior(self):
-        current_device = torch.current_device()
-        target_device = (current_device + 1) % torch.device_count()
-
-        with torch.DeviceGuard(target_device):
-            self.assertEqual(target_device, torch.current_device())
-        self.assertEqual(current_device, torch.current_device())
-
-        s1 = torch.Stream(target_device)
-        torch.set_stream(s1)
-        self.assertEqual(target_device, torch.current_device())
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -278,19 +247,6 @@ print(torch.xpu.device_count())
             NotImplementedError, "elapsedTime is not supported by XPU backend."
         ):
             event1.elapsed_time(event2)
-
-        stream1 = torch.Stream()
-        stream2 = torch.Stream()
-        torch.set_stream(stream1)
-        self.assertEqual(torch.current_stream(), stream1)
-        with torch.StreamGuard(stream2):
-            self.assertEqual(torch.current_stream(), stream2)
-            a_xpu = a.to("xpu", non_blocking=True)
-            b_xpu = b.to("xpu", non_blocking=True)
-        self.assertEqual(torch.current_stream(), stream1)
-        event1.record(stream2)
-        torch.synchronize()
-        self.assertTrue(event1.query())
 
     def test_generator(self):
         torch.manual_seed(2024)
