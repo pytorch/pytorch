@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -42,6 +42,9 @@ from .runtime_utils import (
     triton_config_to_hashable,
 )
 
+
+if TYPE_CHECKING:
+    from ..remote_cache import RemoteCacheBackend
 
 try:
     import triton
@@ -628,7 +631,7 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, **kwargs):
+    def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs wiht spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
@@ -663,6 +666,11 @@ class CachingAutotuner(KernelInterface):
                 grid=grid,
                 stream=stream,
             )
+
+        if with_profiler:
+            from torch._inductor.utils import do_bench_using_profiling
+
+            return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
@@ -938,8 +946,9 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
-    def __init__(self, *args, regex_filter="", **kwargs):
+    def __init__(self, *args, regex_filter="", with_profiler=False, **kwargs):
         self.regex_filter = regex_filter
+        self.with_profiler = with_profiler
         super().__init__(*args, **kwargs)
         self.cached = None
 
@@ -952,7 +961,9 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = self.bench(
+                launcher, *args, grid=grid, with_profiler=self.with_profiler
+            )
             num_in_out_ptrs = len(
                 [
                     arg_name
@@ -1079,7 +1090,7 @@ def cached_autotune(
 
         local_cache = None
         cache_filename = None
-        remote_cache = None
+        remote_cache: Optional[RemoteCacheBackend] = None
         remote_cache_key = None
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
@@ -1146,7 +1157,7 @@ def cached_autotune(
             if local_cache is not None and cache_filename is not None:
                 local_cache.put(cache_filename, data)
             if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)
+                remote_cache.put(remote_cache_key, data)  # type: ignore[arg-type]
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -1176,6 +1187,9 @@ def cached_autotune(
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
+                with_profiler=inductor_meta[
+                    "profile_bandwidth_with_do_bench_using_profiling"
+                ],
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
