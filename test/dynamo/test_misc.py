@@ -3215,12 +3215,107 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.rand(2, 2)
         m = Model()
 
-        opt_m = torch.compile(backend="eager")(m)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         ref = m(x)
         res = opt_m(x)
         self.assertTrue(same(ref, res))
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
+
+    def test_dunder_new_function_inlining1(self):
+        class Mock:
+            def __new__(cls):
+                return super().__new__(cls)
+
+            def __init__(self):
+                self.c = 5
+
+            def run(self, x):
+                return x * self.c
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dunder_new_function_inlining2(self):
+        class Vehicle:
+            def __new__(cls, *args, **kwargs):
+                return super(Vehicle, cls).__new__(cls)
+
+            def __init__(self, make, model, year):
+                self.make = make
+                self.model = model
+                self.year = year
+
+        class Car(Vehicle):
+            def __new__(cls, *args, **kwargs):
+                return super(Car, cls).__new__(cls)
+
+            def __init__(self, make, model, year, num_doors):
+                super(Car, self).__init__(make, model, year)
+                self.num_doors = num_doors
+
+        class ElectricCar(Car):
+            def __new__(cls, *args, **kwargs):
+                return super(ElectricCar, cls).__new__(cls)
+
+            def __init__(self, make, model, year, num_doors, battery_capacity):
+                super(ElectricCar, self).__init__(make, model, year, num_doors)
+                self.battery_capacity = battery_capacity
+
+            def run(self, x):
+                return torch.sin(x)
+
+        def fn(x):
+            ev = ElectricCar("Tesla", "Model S", 2022, 4, "100 kWh")
+            return ev.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_multiple_inheritance(self):
+        class Base1:
+            def __new__(cls):
+                return super().__new__(cls)
+
+            def __init__(self):
+                super().__init__()
+                if not hasattr(self, "base2"):
+                    raise ValueError("Wrong MRO tracing")
+                self.base1 = 3
+
+        class Base2:
+            def __new__(cls):
+                return super().__new__(cls)
+
+            def __init__(self):
+                super().__init__()
+                self.base2 = 5
+
+        class Derived(Base1, Base2):
+            def __new__(cls):
+                return super().__new__(cls)
+
+            def __init__(self):
+                super().__init__()
+                self.derived = 7
+
+            def run(self, x):
+                return self.base1 * self.base2 * self.derived * x
+
+        def fn(x):
+            o = Derived()
+            return o.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_class_duner_mro(self):
         class ModuleA(torch.nn.Module):
