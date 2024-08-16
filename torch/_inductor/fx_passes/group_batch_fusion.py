@@ -36,7 +36,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 aten = torch.ops.aten
 
@@ -157,15 +156,11 @@ class GroupFusion(GroupBatchFusionBase):
     Fuse ops in a group way, e.g, fuse mm/addmm of arbitrary input shapes with fbgemm.gmm.
     """
 
-    pass
-
 
 class BatchFusion(GroupBatchFusionBase):
     """
     Fuse ops in a batch way, e.g, fuse mm/addmm of same input shapes with bmm.
     """
-
-    pass
 
 
 class BatchPointwiseOpsFusionFactory(BatchFusion):

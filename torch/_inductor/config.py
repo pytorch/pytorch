@@ -618,6 +618,11 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 # Specify a file where we print out the profiling results.
 # None means we do not dump results to a file.
 profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
+# Switch to do_bench_using_profiling to exclude the CPU overheads
+profile_bandwidth_with_do_bench_using_profiling = (
+    os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
+)
+
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -741,6 +746,12 @@ class cpp:
     # mitigate the sync overhead and memory usage.
     # When set to 0, the number of slices is unlimited.
     gemm_max_k_slices = int(os.environ.get("TORCHINDUCTOR_CPP_GEMM_MAX_K_SLICES", "1"))
+
+    # For perf tuning and debugging purpose, configure the pre-defined cache blocking for
+    # MxNxK dims respectively. The blockings are separated by comma and the unit is
+    # the number of register blocks.
+    # For example, "4,1,10" means 4 register blocks on M, 1 on N and 10 on K respectively.
+    gemm_cache_blocking = os.environ.get("TORCHINDUCTOR_CPP_GEMM_CACHE_BLOCKING", None)
 
 
 # config specific to codegen/triton.py

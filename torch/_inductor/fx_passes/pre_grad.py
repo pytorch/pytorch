@@ -72,6 +72,10 @@ def is_same_dict(inductor_dict, optimus_dict):
     return True
 
 
+def normalize_node_kwargs_pass(graph):
+    return None
+
+
 def fuse_parallel_linear_pass(graph):
     return None
 
@@ -127,6 +131,13 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
             )
+            # normalize kwargs, must be called as the first pass
+            pass_execution_and_save(
+                normalize_node_kwargs_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
+            )
             pass_execution_and_save(
                 fuse_chunk_reshape_unsqueeze_concat_pass,
                 gm,
@@ -138,6 +149,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
+            )
+            pass_execution_and_save(
+                normalize_node_kwargs_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
             )
             pass_execution_and_save(
                 fuse_chunk_squeeze_cat_pass.apply,
