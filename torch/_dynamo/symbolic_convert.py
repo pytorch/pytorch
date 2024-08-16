@@ -2795,10 +2795,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.push_torch_function_mode_stack(mode)
 
     def pop_torch_function_mode_stack(self):
-        return self.symbolic_torch_function_mode_stack.popleft()
+        return self.symbolic_torch_function_mode_stack.pop()
 
     def push_torch_function_mode_stack(self, mode_var):
-        self.symbolic_torch_function_mode_stack.appendleft(mode_var)
+        self.symbolic_torch_function_mode_stack.append(mode_var)
 
     def inline_torch_function_mode(self):
         with self._pop_mode_for_inlining() as cur_mode:
