@@ -48,7 +48,15 @@ from typing import (  # type: ignore[attr-defined]
     Union,
 )
 
-import tabulate  # type: ignore[import-untyped]
+
+try:
+    from tabulate import tabulate
+except ModuleNotFoundError:
+    print("tabulate is not installed. Proceeding without it.")
+
+    # Define a no-op tabulate function
+    def tabulate(data: Any) -> Any:
+        return data
 
 
 T = TypeVar("T", bound=NamedTuple)
