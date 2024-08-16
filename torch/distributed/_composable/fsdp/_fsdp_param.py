@@ -432,9 +432,8 @@ class FSDPParam:
         all_gather_input_dtypes: List[torch.dtype],
         world_size: int,
         device: torch.device,
-        force_recreate: bool = False,
     ):
-        if not force_recreate and len(self.all_gather_outputs) > 0:
+        if len(self.all_gather_outputs) > 0:
             return  # already initialized
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
@@ -446,22 +445,17 @@ class FSDPParam:
         [Note: Invariants for torch.compile Traceable FSDP2]
         1. Under compile, we always re-populate the content of `self._unsharded_param`
            per AllGather using the slow path.
-        2. Under compile, we always recreate `self.all_gather_outputs` per AllGather.
-           This is to ensure the buffer creation is internal to the graph and
-           avoid `self.all_gather_outputs` being captured as a graph input.
-        3. Under compile, at the end of `free_unsharded_param()`, we always clean up
-           `self.all_gather_outputs` and `self._unsharded_inner_tensors`,
-           to avoid them being captured as graph output.
 
         With these invariants, only these tensors will be inputs to the graph:
         - Sharded parameters
         - Placeholders for the `self._unsharded_param` nn.Parameter
+        - all_gather_outputs
         """
-        if not ca.compiled_autograd_enabled and hasattr(
+        if hasattr(
             self, "_unsharded_param"
         ):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
-            if not hasattr(inner_tensor, "fsdp_post_all_gather"):
+            if ca.compiled_autograd_enabled or not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
             for tensor in self._unsharded_inner_tensors:
                 alloc_storage(tensor)
@@ -501,20 +495,9 @@ class FSDPParam:
         )
         if self.is_dtensor:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
-        if hasattr(self, "_unsharded_param"):
-            assert ca.compiled_autograd_enabled
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                self._unsharded_param
-            ):
-                # torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
-                size = self._unsharded_param.numel() * self._unsharded_param.itemsize
-                if (storage := self._unsharded_param.untyped_storage()).size() != size:
-                    storage.resize_(size)
-                torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
-        else:
-            self._unsharded_param = nn.Parameter(
-                unsharded_param, requires_grad=self.sharded_param.requires_grad
-            )
+        self._unsharded_param = nn.Parameter(
+            unsharded_param, requires_grad=self.sharded_param.requires_grad
+        )
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(
@@ -644,9 +627,6 @@ class FSDPParam:
             self.all_gather_outputs, self._unsharded_inner_tensors
         ):
             free_storage(tensor)
-        if ca.compiled_autograd_enabled:
-            self.all_gather_outputs = []
-            self._unsharded_inner_tensors = []
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
