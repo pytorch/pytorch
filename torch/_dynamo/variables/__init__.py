@@ -29,6 +29,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -136,6 +137,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",

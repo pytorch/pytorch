@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import operator
 import os
 import unittest.mock as mock
 from unittest.mock import patch
@@ -244,6 +245,42 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_substitute_in_graph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+
+        torch._dynamo.reset()
+
+        @torch._dynamo.substitute_in_graph(operator.indexOf)
+        def polyfill(sequence, x):
+            for i, item in enumerate(sequence):
+                if item is x or item == x:
+                    return i
+            raise ValueError("sequence.index(x): x not in sequence")
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+
+        torch._dynamo.reset()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = polyfill
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):

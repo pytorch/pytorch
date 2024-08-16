@@ -160,6 +160,7 @@ class PublicTorchCompilerTests(TestCase):
         function_names = [
             "reset",
             "allow_in_graph",
+            "substitute_in_graph",
             "list_backends",
             "assume_constant_result",
             "disable",

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+import functools
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -11,6 +12,7 @@ from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
+from .utils import is_function
 
 
 if TYPE_CHECKING:
@@ -26,6 +28,9 @@ else:
         if name.startswith("__"):
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 def run(fn=None):
@@ -157,6 +162,94 @@ def forbid_in_graph(fn):
     assert callable(fn), "forbid_in_graph applies only to callables"
     fn._dynamo_forbidden = True
     return fn
+
+
+def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
+    """
+    Register a polyfill handler for a C++ function. This handler will be used to substitute the
+    original function when inlining the original function in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original function. It is not used when
+        the original function is called directly.
+
+    The polyfill handler is a function that will be called in place of the original function when
+    inlining the original function. The polyfill handler should have the same signature and the same
+    behavior as the original function.
+
+    Example::
+
+        >>> import operator
+        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
+        2
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        Unsupported: ...
+
+        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
+        ... def indexOf(sequence, x):
+        ...     for i, item in enumerate(sequence):
+        ...         if item is x or item == x:
+        ...             return i
+        ...     raise ValueError("sequence.index(x): x not in sequence")
+
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        2
+    """
+    if not is_function(cxx_fn):
+        raise TypeError(
+            f"substitute_in_graph expects a function but got {type(cxx_fn)!r}"
+        )
+
+    def wrapper(python_fn: _F) -> _F:
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.trace_rules import get_torch_obj_rule_map
+        from torch._dynamo.variables import PolyfilledFunctionVariable
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        id_dispatch_map = VariableBuilder._id_dispatch()
+        if id(cxx_fn) in id_dispatch_map:
+            raise RuntimeError(
+                f"Duplicate dispatch rule for {cxx_fn}: "
+                "already registered in VariableBuilder's id dispatch map"
+            )
+
+        rule_map = get_torch_obj_rule_map()
+        if cxx_fn in rule_map:
+            raise RuntimeError(
+                f"Duplicate object {cxx_fn} with different rules: "
+                f"{PolyfilledFunctionVariable}, {rule_map[cxx_fn]}"
+            )
+
+        polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
+        if cxx_fn in polyfill_handlers:
+            raise RuntimeError(
+                f"Duplicate polyfill handlers for {cxx_fn}: "
+                f"already handled by {polyfill_handlers[cxx_fn]}"
+            )
+
+        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # C++ function.
+        @functools.wraps(python_fn)
+        def wrapped(*args, **kwargs):
+            return cxx_fn(*args, **kwargs)
+
+        def builder_dispatch_fn(self, value):
+            return PolyfilledFunctionVariable(
+                value,
+                source=self.source,
+                **self.install_guards(GuardBuilder.CLOSURE_MATCH),
+            )
+
+        id_dispatch_map[id(cxx_fn)] = id_dispatch_map[id(wrapped)] = builder_dispatch_fn
+        rule_map[cxx_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        polyfill_handlers[cxx_fn] = polyfill_handlers[wrapped] = python_fn
+
+        wrapped.__torch_dynamo_polyfill__ = python_fn  # type: ignore[attr-defined]
+
+        return wrapped  # type: ignore[return-value]
+
+    return wrapper
 
 
 # Helper function to flatten a tensor subclass and apply a function to
