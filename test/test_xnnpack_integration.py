@@ -811,7 +811,7 @@ class TestXNNPACKRewritePass(TestCase):
         weight_shape = (weight_output_dim, data_shape[-1])
 
         class Linear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(weight_shape), requires_grad=False
@@ -824,7 +824,7 @@ class TestXNNPACKRewritePass(TestCase):
                 return F.linear(x, self.weight, self.bias)
 
         class LinearNoBias(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(weight_shape), requires_grad=False
@@ -880,7 +880,7 @@ class TestXNNPACKRewritePass(TestCase):
         conv_bias_shape = output_channels
 
         class Conv2D(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(conv_weight_shape), requires_grad=False
@@ -905,7 +905,7 @@ class TestXNNPACKRewritePass(TestCase):
                 )
 
         class Conv2DT(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(conv_transpose_weight_shape), requires_grad=False
@@ -1104,7 +1104,7 @@ class TestXNNPACKRewritePass(TestCase):
         )
 
         class MFusionAntiPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear_weight = torch.nn.Parameter(
                     torch.rand(linear_weight_shape), requires_grad=False
@@ -1139,7 +1139,7 @@ class TestXNNPACKRewritePass(TestCase):
         )
 
         class MFusionAntiPatternParamMinMax(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear_weight = torch.nn.Parameter(
                     torch.rand(linear_weight_shape), requires_grad=False
@@ -1179,7 +1179,7 @@ class TestXNNPACKRewritePass(TestCase):
         weight_shape = (weight_output_dim, data_shape[-1])
 
         class DecomposedLinearAddmm(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(weight_shape), requires_grad=False
@@ -1193,7 +1193,7 @@ class TestXNNPACKRewritePass(TestCase):
                 return torch.addmm(self.bias, x, weight_t)
 
         class DecomposedLinearMatmulAdd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(weight_shape), requires_grad=False
@@ -1209,7 +1209,7 @@ class TestXNNPACKRewritePass(TestCase):
                 return res
 
         class DecomposedLinearMatmul(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(
                     torch.rand(weight_shape), requires_grad=False
@@ -1349,7 +1349,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             conv_bias_shape = output_channels
 
             class Conv1D(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.weight = torch.nn.Parameter(
                         torch.rand(conv_weight_shape), requires_grad=False
@@ -1442,7 +1442,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             fc_bias_shape = output_features
 
             class Net(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv_weight = torch.nn.Parameter(
                         torch.rand(conv_weight_shape), requires_grad=False

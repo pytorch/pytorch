@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -15,6 +16,10 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
+#endif
+
+#ifdef USE_XPU
+#include <ATen/xpu/EmptyTensor.h>
 #endif
 
 #include <sstream>
@@ -187,19 +192,25 @@ std::string TensorCheck::check_verbose(
     return fail_reason.str();
   }
   const auto& sizes = v.sym_sizes();
-  const auto& strides = v.sym_strides();
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
       return fail_reason.str();
     }
-    if (known_stride.has_value() && known_stride.value() != strides[i]) {
-      fail_reason << "stride mismatch at index " << i << ". expected "
-                  << known_stride.value() << ", actual " << strides[i];
-      return fail_reason.str();
+  }
+  const bool supports_stride =
+      !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
+  if (supports_stride) {
+    const auto& strides = v.sym_strides();
+    for (auto i : c10::irange(ndim)) {
+      auto known_stride = strides_[i];
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+        fail_reason << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i];
+        return fail_reason.str();
+      }
     }
   }
   return "";
@@ -754,32 +765,53 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
-  // at::empty_strided is surprising slow.  This is a lower-overhead
-  // version that saves ~2us on every allocation.
+inline static PyObject* _empty_strided_device(
+    PyObject* dummy,
+    PyObject* args,
+    c10::DeviceType device_type) {
   HANDLE_TH_ERRORS;
   at::SmallVector<int64_t, 8> sizes;
   at::SmallVector<int64_t, 8> strides;
   at::ScalarType dtype{at::ScalarType::Undefined};
   _parse_empty_strided_args(args, sizes, strides, dtype);
-  return THPVariable_Wrap(at::detail::empty_strided_cpu(sizes, strides, dtype));
+  if (device_type == c10::DeviceType::CPU) {
+    return THPVariable_Wrap(
+        at::detail::empty_strided_cpu(sizes, strides, dtype));
+  }
+#ifdef USE_CUDA
+  else if (device_type == c10::DeviceType::CUDA) {
+    return THPVariable_Wrap(at::detail::empty_strided_cuda(
+        sizes, strides, dtype, c10::DeviceType::CUDA));
+  }
+#endif
+#ifdef USE_XPU
+  else if (device_type == c10::DeviceType::XPU) {
+    return THPVariable_Wrap(at::detail::empty_strided_xpu(
+        sizes, strides, dtype, c10::DeviceType::XPU));
+  }
+#endif
+  else {
+    TORCH_CHECK(
+        false, "PyTorch compiled without support for the specified device.");
+  }
+
   END_HANDLE_TH_ERRORS;
+}
+
+static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is a lower-overhead
+  // version that saves ~2us on every allocation.
+  return _empty_strided_device(dummy, args, c10::DeviceType::CPU);
 }
 
 static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is lower-overhead.
-  HANDLE_TH_ERRORS;
-#ifdef USE_CUDA
-  at::SmallVector<int64_t, 8> sizes;
-  at::SmallVector<int64_t, 8> strides;
-  at::ScalarType dtype{at::ScalarType::Undefined};
-  _parse_empty_strided_args(args, sizes, strides, dtype);
-  return THPVariable_Wrap(at::detail::empty_strided_cuda(
-      sizes, strides, dtype, c10::DeviceType::CUDA));
-#else
-  TORCH_CHECK(false, "PyTorch compiled without USE_CUDA");
-#endif
-  END_HANDLE_TH_ERRORS;
+  return _empty_strided_device(dummy, args, c10::DeviceType::CUDA);
+}
+
+static PyObject* _empty_strided_xpu(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is lower-overhead.
+  return _empty_strided_device(dummy, args, c10::DeviceType::XPU);
 }
 
 static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
@@ -811,6 +843,7 @@ static PyMethodDef _methods[] = {
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
     {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
@@ -851,6 +884,12 @@ bool is_immutable_object(py::handle example_value) {
       PyUnicode_Check(example_value.ptr()) ||
       THPVariable_Check(example_value.ptr());
 }
+
+bool is_parameter(py::handle tensor) {
+  py::object parameter = py::module::import("torch.nn").attr("Parameter");
+  return py::isinstance(tensor, parameter);
+}
+
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -2540,6 +2579,12 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
+      if (is_parameter(py::handle(value))) {
+        fail_reason += ". Guard failed on a parameter, consider using ";
+        fail_reason +=
+            "torch._dynamo.config.force_parameter_static_shapes = False ";
+        fail_reason += "to allow dynamism on parameters.";
+      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);

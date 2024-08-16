@@ -39,6 +39,7 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 
+
 __all__ = [
     "PackagingErrorReason",
     "EmptyMatchError",
@@ -122,8 +123,6 @@ class EmptyMatchError(Exception):
     """This is an exception that is thrown when a mock or extern is marked as
     ``allow_empty=False``, and is not matched with any module during packaging.
     """
-
-    pass
 
 
 class PackagingError(Exception):

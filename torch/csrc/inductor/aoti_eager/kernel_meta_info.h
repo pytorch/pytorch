@@ -51,7 +51,6 @@ struct TensorMetadata {
 
   TensorMetadata()
       : is_symbolic_(false),
-        dtype_(c10::ScalarType::Undefined),
         device_(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES),
         sizes_({}),
         strides_({}) {}
@@ -116,7 +115,7 @@ struct ParameterMetadata {
   // same tag. For example, an operation with two input tensors, the first
   // tensor is a optional tensor and the second tensor is a tensor. The first
   // tensor will have the order 0 and the second tensor will have the order 1.
-  uint64_t order_;
+  uint64_t order_{};
 
   ParameterMetadata() : tag_(INVALID) {}
   ParameterMetadata(TensorMetadata tensor_metadata, uint64_t input_order);

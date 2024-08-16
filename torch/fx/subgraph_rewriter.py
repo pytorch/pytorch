@@ -118,7 +118,7 @@ def replace_pattern(
         from torch.fx import symbolic_trace, subgraph_rewriter
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, w1, w2):

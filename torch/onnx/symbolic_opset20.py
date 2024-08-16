@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 20.
 
@@ -25,10 +24,10 @@ New operators:
 import functools
 
 import torch.nn.functional as F
-
 from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx._internal import jit_utils, registration
+
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py

@@ -10,15 +10,16 @@ from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch._dynamo
 import torch.fx
-import torch.onnx
-from torch.onnx._internal import exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
+
 if TYPE_CHECKING:
+    import torch.onnx
     from torch.export.exported_program import ExportedProgram
 
 
-class TorchExport(exporter.FXGraphExtractor):
+class TorchExport(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.export API
     Args:
         aten_graph: If True, exports a graph with ATen operators.
@@ -34,7 +35,7 @@ class TorchExport(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         model: ExportedProgram,  # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -98,7 +99,7 @@ class TorchExport(exporter.FXGraphExtractor):
 
     def pre_export_passes(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],

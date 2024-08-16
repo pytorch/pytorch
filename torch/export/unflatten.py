@@ -21,6 +21,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.graph_module import _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -132,6 +133,22 @@ class InterpreterModule(torch.nn.Module):
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "InterpreterModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
 
 class FlatArgsAdapter(abc.ABC):
@@ -465,6 +482,22 @@ class UnflattenedModule(torch.nn.Module):
         )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "UnflattenedModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
+
 
 def unflatten(
     module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
@@ -561,9 +594,13 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     parent_split = parent_fqn.split(".")
     child_split = child_fqn.split(".")
 
-    assert (
-        child_split[: len(parent_split)] == parent_split
-    ), f"Child module '{child_fqn}' is not a descendant of parent module '{parent_fqn}'"
+    # TODO: support skip connection by inlining the child module.
+    if child_split[: len(parent_split)] != parent_split:
+        raise RuntimeError(
+            f"Child module '{child_fqn}' is not a descendant of parent mldule '{parent_fqn}'."
+            "This is currently unsupported."
+            "Please try to make child module attach to parent module direclty."
+        )
     return ".".join(child_split[len(parent_split) :])
 
 
@@ -650,12 +687,12 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 class _ModuleFrame:
     def __init__(
         self,
-        flat_graph,
-        nodes,
+        flat_graph: torch.fx.Graph,
+        nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         parent,
-        module_stack,
+        module_stack: List[str],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,

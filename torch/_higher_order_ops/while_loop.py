@@ -18,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("while_loop")
 
     def __call__(
@@ -56,9 +56,6 @@ class WhileLoopOp(HigherOrderOperator):
 
 
 while_loop_op = WhileLoopOp()
-# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
-# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
-while_loop_op.__module__ = "torch.ops.higher_order"
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):
@@ -136,8 +133,13 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     _validate_input(cond_fn, body_fn, carried_inputs)
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _while_loop_op_wrapper(*args, **kwargs):
+        return while_loop_op(*args, **kwargs)
+
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+        return torch.compile(_while_loop_op_wrapper, backend="eager", fullgraph=True)(
             cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
@@ -217,12 +219,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
-    if mode.enable_tracing:
-        return _trace_while_loop(
-            mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
-        )
-    else:
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return _trace_while_loop(
+        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+    )
 
 
 @while_loop_op.py_impl(FakeTensorMode)

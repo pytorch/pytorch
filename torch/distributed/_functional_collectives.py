@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -806,10 +806,7 @@ def _are_we_tracing() -> bool:
         is not None
     ):
         return True
-    mode = get_innermost_proxy_mode()
-    if mode is None:
-        return False
-    return mode.tracer is not None
+    return get_proxy_mode() is not None
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
@@ -960,6 +957,10 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
     lib_impl.impl("broadcast", _broadcast_meta, "Meta")
     lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+    # mark these ops has side effect so that they won't be removed by DCE
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
 
     # Register legacy ops for backward compatibility
     # TODO(yifu): remove these in functional collective beta release
