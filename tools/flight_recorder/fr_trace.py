@@ -55,7 +55,7 @@ except ModuleNotFoundError:
     print("tabulate is not installed. Proceeding without it.")
 
     # Define a no-op tabulate function
-    def tabulate(data: Any, headers: Any = None) -> Any:
+    def tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
         return data
 
 
