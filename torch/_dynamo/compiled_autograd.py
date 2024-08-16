@@ -312,15 +312,15 @@ class AutogradCompilerInstance:
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
-        compiled_autograd_log.info(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph, colored=True)
+        lazy_graph_code = lazy_format_graph_code(
+            "Compiled autograd graph",
+            graph,
+            include_device=True,
+            include_stride=True,
+            colored=True,
         )
-        verbose_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                "Compiled autograd graph", graph, include_device=True, colored=True
-            ),
-        )
+        compiled_autograd_log.info("%s", lazy_graph_code)
+        verbose_log.debug("%s", lazy_graph_code)
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
