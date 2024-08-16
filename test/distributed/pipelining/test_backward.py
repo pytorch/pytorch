@@ -87,6 +87,10 @@ class StageBackwardTests(TestCase):
         ref_loss.backward()
 
         torch.testing.assert_close(x.grad, ref_x.grad)
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            # Check that the weight gradients were not updated
+            self.assertEqual(p.grad, None)
 
     def test_stage_backward_weight(self):
         # MLP as a stage module

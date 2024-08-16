@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
+    """
+    Get the grad function or grad accumulator for a tensor.
+
+    Accumulate grad nodes are lazily created, so we need to a
+    dummy view in order to trigger its creation.
+    """
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
         viewed_t = t.view_as(t)
@@ -23,7 +29,10 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
         if grad_fn is not None:
             return grad_fn.next_functions[0][0]
         else:
-            raise RuntimeError("grad_fn after adding view is None")
+            raise RuntimeError(
+                "Attempted to get grad_fn, but got None."
+                "Is this being created in a no-grad context?"
+            )
     else:
         return t.grad_fn
 
@@ -31,9 +40,15 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 def reverse_closure(
     roots: List[Node], target_nodes: Set[Node]
 ) -> Tuple[Set[Node], Set[Node]]:
+    """
+    This function returns the reverse closure of the given roots,
+    i.e. the set of nodes that can be reached from the roots by following the
+    reverse edges of the graph. The target_nodes are the nodes that we want to
+    include in the closure.
+    """
     # Recurse until we reach a target node
     closure: Set[Node] = set()
-    actual_target_nodes = set()
+    visited_target_nodes = set()
     q: Deque[Node] = collections.deque()
     for node in roots:
         if node is not None and node not in closure:
@@ -53,11 +68,11 @@ def reverse_closure(
             if fn in closure or fn is None:
                 continue
             if fn in target_nodes:
-                actual_target_nodes.add(fn)
+                visited_target_nodes.add(fn)
                 continue
             closure.add(fn)
             q.append(fn)
-    return closure, actual_target_nodes
+    return closure, visited_target_nodes
 
 
 # Enable weak pointer
@@ -66,7 +81,6 @@ class Holder:
         self.node = node
 
 
-# TODO: use weak references to avoid reference cycle
 def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
     q: Deque[Node] = collections.deque()
     root_seen: Set[Node] = set()
@@ -93,6 +107,20 @@ def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
 
 
 def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, Any]]:
+    """
+    Given a list of inputs and a list of parameters, return a list of parameter
+    groups, where each group contains the parameters and the intermediates that
+    are connected to the parameters.
+
+    The returned list of parameter groups is a list of dictionaries, where each
+    dictionary contains the following keys:
+    - "params": a set of parameters
+    - "intermediates": a set of intermediates
+
+    The returned list of parameter groups is a list of dictionaries,
+    """
+    # reverse graph that starts with inputs, and goes up to the dOutput or the loss,
+    # but omits weights and any subgraphs connecting weights to this closure
     inputs_closure, _ = reverse_closure(inputs, set())
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
     for i, param in enumerate(params):
