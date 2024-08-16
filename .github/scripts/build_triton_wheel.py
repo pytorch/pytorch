@@ -49,15 +49,19 @@ def patch_init_py(
     with open(path, "w") as f:
         f.write(orig)
 
+
 # TODO: remove patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 def patch_setup_py(path: Path) -> None:
     with open(path) as f:
         orig = f.read()
     orig = check_and_replace(
-        orig, "https://tritonlang.blob.core.windows.net/llvm-builds/", "https://oaitriton.blob.core.windows.net/public/llvm-builds/"
+        orig,
+        "https://tritonlang.blob.core.windows.net/llvm-builds/",
+        "https://oaitriton.blob.core.windows.net/public/llvm-builds/",
     )
     with open(path, "w") as f:
         f.write(orig)
+
 
 def build_triton(
     *,
