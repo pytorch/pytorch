@@ -12,6 +12,13 @@ PyTorch DTensor (Distributed Tensor)
 
 PyTorch DTensor offers simple and flexible tensor sharding primitives that transparently handles distributed
 logic, including sharded storage, operator computation and collective communications across devices/hosts.
+``DTensor`` could be used to build different paralleism solutions and support sharded state_dict representation
+when working with multi-dimensional sharding.
+
+Please see examples from the PyTorch native parallelism solutions that are built on top of ``DTensor``:
+
+* `Tensor Parallel <https://pytorch.org/docs/main/distributed.tensor.parallel.html>`__
+* `FSDP2 <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`__
 
 .. automodule:: torch.distributed.tensor
 
@@ -80,3 +87,18 @@ specifying the :class:`DeviceMesh` and :class:`Placement` for the :class:`DTenso
 .. autofunction:: rand
 
 .. autofunction:: randn
+
+
+.. modules that are missing docs, add the doc later when necessary
+.. py:module:: torch.distributed.tensor.api
+.. py:module:: torch.distributed.tensor.device_mesh
+.. py:module:: torch.distributed.tensor.random
+.. py:module:: torch.distributed.tensor.placement_types
+.. py:module:: torch.distributed.tensor.experimental
+.. py:module:: torch.distributed.tensor.experimental.attention
+.. py:module:: torch.distributed.tensor.experimental.func_map
+.. py:module:: torch.distributed.tensor.experimental.register_sharding
+.. py:module:: torch.distributed.tensor.experimental.tp_transform
+.. py:module:: torch.distributed.tensor.debug
+.. py:module:: torch.distributed.tensor.debug.comm_mode
+.. py:module:: torch.distributed.tensor.debug.visualize_sharding
