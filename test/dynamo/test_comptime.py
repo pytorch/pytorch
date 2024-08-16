@@ -159,7 +159,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- TensorVariable()
+- FakeTensor(..., size=(2,))
 """,
         )
 
@@ -185,8 +185,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = TensorVariable()
-y = TensorVariable()
+x = FakeTensor(..., size=(2,))
+y = FakeTensor(..., size=(2,))
 """,
         )
 
