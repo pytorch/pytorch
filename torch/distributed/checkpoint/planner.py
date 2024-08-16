@@ -215,7 +215,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def create_local_plan(self) -> SavePlan:
@@ -227,7 +226,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def create_global_plan(
@@ -238,7 +236,6 @@ class SavePlanner(abc.ABC):
 
         This is called on the coordinator rank only.
         """
-        pass
 
     @abc.abstractmethod
     def finish_plan(self, new_plan: SavePlan) -> SavePlan:
@@ -247,7 +244,6 @@ class SavePlanner(abc.ABC):
 
         This is called on all ranks.
         """
-        pass
 
     @abc.abstractmethod
     def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
@@ -268,7 +264,6 @@ class SavePlanner(abc.ABC):
         When returning tensors, they can be on any device or format, they can be views too.
         It's the storage layer responsibility to figure out how to save them.
         """
-        pass
 
 
 class LoadPlanner:
@@ -357,7 +352,6 @@ class LoadPlanner:
 
         . N.B. This is called on every rank.
         """
-        pass
 
     @abc.abstractmethod
     def create_local_plan(self) -> LoadPlan:
@@ -366,7 +360,6 @@ class LoadPlanner:
 
         . N.B. This is called on every rank.
         """
-        pass
 
     @abc.abstractmethod
     def create_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
@@ -375,12 +368,10 @@ class LoadPlanner:
 
         . N.B. This is called on the coordinator rank only
         """
-        pass
 
     @abc.abstractmethod
     def finish_plan(self, central_plan: LoadPlan) -> LoadPlan:
         """Accept the plan from coordinator and return final LoadPlan."""
-        pass
 
     @abc.abstractmethod
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:
@@ -392,7 +383,6 @@ class LoadPlanner:
         The contents of ``value`` are defined by the SavePlanner used to produce
         the checkpoint being loaded.
         """
-        pass
 
     def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
         """
@@ -411,7 +401,6 @@ class LoadPlanner:
         If, for any reason, that's not possible, the planner can use the ``commit_tensor`` method to copy the data
         back to the one in state_dict.
         """
-        pass
 
     @abc.abstractmethod
     def commit_tensor(self, read_item: ReadItem, tensor: torch.Tensor) -> None:
@@ -424,4 +413,3 @@ class LoadPlanner:
 
         The contents of tensor will follow its device synchronization model.
         """
-        pass
