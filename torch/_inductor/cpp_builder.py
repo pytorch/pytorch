@@ -447,11 +447,11 @@ def _get_optimization_cflags() -> List[str]:
         return ["O2"]
     else:
         cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
-        cflags.append("ffast-math")
-        cflags.append("fno-finite-math-only")
+        # subset of ffast-math
+        cflags.extend(["fno-math-errno", "fno-rounding-math", "fno-signaling-nans", "fcx-limited-range", "fexcess-precision=fast"])
 
-        if not config.cpp.enable_unsafe_math_opt_flag:
-            cflags.append("fno-unsafe-math-optimizations")
+        if config.cpp.enable_unsafe_math_opt_flag:
+            cflags.append("funsafe-math-optimizations")
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
 
