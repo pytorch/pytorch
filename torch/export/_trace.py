@@ -2071,7 +2071,17 @@ def _export(
     if not _is_torch_jit_trace:
         _verify_placeholder_names(gm, export_graph_signature)
 
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)
+
     from torch._export.verifier import Verifier
+
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and hasattr(mod, "meta")
+        and "custom" in mod.meta
+    ):
+        gm.meta.update({"custom": mod.meta["custom"]})
 
     exported_program = ExportedProgram(
         root=gm,

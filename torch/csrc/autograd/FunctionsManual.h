@@ -232,7 +232,7 @@ at::Tensor logsumexp_jvp(
 at::Tensor logcumsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
-    at::Tensor result,
+    const at::Tensor& result,
     int64_t dim);
 at::Tensor logcumsumexp_jvp(
     const at::Tensor& self_p,

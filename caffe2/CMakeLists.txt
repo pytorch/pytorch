@@ -928,6 +928,10 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
+  if(USE_CUFILE)
+    target_link_libraries(torch_cuda PRIVATE torch::cufile)
+    target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
+  endif()
   if(USE_CUSPARSELT)
       target_link_libraries(torch_cuda PRIVATE torch::cusparselt)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
@@ -1065,6 +1069,10 @@ if(USE_XPU)
       target_link_libraries(torch_xpu PRIVATE
         "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
+
+    # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
+    include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+
   endif()
 endif()
 
