@@ -236,7 +236,9 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape: _size = torch.Size(), max_try_correction=None) -> torch.Tensor:
+    def rsample(
+        self, sample_shape: _size = torch.Size(), max_try_correction=None
+    ) -> torch.Tensor:
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
