@@ -2,6 +2,10 @@
 # running these tests takes around 10 minutes on my machine
 cd mixed_mm
 python test_mixed_mm.py
+
 cd ../pad_mm
 python test_pad_mm.py
+
+cd ../mm
+python test_mm.py
 cd ../
