@@ -118,6 +118,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
+from .variables.torch_function import TorchFunctionModeVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -718,6 +719,7 @@ class InstructionTranslatorBase(
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
     symbolic_globals: Dict[str, VariableTracker]
+    symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"]
     stack: List[VariableTracker]
     instruction_pointer: Optional[int]
     current_instruction: Instruction
@@ -2525,6 +2527,7 @@ class InstructionTranslatorBase(
         code_options: Dict[str, Any],
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -2539,6 +2542,7 @@ class InstructionTranslatorBase(
         self.output = output
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
+        self.symbolic_torch_function_mode_stack = symbolic_torch_function_mode_stack
         self.stack = []
         # stack of variable names for tracking 3.13 closures
         self.name_stack: list[Any] = []
@@ -2661,6 +2665,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
+            symbolic_torch_function_mode_stack=collections.deque(),
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -2745,9 +2750,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         ] = collections.deque()
         py_stack = get_torch_function_mode_stack()
         for val in py_stack:
-            global_name = variables.torch_function.TorchFunctionModeVariable.get_global_mangled_name(
-                self, val
-            )
+            global_name = TorchFunctionModeVariable.get_global_mangled_name(self, val)
             source = GlobalWeakRefSource(global_name)
             self.symbolic_torch_function_mode_stack.append(
                 variables.LazyVariableTracker.create(val, source=source)
@@ -3084,7 +3087,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         else:
             tracer = InliningInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -3135,6 +3144,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         code: types.CodeType,
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
+        symbolic_torch_function_mode_stack: Deque["TorchFunctionModeVariable"],
         closure_cells: Dict[str, VariableTracker],
         funcvar: BaseUserFunctionVariable,
     ) -> None:
@@ -3151,6 +3161,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
+            symbolic_torch_function_mode_stack=symbolic_torch_function_mode_stack,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
