@@ -225,6 +225,9 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     )
 
 
+add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a: TensorBox,
@@ -237,7 +240,6 @@ def tuned_scaled_mm(
     use_fast_accum: bool = False,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
-    add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
