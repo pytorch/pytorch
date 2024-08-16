@@ -131,3 +131,11 @@ def mapping_get(obj, key, value=None):
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def instantiate_user_defined_class_object(*args, **kwargs):
+    cls = args[0]
+    other_args = args[1:]
+    obj = cls.__new__(cls, *other_args, **kwargs)
+    obj.__init__(*other_args, **kwargs)
+    return obj
