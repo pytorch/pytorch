@@ -1605,7 +1605,7 @@ class CppKernel(Kernel):
         for _, line in enumerate(self.stores._lines):
             if isinstance(line, PlaceHolderLine):
                 var = line.place_holder
-                assert var.name.startswith("tmp_acc")
+                assert "tmp_acc" in var.name
                 line.place_holder = var.clone_rename(f"{var}_local")
 
     @contextlib.contextmanager
@@ -2360,6 +2360,8 @@ class CppVecKernel(CppKernel):
         assert isinstance(acc, CppCSEVariable)
         acc_vec = acc.clone_rename(f"{acc}_vec")
         acc_vec.is_vec = True
+        masked_acc_vec = acc_vec.clone_rename(f"masked_{acc_vec}")
+        masked_acc_vec.is_vec = True
         self.is_reduction = True
         self.reduction_prefix.writeline(
             f"{acc_type} {acc} = {reduction_init(reduction_type, init_dtype)};"
@@ -2375,7 +2377,7 @@ class CppVecKernel(CppKernel):
             assert self.reduction_depth is not None
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix.writeline(
-                f"{acc_type_vec} masked_{acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
+                f"{acc_type_vec} {masked_acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
             )
             reduction_size = functools.reduce(
                 lambda x, y: x * y, self.ranges[self.reduction_depth :]
@@ -2408,7 +2410,7 @@ class CppVecKernel(CppKernel):
                     self.weight_recp_vec_range
                 ]
             # use masked acc_vec for tail vec kernel
-            acc_vec_ = f"masked_{acc_vec}" if self.tail_size else acc_vec
+            acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
             self.stores.writeline(
                 PlaceHolderLine(
                     acc_vec_,
@@ -2443,7 +2445,7 @@ class CppVecKernel(CppKernel):
         if reduction_type == "welford_reduce":
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
-                f"masked_{acc_vec}",
+                masked_acc_vec,
                 acc_type_vec,
                 reduction_type,
                 dtype,
@@ -2460,7 +2462,7 @@ class CppVecKernel(CppKernel):
                     2,
                 ], "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
-                masked_next_value = f"welford_vec_reduce_all(masked_{acc_vec})"
+                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec})"
                 self.reduction_suffix.writeline(
                     f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
                 )
