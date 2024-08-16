@@ -4231,34 +4231,23 @@ class CppScheduling(BaseScheduling):
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
 
-        def can_alias_template_with_kernel_output(
+        def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
         ):
-            # If there's no epilogue_nodes, template_buffer the and kernel output buffer
-            # are the same, thus return True here.
-            if not epilogue_nodes:
-                return True
-
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
-            for user in users:
-                assert isinstance(user.node, BaseSchedulerNode)
-                computed_buffer = user.node.node
-                # If template_buffer is used by nodes other than the epilogue nodes,
-                # we can't set template_buffer and Y as alias.
-                # Both template_buffer and Y need to be kept.
-                if computed_buffer not in epilogue_nodes:
-                    return False
-            return True
-
-        flag_can_alias_template_with_kernel_output = (
-            can_alias_template_with_kernel_output(
-                ctb, template_node.outputs_by_name, epilogue_ir_nodes
+            return not all(
+                isinstance(user.node, BaseSchedulerNode)
+                and user.node.node in epilogue_nodes
+                for user in users
             )
+
+        flag_template_buffer_has_other_users = template_buffer_has_other_users(
+            ctb, template_node.outputs_by_name, epilogue_ir_nodes
         )
         kernel, render = ctb.make_kernel_render(
             ctb,
-            flag_can_alias_template_with_kernel_output=flag_can_alias_template_with_kernel_output,
+            flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:
