@@ -106,7 +106,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   }
 
   if (!indices_batched && self_bdim.has_value()) {
-    indices_.insert(indices_.begin(), nullopt);
+    indices_.insert(indices_.begin(), std::nullopt);
   } else if (indices_batched && !self_bdim.has_value()) {
     // do nothing
   } else if (indices_batched && (self_bdim.has_value() || values_bdim.has_value())) {

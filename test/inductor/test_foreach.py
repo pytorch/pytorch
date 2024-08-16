@@ -623,6 +623,29 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda
+    @bin_ops
+    @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
+    def test_2d_blocking_partitioning_mixed_sizes(self, op):
+        """2D blocking with mixed sizes should group together"""
+
+        def fn(a0, a1, a2, b0, b1, b2):
+            return op([a0, a1, a2], [b0, b1, b2])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 20, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(20, 10, device="cuda:0").t(),
+                torch.rand(20, 30, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda
     @inplace_bin_ops
     def test_reinplacing(self, op):
         def fn(a0, a1, b0, b1):
@@ -717,6 +740,50 @@ class ForeachTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+    @requires_cuda
+    @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 1)
+    def test_2d_block_no_mixed_sizes_no_mask(self):
+        """2D blocking with no mixed sizes constant mask"""
+
+        def fn(a0, a1, a2, b0, b1, b2):
+            return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(1024, 2048, device="cuda:0"),
+                torch.rand(2048, 2048, device="cuda:0"),
+                torch.rand(1024, 2048, device="cuda:0"),
+                torch.rand(2048, 1024, device="cuda:0").t(),
+                torch.rand(2048, 2048, device="cuda:0").t(),
+                torch.rand(2048, 1024, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda
+    @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
+    def test_2d_block_mixed_sizes_with_mask(self):
+        """2D blocking with mixed sizes should have mask"""
+
+        def fn(a0, a1, a2, b0, b1, b2):
+            return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(1024, 2048, device="cuda:0"),
+                torch.rand(2048, 2048, device="cuda:0"),
+                torch.rand(1024, 2048, device="cuda:0"),
+                torch.rand(2048, 1024, device="cuda:0").t(),
+                torch.rand(2048, 2048, device="cuda:0").t(),
+                torch.rand(2048, 1024, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":

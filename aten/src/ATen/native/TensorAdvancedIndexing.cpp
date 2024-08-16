@@ -241,7 +241,7 @@ TORCH_META_FUNC2(scatter, value_reduce)
  const Tensor& index,
  const Scalar& src,
  const c10::string_view reduce) {
-  scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
+  scatter_meta_impl(*this, self, dim, index, std::nullopt, reduce);
 }
 
 TORCH_META_FUNC(scatter_add)
@@ -811,7 +811,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<std::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-  if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
+  if ((self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU) && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
