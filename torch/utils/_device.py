@@ -66,7 +66,19 @@ class DeviceContext(TorchFunctionMode):
         global CURRENT_DEVICE
         self.old_device = CURRENT_DEVICE
         CURRENT_DEVICE = self.device
-        return super().__enter__()
+        # We need to put the device at the bottom of the stack
+        # If we set default device within a function mode context
+        # exiting that context mode will pop the device function mode off
+        # of the stack incorrectly
+        cur_stack = []
+        for _ in range(_len_torch_function_stack()):
+            cur_stack.append(_pop_mode())
+
+        _push_mode(self)
+
+        for mode in reversed(cur_stack):
+            _push_mode(mode)
+
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global CURRENT_DEVICE

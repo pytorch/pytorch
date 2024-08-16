@@ -754,7 +754,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not tx.symbolic_torch_function_mode_stack:
                 raise unimplemented("Popping from an empty torch function mode stack")
             TorchFunctionModeStackVariable.register_mutation(tx)
-            return tx.symbolic_torch_function_mode_stack.popleft()
+            return tx.symbolic_torch_function_mode_stack.pop()
 
         return handlers
 
