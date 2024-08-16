@@ -348,16 +348,18 @@ class AutogradCompilerInstance:
             return
 
         def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
-            if callable(a.target) and callable(b.target):
-                target_match = a.target.__qualname__ == b.target.__qualname__
-            else:
-                target_match = a.target == b.target
-
+            target_match = a.target == b.target
+            if not target_match:
+                target_match = (
+                    hasattr(a.target, "__name__")
+                    and hasattr(b.target, "__name__")
+                    and a.target.__name__ == b.target.__name__
+                )
             return (
-                a.op == b.op
+                target_match
+                and a.op == b.op
                 and a.type == b.type
                 and len(a.all_input_nodes) == len(b.all_input_nodes)
-                and target_match
             )
 
         for nodecall_index, info in self.aot_graph_infos.items():
