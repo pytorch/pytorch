@@ -104,8 +104,9 @@ class _PipelineStageBase(ABC):
                 Default: `None`.
             dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_runner is a builder function
                 that will build a new dw_runner function that will run parts of module backward that were intentionally
-                skipped during the module's actual backward pass.  builder must be invoked by stage after stage runs
+                skipped during the module's actual backward pass. The builder must be invoked by stage after stage runs
                 model backwards, and stage should save the latest dw_runner to run during weight pass.
+                If not provided, a dw_runner will be generated automatically by traversing the autograd graph.
                 When used with schedules that only have F and B steps, the fresh dw_runner function will be called as
                 part of B.
                 When used with F,B,W schedules, the dw_runner function implements 'W'.
@@ -612,6 +613,8 @@ class _PipelineStageBase(ABC):
 
         # Custom backward function
         if self.dw_builder:
+            # TODO: We may want to change our semantics so we are allowed to ignore
+            # the 'dw_builder' and call full_backward directly when it is a full_backward op.
             self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
             if full_backward:
                 self.dw_builder()()
@@ -646,11 +649,12 @@ class _PipelineStageBase(ABC):
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
+        assert bwd_chunk_id in self.dw_runner, (
+            f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
+            " without first calling `backward_one_chunk(full_backward=False)`"
+        )
+
         if self.dw_builder is not None:
-            assert bwd_chunk_id in self.dw_runner, (
-                f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
-                " without first calling `backward_one_chunk(full_backward=False)`"
-            )
             self.dw_runner.pop(bwd_chunk_id)()
         else:
             (
@@ -667,8 +671,9 @@ class _PipelineStageBase(ABC):
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,
-                # then the parameter group will not be fully captured during stage_backward_weight
+                # then the parameter group will not be fully captured during stage_backward_input
                 # in this case, we need call grad directly on the parameters
+                # To solve: make input fn do the intersect compute and then finish it off during W
                 torch.autograd.backward(stage_output, grad_tensors=output_grads)
 
     def _validate_fwd_input(self, args, kwargs):
