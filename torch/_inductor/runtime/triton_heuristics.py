@@ -224,6 +224,9 @@ class CachingAutotuner(KernelInterface):
         )
         self.filename = filename
 
+        self.precompile_time_taken_ns = 0
+        self.autotune_time_taken_ns = 0
+
     def precompile(self, warm_cache_only=False):
         with self.lock:
             if self.launchers:
@@ -820,14 +823,13 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(
                 best_config,
-                getattr(self, "autotune_time_taken_ns", 0) + coordesc_time_taken_ns,
+                self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
             )
         return config2launcher.get(best_config)
 
     def run(self, *args, grid, stream, **kwargs):
         if len(self.launchers) != 1:
-            self.precompile_time_taken_ns = getattr(self, "precompile_time_taken_ns", 0)
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
                 self.precompile()
