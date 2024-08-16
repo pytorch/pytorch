@@ -379,6 +379,30 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_across_graph_break(self):
+        def fn(x):
+            e = torch.cuda.Event()
+            e.record()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            torch.cuda.current_stream().wait_event(e)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x, e
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.cuda.Stream()
         event = torch.cuda.Event()
@@ -388,8 +412,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             event.wait()
             return foo + 1
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((1024, 1024), device="cuda")
         cnts = torch._dynamo.testing.CompileCounter()
+
         def run_iters(fn, compile=False):
             if compile:
                 fn = torch._dynamo.optimize(cnts)(fn)
@@ -400,12 +425,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 out = fn(foo)
             return out
 
-        x = torch.randn((2, 2), device="cuda")
         ref = run_iters(func, compile=False)
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 6)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method_create_stream_outside_of_compile(self):

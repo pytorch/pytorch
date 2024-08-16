@@ -3056,3 +3056,20 @@ def _extract_tensor_dict(t):
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[Any]] = {}
+
+
+def get_user_object_from_id(obj_id):
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object(obj):
+    obj_id = id(obj)
+    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
