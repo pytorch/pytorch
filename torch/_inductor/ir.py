@@ -4684,11 +4684,6 @@ class ExternKernel(InputsKernel):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
-        try:
-            x.realize()
-        except NotImplementedError:
-            pass
-
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
