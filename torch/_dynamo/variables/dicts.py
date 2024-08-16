@@ -657,8 +657,6 @@ class DataClassVariable(ConstDictVariable):
     Keeping since we wish to support dataclasses in general in the future
     """
 
-    pass
-
 
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
