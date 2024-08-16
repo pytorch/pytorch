@@ -189,7 +189,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(0)
         y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
         state_2 = random.getstate()
-        breakpoint()
         self.assertEqual(y_1, y_2)
         self.assertEqual(state_1, state_2)
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
