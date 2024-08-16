@@ -818,7 +818,7 @@ def _exported_program_to_onnx_program(
         if input_kind == graph_signature.InputKind.USER_INPUT:
             # Add only user inputs to the graph
             # Subsequent passes can decide if they want to add initializers as inputs
-            model.graph.inputs.append(value)  # type: ignore
+            model.graph.inputs.append(value)
         else:
             model.graph.initializers[value_name] = value
 

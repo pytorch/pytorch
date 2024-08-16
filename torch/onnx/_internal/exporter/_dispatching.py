@@ -255,17 +255,17 @@ def get_matching_overload(
 
             if isinstance(param, _schemas.Parameter):
                 if isinstance(arg, torch.Tensor):
-                    arg = _get_type_from_tensor(arg)
+                    arg = _get_type_from_tensor(arg)  # type: ignore[assignment]
                 if isinstance(arg, (list, tuple)) and any(
                     isinstance(t, torch.fx.Node) for t in arg
                 ):
                     first_tensor = _get_first_tensor_in_node_list(arg)
                     assert first_tensor is not None
                     # FIXME: Handle symfloat here
-                    arg = ir.SequenceType(_get_type_from_tensor(first_tensor))
+                    arg = ir.SequenceType(_get_type_from_tensor(first_tensor))  # type: ignore[assignment]
                 elif isinstance(arg, torch.fx.Node):
                     meta_val = arg.meta["val"]
-                    arg = _get_type_from_tensor(meta_val)
+                    arg = _get_type_from_tensor(meta_val)  # type: ignore[assignment]
                 # TODO: Handle None attributes
                 # FIXME: Handle symfloat etc.
                 # Handle tensors and Python values

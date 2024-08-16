@@ -193,7 +193,7 @@ ONNXProgram(
             )
             model = model_path
         else:
-            model = proto.SerializeToString()
+            model = proto.SerializeToString()  # type: ignore[assignment]
 
         self._inference_session = initializer(model)
         logger.debug("Inference session initialized.")

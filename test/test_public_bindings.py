@@ -286,6 +286,8 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
+            # TODO(#133647): Remove the onnx._internal entries after
+            # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
             "torch.onnx._internal.exporter._analysis",
             "torch.onnx._internal.exporter._building",

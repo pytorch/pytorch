@@ -269,7 +269,6 @@ class LegacyDynamoStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        # Adapted from https://github.com/pytorch/pytorch/blob/ea42027e0ed7530386ae4222dc599fcaf84a8a05/torch/onnx/_internal/_exporter_legacy.py#L1491
         # NOTE: Import here to prevent circular dependency
         from torch.onnx._internal.fx import diagnostics, passes
 
