@@ -60,6 +60,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
+    _get_function_stack_at,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
@@ -3035,15 +3036,7 @@ def is_parameter_freezing():
 def get_torch_function_mode_stack():
     from .variables.torch_function import IGNORED_MODES
 
-    stack = []
-
-    for i in range(_len_torch_function_stack()):
-        mode = _pop_torch_function_stack()
-        stack.append(mode)
-
-    for mode in reversed(stack):
-        _push_on_torch_function_stack(mode)
-
+    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
     return [mode for mode in stack if type(mode) not in IGNORED_MODES]
 
 
