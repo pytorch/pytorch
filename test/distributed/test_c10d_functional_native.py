@@ -551,7 +551,6 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check("buf0 = empty")
@@ -568,13 +567,12 @@ class CompileTest(TestCase):
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
                 ".default([buf15, buf16]"
             )
-            # TODO Why repetitions?
             .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
             # Expect no extra copy on return
-            .check("return (buf0, buf1, buf5, buf6, )")
+            .check("return (buf0, buf1, buf15, buf16, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -596,7 +594,6 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
-        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check("buf2 = empty")
@@ -657,13 +654,12 @@ class CompileTest(TestCase):
         arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
-        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
                 "buf2 = torch.ops._c10d_functional.all_gather_into_tensor.default(arg1_1"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
             # Expect no extra copy on return
             .check("return (buf2, )")
             .run(code)
@@ -685,7 +681,6 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
@@ -748,7 +743,6 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(f"XXX CODE:{code}")
         (
             FileCheck()
             .check(
@@ -837,7 +831,6 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
-        print(f"XXX CODE={code}")
         (
             FileCheck()
             .check("buf2 = empty")
