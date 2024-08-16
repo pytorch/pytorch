@@ -62,13 +62,6 @@ def _is_causal_behavior(
     else:
         return _CausalBehavior.SKIP
 
-    out = []
-    for chunk, chunk_lse in zip(chunks, logsumexps):
-        softmax_lse_corrected = torch.exp(chunk_lse - softmax_lse)
-        out_corrected = chunk * softmax_lse_corrected.unsqueeze(-1).to(chunk.dtype)
-        out.append(out_corrected)
-    out = torch.stack(out).sum(dim=0)
-
 
 def _maybe_wait(tensor: torch.Tensor) -> torch.Tensor:
     """
