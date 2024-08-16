@@ -161,8 +161,6 @@ class GraphMatchingException(Exception):
     Exception raised when two graphs cannot be matched.
     """
 
-    pass
-
 
 class SubgraphTypeRelationship(enum.Enum):
     # same type, known
