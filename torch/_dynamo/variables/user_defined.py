@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
-    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -496,6 +495,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            not self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(
+                    tx, polyfill.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -1028,18 +1039,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 else:
                     return trace_rules.lookup(func)(func)
-
-        if (
-            source
-            and isinstance(self, variables.UnspecializedNNModuleVariable)
-            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
-            # usecase for now.
-            and not tx.output.export
-        ):
-            # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
-                source = UnspecializedParamBufferSource(self.source, name)
-            source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
