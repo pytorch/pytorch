@@ -1046,6 +1046,9 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::get_symmetric_memory)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def("get_buffer_ptrs_dev", [](c10::intrusive_ptr<SymmetricMemory> symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_buffer_ptrs_dev());
+          })
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
