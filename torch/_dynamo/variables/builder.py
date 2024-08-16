@@ -874,9 +874,7 @@ class VariableBuilder:
                 )
             else:
                 # We need to create an unbacked symint to replace the unbacked symbool.
-                # Call ignore_fresh_unbacked_symbols to skip the pending unbacked symbols check.
-                with self.tx.output.shape_env.ignore_fresh_unbacked_symbols():
-                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                new_symint = self.tx.output.shape_env.create_unbacked_symint()
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -892,6 +890,8 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
+            # We bind the new_symint to graph input.
+            set_example_value(sym_node_proxy.node, new_symint)
             self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
