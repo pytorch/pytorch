@@ -6,6 +6,7 @@ from torch.types import Device
 
 from . import _get_device_index, is_initialized
 
+
 _device_t = Union[Device, str, int, None]
 
 
