@@ -1,0 +1,57 @@
+name: Create a cherry pick from a PR
+
+on:
+  repository_dispatch:
+    types: [try-cherry-pick]
+
+jobs:
+  cherry-pick:
+    name: cherry-pick-pr-${{ github.event.client_payload.pr_num }}
+    runs-on: ubuntu-latest
+    environment: cherry-pick-bot
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repo
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PYTORCHBOT_CHERRY_PICK_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      # Not the direct dependencies but the script uses trymerge
+      - run: pip install pyyaml==6.0 rockset==1.0.3
+
+      - name: Setup committer id
+        run: |
+          git config --global user.name "PyTorch Bot"
+          git config --global user.email "pytorchbot@users.noreply.github.com"
+
+      - name: Cherry pick the PR
+        shell: bash
+        env:
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          BRANCH: ${{ github.event.client_payload.branch }}
+          CLASSIFICATION: ${{ github.event.client_payload.classification }}
+          FIXES: ${{ github.event.client_payload.fixes || '' }}
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GH_PYTORCHBOT_CHERRY_PICK_TOKEN }}
+        run: |
+          set -ex
+
+          python .github/scripts/cherry_pick.py \
+            --onto-branch "${BRANCH}" \
+            --classification "${CLASSIFICATION}" \
+            --fixes "${FIXES}" \
+            --github-actor "${ACTOR}" \
+            "${PR_NUM}"
+
+concurrency:
+  group: cherry-pick-pr-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true
