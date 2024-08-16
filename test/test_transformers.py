@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     TEST_WITH_ROCM,
     skipIfRocm,
+    xfailIfRocm,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -1637,10 +1638,9 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, mask, 0.0, False))
 
     @onlyCUDA
+    @xfailIfRocm  # ROCm GPU kernels accepts irregular shapes and thus assertRaises will fail
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self, device):
-        if TEST_WITH_ROCM:  # ROCm GPU kernels does not have strict alignment requirements
-            return
         # The alignment is depdent on arch so we specifiy SM80OrLater
         dtype = torch.float16
         size = SdpaShape(2, 2, 8, 5)
