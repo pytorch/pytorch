@@ -1142,7 +1142,6 @@ def make_fast_binary_impl(slow_ref):
             ):
                 break
         else:
-            breakpoint()
             return slow("both tensors nontrivially broadcast")
 
         # compute_types
