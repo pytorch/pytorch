@@ -182,7 +182,6 @@ class Linear(torch.nn.Module):
         self.zero_point = int(state_dict[prefix + "zero_point"])
         state_dict.pop(prefix + "zero_point")
 
-        op_type = int(state_dict[prefix + "op_type"])
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
@@ -249,7 +248,7 @@ class Linear(torch.nn.Module):
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[operator, union-attr]
         assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
-        w_sc, w_zp = weight_post_process.calculate_qparams()
+        _, w_zp = weight_post_process.calculate_qparams()
         if isinstance(w_zp, torch.Tensor):
             assert not torch.any(w_zp.bool()), "All weight zero points must map to 0"
         else:
