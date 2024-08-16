@@ -878,7 +878,7 @@ cmake_dependent_option(
 # Suspect users building from source will need this
 add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 # Same for softcapping
-add_definitions(-FLASHATTENTION_DISABLE_SOFTCAP)
+add_definitions(-DFLASHATTENTION_DISABLE_SOFTCAP)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
