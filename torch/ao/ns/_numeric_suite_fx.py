@@ -91,10 +91,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TYPE_C
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-from torch.ao.ns.fx.graph_matcher import (
-    get_matching_subgraph_pairs,
-    get_type_a_related_to_b,
-)
+from torch.ao.ns.fx.graph_matcher import get_matching_subgraph_pairs
 from torch.ao.ns.fx.mappings import get_base_name_to_sets_of_related_ops
 from torch.ao.ns.fx.n_shadows_utils import (
     _get_dedup_subgraphs,
