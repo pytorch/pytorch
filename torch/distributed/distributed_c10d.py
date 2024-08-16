@@ -218,26 +218,6 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-def get_backend_from_device(device) -> str:
-    """
-    A utility function to get backend name string from a device object.
-    This API get handy in generalizing code flows.
-    eg. DDP based Multi Process Test cases, Mesh() etc.
-
-    current_device = torch.device('cuda:0')
-    tensor_ = torch.randn(5, device=current_device)
-    get_backend_from_device(tensor_.device) -> returns 'nccl'
-
-    """
-
-    if device.type == "cuda":
-        return "nccl"
-    elif device.type == "hpu":
-        return "hccl"
-    else :
-        return "gloo"
-
-
 class Backend(str):
     """
     An enum-like class for backends.
@@ -297,6 +277,20 @@ class Backend(str):
         if value == Backend.UNDEFINED:
             value = name.lower()
         return value
+
+    @staticmethod
+    def get_default_backend(device) -> str:
+        """
+        A utility function to get backend name string from a device object.
+        This API get handy in generalizing code flows.
+        eg. DDP based Multi Process Test cases, Mesh() etc.
+
+        current_device = torch.device('cuda:0')
+        tensor_ = torch.randn(5, device=current_device)
+        get_backend_from_device(tensor_.device) -> returns 'nccl'
+        """
+        return Backend.default_device_backend_map[device.type] if device.type in Backend.default_device_backend_map else "Unknown device type"
+
 
     @classmethod
     def register_backend(
