@@ -61,8 +61,6 @@ DimMap = Tuple[DimSpec, ...]
 class Singleton(DimSpec):
     """Output dimension is a singleton."""
 
-    pass
-
 
 @dataclass
 class InputDim(DimSpec):

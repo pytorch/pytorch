@@ -425,6 +425,8 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         aten.diag_embed.default,
         aten.diag.default,
         aten.diagonal.default,
+        aten.tril.default,
+        aten.triu.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )

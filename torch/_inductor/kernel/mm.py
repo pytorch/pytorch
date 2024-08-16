@@ -18,7 +18,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.common import BackendFeature
-from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
 from ..ir import FlexibleLayout, is_triton
@@ -124,12 +124,17 @@ mm_template = TritonTemplate(
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
-
 aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
 )
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+
+aten__sparse_semi_structured_mm = ExternKernelChoice(
+    torch._sparse_semi_structured_mm,
+    "at::_sparse_semi_structured_mm",
+    has_out_variant=False,
+)
 
 
 def _is_int8_mat(mat):
@@ -175,9 +180,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
     if use_cpp_packed_gemm_template(layout, mat1, mat2):
@@ -202,13 +207,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-        choice = mm_autoheuristic(
-            mat1, mat2, m, n, k, choices, name, input_nodes, mm_operations(), None
+        ah_choices = mm_autoheuristic(
+            mat1,
+            mat2,
+            m,
+            n,
+            k,
+            choices,
+            name,
+            input_nodes,
+            mm_operations(),
+            None,
+            top_k=10,
         )
         if not torch._inductor.config.collect_autoheuristic(name):
             # if we are collecting data, we do not want to modify choices
-            if choice is not None:
-                choices.insert(0, choice)
+            if ah_choices is not None and len(ah_choices) > 0:
+                choices = ah_choices
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
@@ -267,7 +282,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         choices = []
 
     if use_cutlass:
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
@@ -368,7 +383,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
             != 0
         ):
-            CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
                 choices,
                 layout,
                 [mat1, mat2, inp_expanded],
@@ -376,7 +391,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
 
-    if static_shape and is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
@@ -439,6 +454,51 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
         )
         return fallback_choice.output_node()
+
+
+@register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
+def tuned_sparse_semi_structured_mm(
+    mat1, mat1_meta, mat2, *, out_dtype=None, layout=None
+):
+    from torch._inductor.select_algorithm import realize_inputs
+
+    mat1, mat1_meta, mat2 = realize_inputs(mat1, mat1_meta, mat2)
+    m1, k1 = mat1.get_size()
+    m2, _ = mat1_meta.get_size()
+    k2, n = mat2.get_size()
+    m = V.graph.sizevars.guard_equals(m1, m2)
+    k = V.graph.sizevars.guard_equals(2 * k1, k2)
+
+    if layout is None:
+        from torch._inductor.ir import FixedLayout
+
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype else mat2.get_dtype(),
+            [m, n],
+            [n, 1],
+        )
+    else:
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+
+    choices = (
+        [
+            aten__sparse_semi_structured_mm.bind(
+                (mat1, mat1_meta, mat2), layout, out_dtype=out_dtype
+            )
+        ]
+        if use_aten_gemm_kernels()
+        else []
+    )
+
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
+        )
+
+    return autotune_select_algorithm(
+        "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
+    )
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):
@@ -505,7 +565,17 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
 
 
 def mm_autoheuristic(
-    mat1, mat2, m, n, k, choices, name, input_nodes, ops, precondition
+    mat1,
+    mat2,
+    m,
+    n,
+    k,
+    choices,
+    name,
+    input_nodes,
+    ops,
+    precondition,
+    top_k: Optional[int] = None,
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
@@ -544,6 +614,8 @@ def mm_autoheuristic(
         augment_context=ops,
         precondition=precondition,
     )
+    if top_k is not None:
+        return autoheuristic.get_top_k_choices_caller(top_k)
     return autoheuristic.get_choice_caller()
 
 
@@ -611,7 +683,10 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             )
 
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 

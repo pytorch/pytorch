@@ -220,8 +220,8 @@ class DTensor(torch.Tensor):
     * :class:`Replicate`: Tensor replicated on the devices of the ``DeviceMesh`` dimension
     * :class:`Partial`: Tensor is pending reduction on the devices of the ``DeviceMesh`` dimension
 
-    When calling PyTorch operators, ``DTensor`` overrides the PyTorch operators to perform sharded computation or issue
-    communications when necessary. Along with the operator computation, ``DTensor`` will transform or propagate the
+    When calling PyTorch operators, ``DTensor`` overrides the PyTorch operators to perform sharded computation and issue
+    communications whenever necessary. Along with the operator computation, ``DTensor`` will transform or propagate the
     placements (DTensor Layout) properly (based on the operator semantic itself) and generate new ``DTensor`` outputs.
 
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
@@ -491,7 +491,7 @@ class DTensor(torch.Tensor):
 
         Args:
             device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to place the
-                DTensor, if not specified, it would use the current DTensor's DeviceMesh,
+                DTensor. If not specified, it would use the current DTensor's DeviceMesh.
                 default: None
             placements (List[:class:`Placement`], optional): the new placements that
                 describes how to place the DTensor into the DeviceMesh, must
@@ -505,11 +505,11 @@ class DTensor(torch.Tensor):
         Returns:
             A :class:`DTensor` object
 
-        .. note:: ``redistribute`` is differentiable, user do not need to worry about the backward
-            formula of the redistribute operation.
+        .. note:: ``redistribute`` is differentiable, which means user do not need to worry about
+            the backward formula of the redistribute operation.
 
         .. note:: ``redistribute`` currently only supports redistributing DTensor on the same DeviceMesh,
-            Please file a issue if you need to redistribute DTensor to different DeviceMesh.
+            Please file an issue if you need to redistribute DTensor to different DeviceMesh.
         """
         # NOTE: This redistribute API currently only supports out
         # of place redistribution, i.e. it always create a new
@@ -624,7 +624,7 @@ def distribute_tensor(
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
     """
-    Distribute a leaf torch.Tensor (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
+    Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
     to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be the
     same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
     the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
@@ -774,7 +774,7 @@ def distribute_module(
     parameters according to the `partition_fn` specified).
     2. To control the inputs or outputs of the module during runtime execution by
     specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
-    :class:`DTensor`, convert the output back to torch.Tensor)
+    :class:`DTensor`, convert the output back to ``torch.Tensor``)
 
     Args:
         module (:class:`nn.Module`): user module to be partitioned.

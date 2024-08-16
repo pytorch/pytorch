@@ -565,11 +565,21 @@ for_each_ops = [
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
-    aten._foreach_sub.List,
+    aten._foreach_sub.Scalar,
     aten._foreach_sub_.Scalar,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.ScalarList,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
     aten._foreach_zero_.default,
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
 ]
 
 for_each_linearity_ops = [
