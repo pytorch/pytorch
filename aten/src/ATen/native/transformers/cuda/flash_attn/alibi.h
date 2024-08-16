@@ -31,7 +31,7 @@ struct Alibi {
                                       const int col_idx_offset_,
                                       const int row_idx_offset,
                                       const int warp_row_stride) {
-        // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
+        // tensor has shape (nrow=(2, MMA_M), ncol=(2, MMA_N))
         static_assert(Layout::rank == 2, "Only support 2D Tensor");
         const int lane_id = threadIdx.x % 32;
         const int col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
