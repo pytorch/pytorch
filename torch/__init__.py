@@ -2597,6 +2597,7 @@ class DeviceGuard:
             this argument is negative.
 
     Examples:
+        >>> # xdoctest: +SKIP("requires multiple accelerators.")
         >>> torch.set_device(0)
         >>> torch.current_device()
         0
@@ -2626,6 +2627,7 @@ class StreamGuard:
         stream (torch.Stream): selected stream.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> s1 = torch.Stream()
         >>> s2 = torch.Stream()
         >>> torch.set_stream(s1)
