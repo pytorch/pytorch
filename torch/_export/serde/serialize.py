@@ -12,6 +12,7 @@ import math
 import operator
 import re
 import typing
+import traceback
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -552,7 +553,7 @@ class GraphModuleSerializer(metaclass=Final):
     def handle_get_attr(self, node):
         pass
 
-    def _output_node_at_index(self, node, index):
+    def _output_node_at_index(self, node, index) -> Optional[torch.fx.Node]:
         user_node = None
         for user in node.users:
             assert user.target is operator.getitem, f"{user} is not a getitem node"
@@ -564,6 +565,13 @@ class GraphModuleSerializer(metaclass=Final):
                     # index to the same index
                     self.duplicate_getitem_nodes[user.name] = user_node.name
         return user_node
+
+    def _output_node_name_at_index(self, node, index) -> str:
+        user_node = self._output_node_at_index(node, index)
+        if user_node is None:
+            return f"{node.name}_unused_{index}"
+        else:
+            return user_node.name
 
     def serialize_metadata(self, node: torch.fx.Node) -> Dict[str, str]:
         ret = {}
@@ -917,7 +925,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return Argument.create(as_operator=self.serialize_operator(arg))
         else:
-            raise SerializeError(f"Unsupported argument type: {type(arg)}")
+            raise SerializeError(f"Unsupported argument type: {type(arg)} with schema arg_type {arg_type}")
 
     def serialize_tensor_output(self, name, meta_val) -> TensorArgument:
         assert name not in self.graph_state.tensor_values
@@ -1149,12 +1157,7 @@ class GraphModuleSerializer(metaclass=Final):
             # e.g "-> Tensor[]"
             tensor_args = []
             for idx, meta in enumerate(meta_val):
-                user_node = self._output_node_at_index(node, idx)
-                name = (
-                    user_node.name
-                    if user_node is not None
-                    else f"{node.name}_unused_{idx}"
-                )
+                name = self._output_node_name_at_index(node, idx)
                 tensor_args.append(self.serialize_tensor_output(name, meta))
             return [Argument.create(as_tensors=tensor_args)]
         elif len(returns) == 1:
@@ -1179,12 +1182,7 @@ class GraphModuleSerializer(metaclass=Final):
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
                 assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
-                user_node = self._output_node_at_index(node, idx)
-                name = (
-                    user_node.name
-                    if user_node is not None
-                    else f"{node.name}_unused_{idx}"
-                )
+                name = self._output_node_name_at_index(node, idx)
                 output_arguments.append(self.serialize_output(name, meta))
             elif isinstance(meta, list):
                 # for List[Tensor] return type
@@ -1200,19 +1198,12 @@ class GraphModuleSerializer(metaclass=Final):
                 for i, m in enumerate(meta):
                     if m is None:
                         continue
-                    sub_user_node = self._output_node_at_index(user_node, i)
-                    assert sub_user_node is not None, f"No user found at index {i}"
-
-                    args.append(self.serialize_tensor_output(sub_user_node.name, m))
+                    sub_user_node_name = self._output_node_name_at_index(user_node, i)
+                    args.append(self.serialize_tensor_output(sub_user_node_name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
             elif isinstance(meta, (int, SymInt)):
-                user_node = self._output_node_at_index(node, idx)
-                name = (
-                    user_node.name
-                    if user_node is not None
-                    else f"{node.name}_unused_{idx}"
-                )
-                output_arguments.append(self.serialize_output(name, meta))
+                user_node_name = self._output_node_name_at_index(node, idx)
+                output_arguments.append(self.serialize_output(user_node_name, meta))
             else:
                 raise ValueError(
                     f"Unhandled output type {type(meta)} from node {node.format_node()}"
@@ -1236,12 +1227,7 @@ class GraphModuleSerializer(metaclass=Final):
 
             if len(meta_val) == 1:
                 assert isinstance(meta_val[0], torch.Tensor)
-                user_node = self._output_node_at_index(node, 0)
-                name = (
-                    user_node.name
-                    if user_node is not None
-                    else f"{node.name}_unused_0"
-                )
+                name = self._output_node_name_at_index(node, 0)
                 return [Argument.create(as_tensors=[self.serialize_tensor_output(name, meta_val[0])])]
 
             outputs = []
@@ -1256,12 +1242,7 @@ class GraphModuleSerializer(metaclass=Final):
                         if not isinstance(m, torch.Tensor):
                             raise SerializeError(f"Serialize list output with type {type(m)} nyi")
 
-                        sub_user_node = self._output_node_at_index(user_node, j)
-                        name = (
-                            sub_user_node.name
-                            if sub_user_node is not None
-                            else f"{user_node.name}_unused_{j}"
-                        )
+                        name = self._output_node_name_at_index(user_node, j)
                         tensors.append(self.serialize_tensor_output(name, m))
                     outputs.append(Argument.create(as_tensors=tensors))
 
@@ -1333,7 +1314,7 @@ class GraphModuleSerializer(metaclass=Final):
                 getattr(self, f"handle_{node.op}")(node)
             except Exception as e:
                 raise SerializeError(
-                    f"Failed serializing node {node} in graph: {node.format_node()}"
+                    f"Failed serializing node {node} in graph: {node.format_node()}\n Original exception {traceback.format_exc()}"
                 ) from e
 
         return Graph(
@@ -1673,7 +1654,7 @@ class GraphModuleDeserializer(metaclass=Final):
 
             except Exception as e:
                 raise SerializeError(
-                    f"Failed deserializing node {serialized_node}"
+                    f"Failed deserializing node {serialized_node}\n Original exception {traceback.format_exc()}"
                 ) from e
 
         # Outputs: convert to a single `output` node.
