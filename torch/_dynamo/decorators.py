@@ -186,11 +186,11 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
 
     Example::
 
+        >>> # xdoctest: +SKIP("conflict with the tests: duplicate polyfill handlers")
         >>> import operator
         >>> operator.indexOf([1, 2, 3, 4, 5], 3)
         2
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        ... # xdoctest: +SKIP("Long tracebacks")
         Traceback (most recent call last):
         ...
         torch._dynamo.exc.Unsupported: ...
