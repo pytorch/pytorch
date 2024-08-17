@@ -2747,6 +2747,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             unimplemented(msg)
 
     def _init_torch_function_mode_stack(self):
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        TorchFunctionModeStackVariable.reset()
+
         self.symbolic_torch_function_mode_stack: Deque[
             TorchFunctionModeVariable
         ] = collections.deque()
@@ -3092,7 +3096,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, parent.symbolic_torch_function_mode_stack, closure_cells, func
+                parent,
+                code,
+                sub_locals,
+                parent.symbolic_globals,
+                parent.symbolic_torch_function_mode_stack,
+                closure_cells,
+                func,
             )
         else:
             tracer = InliningInstructionTranslator(
