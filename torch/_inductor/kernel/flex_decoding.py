@@ -303,7 +303,7 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     dtype = key.get_dtype()
     head_dim = key.get_size()[-1]
     sm_version = torch.cuda.get_device_capability()
-    default_config = (32, 2, 3)
+    default_config = (64, 2, 1)
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
@@ -338,10 +338,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,
     ) = block_mask
 
+    B, Hq, seq_len_q, head_dim = query.get_size()
+    B, Hkv, seq_len_kv, head_dim = key.get_size()
     kernel_options = dict(kernel_options)
 
     # Calculate GQA head sharing
-    gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
+    gqa_shared_heads = Hq // Hkv
     if not is_power_of_2(gqa_shared_heads):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
@@ -379,9 +381,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (128, 2, 3),
         ]
     # TODO: fix autotuning.
-
-    B, Hkv, seq_len_kv, head_dim = key.get_size()
-    B, Hq, seq_len_q, head_dim = query.get_size()
 
     kernel_options["SM_SCALE"] = scale
     kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv)
@@ -447,6 +446,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     kernel_options["SAFE_M_BOUNDARY"] = (
         (seq_len_q * gqa_shared_heads) % kernel_options["BLOCK_M"]
     ) == 0
+    # TODO: This feels sketchy
     kernel_options["SAFE_N_BOUNDARY"] = True
 
     # Note, we don't need to pass in the captured buffers explicitly
