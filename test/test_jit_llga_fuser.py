@@ -1,4 +1,4 @@
-# Owner(s): ["module: onednn"]
+# Owner(s): ["module: mkldnn"]
 import sys
 import torch
 import unittest

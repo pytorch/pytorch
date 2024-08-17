@@ -214,6 +214,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
         torch.onednn_rnn_layer,
+        torch.mkldnn_rnn_layer,
         torch.normal,
         torch.ones,
         torch.promote_types,
