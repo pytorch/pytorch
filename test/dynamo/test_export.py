@@ -2756,7 +2756,7 @@ def forward(self, x):
 
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
+        example_inputs = (x, y)
         dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
@@ -2766,7 +2766,7 @@ def forward(self, x):
         )(*example_inputs)
 
         constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            f, example_inputs, dynamic_shapes=dynamic_shapes
+            {"x": x, "y": y}, dynamic_shapes=dynamic_shapes
         )
         self.assertEqual(
             gm.meta["input_shape_constraints"],
