@@ -29,8 +29,6 @@ __all__ = [
 class GradcheckError(RuntimeError):
     r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
 
-    pass
-
 
 def _is_sparse_compressed_tensor(obj: torch.Tensor):
     return obj.layout in {
