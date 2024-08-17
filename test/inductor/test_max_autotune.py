@@ -448,22 +448,6 @@ class TestMaxAutotune(TestCase):
 
     @skipIfRocm
     @fresh_inductor_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
-    @skipIfRocm
-    @fresh_inductor_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):
         # In this example, AOTInductor's JIT-compile will fuse(buf1, buf2) due

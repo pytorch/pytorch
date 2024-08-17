@@ -544,8 +544,8 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> li
                 unpacked_args=redispatch_args,
             )
         )
-        for r in cpp.return_names(f):
-            inplace_view_body.append(f"increment_version({r});")
+        for n in f.func.arguments.mutable_arg_names():
+            inplace_view_body.append(f"increment_version({n});")
     else:
         assert get_view_info(f) is not None
         inplace_view_body.append(
@@ -590,8 +590,9 @@ def inplace_or_view_method_definition(
         # For functions that modify their inputs but don't return them,
         # we can't give them autograd support.
         # See https://github.com/pytorch/pytorch/issues/53796
+        # However, we still generate InplaceOrView kernels
+        # to properly bump version counters
         not modifies_arguments(f)
-        or len(f.func.returns) == 0
     ):
         return None
     return METHOD_DEFINITION.substitute(
@@ -607,9 +608,7 @@ def inplace_or_view_method_registration(
     fn: NativeFunctionWithDifferentiabilityInfo,
 ) -> str | None:
     f = fn.func
-    if get_view_info(f) is None and (
-        not modifies_arguments(f) or len(f.func.returns) == 0
-    ):
+    if get_view_info(f) is None and not modifies_arguments(f):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

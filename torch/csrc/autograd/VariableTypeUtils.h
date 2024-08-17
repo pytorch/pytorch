@@ -157,6 +157,11 @@ inline void rebase_history(
 inline void increment_version(const at::Tensor& t) {
   impl::bump_version(t);
 }
+inline void increment_version(const at::TensorList& tensors) {
+  for (const auto& t : tensors) {
+    impl::bump_version(t);
+  }
+}
 
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
