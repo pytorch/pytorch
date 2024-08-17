@@ -262,7 +262,7 @@ class ExprPrinterTests(InductorTestCase):
         cpu_cases = common_cases + [
             (
                 sympy.Pow(s1 + s2, 2),
-                lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
+                lambda c, L: "static_cast<int64_t>((bar + foo)*(bar + foo))",
             )
         ]
         for expr, result in gpu_cases:
@@ -278,7 +278,7 @@ class ExprPrinterTests(InductorTestCase):
             if integer:
                 self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
                 self.assertEqual(
-                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                    cexpr(expr), "static_cast<int64_t>(std::floor((1.0/2.0)*s1))"
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
@@ -295,7 +295,7 @@ class ExprPrinterTests(InductorTestCase):
             if integer:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
                 self.assertExpectedInline(
-                    cexpr(expr), """static_cast<long>(std::ceil((1.0/2.0)*s1))"""
+                    cexpr(expr), """static_cast<int64_t>(std::ceil((1.0/2.0)*s1))"""
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
