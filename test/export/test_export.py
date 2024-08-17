@@ -4420,7 +4420,7 @@ def forward(self, b_a_buffer, x):
                     self.assertIsInstance(s, int)
 
         dim0_x_f, dim0_x_p = torch.export.dims("dim0_x_f", "dim0_x_p")
-        dynamic_shapes = {"x": [{0: dim0_x_f}, {0: dim0_x_p}]}
+        dynamic_shapes = {"x": [{0: dim0_x_f, 1: 4}, {0: dim0_x_p, 1: 4}]}
         ep_dynamic = torch.export.export(
             mod, example_inputs, dynamic_shapes=dynamic_shapes
         )

@@ -1010,7 +1010,7 @@ def _process_dynamic_shapes(
 
     def update_symbols(path, tensor, shape):
         def _create_static_dim(tensor, i, value):
-            return _StaticDim(str(value), (int,), {"value": value})
+            return _StaticDim(f"{value}_{id(tensor)}", (int,), {"value": value})
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
