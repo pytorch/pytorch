@@ -1432,12 +1432,12 @@ class GuardBuilder(GuardBuilderBase):
             }
         )
         if torch.distributed.is_available():
-            from torch.distributed._tensor.placement_types import (
+            from torch.distributed.device_mesh import DeviceMesh
+            from torch.distributed.tensor.placement_types import (
                 Partial,
                 Replicate,
                 Shard,
             )
-            from torch.distributed.device_mesh import DeviceMesh
 
             ok_types = ok_types + (
                 Shard,

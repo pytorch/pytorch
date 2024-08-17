@@ -142,7 +142,7 @@ manual_torch_name_rule_map = {
     "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
-    "torch.distributed._tensor.api.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.tensor.api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
@@ -3190,8 +3190,8 @@ LEGACY_MOD_INLINELIST = {
 
 if torch.distributed.is_available():
     LEGACY_MOD_INLINELIST |= {
-        "torch.distributed._tensor.api",
-        "torch.distributed._tensor.device_mesh",
+        "torch.distributed.tensor.api",
+        "torch.distributed.tensor.device_mesh",
         "torch.distributed.device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
