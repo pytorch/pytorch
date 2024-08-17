@@ -577,6 +577,8 @@ class BaseSchedulerNode:
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
+                        if isinstance(user.node, OutputNode):
+                            return 0
                         assert isinstance(user.node, BaseSchedulerNode)
                         if isinstance(user.node.node, MultiOutput):
                             for sched_buf in user.node.get_outputs():
