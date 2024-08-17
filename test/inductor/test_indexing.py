@@ -351,7 +351,7 @@ class ExprPrinterTests(InductorTestCase):
                 texpr(expr),
                 f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
-            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2LL*x, 3LL*x}})")
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
