@@ -2649,7 +2649,7 @@ class TestSparseCSR(TestCase):
             out = torch.sparse.mm(csr, mat, reduce_type)
             self.assertEqual(out, ref_out)
 
-            if train and dtype not in [torch.bfloat16, torch.float16]:
+            if train and dtype not in (torch.bfloat16, torch.float16):
                 ref_out.sum().backward()
                 out.sum().backward()
 
