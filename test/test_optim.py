@@ -1033,11 +1033,6 @@ class TestOptimRenewed(TestCase):
             self.skipTest(
                 f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
             )
-        if _get_device_type(device) == "mps" and dtype not in (
-            torch.float16,
-            torch.float32,
-        ):
-            self.skipTest("MPS supports only torch.float16 and torch.float32")
 
         with torch.device("meta"):
             model = torch.nn.Sequential(
