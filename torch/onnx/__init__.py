@@ -63,7 +63,6 @@ from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
 from ._exporter_states import ExportTypes
-from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,
@@ -111,6 +110,7 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
+    ONNXProgram,
     ONNXProgramSerializer,
     ONNXRuntimeOptions,
     InvalidExportOptionsError,
@@ -182,7 +182,7 @@ def export(
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
     **_: Any,  # ignored options
-) -> ONNXProgram | None:
+) -> Any | None:
     r"""Exports a model into ONNX format.
 
     Args:
