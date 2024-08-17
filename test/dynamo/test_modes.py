@@ -10,7 +10,8 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
-from torch.overrides import BaseTorchFunctionMode
+from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -156,6 +157,25 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
+
+    def test_stack_state_mutation_default_device(self):
+        m = BaseTorchFunctionMode()
+        m1 = BaseTorchFunctionMode()
+        with m, m1:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                torch.set_default_device("cpu")
+                _pop_torch_function_stack()
+
+            fn(torch.ones(2, 2))
+            _push_on_torch_function_stack(m1)
+
+            stack = _get_current_function_mode_stack()
+            self.assertIsInstance(stack[0], DeviceContext)
+            self.assertEqual(stack[0].device, torch.device("cpu"))
+            self.assertIs(stack[1], m)
+            self.assertIs(stack[2], m1)
 
     def test_pop_torch_function_mode(self):
         m = BaseTorchFunctionMode()
