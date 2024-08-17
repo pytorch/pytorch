@@ -44,7 +44,7 @@ from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
     optim_db,
     optims,
-    TensorTracker
+    TensorTracker,
 )
 from torch.testing._internal.common_utils import (
     EXPANDABLE_SEGMENTS,
@@ -3459,7 +3459,6 @@ exit(2)
             for p_control, p_graphed in zip(params_control, params_graphed):
                 self.assertEqual(p_control, p_graphed)
 
-
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4881,6 +4880,7 @@ class TestMemPool(TestCase):
         # the pointer to the mempool is thread local
         self.assertEqual(len(set(active_pool_ids)), 4)
 
+
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaOptims(TestCase):
     # These tests will be instantiate with instantiate_device_type_tests
@@ -4965,8 +4965,11 @@ class TestCudaOptims(TestCase):
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @optims(
-        [optim for optim in optim_db if "fused" in optim.supported_impls and "cuda" in optim.supports_fused_on
-         ],
+        [
+            optim
+            for optim in optim_db
+            if "fused" in optim.supported_impls and "cuda" in optim.supports_fused_on
+        ],
         dtypes=[torch.float32],
     )
     def test_graph_scaling_fused_optimizers(self, device, dtype, optim_info):
@@ -5051,7 +5054,6 @@ class TestCudaOptims(TestCase):
 
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
-
 
     @onlyNativeDeviceTypes
     @optims(
