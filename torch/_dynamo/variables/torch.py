@@ -3,7 +3,6 @@
 import functools
 import inspect
 import logging
-import math
 import re
 from typing import Dict, List, TYPE_CHECKING
 
@@ -400,14 +399,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return tx.inline_user_function_return(
                 SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
             )
-
-        @register(math.radians)
-        def handle_radians(self, tx: "InstructionTranslator", *args, **kwargs):
-            if not check_unspec_or_constant_args(args, kwargs):
-                # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
-                return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
-                )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(self, tx: "InstructionTranslator", arg):

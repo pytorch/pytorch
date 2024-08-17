@@ -3,7 +3,7 @@
 """
 Python polyfills for common builtins.
 """
-import math
+
 from typing import Any, Callable, Sequence
 
 import torch
@@ -20,10 +20,6 @@ def index(iterator, item, start=0, end=None):
 def repeat(item, count):
     for i in range(count):
         yield item
-
-
-def radians(x):
-    return math.pi / 180.0 * x
 
 
 def accumulate_grad(x, new_grad):
