@@ -5,10 +5,10 @@ import itertools
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor._collective_utils import shard_dim_alltoall
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -207,7 +207,7 @@ class RedistributeTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
-        from torch.distributed._tensor._redistribute import Redistribute
+        from torch.distributed.tensor._redistribute import Redistribute
 
         comm_mode = CommDebugMode()
 
