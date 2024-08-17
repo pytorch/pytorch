@@ -222,7 +222,7 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}L"
+        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
