@@ -219,6 +219,17 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertIs(stack[0], m)
             self.assertIs(stack[1], m1)
 
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            torch.set_default_device("cpu")
+            torch.set_default_device("cpu")
+            return x + 1
+
+        fn(torch.ones(2, 2))
+        stack = _get_current_function_mode_stack()
+        self.assertEqual(stack[0].device, torch.device("cpu"))
+        torch.set_default_device(None)
+
     def test_pop_torch_function_mode(self):
         m = BaseTorchFunctionMode()
         with m:
