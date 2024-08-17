@@ -999,6 +999,20 @@ class BuiltinVariable(VariableTracker):
                 and name_var.is_python_constant()
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
+        if self.fn == object and name == "__new__":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            user_defined_class_variable = args[0]
+            source = user_defined_class_variable.source
+            value = user_defined_class_variable.value
+            return tx.output.side_effects.track_object_new(
+                source,
+                value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                {},
+            )
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         if self.fn == itertools.chain and name == "from_iterable":
@@ -1647,7 +1661,6 @@ class BuiltinVariable(VariableTracker):
         from . import (
             ConstantVariable,
             GetAttrVariable,
-            PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
         )
@@ -1734,7 +1747,8 @@ class BuiltinVariable(VariableTracker):
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+        elif isinstance(obj, DummyModule):
+            # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
                 member = getattr(obj.value, name)
             else:
