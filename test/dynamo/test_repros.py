@@ -5017,6 +5017,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
 
+    def test_classmethod_with_slots(self):
+        class Mock:
+            __slots__ = ("_a",)
+
+            def __init__(self):
+                self._a = 2
+
+            @classmethod
+            def _m(cls):
+                return 3
+
+            def run(self, x):
+                return torch.sin(x) * self._a * self._m()
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_nn_parametrize(self):
         class Module(nn.Module):
             def __init__(self) -> None:

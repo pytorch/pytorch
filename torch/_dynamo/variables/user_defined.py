@@ -874,20 +874,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return get_custom_getattr(self.value)
 
     def _getattr_static(self, name):
-        if (
-            isinstance(self.value, PyTreeSpec)
-            or "__slots__" in self.value.__class__.__dict__
-            or type(self.value) == threading.local
-        ):
-            try:
-                cls_var = inspect.getattr_static(
-                    self.value.__class__, name, NO_SUCH_SUBOBJ
-                )
-                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
-                    # maybe user-defined @property that we need to inline
-                    return cls_var
-            except AttributeError:
-                pass  # __slots__
+        if isinstance(self.value, PyTreeSpec) or type(self.value) == threading.local:
+            # Cherry-picked cases where we are ok calling the getattr.
+            #
+            # Threading local has custom __getattribute__ but its side-effect free, so we speicalize here.
+            #
+            # TODO(anijain2305) - We might need to do a better job at identifying custom __getattribute__ and graph
+            # break early in other cases (improve object_has_getattribute). For threading local, the __getattribute__ is
+            # overridden in C, so we could not catch it correctly.
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
