@@ -53,7 +53,6 @@ from ..source import (
     ConvertIntSource,
     FloatTensorSource,
     GetItemSource,
-    GlobalWeakRefSource,
     GradSource,
     is_cell_contents,
     is_constant_source,
@@ -610,12 +609,6 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif isinstance(value, torch.overrides.TorchFunctionMode):
-            # This value was on the TF mode stack
-            # stash a weak ref for simpler access
-            if isinstance(self.source, GlobalWeakRefSource):
-                install_guard(self.source.make_guard(GuardBuilder.WEAKREF_ALIVE))
-                val_ref = weakref.ref(value)
-                self.tx.output.install_global_unsafe(self.source.global_name, val_ref)
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
