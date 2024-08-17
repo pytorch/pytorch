@@ -210,11 +210,21 @@ def aot_dispatch_base_graph(
                 colored=True,
             ),
         )
+
+        def fw_metadata_str():
+            return "\n\n".join(
+                [
+                    f"fw_metadata: {str(fw_metadata)}",
+                    f"maybe_subclass_meta: {str(maybe_subclass_meta)}",
+                    fw_module.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                ]
+            )
+
         trace_structured(
             "aot_forward_graph",
-            payload_fn=lambda: fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: fw_metadata_str,
         )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.

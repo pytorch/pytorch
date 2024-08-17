@@ -527,12 +527,19 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
-            trace_structured(
-                "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
+
+            def fw_metadata_str():
+                return "\n\n".join(
+                    [
+                        f"fw_metadata: {str(fw_metadata)}",
+                        f"maybe_subclass_meta: {str(inner_meta)}",
+                        fw_module.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    ]
+                )
+
+            trace_structured("aot_forward_graph", payload_fn=fw_metadata_str)
             trace_structured(
                 "aot_backward_graph",
                 payload_fn=lambda: bw_module.print_readable(
