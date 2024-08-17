@@ -292,6 +292,7 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.exporter._analysis",
             "torch.onnx._internal.exporter._building",
             "torch.onnx._internal.exporter._capture_strategies",
+            "torch.onnx._internal.exporter._compat",
             "torch.onnx._internal.exporter._core",
             "torch.onnx._internal.exporter._decomp",
             "torch.onnx._internal.exporter._dispatching",
