@@ -7,8 +7,8 @@ import itertools
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
