@@ -57,6 +57,9 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
+# sleep in inductor for testing
+sleep_sec_TESTING_ONLY: Optional[int] = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -65,9 +68,7 @@ abi_compatible = (
     os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
 )
 
-c_shim_version = os.environ.get(
-    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if (is_fbcode() and torch.version.hip) else "2"
-)
+c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
 # dead code elimination
 dce = False
@@ -313,8 +314,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+# DEPRECATED, DO NOT USE
+search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -620,6 +621,11 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 # Specify a file where we print out the profiling results.
 # None means we do not dump results to a file.
 profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
+# Switch to do_bench_using_profiling to exclude the CPU overheads
+profile_bandwidth_with_do_bench_using_profiling = (
+    os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
+)
+
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -735,6 +741,11 @@ class cpp:
     enable_floating_point_contract_flag = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
         == "1"
+    )
+
+    # Disable the tiling select heuristic
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
     )
 
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
