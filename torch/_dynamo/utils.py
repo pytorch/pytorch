@@ -61,7 +61,12 @@ import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._C import _get_function_stack_at, _len_torch_function_stack
+from torch._C import (
+    _get_function_stack_at,
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
