@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+
 import torch
-from torch.testing._internal import common_utils
 from torch.onnx._internal import exporter
+from torch.testing._internal import common_utils
 
 
 class SampleModel(torch.nn.Module):
@@ -103,13 +104,12 @@ class TestExportAPIDynamo(common_utils.TestCase):
             self.assertTrue(os.path.exists(path))
 
     def test_export_supports_script_module(self):
-        @torch.jit.script
         class ScriptModule(torch.nn.Module):
             def forward(self, x):
                 return x
 
         onnx_program = torch.onnx.export(
-            ScriptModule(), (torch.randn(1, 1, 2),), dynamo=True
+            torch.jit.script(ScriptModule()), (torch.randn(1, 1, 2),), dynamo=True
         )
         assert onnx_program
         exporter.verify_onnx_program(onnx_program)
