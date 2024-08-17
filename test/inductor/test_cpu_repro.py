@@ -2125,6 +2125,53 @@ class CPUReproTests(TestCase):
                 check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
+    def test_vec_randn(self):
+        funcs = [torch.randn, torch.rand, torch.randint]
+        float_dtypes = [
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+        ]
+        int_dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]
+        dtypes = float_dtypes + int_dtypes
+        for rand_func, dtype in itertools.product(funcs, dtypes):
+            if (rand_func == torch.randint and dtype not in int_dtypes) or (
+                rand_func != torch.randint and dtype not in float_dtypes
+            ):
+                # Skip the invalid combination
+                continue
+            with config.patch(
+                {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+            ):
+                torch._dynamo.reset()
+                metrics.reset()
+
+                def func(seed):
+                    torch.manual_seed(seed)
+                    if rand_func == torch.randint:
+                        return rand_func(0, 64, (64,), dtype=dtype)
+                    else:
+                        return rand_func(64, dtype=dtype)
+
+                cfn = torch.compile(func)
+                # Check the result is deterministic with mauanl seed
+                self.assertEqual(cfn(2024), cfn(2024))
+                check_metrics_vec_kernel_count(1)
+                res_vec = cfn(2024)
+
+                torch._dynamo.reset()
+                metrics.reset()
+                with config.patch({"cpp.simdlen": 0}):
+                    res_scalar = torch.compile(func)(2024)
+                    # Check the same result between scalar and vec
+                    self.assertEqual(res_vec, res_scalar)
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
