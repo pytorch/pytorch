@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -205,7 +205,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 }
 #endif // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
     at::Tensor weight,
     std::optional<at::Tensor> bias) {
@@ -294,14 +294,14 @@ inline at::Tensor pack_weight_to_onednn_tensor(
       wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
-  auto packed_weight = at::native::new_with_itensor_mkldnn(
+  auto packed_weight = at::native::new_with_itensor_onednn(
       std::move(expected_weight),
       c10::optTypeMetaToScalarType(weight.options().dtype_opt()),
       weight.options().device_opt());
   return packed_weight;
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -334,11 +334,11 @@ class QLinearPackWeightInt8 final {
           std::move(weight), std::move(bias));
     }
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
     }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::linear_prepack ",
@@ -370,14 +370,14 @@ class QLinearPackWeightFp16 final {
           "not supported by QNNPACK");
     }
 #endif // USE_PYTORCH_QNNPACK
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       TORCH_CHECK(
           false,
           "quantized::linear_prepack_fp16 is currently "
           "not supported by ONEDNN");
     }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
     TORCH_CHECK(
         false,
         "Didn't find engine for operation quantized::linear_prepack_fp16 ",
@@ -408,7 +408,7 @@ class QLinearPackWeightInt8Onednn final {
   static at::Tensor run(
     at::Tensor weight, // Not QTensor
     std::optional<torch::List<int64_t>> input_shape) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.");

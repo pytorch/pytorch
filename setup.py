@@ -50,14 +50,14 @@
 #   BUILD_TEST=0
 #     disables the test build
 #
-#   USE_MKLDNN=0
-#     disables use of MKLDNN
+#   USE_ONEDNN=0
+#     disables use of ONEDNN
 #
-#   USE_MKLDNN_ACL
-#     enables use of Compute Library backend for MKLDNN on Arm;
-#     USE_MKLDNN must be explicitly enabled.
+#   USE_ONEDNN_ACL
+#     enables use of Compute Library backend for ONEDNN on Arm;
+#     USE_ONEDNN must be explicitly enabled.
 #
-#   MKLDNN_CPU_RUNTIME
+#   DNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_STATIC_MKL
@@ -617,20 +617,20 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Detected XPU runtime at " + cmake_cache_vars["SYCL_LIBRARY_DIR"])
         else:
             report("-- Not using XPU")
-        if cmake_cache_vars["USE_MKLDNN"]:
-            report("-- Using MKLDNN")
-            if cmake_cache_vars["USE_MKLDNN_ACL"]:
-                report("-- Using Compute Library for the Arm architecture with MKLDNN")
+        if cmake_cache_vars["USE_ONEDNN"]:
+            report("-- Using ONEDNN")
+            if cmake_cache_vars["USE_ONEDNN_ACL"]:
+                report("-- Using Compute Library for the Arm architecture with ONEDNN")
             else:
                 report(
-                    "-- Not using Compute Library for the Arm architecture with MKLDNN"
+                    "-- Not using Compute Library for the Arm architecture with ONEDNN"
                 )
-            if cmake_cache_vars["USE_MKLDNN_CBLAS"]:
-                report("-- Using CBLAS in MKLDNN")
+            if cmake_cache_vars["USE_ONEDNN_CBLAS"]:
+                report("-- Using CBLAS in ONEDNN")
             else:
-                report("-- Not using CBLAS in MKLDNN")
+                report("-- Not using CBLAS in ONEDNN")
         else:
-            report("-- Not using MKLDNN")
+            report("-- Not using ONEDNN")
         if cmake_cache_vars["USE_NCCL"] and cmake_cache_vars["USE_SYSTEM_NCCL"]:
             report(
                 "-- Using system provided NCCL library at {}, {}".format(

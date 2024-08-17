@@ -692,11 +692,11 @@ inline DispatchKey computeDispatchKey(
     case Layout::Mkldnn:
       switch (device_.type()) {
         case c10::DeviceType::CPU:
-          return DispatchKey::MkldnnCPU;
+          return DispatchKey::OnednnCPU;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
-              "Unsupported device type for mkldnn layout: ",
+              "Unsupported device type for onednn layout: ",
               device_.type());
       }
     case Layout::SparseCsr:
@@ -734,7 +734,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
 #undef DO_CASE
     TORCH_CHECK(
         false, "Cannot map DispatchKey ", dispatch_key, " to a unique layout.");
-    case DispatchKey::MkldnnCPU:
+    case DispatchKey::OnednnCPU:
       return Layout::Mkldnn;
     default:
       return Layout::Strided;
@@ -752,7 +752,7 @@ inline c10::DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
 #undef DO_CASES
 #undef DO_CASE
 
-    case DispatchKey::MkldnnCPU:
+    case DispatchKey::OnednnCPU:
       return c10::DeviceType::CPU;
     case DispatchKey::Vulkan:
       return c10::DeviceType::Vulkan;

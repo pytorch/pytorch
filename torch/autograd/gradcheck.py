@@ -430,7 +430,7 @@ def _prepare_input(
     # Prepares the inputs to be passed into the function while including the new
     # modified input.
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
-        # Convert back to mkldnn
+        # Convert back to onednn
         if maybe_perturbed_input is not None:
             return maybe_perturbed_input.to_mkldnn()
         else:
@@ -537,7 +537,7 @@ def _get_analytical_jacobian_forward_ad(
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError(
-                        "MKLDNN inputs are not support for forward AD gradcheck."
+                        "ONEDNN inputs are not support for forward AD gradcheck."
                     )
 
                 inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
@@ -963,7 +963,7 @@ def _check_outputs(outputs) -> None:
         )
     if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
         raise ValueError(
-            "MKLDNN output is not supported at gradcheck yet. "
+            "ONEDNN output is not supported at gradcheck yet. "
             "Please call to_dense(masked_grad=...) on the output of fn for gradcheck."
         )
 
@@ -1241,7 +1241,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError(
-                        "MKLDNN inputs are not support for forward AD gradcheck."
+                        "ONEDNN inputs are not support for forward AD gradcheck."
                     )
 
                 inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))

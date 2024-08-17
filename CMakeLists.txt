@@ -310,16 +310,16 @@ option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
                        ON "CPU_INTEL" OFF)
-# Ensure that an MKLDNN build is the default for x86 CPUs but optional for
-# AArch64 (dependent on -DUSE_MKLDNN).
+# Ensure that an ONEDNN build is the default for x86 CPUs but optional for
+# AArch64 (dependent on -DUSE_ONEDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64."
+  USE_ONEDNN "Use ONEDNN. Only available on x86, x86_64, and AArch64."
   "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64" OFF)
 cmake_dependent_option(
-  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
-  "USE_MKLDNN AND CPU_AARCH64" OFF)
-set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
-cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
+  USE_ONEDNN_ACL "Use Compute Library for the Arm architecture." OFF
+  "USE_ONEDNN AND CPU_AARCH64" OFF)
+set(ONEDNN_ENABLE_CONCURRENT_EXEC ${USE_ONEDNN})
+cmake_dependent_option(USE_ONEDNN_CBLAS "Use CBLAS in ONEDNN" OFF "USE_ONEDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
@@ -1271,7 +1271,7 @@ if(BUILD_SHARED_LIBS)
           ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
-          ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/public/onednn.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
