@@ -110,7 +110,7 @@ struct CodeTemplate {
       char c = template_text[pos];
       if (c == '$') {
         std::stringstream kss;
-        bool comma_before =  false;
+        bool comma_before = false;
         bool comma_after = false;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
         std::string k = kss.str();
