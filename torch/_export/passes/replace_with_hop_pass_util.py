@@ -68,7 +68,6 @@ def _replace_with_hop_helper(
                     output_node = output_args[idx]
                     get_item_node._rename(output_node.name)
                     get_item_node.meta = output_node.meta
-                    pass
 
             elif isinstance(output_args, torch.fx.Node):
                 call_func_node = graph.create_node(

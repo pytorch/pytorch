@@ -181,7 +181,7 @@ struct TORCH_API Engine {
 
   void initialize_device_threads_pool();
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
 
