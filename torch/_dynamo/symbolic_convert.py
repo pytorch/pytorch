@@ -3140,7 +3140,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
-                parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
+                parent, code, sub_locals, parent.symbolic_globals, parent.symbolic_torch_function_mode_stack, closure_cells, func
             )
         else:
             tracer = InliningInstructionTranslator(
