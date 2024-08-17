@@ -1206,8 +1206,10 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_vmap(self, device):
+    def test_pointwise_associative_scan_vmap22(self, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1222,21 +1224,22 @@ def forward(self, pred_1, x_1):
         )
 
         def associative_scan_fct(x):
-            return associative_scan(add, x, 0)
+            return associative_scan(add, x, 0, reverse=reverse)
 
         associative_scan1 = torch.vmap(associative_scan_fct, in_dims=1, out_dims=1)
         associative_scan2 = associative_scan
 
         result1 = associative_scan1(x)
-        result2 = associative_scan2(add, x, 0)
-        expected_result = _fake_associative_scan(add, x, 0)
+        result2 = associative_scan2(add, x, 0, reverse=reverse)
+        expected_result = _fake_associative_scan(add, x, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_vmap_dims(self, device):
+    def test_pointwise_associative_scan_vmap_dims(self, reverse, device):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1251,7 +1254,7 @@ def forward(self, pred_1, x_1):
             scan_dim = random.randint(0, dims - 2)
 
             def associative_scan_fct(x):
-                return associative_scan(add, x, scan_dim)
+                return associative_scan(add, x, scan_dim, reverse=reverse)
 
             associative_scan1 = torch.compile(
                 torch.vmap(associative_scan_fct, in_dims=in_dim, out_dims=out_dim),
@@ -1290,6 +1293,7 @@ def forward(self, pred_1, x_1):
                                 in_dim,
                             ),
                             scan_dim,
+                            reverse=reverse
                         ),
                         in_dim,
                     )
@@ -1302,8 +1306,10 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_vmap_comp(self, device):
+    def test_pointwise_associative_scan_vmap_comp(self, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1319,7 +1325,7 @@ def forward(self, pred_1, x_1):
         torch.compiler.reset()
 
         def associative_scan_fct(x):
-            return associative_scan(add, x, 0)
+            return associative_scan(add, x, 0, reverse=reverse)
 
         associative_scan1 = torch.compile(
             torch.vmap(associative_scan_fct, in_dims=1, out_dims=1), fullgraph=True
@@ -1327,15 +1333,16 @@ def forward(self, pred_1, x_1):
         associative_scan2 = associative_scan
 
         result1 = associative_scan1(x)
-        result2 = associative_scan2(add, x, 0)
-        expected_result = _fake_associative_scan(add, x, 0)
+        result2 = associative_scan2(add, x, 0, reverse=reverse)
+        expected_result = _fake_associative_scan(add, x, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
         self.assertEqual(result2, expected_result)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_vmap_pytree(self, device):
+    def test_pointwise_associative_scan_vmap_pytree(self, reverse, device):
         def fct_pointwise(x, y):
             return {
                 "i": x["i"] * y["i"],
@@ -1359,7 +1366,7 @@ def forward(self, pred_1, x_1):
         inp = {"i": x, "j": (y,)}
 
         def associative_scan_fct(z):
-            return associative_scan(fct_pointwise, z, 0)
+            return associative_scan(fct_pointwise, z, 0, reverse=reverse)
 
         torch.compiler.reset()
         associative_scan1 = torch.compile(
@@ -1369,7 +1376,7 @@ def forward(self, pred_1, x_1):
 
         result1 = associative_scan1(inp)
         # result2 = associative_scan2(inp)
-        expected_result = _fake_associative_scan(fct_pointwise, inp, 0)
+        expected_result = _fake_associative_scan(fct_pointwise, inp, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
         # self.assertEqual(result2, expected_result)
 

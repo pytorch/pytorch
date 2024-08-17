@@ -46,6 +46,7 @@ def associative_scan(
     combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
     input: pytree.PyTree,
     dim: int,
+    reverse: bool = False,
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -66,6 +67,7 @@ def associative_scan(
         input (torch.Tensor): The input tensor, or nested pytree of tensors.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
+        reverse (bool): A boolean stating if the scan should be reversed with respect to the dimension.
 
 
     Example::
@@ -82,10 +84,13 @@ def associative_scan(
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim
+                combine_fn, input, dim, reverse=reverse
             )
 
     leaves, spec = pytree.tree_flatten(input)
+
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     assert len(leaves) >= 1, "expected at least 1 input leaf"
     assert all(
@@ -103,6 +108,9 @@ def associative_scan(
     )
 
     result_flat = associative_scan_op(combine_fn, leaves, dim)
+
+    # if reverse:
+    #     result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -186,12 +194,13 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
 def associative_scan_functionalize(ctx, combine_fn, input, dim):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
-        ret = associative_scan_op(combine_fn, unwrapped_input, dim)
+        functional_combine_fn = ctx.functionalize(combine_fn)
+        ret = associative_scan_op(functional_combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
+def associative_scan_batch_rule(interpreter, combine_fn, input, dim):#, reverse):
     input_bdims = [maybe_get_bdim(x) if is_batchedtensor(x) else None for x in input]
 
     batch_size = None
@@ -219,9 +228,18 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
             else:
                 unwrap = unwrap.movedim(bdim, 0)
         input_unwrapped.append(unwrap)
+        
+    # if reverse:
+    #     input_unwrapped = [torch.flip(elem, [dim + 1]) for elem in input_unwrapped]
 
     with interpreter.lower():
         res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
 
     lvl = interpreter.level()
-    return [_add_batch_dim(x, 0, lvl) for x in res]
+    # return [_add_batch_dim(x, 0, lvl) for x in res]
+    batch_res = [_add_batch_dim(x, 0, lvl) for x in res]
+    
+    # if reverse:
+    #     batch_res = [torch.flip(elem, [dim + 1]) for elem in batch_res]
+
+    return batch_res
