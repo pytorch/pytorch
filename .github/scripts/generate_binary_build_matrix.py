@@ -161,7 +161,7 @@ WHEEL_CONTAINER_IMAGES = {
         gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
+    "xpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-xpu:caa32808dfc5a143d185d4b80ef328f5e22c172a",
     "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
