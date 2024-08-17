@@ -626,6 +626,23 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
+    # torch.distributed.tensor.api
+    "distribute_module",
+    "distribute_tensor",
+    "DTensor",
+    # torch.distributed.tensor.placement_types
+    "DTensorSpec",
+    "Placement",
+    # torch.distributed.tensor.random
+    "is_rng_supported_mesh",
+    "OffsetBasedRNGTracker",
+    # torch.distributed.tensor.experimental
+    "context_parallel",
+    "local_map",
+    "register_sharding",
+    # torch.distributed.tensor.debug
+    "visualize_sharding",
+    "CommDebugMode",
     # torch.distributed.tensor.parallel.api
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
