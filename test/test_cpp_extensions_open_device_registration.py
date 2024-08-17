@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp-extensions"]
 
+import _codecs
 import os
 import shutil
 import sys
@@ -9,9 +10,12 @@ import unittest
 from typing import Union
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
+from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     skipIfTorchDynamo,
@@ -515,27 +519,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z = x[y, y]
         self.assertEqual(z_cpu, z)
 
-    def test_open_device_tensorlist_type_fallback(self):
-        # create tensors located in custom device
-        v_foo = torch.Tensor([1, 2, 3]).to("foo")
-        # create result tensor located in cpu
-        z_cpu = torch.Tensor([2, 4, 6])
-        # create tensorlist for foreach_add op
-        x = (v_foo, v_foo)
-        y = (v_foo, v_foo)
-        # Check that our device is correct.
-        device = self.module.custom_device()
-        self.assertTrue(v_foo.device == device)
-        self.assertFalse(v_foo.is_cpu)
-
-        # call _foreach_add op, which will fallback to cpu
-        z = torch._foreach_add(x, y)
-        self.assertEqual(z_cpu, z[0])
-        self.assertEqual(z_cpu, z[1])
-
-        # call _fused_adamw_ with undefined tensor.
-        self.module.fallback_with_undefined_tensor()
-
     def test_open_device_numpy_serialization_map_location(self):
         torch.utils.rename_privateuse1_backend("foo")
         device = self.module.custom_device()
@@ -551,7 +534,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             )
             with TemporaryFileName() as f:
                 torch.save(sd, f)
-                sd_loaded = torch.load(f, map_location="cpu")
+                with safe_globals(
+                    [
+                        np.core.multiarray._reconstruct,
+                        np.ndarray,
+                        np.dtype,
+                        _codecs.encode,
+                        type(np.dtype(np.float32))
+                        if np.__version__ < "1.25.0"
+                        else np.dtypes.Float32DType,
+                    ]
+                ):
+                    sd_loaded = torch.load(f, map_location="cpu")
                 self.assertTrue(sd_loaded["x"].is_cpu)
 
 

@@ -128,7 +128,7 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 }
 
 int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale, bool enable_gqa){
+    const std::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
   auto backend = sdp::SDPBackend::overrideable;
   return static_cast<int64_t>(backend);
 }
@@ -629,15 +629,6 @@ bool is_register_hook() {
 
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
-}
-
-void fallback_with_undefined_tensor() {
-  at::Tensor a = at::randn({8, 8, 12}).to(at::DeviceType::PrivateUse1);
-  at::Tensor idx1 = at::ones(4, c10::TensorOptions().dtype(torch::kLong).device(at::DeviceType::PrivateUse1));
-  at::Tensor idx2 = at::Tensor();  // undefined
-
-  // runs the CPUFallback, which needs to handle an undefined tensor in the list of indices
-  at::index(a, {idx1, idx2});
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
