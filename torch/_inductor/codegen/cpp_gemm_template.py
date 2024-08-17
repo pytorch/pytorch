@@ -121,14 +121,14 @@ extern "C" {{export_declaration}}
         const int64_t k_block_end = Kr_blocks;
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+{%- if use_local_acc %}
+    {%- set acc_buf_name = "local_acc_buf" %}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+{%- endif %}
         for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
             const int64_t m_start = mc * Mr;
             const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
             const int64_t m_size = m_end - m_start;
-{%- if use_local_acc %}
-    {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
-{%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                 const int64_t n_start = nc * Nr;
                 const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
@@ -146,7 +146,7 @@ extern "C" {{export_declaration}}
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
@@ -164,7 +164,7 @@ extern "C" {{export_declaration}}
 {%- endif %}
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -422,19 +422,28 @@ class CppPackedGemmTemplate(CppTemplate):
             min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
             assert min_Mc_blocks >= 1
             Kt_bytes = Kt_blocks * Kr * num_byte_A
-            if min_Mc_blocks * Mr * Kt_bytes < L2:
+            Nr_bytes = Nr * 4  # assume acc is float32/int32
+            Nt_bytes = Nt_blocks * Nr_bytes
+            if min_Mc_blocks * Mr * (Kt_bytes + Nt_bytes) < L2 / 2:
+                Mc_blocks = min(
+                    Mt_blocks, math.floor(L2 / 2 / (Mr * (Kt_bytes + Nt_bytes)))
+                )
+                Nc_blocks = Nt_blocks
+            elif min_Mc_blocks * Mr * (Kt_bytes + Nr_bytes) < L2:
                 # Strategy 1: A (Mc x Kt) resides in L2 and reused by all Nt
                 # when Nc_blocks is kept 1. Mc should be large enough (>= min_Mc_blocks)
                 # to reuse B (Kc x Nr) in L1. This makes C (Mc x Nr) small enough to reside
                 # in L1.
-                Mc_blocks = min(Mt_blocks, math.floor(L2 / (Mr * Kt_bytes)))
+                Mc_blocks = min(
+                    Mt_blocks, math.floor(L2 / (Mr * (Kt_bytes + Nr_bytes)))
+                )
                 Nc_blocks = 1
             else:
                 # Strategy 2: Kt is too large to hold A (Mc x Kt) in L2, we reuse
                 # A (Mc x Kc) in L2 by B (Kc x Nc). C (Mc x Nc) resides in L2.
                 Mc_blocks = Mt_blocks
                 Nc_blocks = min(math.ceil(Mc_blocks * Mr / Nr), Nt_blocks)
-                Nc_bytes = Nc_blocks * Nr * 4  # assume C or acc is float32/int32
+                Nc_bytes = Nc_blocks * Nr_bytes
                 Kc_bytes = Kc_blocks * Kr * num_byte_A
                 if Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2:
                     # The following is the solution for 4*Mc*Nc + Mc*Kc_bytes = L2,
