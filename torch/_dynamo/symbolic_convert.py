@@ -2741,6 +2741,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         if TYPE_CHECKING:
             from torch.overrides import TorchFunctionMode
 
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        TorchFunctionModeStackVariable.reset()
+
         self.symbolic_torch_function_mode_stack: Deque[
             TorchFunctionMode
         ] = collections.deque()
