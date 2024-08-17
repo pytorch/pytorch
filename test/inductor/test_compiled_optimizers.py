@@ -46,6 +46,7 @@ from torch.optim.lr_scheduler import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
@@ -53,8 +54,13 @@ from torch.testing._internal.common_optimizers import (
     optims,
 )
 from torch.testing._internal.common_utils import parametrize
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    has_triton,
+)
+from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
 # Note: we use atypical values to amplify error
@@ -111,40 +117,70 @@ KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_foreach_weight_decay_cpu": 12,
     "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
     "test_adamw_amsgrad_capturable_foreach_cuda": 3,
+    "test_adamw_amsgrad_capturable_foreach_xpu": 3,
     "test_adamw_amsgrad_capturable_cuda": 6,
+    "test_adamw_amsgrad_capturable_xpu": 6,
     "test_adamw_tensor_lr_amsgrad_capturable_foreach_cuda": 3,
+    "test_adamw_tensor_lr_amsgrad_capturable_foreach_xpu": 3,
     "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
+    "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
+    "test_adam_tensor_lr_amsgrad_capturable_xpu": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
+    "test_adam_amsgrad_capturable_xpu": 6,
     "test_adadelta_tensor_lr_capturable_cuda": 6,
+    "test_adadelta_tensor_lr_capturable_xpu": 6,
     "test_rmsprop_tensor_lr_capturable_cuda": 6,
+    "test_rmsprop_tensor_lr_capturable_xpu": 6,
     "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
+    "test_adadelta_tensor_lr_capturable_foreach_xpu": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
     "test_adadelta_foreach_weight_decay_cpu": 12,
     "test_sgd_foreach_momentum_weight_decay_cpu": 16,
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
+    "test_sgd_momentum_dampening_foreach_xpu": 5,
     "test_sgd_momentum_foreach_cuda": 5,
+    "test_sgd_momentum_foreach_xpu": 5,
     "test_sgd_weight_decay_maximize_cuda": 4,
+    "test_sgd_weight_decay_maximize_xpu": 4,
     "test_sgd_weight_decay_maximize_cpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
+    "test_sgd_momentum_weight_decay_foreach_xpu": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
+    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": 2,
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
+    "test_sgd_xpu": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_rmsprop_tensor_lr_capturable_foreach_xpu": 4,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
+    "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
+    "test_adagrad_weight_decay_foreach_xpu": 2,
+    "test_adagrad_weight_decay_maximize_foreach_xpu": 2,
     "test_adagrad_tensor_lr_cpu": 6,
     "test_adagrad_tensor_lr_cuda": 6,
+    "test_adagrad_tensor_lr_xpu": 6,
     "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
+    "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
     "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_xpu": 4,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
     "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_xpu": 3,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
     "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_xpu": 3,
     "test_sgd_tensor_lr_cpu": 2,
     "test_sgd_tensor_lr_cuda": 2,
+    "test_sgd_tensor_lr_xpu": 2,
     "test_sgd_tensor_lr_foreach_cuda": 2,
+    "test_sgd_tensor_lr_foreach_xpu": 2,
 }
 
 # also tracks currently supported optimizers
@@ -169,7 +205,7 @@ def build_opt_kwarg_db():
         if optim_info.optim_cls not in KERNEL_COUNTS:
             continue
 
-        for device in ["cpu", "cuda"]:
+        for device in ["cpu", GPU_TYPE]:
             for optim_inputs in _get_optim_inputs_including_global_cliquey_kwargs(
                 device, None, optim_info, skip=("differentiable", "fused")
             ):
@@ -195,7 +231,7 @@ def build_opt_kwarg_db():
                 else:
                     kwargs["kernel_count"] = (
                         KERNEL_COUNTS[optim_info.optim_cls].multitensor
-                        if kwargs.get("foreach", False) and device == "cuda"
+                        if kwargs.get("foreach", False) and device == GPU_TYPE
                         else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                     )
 
@@ -226,9 +262,9 @@ aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_gpu
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -381,20 +417,20 @@ def make_test(
         finally:
             stack.close()
 
-    if device == "cuda":
-        test_fn = requires_cuda(test_fn)
+    if device == GPU_TYPE:
+        test_fn = requires_gpu(test_fn)
 
     return test_fn
 
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
-    @requires_cuda
+    @requires_gpu
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda")
+        input = torch.ones([10, 10], device=GPU_TYPE)
         model = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda") for _ in range(2)]
+            *[torch.nn.Linear(10, 10, device=GPU_TYPE) for _ in range(2)]
         )
         model(input).sum().backward()
 
@@ -440,6 +476,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
 class CompiledOptimizerParityTests(TestCase):
     @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
+    @skipXPUIf(not has_triton(), "torch.compile with xpu requires triton")
     @optims(optim_db, dtypes=[torch.float32])
     @parametrize("use_closure", [True, False])
     def test_correctness(self, device, dtype, optim_info, use_closure):
@@ -544,7 +581,7 @@ class CompiledOptimizerParityTests(TestCase):
 
 
 class CompiledOptimizerTests(TestCase):
-    check_model_cuda = check_model_cuda
+    check_model_gpu = check_model_gpu
     check_model_cpu = check_model
     check_kernel_count = True
 
@@ -584,7 +621,7 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
-    @requires_cuda
+    @requires_gpu
     def test_static_address_finalizer(self):
         import gc
 
@@ -593,7 +630,7 @@ class CompiledOptimizerTests(TestCase):
 
         def fn():
             nonlocal p_ref
-            mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
+            mod = torch.nn.Linear(10, 10, device=GPU_TYPE, bias=False)
             for p in mod.parameters():
                 p.grad = torch.rand_like(p)
 
@@ -647,7 +684,7 @@ class CompiledOptimizerTests(TestCase):
         self.assertEqual(actual_steps, expected_steps)
 
     # Basic shampoo test to verify we support compiling the various ops without error
-    @requires_cuda
+    @requires_gpu
     def test_basic_shampoo(self):
         param_buf = torch.rand((1024, 128))
         param_buf_c = param_buf.clone().detach()
@@ -716,9 +753,11 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
-    @requires_cuda
+    @requires_gpu
     def test_closure_graph_break(self):
-        param = torch.rand(2, 3, dtype=torch.float32, device="cuda", requires_grad=True)
+        param = torch.rand(
+            2, 3, dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+        )
         param_c = param.clone().detach().requires_grad_(True)
 
         def closure():
@@ -757,12 +796,12 @@ class CompiledOptimizerTests(TestCase):
 
     # compile a large foreach op and verify
     # that the time taken is within an expected range
-    @requires_cuda
+    @requires_gpu
     def test_compile_time_smoketest(self):
         import time
 
-        xs = [torch.ones(2, 2, device="cuda") for _ in range(100)]
-        ys = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+        xs = [torch.ones(2, 2, device=GPU_TYPE) for _ in range(100)]
+        ys = [torch.ones(2, 2, device=GPU_TYPE) for _ in range(100)]
 
         @torch.compile
         def fn(xs, ys):
@@ -774,6 +813,25 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
+    @requires_cuda
+    def test_S429861(self):
+        # Just verify we can compile this function without error
+        try:
+            from . import s429861_repro
+        except ImportError:
+            import s429861_repro
+
+        forward = s429861_repro.forward
+
+        import torch._dynamo
+        import torch._inductor
+        from torch._dynamo.debug_utils import aot_graph_input_parser
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache():
+            kwargs = aot_graph_input_parser(forward)
+            torch.compile(forward)(**kwargs)
+
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(
@@ -782,10 +840,12 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
         make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
     )
 
-instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
+instantiate_device_type_tests(
+    CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
