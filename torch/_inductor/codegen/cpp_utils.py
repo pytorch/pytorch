@@ -247,7 +247,7 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
+            return f"c10::div_floor_integer({x}, static_cast<long>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
