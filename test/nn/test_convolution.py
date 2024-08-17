@@ -87,7 +87,8 @@ class TestConvolutionNN(NNTestCase):
         path = download_file("https://download.pytorch.org/test_data/legacy_conv2d.pt")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SourceChangeWarning)
-            m = torch.load(path, encoding="utf-8")
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, encoding="utf-8", weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 

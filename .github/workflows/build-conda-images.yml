@@ -23,8 +23,6 @@ on:
 env:
   DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
-  DOCKER_ID: ${{ secrets.DOCKER_ID }}
-  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
 
 concurrency:
@@ -33,6 +31,7 @@ concurrency:
 
 jobs:
   build-docker:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
@@ -54,6 +53,9 @@ jobs:
             push: true
       - name: Authenticate if WITH_PUSH
         if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin

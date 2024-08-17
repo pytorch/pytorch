@@ -151,6 +151,22 @@ class SuperVariable(VariableTracker):
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
+        elif self.objvar.source and inner_fn is object.__new__:
+            return tx.output.side_effects.track_object_new(
+                self.objvar.source,
+                self.objvar.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.objvar.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                {},
+            )
+        elif name == "__new__" and isinstance(inner_fn, types.FunctionType):
+            # __new__ is a staticmethod object, but accessing __new__ from the super object, as done in
+            # _resolved_getattr_and_source, results in a function object. If not specialized here, it will try to add
+            # the `self` arg and fail bind arg matching later.
+            return variables.UserFunctionVariable(
+                inner_fn, source=source
+            ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
@@ -422,8 +438,6 @@ class InspectSignatureVariable(VariableTracker):
 
 class InspectParameterVariable(VariableTracker):
     """This is not implemented, if used will graph break."""
-
-    pass
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -1092,7 +1106,10 @@ class PythonModuleVariable(VariableTracker):
 
         from .builder import SourcelessBuilder, VariableBuilder
 
-        attr_value = getattr(self.value, name)
+        if self.is_torch or name not in self.value.__dict__:
+            attr_value = getattr(self.value, name)
+        else:
+            attr_value = self.value.__dict__[name]
 
         if self.source:
             new_source = AttrSource(self.source, name)
