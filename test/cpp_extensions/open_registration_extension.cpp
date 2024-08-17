@@ -128,7 +128,7 @@ void quantize_tensor_per_tensor_affine_privateuse1(
 }
 
 int64_t _fused_sdp_choice_privateuse1(const at::Tensor & query, const at::Tensor & key, const at::Tensor & value,
-    const c10::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, c10::optional<double> scale, bool enable_gqa){
+    const std::optional<at::Tensor> & attn_mask, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
   auto backend = sdp::SDPBackend::overrideable;
   return static_cast<int64_t>(backend);
 }
@@ -389,7 +389,7 @@ at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 std::optional<bool> pin_memory_opt) {
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
-  return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
+  return at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
 }
 
 // Some set operations for the basic use case
@@ -629,20 +629,6 @@ bool is_register_hook() {
 
 const at::Generator& default_generator(c10::DeviceIndex device_index) {
   return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
-}
-
-void fallback_with_undefined_tensor() {
-  at::Tensor first = at::empty((2,3)).to(at::DeviceType::PrivateUse1);
-  at::Tensor second = at::Tensor();
-  at::Tensor step = at::empty({}).fill_(2).to(at::DeviceType::PrivateUse1);
-  at::Tensor grad_scale = at::empty({}).fill_(0.00001).to(at::DeviceType::PrivateUse1);
-  at::Tensor found_inf = at::empty({}).fill_(1).to(at::DeviceType::PrivateUse1);
-  at::TensorList tensors = {first, first};
-  at::TensorList undefined_tensors = {first, second};
-  at::TensorList steps = {step, step};
-  return at::_fused_adamw_(tensors, tensors, tensors, tensors, undefined_tensors,
-                           steps, 0.001, 0.9, 0.999, 1e-2, 1e-8, false, false,
-                           grad_scale, found_inf);
 }
 
 struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {

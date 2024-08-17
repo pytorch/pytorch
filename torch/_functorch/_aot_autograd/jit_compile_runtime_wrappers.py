@@ -47,6 +47,7 @@ from .runtime_wrappers import (
     AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
+    EffectTokensWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     make_runtime_safe,
@@ -212,9 +213,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
+    compiled_fw = EffectTokensWrapper().post_compile(
+        compiled_fw,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
-    compiled_fw_func = AOTDispatchSubclassWrapper(
+    compiled_fw = AOTDispatchSubclassWrapper(
         trace_joint=False,
         # TODO: once we use pre_compile this will be flat_fn at the top of this function
         fw_only=None,
@@ -226,15 +233,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
-    if not hasattr(compiled_fw_func, "_boxed_call"):
-        compiled_fw_func = make_boxed_func(compiled_fw_func)
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
 
     compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
         disable_amp=disable_amp,
     ).post_compile(
-        compiled_fw_func,
+        compiled_fw,
         aot_config,
         runtime_metadata=fw_metadata,
     )
@@ -520,12 +527,19 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
-            trace_structured(
-                "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
+
+            def fw_metadata_str():
+                return "\n\n".join(
+                    [
+                        f"fw_metadata: {str(fw_metadata)}",
+                        f"maybe_subclass_meta: {str(inner_meta)}",
+                        fw_module.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    ]
+                )
+
+            trace_structured("aot_forward_graph", payload_fn=fw_metadata_str)
             trace_structured(
                 "aot_backward_graph",
                 payload_fn=lambda: bw_module.print_readable(
@@ -568,6 +582,12 @@ def aot_dispatch_autograd(
 
             if fakified_out_wrapper.needs_post_compile:
                 fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+            compiled_fw_func = EffectTokensWrapper().post_compile(
+                compiled_fw_func,
+                aot_config,
+                runtime_metadata=fw_metadata,
+            )
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
                 fw_only=None,
