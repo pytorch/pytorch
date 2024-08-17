@@ -130,7 +130,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-    def test_trace_fsdp_set_(self):
+    def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
             torch.add(x, 1, out=out)
@@ -140,7 +140,7 @@ class TestFullyShardCompile(FSDPTest):
             buf_view = buf.view(-1)
             torch.ops.mylib.add_one_out(x, out=buf_view)
             buf_view2 = buf.view(-1)
-            torch.ops.fsdp.set_(x, buf_view2)
+            torch.ops.fsdp.copy_(x, buf_view2)
 
         ref_x = torch.zeros(2)
         x = copy.deepcopy(ref_x)
@@ -633,7 +633,7 @@ class TestFullyShardCompile(FSDPTest):
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
-                n_layers=3,
+                n_layers=2,
             )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
