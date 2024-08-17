@@ -10,7 +10,7 @@ from torch.utils._device import DeviceContext
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalSource, TypeSource
+from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
 from ..utils import get_safe_global_name, has_torch_function, is_tensor_base_attr_getter
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -65,6 +65,11 @@ class TorchFunctionModeStackVariable(VariableTracker):
     # singleton value representing the global torch function mode stack
     # singleton (it exists in C++)
     stack_value_singleton = object()
+    # If a device context was added by the graph
+    # and there was not one previously present,
+    # the stack locations of any recorded
+    # modes need to be shifted by one
+    device_context_inserted = False
 
     def __init__(self, source, symbolic_stack):
         self.source = source
@@ -78,6 +83,27 @@ class TorchFunctionModeStackVariable(VariableTracker):
             )
             tx.output.side_effects.track_mutable(cls.stack_value_singleton, var)
             tx.output.side_effects.mutation(var)
+
+    @classmethod
+    def register_device_context_insertion(cls, tx: "InstructionTranslator"):
+        stack = tx.symbolic_torch_function_mode_stack
+        if stack and isinstance(stack[0], DeviceContext):
+            return
+        else:
+            cls.device_context_inserted = True
+            tx.symbolic_torch_function_mode_stack.insert(
+                0,
+                TorchFunctionModeVariable(
+                    None, source=TorchFunctionModeStackSource(-1)
+                ),
+            )
+
+    @classmethod
+    def get_mode_index(cls, ind):
+        if cls.device_context_inserted:
+            return ind + 1
+        else:
+            return ind
 
 
 class TorchFunctionModeVariable(ContextWrappingVariable):
