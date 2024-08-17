@@ -1258,11 +1258,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
-            if config.search_autotune_cache and not (
-                config.max_autotune or config.max_autotune_gemm
-            ):
-                return no_op
-
             precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
