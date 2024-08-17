@@ -72,6 +72,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
+    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -2743,14 +2744,19 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.symbolic_torch_function_mode_stack: Deque[
             TorchFunctionMode
         ] = collections.deque()
-        py_stack = get_torch_function_mode_stack()
-        for val in py_stack:
-            global_name = variables.torch_function.TorchFunctionModeVariable.get_global_mangled_name(
-                self, val
+        # We want to retrieve all modes to properly reconstruct the stack if needed
+        py_stack = get_torch_function_mode_stack(filter_ignored=False)
+
+        if py_stack:
+            has_device_context = isinstance(
+                py_stack[0], torch.utils._device.DeviceContext
             )
-            source = GlobalWeakRefSource(global_name)
+
+        for i, val in enumerate(py_stack):
             self.symbolic_torch_function_mode_stack.append(
-                variables.LazyVariableTracker.create(val, source=source)
+                variables.LazyVariableTracker.create(
+                    val, source=TorchFunctionModeStackSource(i)
+                )
             )
 
     def get_example_value(self, source: Source):
