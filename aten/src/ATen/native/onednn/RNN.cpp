@@ -15,8 +15,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/mkldnn_convolution_native.h>
-#include <ATen/ops/mkldnn_rnn_layer_backward_native.h>
-#include <ATen/ops/mkldnn_rnn_layer_native.h>
+#include <ATen/ops/onednn_rnn_layer_backward_native.h>
+#include <ATen/ops/onednn_rnn_layer_native.h>
 #endif
 
 #if !AT_ONEDNN_ENABLED()
@@ -24,7 +24,7 @@
 namespace at::native {
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
+std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(
 const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
@@ -41,10 +41,10 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with ONEDNN support");
+      AT_ERROR("onednn_rnn_layer: ATen not compiled with ONEDNN support");
   }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,
@@ -68,7 +68,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with ONEDNN support");
+      AT_ERROR("onednn_rnn_layer_backward: ATen not compiled with ONEDNN support");
     }
 
 REGISTER_NO_CPU_DISPATCH(lstm_onednn_stub);
@@ -213,7 +213,7 @@ static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_
   return bias_ih + bias_hh;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
+std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
     const Tensor& w2,
@@ -291,7 +291,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,
@@ -487,7 +487,7 @@ static std::tuple<Tensor, Tensor, Tensor> onednn_rnn(
       auto layer_cx = cx[index];
       auto reverse = (direction > 0);
       // bias won't be packed
-      auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
+      auto outputs = at::onednn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
                                         has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options().layout(at::Layout::Strided)),
           has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options().layout(at::Layout::Strided)), layer_hx,
           layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
