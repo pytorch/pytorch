@@ -4,6 +4,7 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
+    CUDADeviceVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
@@ -112,6 +113,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DefaultDictVariable",

@@ -178,13 +178,22 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     inlining the original function. The polyfill handler should have the same signature and the same
     behavior as the original function.
 
+    Args:
+        cxx_fn (callable): The original C++ function to register a polyfill handler for.
+
+    Returns:
+        A decorator that registers the polyfill handler for the original function.
+
     Example::
 
         >>> import operator
         >>> operator.indexOf([1, 2, 3, 4, 5], 3)
         2
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        Unsupported: ...
+        ... # xdoctest: +SKIP("Long tracebacks")
+        Traceback (most recent call last):
+        ...
+        torch._dynamo.exc.Unsupported: ...
 
         >>> @torch.compiler.substitute_in_graph(operator.indexOf)
         ... def indexOf(sequence, x):
@@ -192,7 +201,7 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
         ...         if item is x or item == x:
         ...             return i
         ...     raise ValueError("sequence.index(x): x not in sequence")
-
+        >>>
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
