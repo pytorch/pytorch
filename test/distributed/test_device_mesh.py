@@ -5,11 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-    unpad_tensor,
-)
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -21,6 +16,11 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     is_nccl_available,
     ProcessGroup,
+)
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -540,7 +540,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(_world.group_count, ref_pg_count)
 
     @with_comms
-    def test_get_item_3d_noncontinuous_slicing(self):
+    def test_get_item_3d_noncontiguous_slicing(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "pp", "cp")
         mesh_3d = init_device_mesh(
@@ -561,18 +561,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
         self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
 
-        # For dp_cp_mesh, dp mesh is the innermost dimension.
-        cp_dp_mesh = mesh_3d["cp", "dp"]
-        expected_mesh_tensor = (
-            torch.tensor([[0, 4], [1, 5]], dtype=torch.int)
-            if self.rank in (0, 1, 4, 5)
-            else torch.tensor([[2, 6], [3, 7]], dtype=torch.int)
-        )
-        cp_local_rank = cp_dp_mesh.get_local_rank("cp")
-        self.assertEqual(cp_dp_mesh.mesh, expected_mesh_tensor)
-        dp_mesh = mesh_3d["dp"]
-        # Check on the current cp_local_rank, whether the dp mesh tensor is the same.
-        self.assertEqual(cp_dp_mesh.mesh[cp_local_rank], dp_mesh.mesh)
+        with self.assertRaisesRegex(
+            KeyError,
+            "Valid mesh_dim_names should be a subsequence of",
+        ):
+            cp_dp_mesh = mesh_3d["cp", "dp"]
 
     @with_comms
     def test_flatten_mesh(self):
@@ -586,6 +579,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_cp_mesh = mesh_3d["dp", "cp"]
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+
+        ref_pg_count = _world.group_count
+        # Calling flatten again should not create a new pg.
+        dp_cp_mesh_2 = dp_cp_mesh._flatten()
+        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
@@ -605,12 +603,14 @@ class TestMeshEnv(DTensorTestBase):
         )
 
         dp_cp_mesh = mesh_3d["dp", "cp"]
-        cp_dp_mesh = mesh_3d["cp", "dp"]
+        dp_tp_mesh = mesh_3d["dp", "tp"]
+        cp_tp_mesh = mesh_3d["cp", "tp"]
         dp_mesh = mesh_3d["dp"]
         cp_mesh = mesh_3d["cp"]
         tp_mesh = mesh_3d["tp"]
         self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(cp_dp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_tp_mesh), mesh_3d)
+        self.assertEqual(_mesh_resources.get_root_mesh(cp_tp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
         self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
