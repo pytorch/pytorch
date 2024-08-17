@@ -34,15 +34,11 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -649,8 +645,7 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
