@@ -250,6 +250,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_substitute_in_graph(self):
         counters.clear()
 
+        # NB: Choose another C function for test when we support operator.indexOf
+        #     out of the box
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf
         opt_fn = torch._dynamo.optimize(cnts)(fn)
