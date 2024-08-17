@@ -1647,7 +1647,6 @@ class BuiltinVariable(VariableTracker):
         from . import (
             ConstantVariable,
             GetAttrVariable,
-            PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
         )
