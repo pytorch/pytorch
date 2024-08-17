@@ -46,12 +46,6 @@ static void pool2d_template(const Tensor& input,
                             const std::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
                             const c10::string& op_name) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_CHECK(input.scalar_type() != ScalarType::Long,
-                "MPS: ",
-                op_name,
-                " op with int64 input is supported natively starting from macOS 13.0.");
-  }
   const int64_t ndims = input.ndimension();
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
@@ -192,14 +186,29 @@ static void pool2d_template(const Tensor& input,
 
     MPSStream* mpsStream = getCurrentMPSStream();
     // in case of ChannelsLast we don't perform gather() in placeholder to avoid implicit conversion to NCHW
-    Placeholder inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input, inputShape, memory_format != MemoryFormat::ChannelsLast);
-    Placeholder gradOutputPlaceholder = !is_backward_pass
-        ? Placeholder()
-        : Placeholder(
-              cachedGraph->gradOutputTensor, grad_output, gradOutputShape, memory_format != MemoryFormat::ChannelsLast);
-    Placeholder indicesPlaceholder = has_indices ? Placeholder(cachedGraph->indicesTensor, indices) : Placeholder();
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+
+    // MPS TODO: Using strided API causes invalid indices to be generated if the original format is NHWC
+    //           Output is still correct, but indices are not matching. Disable it for now and use the old
+    //           gather path to solve the strides.
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor,
+                                               input,
+                                               inputShape,
+                                               memory_format != MemoryFormat::ChannelsLast,
+                                               MPSDataTypeInvalid,
+                                               /*useMPSStridedAPI=*/false);
+    Placeholder gradOutputPlaceholder = !is_backward_pass ? Placeholder()
+                                                          : Placeholder(cachedGraph->gradOutputTensor,
+                                                                        grad_output,
+                                                                        gradOutputShape,
+                                                                        memory_format != MemoryFormat::ChannelsLast,
+                                                                        MPSDataTypeInvalid,
+                                                                        /*useMPSStridedAPI=*/false);
+    Placeholder indicesPlaceholder = has_indices
+        ? Placeholder(
+              cachedGraph->indicesTensor, indices, nullptr, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false)
+        : Placeholder();
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor, output, nullptr, false, MPSDataTypeInvalid, false);
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
 
