@@ -2171,7 +2171,8 @@ def wrap_fx_proxy_cls(
         or (
             # TODO: this is a little sus, because we didn't check what the self is
             proxy.node.op == "call_method"
-            and proxy.node.target in ["bit_length"]
+            and proxy.node.target in ["bit_length", "storage_offset"]
+            # TODO(yf225): do we need to use SymInt for storage_offset? Or manually create a guard for this? I am not sure.
         )
     ):
         set_example_value(proxy.node, example_value)
