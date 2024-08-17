@@ -590,6 +590,9 @@ class GlobalStateSource(Source):
 class TorchFunctionModeStackSource(Source):
     ind: int
 
+    def name(self):
+        return ""
+
     def _get_index(self):
         from .variables.torch_function import TorchFunctionModeStackVariable
 

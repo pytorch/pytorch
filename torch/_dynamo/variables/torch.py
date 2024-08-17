@@ -787,7 +787,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Running the graph will ensure that the DeviceContext mode is
             # at the correct position in the stack
             TorchFunctionModeStackVariable.register_mutation(tx)
-            TorchFunctionModeStackVariable.register_device_context_insertion(tx)
+            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+                TorchFunctionModeStackVariable.clear_default_device(tx)
+            else:
+                TorchFunctionModeStackVariable.register_device_context_insertion(tx)
+
             return None
 
     def call_function(
