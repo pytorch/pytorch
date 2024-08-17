@@ -795,6 +795,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  // logging C++ stack isn't safe. Introduce a variable to control it.
+  logCppStackOnUncleanShutdown_ =
+      getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
@@ -887,7 +890,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_;
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
+            << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
+            << logCppStackOnUncleanShutdown_;
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1426,7 +1431,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   LOG(ERROR) << errorMsg;
 
   auto& cpp_dumper = get_cpp_trace_dumper();
-  if (cpp_dumper.has_value()) {
+  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
     LOG(INFO) << "Dumping c++ stacktraces:";
     cpp_dumper.value()([](const std::string& line) { LOG(INFO) << line; });
   }
@@ -1455,7 +1460,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       LOG(ERROR)
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
-    LOG(INFO) << "Could acquire GIL on exit";
   } else {
     LOG(INFO)
         << "GIL checker was not registered, perhaps this is a no-python build?";
@@ -1595,7 +1599,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
     return c10::str(
         "[PG ID ",
         local_id_,
-        "PG GUID ",
+        " PG GUID ",
         pg_uid_,
         "(",
         pg_desc_,
@@ -1604,7 +1608,7 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
         "] ");
   }
   return c10::str(
-      "[PG ID ", local_id_, "PG GUID ", pg_uid_, " Rank ", rank_, "] ");
+      "[PG ID ", local_id_, " PG GUID ", pg_uid_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {

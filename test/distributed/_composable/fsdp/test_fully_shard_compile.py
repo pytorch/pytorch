@@ -307,7 +307,10 @@ class TestFullyShardCompile(FSDPTest):
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    @torch._dynamo.config.patch(
+        inline_inbuilt_nn_modules=True,
+        skip_fsdp_hooks=False,
+    )
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
     @torch._inductor.config.patch(

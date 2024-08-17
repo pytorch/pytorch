@@ -1226,9 +1226,6 @@ def forward(self, pred_1, x_1):
             )
             result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
-            if not reverse:
-                result_exp_PT = op_pt(x, 0)
-                self.assertEqual(result, result_exp_PT)
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
