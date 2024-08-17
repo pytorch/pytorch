@@ -34,7 +34,7 @@ pip_install onnxruntime==1.18.1
 pip_install onnx==1.16.2
 pip_install onnxscript==0.1.0.dev20240817 --no-deps
 # required by onnxscript
-pip_install ml_dtypes==0.4.0
+pip_install ml_dtypes
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
