@@ -1,58 +1,43 @@
-# mypy: allow-untyped-defs
-# Copyright (c) Meta Platforms, Inc. and affiliates
+"""
+NOTICE: DTensor has moved to torch.distributed.tensor
 
-import torch
-import torch.distributed._tensor.ops as _ops  # force import all built-in dtensor ops
-from torch.distributed._tensor.api import (
-    distribute_module,
-    distribute_tensor,
-    DTensor,
-    empty,
-    full,
-    ones,
-    rand,
-    randn,
-    zeros,
-)
-from torch.distributed._tensor.placement_types import (
-    Partial,
-    Placement,
-    Replicate,
-    Shard,
-)
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.optim.optimizer import (
-    _foreach_supported_types as _optim_foreach_supported_types,
-)
-from torch.utils._foreach_utils import (
-    _foreach_supported_types as _util_foreach_supported_types,
-)
+This file is a shim to redirect to the new location, and
+we keep the old import path starts with `_tensor` for
+backward compatibility.
+"""
+import importlib
+import sys
+
+import torch.distributed.tensor
 
 
-# All public APIs from dtensor package
-__all__ = [
-    "DTensor",
-    "DeviceMesh",
-    "distribute_tensor",
-    "distribute_module",
-    "init_device_mesh,",
-    "Shard",
-    "Replicate",
-    "Partial",
-    "Placement",
-    "ones",
-    "empty",
-    "full",
-    "rand",
-    "randn",
-    "zeros",
-]
+def _populate():  # type: ignore[no-untyped-def]
+    for name in (
+        # TODO: _utils here mainly for checkpoint imports BC, remove it
+        "_utils",
+        "api",
+        "debug",
+        "device_mesh",
+        "experimental",
+        "placement_types",
+        "random",
+    ):
+        try:
+            globals()[name] = sys.modules[
+                f"torch.distributed._tensor.{name}"
+            ] = importlib.import_module(f"torch.distributed.tensor.{name}")
+        except ImportError as e:
+            import traceback
+
+            traceback.print_exc()
+            raise ImportError(
+                f"Failed to import torch.distributed.tensor.{name} due to {e}"
+            ) from e
+
+    for name, val in torch.distributed.tensor.__dict__.items():
+        # Skip private names and tensor parallel package
+        if not name.startswith("_") and name != "parallel":
+            globals()[name] = val
 
 
-# Append DTensor to the list of supported types for foreach implementation for optimizer
-# and clip_grad_norm_ so that we will try to use foreach over the for-loop implementation on CUDA.
-if DTensor not in _optim_foreach_supported_types:
-    _optim_foreach_supported_types.append(DTensor)
-
-if DTensor not in _util_foreach_supported_types:
-    _util_foreach_supported_types.append(DTensor)
+_populate()

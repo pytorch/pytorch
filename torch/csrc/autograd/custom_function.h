@@ -189,6 +189,8 @@ struct CppNode : public Node {
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) override {
+    static_assert(
+        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
     if (!T::is_traceable) {
       throw std::runtime_error(
           std::string(
