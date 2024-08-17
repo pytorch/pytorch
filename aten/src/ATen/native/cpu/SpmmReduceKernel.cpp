@@ -452,7 +452,7 @@ void spmm_reduce_arg_kernel(
     const Tensor& values,
     const Tensor& other,
     ReductionType reduce_op) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_arg_kernel_impl<scalar_t, index_t, reduce>(
@@ -489,7 +489,7 @@ void spmm_reduce_backward_input_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_arg_indices", [&]() {
       spmm_reduce_backward_input_arg_kernel_impl<scalar_t, index_t>(
           grad_self, grad_out, col_indices, other, arg_out);
@@ -545,7 +545,8 @@ void spmm_reduce_backward_other_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
+  // min / max not defined for complex numbers
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_other_arg_indices", [&]() {
       spmm_reduce_backward_other_arg_kernel_impl<scalar_t, index_t>(
           grad_other, grad_out, col_indices, values, arg_out);
