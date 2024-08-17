@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import atexit
 import collections
 import contextlib
@@ -60,7 +62,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import Source, TracingContext
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -252,7 +254,13 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
+            ChromiumEventLogger.log_event_start(key, time.time_ns())
+            if phase_name:
+                ChromiumEventLogger.log_event_start(phase_name, time.time_ns())
             yield
+            if phase_name:
+                ChromiumEventLogger.log_event_end(phase_name, time.time_ns())
+            ChromiumEventLogger.log_event_end(key, time.time_ns())
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -799,6 +807,105 @@ def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMe
     return list(_compilation_metrics)
 
 
+class ChromiumEventLogger:
+    """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
+
+    See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
+    a specification of the Chromium Event JSON format.
+    """
+
+    @staticmethod
+    def log_event_start(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the start of a single event.
+        :param str event_name Name of event to appear in trace
+        :param time_ns Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "B",
+            metadata,
+        )
+
+    @staticmethod
+    def log_event_end(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the end of a single event. This function should only be
+        called after log_event_start with the same event_name.
+        :param event_name: Name of event to appear in trace
+        :param time_ns: Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            metadata,
+        )
+
+    @staticmethod
+    def _log_timed_event(
+        event_name: str,
+        time_ns: int,
+        phase: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,  # Chromium events are in ms
+            "args": metadata,
+            "ph": phase,
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=False,  # Not every chromium event will have a trace_id
+        )
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an instant event with no associated duration.
+        :param str event_name: Name of event to appear in trace
+        :param int time_ns Timestamp in nanoseconds
+        :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
+        :param str cname optional color for the arrow in the trace
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,
+            "args": metadata,
+            "ph": "i",
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+            "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=True,
+        )
+
+
 @dataclasses.dataclass
 class CleanupHook:
     """Remove a global variable when hook is called"""
@@ -822,7 +929,7 @@ class CleanupHook:
 
 class CleanupManager(ExactWeakKeyDictionary):
     count = 0
-    instance: ClassVar["CleanupManager"]
+    instance: ClassVar[CleanupManager]
 
     def _remove_id(self, idx):
         for hook in self.values[idx]:
@@ -1119,11 +1226,18 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+"""
+    Difference between is_safe_constant and common_constant_types.
+    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
+                             as ConstantVariable.
+    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
+"""
+
 
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type)) or istype(
+    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
         v,
         common_constant_types | {slice},
     )
@@ -1663,7 +1777,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
+graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -2134,7 +2248,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    tensor_source: Source,
+    guard_source: torch._guards.GuardSource,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2147,20 +2261,12 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from .source import is_from_unspecialized_param_buffer_source
-
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
-    ) and config.force_nn_module_property_static_shapes:
+        guard_source.is_specialized_nn_module()
+        and config.force_nn_module_property_static_shapes
+    ):
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-
-    if (
-        type(tensor) is torch.nn.Parameter
-        or is_from_unspecialized_param_buffer_source(tensor_source)
-    ) and config.force_parameter_static_shapes:
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
@@ -2712,7 +2818,7 @@ def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
     from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -2944,3 +3050,20 @@ def _extract_tensor_dict(t):
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[object]] = {}
+
+
+def get_user_object_from_id(obj_id):
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object_weakref(obj):
+    obj_id = id(obj)
+    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
