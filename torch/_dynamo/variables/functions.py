@@ -927,6 +927,67 @@ class FunctoolsPartialVariable(VariableTracker):
         )
 
 
+class PolyfilledFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "fn",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_polyfill_handlers(cls):
+        return {}
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return cls(
+            value,
+            source=source,
+        )
+
+    def __init__(self, fn: VariableTracker, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+
+    def get_function(self):
+        return self.as_python_constant()
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        handler = self._get_polyfill_handlers().get(self.fn)
+        if handler:
+            assert callable(handler)
+            return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+
+        source = None
+        handler = getattr(self.fn, "__torch_dynamo_polyfill__", None)
+        if callable(handler):
+            source = AttrSource(self.source, "__torch_dynamo_polyfill__")
+        else:
+            handler = getattr(self.fn, "__python_implementation__", None)
+            assert callable(handler)
+            source = AttrSource(self.source, "__python_implementation__")
+
+        if source:
+            return UserFunctionVariable.create_with_source(
+                handler, source=source
+            ).call_function(tx, args, kwargs)
+        return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.fn.as_python_constant()
+
+    def guard_as_python_constant(self):
+        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
+        return self.fn.guard_as_python_constant()
+
+
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier
 
 
