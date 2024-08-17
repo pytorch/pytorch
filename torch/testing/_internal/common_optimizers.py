@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     _TestParametrizer,
     skipIfMps,
     skipIfTorchDynamo,
+    skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
@@ -1257,10 +1258,145 @@ optim_db: List[OptimizerInfo] = [
         Adafactor,
         optim_inputs_func=optim_inputs_func_adafactor,
         optim_error_inputs_func=optim_error_inputs_func_adafactor,
-        supported_impls=(),
-        not_og_supported_flags=(),
+        supported_impls=("foreach",),
+        not_og_supported_flags=("foreach",),
         supports_complex=False,
-        skips=(),
+        skips=(
+            DecorateInfo(
+                unittest.skip("See #133268 regarding dtype being None"),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="cuda",
+                active_if=lambda kwargs: kwargs.get("use_closure", False),
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_foreach_large_tensor",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #116028 regarding copy not supported"),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                unittest.skip("See #133268 regarding dtype being None"),
+                "CompiledOptimizerParityTests",
+                "test_correctness",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("See #133268 regarding dtype being None"),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+                device_type="xpu",
+            ),
+        ),
     ),
     OptimizerInfo(
         Adagrad,
@@ -1967,6 +2103,9 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
+            ),
+            DecorateInfo(
+                skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),

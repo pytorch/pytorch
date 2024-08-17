@@ -1211,6 +1211,12 @@ class skipCUDAIf(skipIf):
         super().__init__(dep, reason, device_type="cuda")
 
 
+# Skips a test on XPU if the condition is true.
+class skipXPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type="xpu")
+
+
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
     def __init__(self, dep, reason):
@@ -1866,6 +1872,24 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
+
+
+def skipMPSVersionIfLessThan(major: int, minor: int):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if self.device_type == "mps":
+                if not torch.backends.mps.is_macos_or_newer(major, minor):
+                    reason = (
+                        f"MPS test is skipped for MacOS versions < {major}.{minor} "
+                    )
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+
+    return dec_fn
 
 
 def skipHPU(fn):
