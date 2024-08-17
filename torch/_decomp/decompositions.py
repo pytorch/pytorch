@@ -765,18 +765,18 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val += sizes[dim]
 
-    if end_val < 0:
+    if guard_size_oblivious(end_val < 0):
         end_val += sizes[dim]
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val = 0
-    elif start_val > sizes[dim]:
+    elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if end_val < start_val:
+    if guard_size_oblivious(end_val < start_val):
         end_val = start_val
     elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
         end_val > sizes[dim]
