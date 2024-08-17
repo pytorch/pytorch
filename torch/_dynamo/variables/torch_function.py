@@ -65,15 +65,24 @@ class TorchFunctionModeStackVariable(VariableTracker):
     # singleton value representing the global torch function mode stack
     # singleton (it exists in C++)
     stack_value_singleton = object()
-    # If a device context was added by the graph
-    # and there was not one previously present,
-    # the stack locations of any recorded
-    # modes need to be shifted by one
-    device_context_inserted = False
+
+    # offset is used to track if we have inserted/removed a
+    # device context which is always placed at the bottom of the stack
+    # if a device context is inserted, the graph will run this mutation
+    # so when we want to reconstruct any other modes on the stack
+    # their indices should be shifted right by 1 (+1)
+    # Conversely, if there was a device context on the stack, and the graph
+    # mutates the stack to remove that context (set default device to None)
+    # each of the indices of other modes should be shifted left by 1 (-1)
+    offset = 0
 
     def __init__(self, source, symbolic_stack):
         self.source = source
         self.symbolic_stack = symbolic_stack
+
+    @classmethod
+    def reset(cls):
+        cls.offset = 0
 
     @classmethod
     def register_mutation(cls, tx: "InstructionTranslator"):
@@ -87,26 +96,36 @@ class TorchFunctionModeStackVariable(VariableTracker):
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslator"):
         stack = tx.symbolic_torch_function_mode_stack
-        if stack and isinstance(stack[0], DeviceContext):
+        if stack and isinstance(stack[0].value, DeviceContext):
             return
         else:
-            cls.device_context_inserted = True
+            cls.offset += 1
             tx.symbolic_torch_function_mode_stack.insert(
                 0,
                 TorchFunctionModeVariable(
-                    None, source=TorchFunctionModeStackSource(-1)
+                    None, source=TorchFunctionModeStackSource(-cls.offset)
                 ),
             )
 
     @classmethod
+    def clear_default_device(cls, tx: "InstructionTranslator"):
+        stack = tx.symbolic_torch_function_mode_stack
+        if stack and (
+            isinstance(stack[0].value, DeviceContext) or stack[0].value is None
+        ):
+            stack.popleft()
+            cls.offset -= 1
+
+    @classmethod
     def get_mode_index(cls, ind):
-        if cls.device_context_inserted:
-            return ind + 1
-        else:
-            return ind
+        return ind + cls.offset
 
 
 class TorchFunctionModeVariable(ContextWrappingVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+        self.value = value
+
     @staticmethod
     def get_global_mangled_name(tx, val):
         return get_safe_global_name(
