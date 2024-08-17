@@ -9,6 +9,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.utils import counters
 
 
 def my_custom_function(x):
@@ -247,6 +248,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_substitute_in_graph(self):
+        counters.clear()
+
         cnts = torch._dynamo.testing.CompileCounter()
         fn = operator.indexOf
         opt_fn = torch._dynamo.optimize(cnts)(fn)
@@ -254,8 +257,10 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 1)
 
         torch._dynamo.reset()
+        counters.clear()
 
         @torch._dynamo.substitute_in_graph(operator.indexOf)
         def polyfill(sequence, x):
@@ -271,8 +276,10 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
         torch._dynamo.reset()
+        counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = polyfill
@@ -281,6 +288,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_out = opt_fn([1, 2, 3, 4, 5], 3)
         self.assertEqual(out, opt_out)
         self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
