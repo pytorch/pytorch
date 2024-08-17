@@ -79,20 +79,6 @@ def copy_(tensor, data):
     tensor.copy_(data)
 
 
-@torch.library.impl(lib, "copy_", "Functionalize")
-def copy__functionalize(tensor, data):
-    torch._sync(tensor)
-    torch._sync(data)
-    tensor_inner = torch._from_functional_tensor(tensor)
-    data_inner = torch._from_functional_tensor(data)
-    with torch._C._ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-    ):
-        torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
-
-
-torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
-
 """
 [Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_(0)]
 
@@ -118,6 +104,21 @@ so it's safe to call .copy_() in the middle of the graph to update its content a
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
 """
+
+
+@torch.library.impl(lib, "copy_", "Functionalize")
+def copy__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):

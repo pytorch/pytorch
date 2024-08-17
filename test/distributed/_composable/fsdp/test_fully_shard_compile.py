@@ -266,8 +266,7 @@ class TestFullyShardCompile(FSDPTest):
         self,
         file_check,
         overlapped_compute_op_str,
-        num_resize,
-        num_set,
+        num_copy,
         last_all_gather=False,
     ):
         file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
@@ -278,15 +277,12 @@ class TestFullyShardCompile(FSDPTest):
         # Checks that AGWait is delayed, making the AG overlap with some compute op.
         if overlapped_compute_op_str is not None:
             file_check = file_check.check(f"{overlapped_compute_op_str}")
-        file_check = file_check.check_count(
-            "inductor_ops.resize_storage_bytes_(", num_resize, exactly=True
-        )
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check("torch.ops.fsdp.split_with_sizes_copy.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check_count(
-            "torch.ops.aten.set_.", num_set, exactly=True
+            "torch.ops.aten.copy_.", num_copy, exactly=True
         )
         if not last_all_gather:
             # Checks that there is no compute op between this AGWait and next AG.
@@ -537,46 +533,38 @@ class TestFullyShardCompile(FSDPTest):
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
+                    dict(overlapped_compute_op_str=None, num_copy=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=2,
-                        num_set=2,
+                        num_copy=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -588,16 +576,14 @@ class TestFullyShardCompile(FSDPTest):
                 bwd_code = triton_codes[1]
                 file_check = FileCheck().check("def call(args):")
                 for bwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None, num_resize=0, num_set=2),
+                    dict(overlapped_compute_op_str=None, num_copy=2),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_set=2,
+                        num_copy=2,
                     ),
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_set=2,
+                        num_copy=2,
                         last_all_gather=True,
                     ),
                 ]:
@@ -633,7 +619,7 @@ class TestFullyShardCompile(FSDPTest):
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
-                n_layers=2,
+                n_layers=3,
             )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
@@ -721,23 +707,21 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
+                print(f"fwd_code: {fwd_code}")
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
+                    dict(overlapped_compute_op_str="triton_", num_copy=4),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
-                        num_resize=0,
-                        num_set=12,
+                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_set=12,
+                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        num_resize=12,
-                        num_set=12,
+                        num_copy=12,
                         last_all_gather=True,
                     ),
                 ]:
@@ -751,18 +735,15 @@ class TestFullyShardCompile(FSDPTest):
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
-                        num_resize=0,
-                        num_set=12,
+                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_set=12,
+                        num_copy=12,
                     ),
                     dict(
                         overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        num_resize=0,
-                        num_set=12,
+                        num_copy=12,
                         last_all_gather=True,
                     ),
                 ]:
