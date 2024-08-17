@@ -247,7 +247,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
-                param_group["lr"].copy_(lr)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
