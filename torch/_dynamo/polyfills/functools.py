@@ -20,8 +20,8 @@ class _INITIAL_MISSING:
 def reduce(
     function: Callable[[_U, _T], _U],
     iterable: Iterable[_T],
-    /,
     initial: _U = _INITIAL_MISSING,  # type: ignore[assignment]
+    /,
 ) -> _U:
     it = iter(iterable)
 
