@@ -2094,7 +2094,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return f"Rank {torch.distributed.get_rank()}: Failed running {op} {node.target}:\n" + str(e)  # (*{args}, **{kwargs}):\n" + str(e)
 
         try:
             if op == "call_function":
