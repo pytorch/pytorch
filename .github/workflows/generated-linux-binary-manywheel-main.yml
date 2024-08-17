@@ -44,7 +44,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
       build_name: manywheel-py3_9-cuda11_8
@@ -65,7 +65,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
@@ -86,7 +86,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
@@ -108,7 +108,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8-split
@@ -130,7 +130,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.1:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
       build_name: manywheel-py3_9-cuda12_1
@@ -151,7 +151,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.1:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
@@ -172,7 +172,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.1:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
@@ -194,7 +194,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.1:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1-split
@@ -216,7 +216,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.4:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
       build_name: manywheel-py3_9-cuda12_4
@@ -237,7 +237,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.4:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
@@ -258,7 +258,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.4:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       runner_prefix: amz2023.
@@ -280,7 +280,7 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.4:2e93bbf314eef6fa998bce9ba6c5dfdc935eccbd
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4-split
