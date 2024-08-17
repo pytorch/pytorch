@@ -33,7 +33,8 @@
     "torch.nn.quantizable": "torch.ao.nn.quantizable",
     "torch.nn.quantizable.modules": "torch.ao.nn.quantizable.modules",
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
-    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
+    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn",
+    "torch.distributed.tensor.device_mesh": "torch.distributed.device_mesh"
   },
   "torch.backends": [
     "contextmanager"
@@ -231,6 +232,9 @@
     "urlunparse"
   ],
   "torch.distributed.rpc": [],
+  "torch.distributed.tensor": [
+    "DeviceMesh"
+  ],
   "torch.fft": [
     "Tensor",
     "fft",
