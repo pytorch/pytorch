@@ -96,7 +96,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
     @classmethod
     def register_device_context_insertion(cls, tx: "InstructionTranslator"):
         stack = tx.symbolic_torch_function_mode_stack
-        if stack and isinstance(stack[0].value, DeviceContext):
+        if stack and cls.is_device_context(stack[0]):
             return
         else:
             cls.offset += 1
@@ -110,11 +110,13 @@ class TorchFunctionModeStackVariable(VariableTracker):
     @classmethod
     def clear_default_device(cls, tx: "InstructionTranslator"):
         stack = tx.symbolic_torch_function_mode_stack
-        if stack and (
-            isinstance(stack[0].value, DeviceContext) or stack[0].value is None
-        ):
+        if stack and cls.is_device_context(stack[0]):
             stack.popleft()
             cls.offset -= 1
+
+    @staticmethod
+    def is_device_context(var):
+        return isinstance(var.value, DeviceContext) or var.value is None
 
     @classmethod
     def get_mode_index(cls, ind):
