@@ -16,6 +16,7 @@ For a quick overview of ``torch.compiler``, see :ref:`torch.compiler_overview`.
      compile
      reset
      allow_in_graph
+     substitute_in_graph
      assume_constant_result
      list_backends
      disable

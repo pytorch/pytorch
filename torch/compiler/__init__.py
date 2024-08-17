@@ -120,6 +120,52 @@ def allow_in_graph(fn):
     return torch._dynamo.allow_in_graph(fn)
 
 
+def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
+    """
+    Register a polyfill handler for a C++ function. This handler will be used to substitute the
+    original function when inlining the original function in the graph.
+
+    .. note::
+
+        The polyfill handler is only used when inlining the original function. It is not used when
+        the original function is called directly.
+
+    The polyfill handler is a function that will be called in place of the original function when
+    inlining the original function. The polyfill handler should have the same signature and the same
+    behavior as the original function.
+
+    Args:
+        cxx_fn (callable): The original C++ function to register a polyfill handler for.
+
+    Returns:
+        A decorator that registers the polyfill handler for the original function.
+
+    Example::
+
+        >>> import operator
+        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
+        2
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        ... # xdoctest: +SKIP("Long tracebacks")
+        Traceback (most recent call last):
+        ...
+        torch._dynamo.exc.Unsupported: ...
+
+        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
+        ... def indexOf(sequence, x):
+        ...     for i, item in enumerate(sequence):
+        ...         if item is x or item == x:
+        ...             return i
+        ...     raise ValueError("sequence.index(x): x not in sequence")
+        >>>
+        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        2
+    """
+    import torch._dynamo
+
+    return torch._dynamo.substitute_in_graph(cxx_fn)
+
+
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
@@ -221,52 +267,6 @@ def wrap_numpy(fn):
     from torch._dynamo.external_utils import wrap_numpy as wrap
 
     return wrap(fn)
-
-
-def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
-    """
-    Register a polyfill handler for a C++ function. This handler will be used to substitute the
-    original function when inlining the original function in the graph.
-
-    .. note::
-
-        The polyfill handler is only used when inlining the original function. It is not used when
-        the original function is called directly.
-
-    The polyfill handler is a function that will be called in place of the original function when
-    inlining the original function. The polyfill handler should have the same signature and the same
-    behavior as the original function.
-
-    Args:
-        cxx_fn (callable): The original C++ function to register a polyfill handler for.
-
-    Returns:
-        A decorator that registers the polyfill handler for the original function.
-
-    Example::
-
-        >>> import operator
-        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
-        2
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        ... # xdoctest: +SKIP("Long tracebacks")
-        Traceback (most recent call last):
-        ...
-        torch._dynamo.exc.Unsupported: ...
-
-        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
-        ... def indexOf(sequence, x):
-        ...     for i, item in enumerate(sequence):
-        ...         if item is x or item == x:
-        ...             return i
-        ...     raise ValueError("sequence.index(x): x not in sequence")
-        >>>
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        2
-    """
-    import torch._dynamo
-
-    return torch._dynamo.substitute_in_graph(cxx_fn)
 
 
 _is_compiling_flag: bool = False
