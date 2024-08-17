@@ -325,7 +325,9 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.Symbol("s2", integer=True)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(s1 // s2)")
-        self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, static_cast<int64_t>(s2))")
+        self.assertEqual(
+            cexpr(expr), "c10::div_floor_integer(s1, static_cast<int64_t>(s2))"
+        )
 
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.S(-1)
