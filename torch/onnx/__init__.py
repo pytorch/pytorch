@@ -349,6 +349,8 @@ def export(
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal import exporter
 
+        if isinstance(args, torch.Tensor):
+            args = (args,)
         return exporter.export_compat(
             model,
             args,
