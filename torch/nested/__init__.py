@@ -435,7 +435,7 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
 
     >>> tensor = torch.randn(6, 5)
     >>> mask = torch.tensor([False])
-    >>> nt = torch.nested_select(tensor, mask)
+    >>> nt = torch.nested.masked_select(tensor, mask)
     torch.Size([3, j5])
     >>> # Length of each item in the batch:
     >>> nt.offsets().diff()
