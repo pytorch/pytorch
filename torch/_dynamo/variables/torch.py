@@ -775,6 +775,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         return handlers
 
+        @register(torch.set_default_device)
+        def handle_set_default_device(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # Today this is inserted in the graph, once TF mode
+            # handling is complete, we can trace the device context
+            # like any other TF mode and remove this special handling
+            # Insert the TF mode representing the device context at
+            # the bottom of the stack to match the eager semantics
+            # Running the graph will ensure that the DeviceContext mode is
+            # at the correct position in the stack
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            TorchFunctionModeStackVariable.register_device_context_insertion(tx)
+            return None
+
     def call_function(
         self,
         tx: "InstructionTranslator",

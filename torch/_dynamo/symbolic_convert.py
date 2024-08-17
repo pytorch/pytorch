@@ -72,6 +72,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
+    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -118,7 +119,11 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
-from .variables.torch_function import TorchFunctionModeVariable
+
+
+if TYPE_CHECKING:
+    from .variables.torch_function import TorchFunctionModeVariable
+
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -2770,18 +2775,22 @@ class InstructionTranslator(InstructionTranslatorBase):
     def _init_torch_function_mode_stack(self):
         self.cur_mode = None
 
-        if TYPE_CHECKING:
-            from torch.overrides import TorchFunctionMode
-
         self.symbolic_torch_function_mode_stack: Deque[
-            TorchFunctionMode
+            TorchFunctionModeVariable
         ] = collections.deque()
-        py_stack = get_torch_function_mode_stack()
-        for val in py_stack:
-            global_name = TorchFunctionModeVariable.get_global_mangled_name(self, val)
-            source = GlobalWeakRefSource(global_name)
+        # We want to retrieve all modes to properly reconstruct the stack if needed
+        py_stack = get_torch_function_mode_stack(filter_ignored=False)
+
+        if py_stack:
+            has_device_context = isinstance(
+                py_stack[0], torch.utils._device.DeviceContext
+            )
+
+        for i, val in enumerate(py_stack):
             self.symbolic_torch_function_mode_stack.append(
-                variables.LazyVariableTracker.create(val, source=source)
+                variables.LazyVariableTracker.create(
+                    val, source=TorchFunctionModeStackSource(i)
+                )
             )
 
     @contextlib.contextmanager
