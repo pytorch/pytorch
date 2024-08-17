@@ -219,6 +219,8 @@ class TensorVariable(VariableTracker):
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
+        if name == "fsdp_pre_all_gather":
+            print(f"dynamic_getattr: here3: self: {self}, fake_val: {fake_val}, subclass?: {is_traceable_wrapper_subclass(fake_val)}, not self.source?: {not self.source}")        
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
@@ -272,10 +274,13 @@ class TensorVariable(VariableTracker):
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
-            # Callables have more nuanced handling, and we should let the existing system delegate here.
-            # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle
-            raise NotImplementedError
+            if is_traceable_wrapper_subclass(fake_val) and name in ["fsdp_pre_all_gather", "fsdp_post_all_gather"]:
+                pass
+            else:
+                # Callables have more nuanced handling, and we should let the existing system delegate here.
+                # Raising was past behavior and so should always be sound to fall back.
+                # Note - at a certain point we may want to handle
+                raise NotImplementedError
 
         from ..guards import GuardBuilder
         from .builder import VariableBuilder
@@ -354,8 +359,12 @@ class TensorVariable(VariableTracker):
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
+            if "NF4Tensor" in str(type(self.get_real_value())):
+                print(f"here1: name: {name}, var: {var}, ret_val: {ret_val}")
         except AttributeError:
             ret_val = False
+            if "NF4Tensor" in str(type(self.get_real_value())):
+                print(f"here2: name: {name}, ret_val: {ret_val}")
 
         if self.source:
             install_guard(
@@ -1041,6 +1050,9 @@ class TensorVariable(VariableTracker):
         if not self._is_name_set:
             self.proxy.node._rename(name)
             self._is_name_set = True
+
+    def __repr__(self):
+        return f"TensorVariable({type(self.get_real_value())})"
 
 
 class SymNodeVariable(VariableTracker):
