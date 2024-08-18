@@ -2403,7 +2403,7 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "true" if val else "false"
         elif isinstance(val, int):
-            return f"{val}L"
+            return f"{val}"
         elif isinstance(val, str):
             return f'"{val}"'
         elif isinstance(
