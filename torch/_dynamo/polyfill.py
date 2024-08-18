@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in islice(enumerate(list(iterator)), start, end):
+    for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
