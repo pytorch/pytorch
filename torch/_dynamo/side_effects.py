@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import inspect
 import warnings
-from typing import Any, Dict, List, Optional, Union
+from collections.abc import MutableMapping
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch.nn
 
@@ -267,6 +268,28 @@ class SideEffects:
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
+
+    def track_object_new_from_user_defined_class(
+        self,
+        cls_variable: "variables.UserDefinedClassVariable",
+    ):
+        cls_source = cls_variable.source
+        user_cls = cls_variable.value
+
+        # Find the variable class
+        variable_cls: Type[
+            variables.UserDefinedObjectVariable
+        ] = variables.UserDefinedObjectVariable
+        if issubclass(user_cls, torch.nn.Module):
+            variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, MutableMapping):
+            variable_cls = variables.MutableMappingVariable
+        else:
+            variable_cls = variables.UserDefinedObjectVariable
+
+        assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+
+        return self.track_object_new(cls_source, user_cls, variable_cls, {})
 
     def track_cell_new(
         self,
