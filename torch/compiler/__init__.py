@@ -122,8 +122,8 @@ def allow_in_graph(fn):
 
 def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     """
-    Register a polyfill handler for a C++ function. This handler will be used to substitute the
-    original function when inlining the original function in the graph.
+    Register a polyfill handler for a function, usually a C function from the C extension, to be
+    used in place of the original function when inlining the original function in the graph.
 
     .. note::
 
@@ -135,7 +135,8 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     behavior as the original function.
 
     Args:
-        cxx_fn (callable): The original C++ function to register a polyfill handler for.
+        original_fn (callable): The original function, usually a C function, to register a polyfill
+            handler for.
 
     Returns:
         A decorator that registers the polyfill handler for the original function.

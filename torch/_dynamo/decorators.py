@@ -164,10 +164,10 @@ def forbid_in_graph(fn):
     return fn
 
 
-def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
+def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
     """
-    Register a polyfill handler for a C++ function. This handler will be used to substitute the
-    original function when inlining the original function in the graph.
+    Register a polyfill handler for a function, usually a C function from the C extension, to be
+    used in place of the original function when inlining the original function in the graph.
 
     .. note::
 
@@ -179,7 +179,8 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     behavior as the original function.
 
     Args:
-        cxx_fn (callable): The original C++ function to register a polyfill handler for.
+        original_fn (callable): The original function, usually a C function, to register a polyfill
+            handler for.
 
     Returns:
         A decorator that registers the polyfill handler for the original function.
@@ -205,9 +206,9 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
         >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
         2
     """
-    if not is_function(cxx_fn):
+    if not is_function(original_fn):
         raise TypeError(
-            f"substitute_in_graph expects a function but got {type(cxx_fn)!r}"
+            f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
 
     def wrapper(python_fn: _F) -> _F:
@@ -217,43 +218,44 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
         from torch._dynamo.variables.builder import VariableBuilder
 
         id_dispatch_map = VariableBuilder._id_dispatch()
-        if id(cxx_fn) in id_dispatch_map:
+        if id(original_fn) in id_dispatch_map:
             raise RuntimeError(
-                f"Duplicate dispatch rule for {cxx_fn}: "
+                f"Duplicate dispatch rule for {original_fn}: "
                 "already registered in VariableBuilder's id dispatch map"
             )
 
         rule_map = get_torch_obj_rule_map()
-        if cxx_fn in rule_map:
+        if original_fn in rule_map:
             raise RuntimeError(
-                f"Duplicate object {cxx_fn} with different rules: "
-                f"{PolyfilledFunctionVariable}, {rule_map[cxx_fn]}"
+                f"Duplicate object {original_fn} with different rules: "
+                f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
             )
 
         polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
-        if cxx_fn in polyfill_handlers:
+        if original_fn in polyfill_handlers:
             raise RuntimeError(
-                f"Duplicate polyfill handlers for {cxx_fn}: "
-                f"already handled by {polyfill_handlers[cxx_fn]}"
+                f"Duplicate polyfill handlers for {original_fn}: "
+                f"already handled by {polyfill_handlers[original_fn]}"
             )
 
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(python_fn)
         def wrapped(*args, **kwargs):
-            return cxx_fn(*args, **kwargs)
+            return original_fn(*args, **kwargs)
 
-        def builder_dispatch_fn(self, value):
+        def dispatch_fn(self, value):
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
                 **self.install_guards(GuardBuilder.CLOSURE_MATCH),
             )
 
-        id_dispatch_map[id(cxx_fn)] = id_dispatch_map[id(wrapped)] = builder_dispatch_fn
-        rule_map[cxx_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
-        polyfill_handlers[cxx_fn] = polyfill_handlers[wrapped] = python_fn
+        id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
+        rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = python_fn
 
+        wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = python_fn  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
