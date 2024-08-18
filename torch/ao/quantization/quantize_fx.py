@@ -289,7 +289,7 @@ def prepare_fx(
         from torch.ao.quantization.quantize_fx import prepare_fx
 
         class Submodule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
             def forward(self, x):
@@ -297,7 +297,7 @@ def prepare_fx(
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Submodule()
@@ -427,7 +427,7 @@ def prepare_qat_fx(
         from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
         class Submodule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
             def forward(self, x):
@@ -435,7 +435,7 @@ def prepare_qat_fx(
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Submodule()

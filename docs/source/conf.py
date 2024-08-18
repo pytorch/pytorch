@@ -626,6 +626,17 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
+    # torch.distributed.tensor.api
+    "distribute_module",
+    "distribute_tensor",
+    # torch.distributed.tensor.random
+    "is_rng_supported_mesh",
+    # torch.distributed.tensor.experimental
+    "context_parallel",
+    "local_map",
+    "register_sharding",
+    # torch.distributed.tensor.debug
+    "visualize_sharding",
     # torch.distributed.tensor.parallel.api
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
@@ -850,8 +861,6 @@ coverage_ignore_functions = [
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "make_fx",
-    "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
     "set_meta",
@@ -2166,6 +2175,8 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
+    # torch.cuda.memory
+    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2621,6 +2632,15 @@ coverage_ignore_classes = [
     "RemoteException",
     # torch.distributed.rpc.rref_proxy
     "RRefProxy",
+    # torch.distributed.tensor.api
+    "DTensor",
+    # torch.distributed.tensor.placement_types
+    "DTensorSpec",
+    "Placement",
+    # torch.distributed.tensor.random
+    "OffsetBasedRNGTracker",
+    # torch.distributed.tensor.debug
+    "CommDebugMode",
     # torch.distributed.tensor.parallel.fsdp
     "DTensorExtensions",
     # torch.distributed.tensor.parallel.style

@@ -212,7 +212,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_nn_module_getattr(self):
         class A:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._b = 20
 
             def __getattr__(self, name):
@@ -222,7 +222,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise AttributeError(f"{name} absent")
 
         class B(A):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 10
 
             def __getattr__(self, name):
@@ -292,6 +292,42 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         ref = fn(x, y)
         res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_key_error(self):
+        def fn(x, d):
+            try:
+                a = d["b"]
+            except KeyError:
+                a = 2
+            return x * a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d = {"a": 1}
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
+    def test_atrribute_error(self):
+        class Mock:
+            def __init__(self):
+                self.a = 1
+
+        mock = Mock()
+
+        def fn(x):
+            try:
+                c = 2
+                mock.b
+            except AttributeError:
+                c = 3
+            return torch.sin(x) * c
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
         self.assertEqual(ref, res)
 
 

@@ -13,7 +13,6 @@ import itertools
 import logging
 import traceback
 from contextlib import nullcontext
-
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import torch
@@ -27,6 +26,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
+
 from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
@@ -39,7 +39,6 @@ from .dispatch_and_compile_graph import (
     aot_dispatch_base_graph,
 )
 from .logging_utils import track_graph_compiling
-
 from .runtime_wrappers import (
     AOTDedupeWrapper,
     AOTDispatchAutograd,
@@ -48,6 +47,7 @@ from .runtime_wrappers import (
     AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
+    EffectTokensWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
     make_runtime_safe,
@@ -57,8 +57,8 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-
 from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+
 
 zip = strict_zip
 
@@ -213,9 +213,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
+    compiled_fw = EffectTokensWrapper().post_compile(
+        compiled_fw,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+
     # Why do we need to pass in num_fw_outs_saved_for_bw?
     # See Note: [Partitioner handling for Subclasses, Part 2]
-    compiled_fw_func = AOTDispatchSubclassWrapper(
+    compiled_fw = AOTDispatchSubclassWrapper(
         trace_joint=False,
         # TODO: once we use pre_compile this will be flat_fn at the top of this function
         fw_only=None,
@@ -227,15 +233,15 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
-    if not hasattr(compiled_fw_func, "_boxed_call"):
-        compiled_fw_func = make_boxed_func(compiled_fw_func)
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
 
     compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
         disable_amp=disable_amp,
     ).post_compile(
-        compiled_fw_func,
+        compiled_fw,
         aot_config,
         runtime_metadata=fw_metadata,
     )
@@ -569,6 +575,12 @@ def aot_dispatch_autograd(
 
             if fakified_out_wrapper.needs_post_compile:
                 fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+            compiled_fw_func = EffectTokensWrapper().post_compile(
+                compiled_fw_func,
+                aot_config,
+                runtime_metadata=fw_metadata,
+            )
 
             compiled_fw_func = AOTDispatchSubclassWrapper(
                 fw_only=None,

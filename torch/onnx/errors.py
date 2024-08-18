@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from torch.onnx import _constants
 from torch.onnx._internal import diagnostics
 
+
 if TYPE_CHECKING:
     from torch import _C
 
@@ -22,19 +23,13 @@ __all__ = [
 class OnnxExporterWarning(UserWarning):
     """Base class for all warnings in the ONNX exporter."""
 
-    pass
-
 
 class OnnxExporterError(RuntimeError):
     """Errors raised by the ONNX exporter."""
 
-    pass
-
 
 class CheckerError(OnnxExporterError):
     """Raised when ONNX checker detects an invalid model."""
-
-    pass
 
 
 class UnsupportedOperatorError(OnnxExporterError):

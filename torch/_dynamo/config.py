@@ -313,8 +313,9 @@ optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
-skip_fsdp_hooks = False
+# Whether to apply torch._dynamo.disable() to FSDP2 hooks.
+# Defaults to True. If Traceable FSDP2 is used, set this to False.
+skip_fsdp_hooks = True
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -337,6 +338,12 @@ error_on_nested_fx_trace = True
 
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
+
+# If true, enables feature that captures PyTorch sparsity in the
+# exported FX graph. This flag should become the default eventually
+# and be removed, but currently provides a way to fall back to old
+# graph breaking behavior.
+capture_sparse_compute = False if is_fbcode() else True
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -471,5 +478,6 @@ if TYPE_CHECKING:
 
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

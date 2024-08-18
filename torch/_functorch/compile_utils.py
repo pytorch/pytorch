@@ -8,6 +8,7 @@ import torch.fx as fx
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
 
+
 aten = torch.ops.aten
 
 
@@ -42,6 +43,13 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     env = {}  # map from node in the old graph to node in the new graph
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
+
+    from torch._inductor.pattern_matcher import (
+        compute_mutation_region_ids,
+        same_mutation_regions,
+    )
+
+    compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -89,13 +97,19 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
 
             # check if a node has a substitute and can be eliminated
             hash_val_in_hash_env = hash_val in hash_env
+            overwrite_due_to_mutation = False
             if hash_val_in_hash_env and token_map[hash_val] == token:
-                env[n] = hash_env[hash_val]
-                continue
+                duplicate_n_prev = hash_env[hash_val]
+                if same_mutation_regions(n, duplicate_n_prev):
+                    env[n] = duplicate_n_prev
+                    continue
+                else:
+                    # any futures duplicates should replace with n, not duplicate_n_prev
+                    overwrite_due_to_mutation = True
 
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
-            if not hash_val_in_hash_env:
+            if overwrite_due_to_mutation or not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node
                 token_map[hash_val] = token
 
