@@ -13576,7 +13576,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
            )),
     OpInfo('sparse.mm',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            variant_test_name='reduce',
            supports_autograd=True,
            supports_out=False,
