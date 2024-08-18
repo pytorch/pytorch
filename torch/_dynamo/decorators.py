@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 import functools
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
@@ -172,7 +173,8 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
     .. note::
 
         The polyfill handler is only used when inlining the original function. It is not used when
-        the original function is called directly.
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
 
     The polyfill handler is a function that will be called in place of the original function when
     inlining the original function. The polyfill handler should have the same signature and the same
@@ -211,7 +213,48 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
 
-    def wrapper(python_fn: _F) -> _F:
+    def wrapper(traceable_fn: _F) -> _F:
+        if not is_function(traceable_fn):
+            raise TypeError(
+                f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
+            )
+
+        try:
+            original_sig = inspect.signature(original_fn)
+        except ValueError:
+            pass
+        else:
+            traceable_sig = inspect.signature(traceable_fn)
+            if (
+                tuple(
+                    p.name
+                    for p in original_sig.parameters.values()
+                    if p.kind != p.KEYWORD_ONLY
+                ),
+                {
+                    p.name
+                    for p in original_sig.parameters.values()
+                    if p.kind == p.KEYWORD_ONLY
+                },
+                {p.name: p.default for p in original_sig.parameters.values()},
+            ) != (
+                tuple(
+                    p.name
+                    for p in traceable_sig.parameters.values()
+                    if p.kind != p.KEYWORD_ONLY
+                ),
+                {
+                    p.name
+                    for p in traceable_sig.parameters.values()
+                    if p.kind == p.KEYWORD_ONLY
+                },
+                {p.name: p.default for p in traceable_sig.parameters.values()},
+            ):
+                raise TypeError(
+                    f"Signature mismatch between {original_fn} and {traceable_fn}: "
+                    f"{original_sig} != {traceable_sig}"
+                )
+
         from torch._dynamo.guards import GuardBuilder
         from torch._dynamo.trace_rules import get_torch_obj_rule_map
         from torch._dynamo.variables import PolyfilledFunctionVariable
@@ -240,7 +283,7 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
-        @functools.wraps(python_fn)
+        @functools.wraps(traceable_fn)
         def wrapped(*args, **kwargs):
             return original_fn(*args, **kwargs)
 
@@ -253,10 +296,10 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
-        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = python_fn
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = traceable_fn
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
-        wrapped.__torch_dynamo_polyfill__ = python_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 
