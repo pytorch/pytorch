@@ -4,7 +4,8 @@
 Python polyfills for common builtins.
 """
 import math
-from typing import Any, Callable, Sequence
+from os import PathLike
+from typing import Any, Callable, Sequence, Union
 
 import torch
 
@@ -139,3 +140,15 @@ def instantiate_user_defined_class_object(*args, **kwargs):
     obj = cls.__new__(cls, *other_args, **kwargs)
     obj.__init__(*other_args, **kwargs)
     return obj
+
+
+def fspath(path: Union[str, bytes, PathLike[str]]) -> Union[str, bytes]:
+    # Python equivalent of os.fspath
+    if isinstance(path, (str, bytes)):
+        return path
+    elif hasattr(path, "__fspath__"):
+        return path.__fspath__()
+    else:
+        raise TypeError(
+            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
+        )
