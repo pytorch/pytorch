@@ -65,9 +65,9 @@ struct VecMaskLoad<
     2,
     mask_t,
     1,
-    typename std::enable_if<
-        (std::is_same_v<T, int64_t> && sizeof(int64_t) == sizeof(long long)) ||
-        std::is_same_v<T, double>>::type> {
+    typename std::enable_if_t<
+        std::is_same_v<T, int64_t> ||
+        std::is_same_v<T, double>>> {
   static inline VectorizedN<T, 2> apply(
       const T* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
@@ -77,8 +77,10 @@ struct VecMaskLoad<
       result[0] = _mm256_maskload_pd(ptr, int64_mask[0]);
       result[1] = _mm256_maskload_pd(ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
     } else {
-      result[0] = _mm256_maskload_epi64(ptr, int64_mask[0]);
-      result[1] = _mm256_maskload_epi64(ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
+      result[0] = _mm256_maskload_epi64(reinterpret_cast<const long long*>(ptr),
+                                        int64_mask[0]);
+      result[1] = _mm256_maskload_epi64(reinterpret_cast<const long long*>(ptr + at::vec::Vectorized<T>::size()),
+                                        int64_mask[1]);
     }
     return result;
   }
