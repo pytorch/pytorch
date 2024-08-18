@@ -220,21 +220,21 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         id_dispatch_map = VariableBuilder._id_dispatch()
         if id(original_fn) in id_dispatch_map:
-            raise RuntimeError(
+            raise ValueError(
                 f"Duplicate dispatch rule for {original_fn}: "
                 "already registered in VariableBuilder's id dispatch map"
             )
 
         rule_map = get_torch_obj_rule_map()
         if original_fn in rule_map:
-            raise RuntimeError(
+            raise ValueError(
                 f"Duplicate object {original_fn} with different rules: "
                 f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
             )
 
         polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
         if original_fn in polyfill_handlers:
-            raise RuntimeError(
+            raise ValueError(
                 f"Duplicate polyfill handlers for {original_fn}: "
                 f"already handled by {polyfill_handlers[original_fn]}"
             )
