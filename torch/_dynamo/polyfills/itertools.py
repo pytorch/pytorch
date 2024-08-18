@@ -11,6 +11,7 @@ from ..decorators import substitute_in_graph
 _T = TypeVar("_T")
 
 
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
 @substitute_in_graph(itertools.tee)
 def tee(iterable: Iterable[_T], n: int = 2, /) -> Tuple[Iterator[_T], ...]:
     iterator = iter(iterable)
