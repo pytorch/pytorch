@@ -5,6 +5,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._C import (
+    _is_torch_function_all_disabled,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
@@ -47,11 +48,19 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.default_device_old = torch.get_default_device()
         super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
+        torch.set_default_device(cls.default_device_old)
         super().tearDownClass()
+
+    def setUp(self):
+        torch.set_default_device(None)
+
+    def tearDown(self):
+        torch.set_default_device(None)
 
     def _run_torch_function_mode_guard_test(self):
         class TestMode1(BaseTorchFunctionMode):
@@ -301,6 +310,37 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return x + 1, z
 
         fn(torch.ones(2, 2))
+
+    def test_torch_function_mode_enabled_guard(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        inp = torch.ones(2, 2)
+
+        @torch.compile(backend=cnt.__call__)
+        def fn(x):
+            return x + 1
+
+        with BaseTorchFunctionMode(), torch._C.DisableTorchFunctionSubclass():
+            with torch._C.DisableTorchFunction():
+                fn(inp)
+
+            fn(inp)
+
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_torch_function_all_disabled_api(self):
+        state = _is_torch_function_all_disabled()
+        self.assertFalse(state)
+
+        with torch._C.DisableTorchFunction():
+            state = _is_torch_function_all_disabled()
+            self.assertTrue(state)
+
+        state = _is_torch_function_all_disabled()
+        self.assertFalse(state)
+
+        with torch._C.DisableTorchFunctionSubclass():
+            state = _is_torch_function_all_disabled()
+            self.assertFalse(state)
 
 
 if __name__ == "__main__":
