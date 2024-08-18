@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 import functools
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
@@ -213,6 +214,47 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
         )
 
     def wrapper(traceable_fn: _F) -> _F:
+        if not is_function(traceable_fn):
+            raise TypeError(
+                f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
+            )
+
+        try:
+            original_sig = inspect.signature(original_fn)
+        except ValueError:
+            pass
+        else:
+            traceable_sig = inspect.signature(traceable_fn)
+            if (
+                tuple(
+                    p.name
+                    for p in original_sig.parameters.values()
+                    if p.kind != p.KEYWORD_ONLY
+                ),
+                {
+                    p.name
+                    for p in original_sig.parameters.values()
+                    if p.kind == p.KEYWORD_ONLY
+                },
+                {p.name: p.default for p in original_sig.parameters.values()},
+            ) != (
+                tuple(
+                    p.name
+                    for p in traceable_sig.parameters.values()
+                    if p.kind != p.KEYWORD_ONLY
+                ),
+                {
+                    p.name
+                    for p in traceable_sig.parameters.values()
+                    if p.kind == p.KEYWORD_ONLY
+                },
+                {p.name: p.default for p in traceable_sig.parameters.values()},
+            ):
+                raise TypeError(
+                    f"Signature mismatch between {original_fn} and {traceable_fn}: "
+                    f"{original_sig} != {traceable_sig}"
+                )
+
         from torch._dynamo.guards import GuardBuilder
         from torch._dynamo.trace_rules import get_torch_obj_rule_map
         from torch._dynamo.variables import PolyfilledFunctionVariable
