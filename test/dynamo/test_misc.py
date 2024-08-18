@@ -3279,6 +3279,41 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dunder_new_function_inlining3(self):
+        class Foo:
+            def __new__(cls):
+                instance = object.__new__(cls)
+                instance.a = 3
+                return instance
+
+            def __init__(self):
+                self.a = 5
+
+            def run(self, x):
+                return torch.sin(x) * self.a
+
+        class Bar:
+            def __new__(cls):
+                instance = object.__new__(Foo)  # not returning a new instance of Bar
+                instance.a = 7
+                return instance
+
+            def __init__(self):
+                self.a = 11  # not called in Bar()
+
+            def run(self, x):
+                return torch.sin(x) * self.a
+
+        def fn(x):
+            bar = Bar()
+            return bar.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_dunder_new_function_inlining4(self):
         class Mock(object):
             def __new__(cls, *args):

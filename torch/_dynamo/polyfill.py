@@ -133,11 +133,10 @@ def mapping_get(obj, key, value=None):
         return value
 
 
-def instantiate_user_defined_class_object(*args, **kwargs):
-    cls = args[0]
-    other_args = args[1:]
-    obj = cls.__new__(cls, *other_args, **kwargs)
-    obj.__init__(*other_args, **kwargs)
+def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
+    obj = cls.__new__(cls, *args, **kwargs)
+    if isinstance(obj, cls):
+        obj.__init__(*args, **kwargs)
     return obj
 
 
