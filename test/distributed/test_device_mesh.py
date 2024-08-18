@@ -5,11 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-    unpad_tensor,
-)
 from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -21,6 +16,11 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     is_nccl_available,
     ProcessGroup,
+)
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -579,6 +579,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_cp_mesh = mesh_3d["dp", "cp"]
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
+
+        ref_pg_count = _world.group_count
+        # Calling flatten again should not create a new pg.
+        dp_cp_mesh_2 = dp_cp_mesh._flatten()
+        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
