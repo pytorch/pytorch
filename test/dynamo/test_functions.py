@@ -161,6 +161,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return clip01(a + b)
 
     @make_test
+    def test_functools_cmp_to_key(a, b, c, d):
+        return sorted(
+            [a, b, c, d],
+            key=functools.cmp_to_key(lambda x, y: (x.mean() - y.mean()).item()),
+        )
+
+    @make_test
     def test_itertools_product(a, b):
         v = a
         for x, i in itertools.product([a, b], [1, 2]):
