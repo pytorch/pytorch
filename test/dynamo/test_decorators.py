@@ -267,7 +267,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "Signature mismatch"):
 
             @torch._dynamo.substitute_in_graph(operator.indexOf)
-            def polyfill(sequence, x):
+            def _(sequence, x):
                 for i, item in enumerate(sequence):
                     if item is x or item == x:
                         return i
