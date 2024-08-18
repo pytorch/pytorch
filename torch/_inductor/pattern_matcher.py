@@ -307,7 +307,7 @@ MatchResult = Union[Match, FailedMatch]
 
 def is_match(m: MatchResult) -> TypeIs[Match]:
     """
-    TypeIss cannot act on `self`. Thus this function exists to let mypy
+    TypeIs cannot act on `self`. Thus this function exists to let mypy
     recognize FailedMatch.__bool__ as a TypeIs.
     """
     return bool(m)
