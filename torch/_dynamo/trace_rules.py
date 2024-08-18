@@ -2934,7 +2934,7 @@ class FunctionIdSet:
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self):
+    def __call__(self) -> Set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -2990,7 +2990,7 @@ def _builtin_function_ids() -> Dict[int, str]:
         }
     )
     rv.update(
-        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv.update(
         {
@@ -3515,6 +3515,7 @@ def lookup_callable(obj):
         return TorchInGraphFunctionVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
+    return None
 
 
 """
