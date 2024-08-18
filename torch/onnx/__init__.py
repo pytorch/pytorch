@@ -137,13 +137,6 @@ producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
 
-@_deprecation.deprecated(
-    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
-)
-def _export(*args, **kwargs):
-    return utils._export(*args, **kwargs)
-
-
 # TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
 
 # Returns True iff ONNX logging is turned on.
