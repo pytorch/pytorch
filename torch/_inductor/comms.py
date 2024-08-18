@@ -453,7 +453,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     graph_pass.apply(graph)  # type: ignore[arg-type]
 
 
-def dedup_fsdp_unsharded_param(graph: torch.fx.Graph) -> None:
+def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
     """
     In Traceable FSDP2, each unsharded parameter is captured multiple times as different graph inputs,
     and the correctness of the program relies on fsdp.copy_() being called before any compute op
