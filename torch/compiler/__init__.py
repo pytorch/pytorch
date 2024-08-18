@@ -154,9 +154,9 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
         torch._dynamo.exc.Unsupported: ...
 
         >>> @torch.compiler.substitute_in_graph(operator.indexOf)
-        ... def indexOf(sequence, x):
-        ...     for i, item in enumerate(sequence):
-        ...         if item is x or item == x:
+        ... def indexOf(a, b, /):
+        ...     for i, item in enumerate(a):
+        ...         if item is b or item == b:
         ...             return i
         ...     raise ValueError("sequence.index(x): x not in sequence")
         >>>
