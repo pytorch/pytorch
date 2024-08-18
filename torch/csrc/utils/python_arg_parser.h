@@ -804,17 +804,25 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
   return layout(i);
 }
 
+inline at::Device deviceFromLong(int64_t device_index) {
+  TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+  return at::Device(
+      at::getAccelerator(true).value(),
+      static_cast<c10::DeviceIndex>(device_index));
+}
+
 inline at::Device toDevice(PyObject* obj) {
   if (THPDevice_Check(obj)) {
     const auto device = reinterpret_cast<THPDevice*>(obj);
     return device->device;
   }
   if (THPUtils_checkLong(obj)) {
-    const auto device_index = THPUtils_unpackLong(obj);
-    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(
-        at::getAccelerator(true).value(),
-        static_cast<c10::DeviceIndex>(device_index));
+    return deviceFromLong(THPUtils_unpackLong(obj));
+  }
+  if (torch::is_symint(py::handle(obj))) {
+    auto device_index =
+        py::cast<c10::SymInt>(py::handle(obj)).guard_int(__FILE__, __LINE__);
+    return deviceFromLong(device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);

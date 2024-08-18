@@ -4,6 +4,7 @@ from torch._prims import _make_prim, RETURN_TYPE
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 
+
 _tensor_version = _make_prim(
     schema="_tensor_version(Tensor self) -> SymInt",
     return_type=RETURN_TYPE.NEW,
