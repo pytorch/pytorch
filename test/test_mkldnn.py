@@ -883,7 +883,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                msg = "onednn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: avg_pool(x_bf16.to_mkldnn()))
