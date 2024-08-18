@@ -2500,8 +2500,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(njt.values(), torch.tensor([], device=device))
         self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
 
-        mask = torch.tensor([[False], [False], [True]])
-        njt = torch.nested.masked_select(t, mask, device=device)
+        mask = torch.tensor([[False], [False], [True]], device=device)
+        njt = torch.nested.masked_select(t, mask)
         self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
         self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
 
