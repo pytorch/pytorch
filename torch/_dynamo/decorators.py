@@ -172,7 +172,8 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
     .. note::
 
         The polyfill handler is only used when inlining the original function. It is not used when
-        the original function is called directly.
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
 
     The polyfill handler is a function that will be called in place of the original function when
     inlining the original function. The polyfill handler should have the same signature and the same
@@ -211,7 +212,7 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
             f"substitute_in_graph expects a function but got {type(original_fn)!r}"
         )
 
-    def wrapper(python_fn: _F) -> _F:
+    def wrapper(traceable_fn: _F) -> _F:
         from torch._dynamo.guards import GuardBuilder
         from torch._dynamo.trace_rules import get_torch_obj_rule_map
         from torch._dynamo.variables import PolyfilledFunctionVariable
@@ -240,7 +241,7 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
-        @functools.wraps(python_fn)
+        @functools.wraps(traceable_fn)
         def wrapped(*args, **kwargs):
             return original_fn(*args, **kwargs)
 
@@ -253,10 +254,10 @@ def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
         rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
-        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = python_fn
+        polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = traceable_fn
 
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
-        wrapped.__torch_dynamo_polyfill__ = python_fn  # type: ignore[attr-defined]
+        wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 
