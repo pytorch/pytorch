@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import atexit
 import collections
 import contextlib
@@ -927,7 +929,7 @@ class CleanupHook:
 
 class CleanupManager(ExactWeakKeyDictionary):
     count = 0
-    instance: ClassVar["CleanupManager"]
+    instance: ClassVar[CleanupManager]
 
     def _remove_id(self, idx):
         for hook in self.values[idx]:
@@ -1775,7 +1777,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
+graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -2246,7 +2248,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    guard_source: "torch._guards.GuardSource",
+    guard_source: torch._guards.GuardSource,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2816,7 +2818,7 @@ def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
     from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -3048,3 +3050,20 @@ def _extract_tensor_dict(t):
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[object]] = {}
+
+
+def get_user_object_from_id(obj_id):
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object_weakref(obj):
+    obj_id = id(obj)
+    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)

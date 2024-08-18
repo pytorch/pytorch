@@ -1106,7 +1106,10 @@ class PythonModuleVariable(VariableTracker):
 
         from .builder import SourcelessBuilder, VariableBuilder
 
-        attr_value = getattr(self.value, name)
+        if self.is_torch or name not in self.value.__dict__:
+            attr_value = getattr(self.value, name)
+        else:
+            attr_value = self.value.__dict__[name]
 
         if self.source:
             new_source = AttrSource(self.source, name)
