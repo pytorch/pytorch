@@ -128,7 +128,8 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     .. note::
 
         The polyfill handler is only used when inlining the original function. It is not used when
-        the original function is called directly.
+        the original function is called directly. In the eager mode, the decorated function calls
+        the performant C function rather than the polyfill handler.
 
     The polyfill handler is a function that will be called in place of the original function when
     inlining the original function. The polyfill handler should have the same signature and the same
