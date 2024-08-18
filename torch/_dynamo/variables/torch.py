@@ -763,9 +763,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
             tx.symbolic_torch_function_mode_stack.append(args[0])
-            return ConstantVariable.create(None)
-
-        return handlers
+            return ConstantVariable(None)
 
         @register(torch.set_default_device)
         def handle_set_default_device(
@@ -785,6 +783,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
             return None
+
+        return handlers
 
     def call_function(
         self,
