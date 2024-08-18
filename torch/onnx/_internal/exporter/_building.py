@@ -318,7 +318,7 @@ def _construct_node(
             consistency with the other functions.
         named_attrs: The mapping of attribute names to their values.
     """
-    inputs = []
+    inputs: list[Any] = []
     # Flatten variadic inputs
     for value in named_inputs.values():
         if isinstance(value, Sequence):
