@@ -120,7 +120,7 @@ def allow_in_graph(fn):
     return torch._dynamo.allow_in_graph(fn)
 
 
-def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
+def substitute_in_graph(original_fn: _F) -> Callable[[_F], _F]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -165,7 +165,7 @@ def substitute_in_graph(cxx_fn: _F) -> Callable[[_F], _F]:
     """
     import torch._dynamo
 
-    return torch._dynamo.substitute_in_graph(cxx_fn)
+    return torch._dynamo.substitute_in_graph(original_fn)
 
 
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
