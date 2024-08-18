@@ -794,6 +794,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return None
 
+        return handlers
+
     def call_function(
         self,
         tx: "InstructionTranslator",
