@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
 

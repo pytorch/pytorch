@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 class _LazyModule:
@@ -11,7 +11,7 @@ class _LazyModule:
 
     def __init__(self, module_name: str) -> None:
         self._name = module_name
-        self._module = None
+        self._module: Any = None
 
     def __repr__(self) -> str:
         return f"<lazy module '{self._name}'>"

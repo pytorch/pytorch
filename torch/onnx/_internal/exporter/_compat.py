@@ -1,6 +1,7 @@
 """Compatibility functions for the torch.onnx.export API."""
 
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
 import inspect
@@ -54,7 +55,8 @@ def _from_dynamic_axes_to_dynamic_shapes(
     sig = _signature(model)
     if len(input_names) > len(sig.parameters):
         raise ValueError(
-            f"Number of input names ({len(input_names)}) should not be greater than the number of model inputs ({len(sig.parameters)})"
+            f"Number of input names ({len(input_names)}) should not be greater than "
+            f"the number of model inputs ({len(sig.parameters)})"
         )
     input_names_to_model_inputs = {}
     for idx, param_name in enumerate(sig.parameters):
@@ -189,7 +191,7 @@ def export_compat(
                 f"[torch.onnx] Falling back to legacy torch.onnx.export due to the following error: {e}",
             )
             torch.onnx.utils.export(
-                model,
+                model,  # type: ignore[arg-type]
                 args,
                 f,  # type: ignore[arg-type]
                 kwargs=kwargs,

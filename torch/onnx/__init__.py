@@ -75,7 +75,6 @@ from .utils import (
     _optimize_graph,
     _run_symbolic_function,
     _run_symbolic_method,
-    export as _legacy_export,
     export_to_pretty_string,
     is_in_onnx_export,
     register_custom_op_symbolic,
@@ -373,7 +372,9 @@ def export(
             fallback=fallback,
         )
     else:
-        return _legacy_export(
+        from torch.onnx.utils import export
+
+        export(
             model,
             args,
             f,  # type: ignore[arg-type]
@@ -392,6 +393,7 @@ def export(
             export_modules_as_functions=export_modules_as_functions,
             autograd_inlining=autograd_inlining,
         )
+        return None
 
 
 @_deprecation.deprecated(
