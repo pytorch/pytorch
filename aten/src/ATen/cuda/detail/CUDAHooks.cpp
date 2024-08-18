@@ -123,8 +123,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  cudaPointerAttributes attr;
+  cudaPointerAttributes attr{};
   // We do not believe that CUDA needs mutable access to the data
   // here.
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
