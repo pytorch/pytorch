@@ -6,7 +6,7 @@ from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
