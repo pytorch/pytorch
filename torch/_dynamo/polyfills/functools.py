@@ -16,6 +16,7 @@ class _INITIAL_MISSING:
     pass
 
 
+# Reference: https://docs.python.org/3/library/functools.html#functools.reduce
 @substitute_in_graph(functools.reduce)
 def reduce(
     function: Callable[[_U, _T], _U],
