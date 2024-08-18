@@ -269,7 +269,7 @@ class ExprPrinterTests(InductorTestCase):
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
         for expr, result in cpu_cases:
-            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+            self.assertEqual(cexpr(expr), result(1.0, ""))  # 1.0 for FP div
 
     def test_print_floor(self):
         for integer in [True, False]:
@@ -334,7 +334,7 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1L)*s1")
+        self.assertEqual(cexpr(expr), "(-1)*s1")
 
     def test_print_Min_Max(self):
         cases = (
@@ -347,14 +347,14 @@ class ExprPrinterTests(InductorTestCase):
             self.assertEqual(
                 texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
             )
-            self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
+            self.assertEqual(cexpr(expr), f"std::{s}(-2, x)")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
                 f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
-            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2*x, 3*x}})")
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
