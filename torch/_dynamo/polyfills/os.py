@@ -8,9 +8,9 @@ from typing import AnyStr
 from ..decorators import substitute_in_graph
 
 
+# Copied from os.py in the standard library
 @substitute_in_graph(os.fspath)
 def fspath(path: os.PathLike[AnyStr]) -> AnyStr:
-    # Copied from os.py in the standard library
     if isinstance(path, (str, bytes)):
         return path
 
