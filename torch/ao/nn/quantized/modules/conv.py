@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import List, Optional, TypeVar
+from typing import List, Optional, Type, TypeVar
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -744,7 +744,7 @@ MOD = TypeVar("MOD", bound=nn.modules.conv._ConvNd)
 
 
 class _ConvTransposeNd(_ConvNd):
-    _FLOAT_MODULE = MOD
+    _FLOAT_MODULE = Type[MOD]
 
     def __init__(
         self,

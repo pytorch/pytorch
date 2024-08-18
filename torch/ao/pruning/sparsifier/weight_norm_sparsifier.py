@@ -216,7 +216,7 @@ class WeightNormSparsifier(BaseSparsifier):
         sparse_block_shape,
         zeros_per_block,
         **kwargs,
-    ):
+    ):  # type: ignore[call-override]
         values_per_block = reduce(operator.mul, sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(
