@@ -965,27 +965,23 @@ class PolyfilledFunctionVariable(VariableTracker):
             assert callable(handler)
             return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
 
-        source = None
-        handler = getattr(self.fn, "__torch_dynamo_polyfill__", None)
-        if callable(handler):
-            source = AttrSource(self.source, "__torch_dynamo_polyfill__")
-        else:
-            handler = getattr(self.fn, "__python_implementation__", None)
-            assert callable(handler)
-            source = AttrSource(self.source, "__python_implementation__")
-
-        if source:
-            return UserFunctionVariable.create_with_source(
-                handler, source=source
-            ).call_function(tx, args, kwargs)
-        return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+        for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
+            handler = getattr(self.fn, candidate, None)
+            if handler:
+                assert callable(handler)
+                if self.source:
+                    source = AttrSource(self.source, candidate)
+                    return UserFunctionVariable.create_with_source(
+                        handler,
+                        source=source,
+                    ).call_function(tx, args, kwargs)
+                return SourcelessBuilder.create(
+                    tx,
+                    handler,
+                ).call_function(tx, args, kwargs)
 
     def as_python_constant(self):
-        return self.fn.as_python_constant()
-
-    def guard_as_python_constant(self):
-        """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
-        return self.fn.guard_as_python_constant()
+        return self.fn
 
 
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier
