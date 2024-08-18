@@ -245,7 +245,7 @@ class ChildFailedError(Exception):
 
     def format_msg(self, boarder_delim="=", section_delim="-"):
         title = f"{self.name} FAILED"
-        root_rank, root_failure = self.get_first_failure()
+        root_rank, _ = self.get_first_failure()
 
         root_failure_fmt: str = ""
         other_failures_fmt: List[str] = []
