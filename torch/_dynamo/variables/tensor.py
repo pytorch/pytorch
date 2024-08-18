@@ -219,8 +219,6 @@ class TensorVariable(VariableTracker):
 
     def dynamic_getattr(self, tx: "InstructionTranslator", name):
         fake_val = self.proxy.node.meta["example_value"]
-        if name == "fsdp_pre_all_gather":
-            print(f"dynamic_getattr: here3: self: {self}, fake_val: {fake_val}, subclass?: {is_traceable_wrapper_subclass(fake_val)}, not self.source?: {not self.source}")        
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
         # if:
@@ -359,12 +357,8 @@ class TensorVariable(VariableTracker):
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
-            if "NF4Tensor" in str(type(self.get_real_value())):
-                print(f"here1: name: {name}, var: {var}, ret_val: {ret_val}")
         except AttributeError:
             ret_val = False
-            if "NF4Tensor" in str(type(self.get_real_value())):
-                print(f"here2: name: {name}, ret_val: {ret_val}")
 
         if self.source:
             install_guard(
@@ -1052,7 +1046,7 @@ class TensorVariable(VariableTracker):
             self._is_name_set = True
 
     def __repr__(self):
-        return f"TensorVariable({type(self.get_real_value())})"
+        return f"TensorVariable()"
 
 
 class SymNodeVariable(VariableTracker):
