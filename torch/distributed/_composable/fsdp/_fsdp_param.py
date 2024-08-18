@@ -9,9 +9,9 @@ import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import (
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor.device_mesh import _mesh_resources
+from torch.distributed.tensor.placement_types import (
     _StridedShard,
     DTensorSpec,
     Placement,
