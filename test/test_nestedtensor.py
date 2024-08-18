@@ -2501,7 +2501,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
 
         mask = torch.tensor([[False], [False], [True]])
-        njt = torch.nested.masked_select(t, mask)
+        njt = torch.nested.masked_select(t, mask, device=device)
         self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
         self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
 
