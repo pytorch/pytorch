@@ -183,6 +183,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
+            else:
+                return VariableBuilder(tx, source)(obj)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -537,11 +539,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, **kwargs) -> None:
+    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
+        self.cls_source = cls_source
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -918,7 +922,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # dunder attrs. inspect.getattr_static does not return correct value for
         # them.
         if name == "__class__":
-            options = {"source": source}
+            cls_source = source
+            if cls_source is None:
+                cls_source = self.cls_source
+            options = {"source": cls_source}
             return UserDefinedClassVariable(type(self.value), **options)
 
         try:

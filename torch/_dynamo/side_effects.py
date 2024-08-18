@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import inspect
 import warnings
 from collections.abc import MutableMapping
@@ -288,6 +289,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedObjectVariable
 
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+
+        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
 
         return self.track_object_new(cls_source, user_cls, variable_cls, {})
 
