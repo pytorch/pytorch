@@ -600,6 +600,7 @@ class FSDPParam:
         ):
             free_storage(tensor)
         if ca.compiled_autograd_enabled:
+            free_storage(self._unsharded_param)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
 
