@@ -345,7 +345,7 @@ class CppPrinter(ExprPrinter):
     def _print_Min(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
+            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -354,7 +354,7 @@ class CppPrinter(ExprPrinter):
     def _print_Max(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
+            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"

@@ -347,7 +347,7 @@ class ExprPrinterTests(InductorTestCase):
             self.assertEqual(
                 texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
             )
-            self.assertEqual(cexpr(expr), f"std::{s}(-2, x)")
+            self.assertEqual(cexpr(expr), f"std::{s}(static_cast<int64_t>(-2), static_cast<int64_t>(x))")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
