@@ -43,6 +43,7 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Iterable,
     Iterator,
     KeysView,
     List,
@@ -55,7 +56,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeIs, TypeVarTuple, Unpack
+from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -570,9 +571,6 @@ class ExactWeakKeyDictionary:
         self.values.clear()
 
 
-_Ts = TypeVarTuple("_Ts")
-
-
 @overload
 def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
     ...
@@ -580,14 +578,17 @@ def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
 
 @overload
 def istype(
-    obj: object, allowed_types: Tuple[Type[Unpack[_Ts]]]
-) -> TypeIs[Union[Unpack[_Ts]]]:
+    obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
+) -> TypeIs[T]:
     ...
 
 
-def istype(
-    obj: object, allowed_types: Union[Type[T], Tuple[Type[Unpack[_Ts]]]]
-) -> Union[TypeIs[T], TypeIs[Union[Unpack[_Ts]]]]:
+@overload
+def istype(obj: object, allowed_types: Iterable[type]) -> bool:
+    ...
+
+
+def istype(obj, allowed_types):
     """isinstance() without subclasses"""
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
@@ -857,7 +858,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
 
 
 def record_compilation_metrics(
-    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics],
+    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
 ):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
