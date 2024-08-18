@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Type, TypeVar
+from typing import TypeVar
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -38,7 +38,7 @@ MOD = TypeVar("MOD", bound=nn.modules.conv._ConvNd)
 
 class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
     _version = 2
-    _FLOAT_MODULE = Type[MOD]
+    _FLOAT_MODULE = MOD
 
     def __init__(
         self,

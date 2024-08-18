@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Tuple, Type, TypeVar, Union
+from typing import Tuple, TypeVar, Union
 
 import torch
 import torch.nn as nn
@@ -14,7 +14,7 @@ MOD = TypeVar("MOD", bound=nn.modules.conv._ConvNd)
 
 
 class _ConvNd(nn.modules.conv._ConvNd):
-    _FLOAT_MODULE = Type[MOD]
+    _FLOAT_MODULE = MOD
 
     def __init__(
         self,
