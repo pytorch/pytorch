@@ -70,7 +70,8 @@ inline C10_HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
 }
 
 inline C10_HOST_DEVICE int div_floor_integer(int a, int b) {
-    return static_cast<int>(div_floor_integer(static_cast<int64_t>(a), static_cast<int64_t>(b)));
+  return static_cast<int>(
+      div_floor_integer(static_cast<int64_t>(a), static_cast<int64_t>(b)));
 }
 
 } // namespace c10
