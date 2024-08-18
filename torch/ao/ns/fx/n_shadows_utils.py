@@ -296,8 +296,6 @@ def create_submodule_from_subgraph(
     #
 
     cur_node_orig = first_node
-    cur_args_orig = cur_node_orig.args
-    cur_kwargs_orig = cur_node_orig.kwargs
 
     cur_name_idx = 0
 

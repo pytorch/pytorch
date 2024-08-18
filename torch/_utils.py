@@ -973,7 +973,7 @@ class CallbackRegistry(Generic[P]):
         for cb in self.callback_list:
             try:
                 cb(*args, **kwargs)
-            except Exception as e:
+            except Exception:
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
