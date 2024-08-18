@@ -430,14 +430,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            var = tx.output.side_effects.track_object_new(
-                self.source,
-                self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
-            )
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
