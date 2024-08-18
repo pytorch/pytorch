@@ -373,7 +373,7 @@ class ContinueExecutionCache:
         argnames_null: Tuple[str],
         setup_fns: Tuple[ReenterWith],
         stack_ctx_vars: Tuple[int, Tuple[Any]],
-        argnames_ctx_vars: Tuple[str, Tuple[Any]],
+        argnames_ctx_vars: Tuple[Tuple[str, Tuple[Any]], ...],
         null_idxes: Tuple[int],
     ) -> types.CodeType:
         assert offset is not None

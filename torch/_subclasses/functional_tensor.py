@@ -222,7 +222,7 @@ class FunctionalTensor(torch.Tensor):
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
