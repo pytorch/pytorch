@@ -30,6 +30,7 @@ def index(iterator, item, start=0, end=None):
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
 
+
 def islice(iterator, start=0, end=None, step=1):
     if start < 0 or (end is not None and end < 0) or step < 0:
         raise ValueError("Indices must be non-negative")
@@ -51,6 +52,7 @@ def islice(iterator, start=0, end=None, step=1):
                 yield element
             elif i + start >= end - start:
                 break
+
 
 def repeat(item, count):
     for i in range(count):
