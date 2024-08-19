@@ -1671,10 +1671,10 @@ class CppKernel(Kernel):
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
-        line = self.indirect_assert(
-            csevar, "0" if lower else None, size_str, self._load_mask
-        )
-        self.cse.generate(buffer, line, assignment=False)
+        # line = self.indirect_assert(
+        #     csevar, "0" if lower else None, size_str, self._load_mask
+        # )
+        # self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -4561,6 +4561,7 @@ class LoopLevel:
         # TODO: parallel dynamic tail loop
         if self.parallel and (
             self.offset == sympy.Integer(0)
+            or self.steps == sympy.Integer(1)
             or not (isinstance(self.size, sympy.Expr) and not self.size.is_number)
         ):
             # TODO(jansel): look into chunk size and other schedules
