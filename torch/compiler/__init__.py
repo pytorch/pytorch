@@ -146,46 +146,49 @@ def disable(fn=None, recursive=True):
     This function provides a decorator manager to disable compilation on a function
     It also provides the option of recursively disabling called functions
 
-    NOTE: Interaction between `compile`, `disable`, and `enable`
+    .. note::
+        Interaction between `compile`, `disable`, and `enable`
 
-    `compile` is is a "marker" that Dynamo should attempt to compile the function
-    and its nested calls.
+        `compile` is is a "marker" that Dynamo should attempt to compile the function
+        and its nested calls.
 
-    `disable` is higher-priority - it signifies that a function (and its nested
-    calls in the case recursive=True) should not be compiled.
+        `disable` is higher-priority - it signifies that a function (and its nested
+        calls in the case recursive=True) should not be compiled.
 
-    In particular, `disable` overrides `compile` - if you want to re-enable compilation,
-    use `enable`. `disable` and `enable` have the same priority.
+        In particular, `disable` overrides `compile` - if you want to re-enable compilation,
+        use `enable`. `disable` and `enable` have the same priority.
 
-    e.g.
-    @enable
-    def a(x):
-        ...
+        e.g.
 
-    @disable
-    def b(x):
-        a(x)
-        ...
+            @enable
+            def a(x):
+                ...
 
-    @compile
-    def c(x):
-        b(x)
-        ...
+            @disable
+            def b(x):
+                a(x)
+                ...
 
-    @disable
-    def d(x):
-        c(x)
-        ...
+            @compile
+            def c(x):
+                b(x)
+                ...
 
-    Calling `a`  will result in no compilation.
-    Calling `b` will result in no compilation
-    Calling `c` will result in `c` and `a` being compiled.
-        A graph break will occur when `b` is called.
-    Calling `d` will result in `a` being compiled.
+            @disable
+            def d(x):
+                c(x)
+                ...
+
+        Calling `a`  will result in no compilation.
+        Calling `b` will result in no compilation
+        Calling `c` will result in `c` and `a` being compiled.
+            A graph break will occur when `b` is called.
+        Calling `d` will result in `a` being compiled.
 
     Args:
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
+
     """
     import torch._dynamo
 
