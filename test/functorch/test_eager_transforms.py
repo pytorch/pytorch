@@ -2637,6 +2637,17 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_jvp_new_tensor(self):
+        def f(x):
+            y = x.new_tensor(0.5)
+            return x + y
+
+        x = torch.rand(10, 10)
+        tangents = torch.zeros_like(x)
+        actual = jvp(f, (x,), (tangents,))
+        expected = (f(x), torch.zeros_like(x))
+        self.assertEqual(actual, expected)
+
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2871,7 +2882,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    def test_linearize_composition(self, device, dtype):
+    def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
 
@@ -2885,6 +2896,25 @@ class TestLinearize(TestCase):
             return jvp(fn, (x_p,), (x_t,))[1]
 
         expected_batched_jvp = vmap(jvp_fn)(x_t)
+
+        self.assertEqual(actual_batched_jvp, expected_batched_jvp)
+
+    @dtypes(torch.float)
+    def test_linearize_composition_grad(self, device, dtype):
+        x_p = make_tensor((3,), device=device, dtype=dtype)
+        x_t = make_tensor((3,), device=device, dtype=dtype)
+
+        def fn(x):
+            z = torch.ones(3, device=device, dtype=dtype)
+            return grad(lambda x: z @ x)(x)
+
+        _, jvp_fn = linearize(fn, x_p)
+        actual_batched_jvp = jvp_fn(x_t)
+
+        def jvp_fn(x_t):
+            return jvp(fn, (x_p,), (x_t,))[1]
+
+        expected_batched_jvp = jvp_fn(x_t)
 
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
