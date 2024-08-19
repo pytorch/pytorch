@@ -601,8 +601,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-        if current_device.type != "cpu":
+        if "cpu" not in V.graph.device_types:
             self.write_get_raw_stream_header_once()
 
     @cache_on_self
@@ -1546,8 +1545,6 @@ class WrapperCodeGen(CodeGen):
         return grid
 
     def prepare_triton_kernel_call(self, device_index, call_args):
-        current_device = V.graph.scheduler.get_current_device_or_throw()
-
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -1560,6 +1557,7 @@ class WrapperCodeGen(CodeGen):
         call_args = [wrap_arg(arg) for arg in call_args]
 
         if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
             device_index = current_device.index
 
         return device_index, call_args

@@ -1863,10 +1863,6 @@ class GraphLowering(torch.fx.Interpreter):
         ]
 
     def is_unspec_arg(self, name: str) -> bool:
-        device = V.graph.scheduler.get_current_device_or_throw()
-        if device.type == "cpu":
-            return False
-
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (

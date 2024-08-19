@@ -578,7 +578,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
-                cuda=V.graph.scheduler.get_current_device_or_throw().type != "cpu",
+                cuda="cpu" not in V.graph.device_types,
             )
 
 
