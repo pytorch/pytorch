@@ -64,7 +64,7 @@ def disable(fn=None, recursive=True):
             if config.old_compile_disable_behavior:
                 fn = innermost_fn(fn)
             assert callable(fn)
-            return ctx(fn)
+            return ctx(fn)  # type: ignore[operator]
         return ctx
     else:
         return skip(fn)
