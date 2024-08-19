@@ -587,7 +587,7 @@ else:
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
         ) -> "DeviceMesh":
             """
-            Contstructs a :class:`DeviceMesh` with ``device_type`` from an
+            Constructs a :class:`DeviceMesh` with ``device_type`` from an
             existing :class:`ProcessGroup`.
 
             The constructed device mesh has number of dimensions equal to the
