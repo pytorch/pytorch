@@ -34,7 +34,7 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
 if TYPE_CHECKING:
@@ -1000,7 +1000,7 @@ def typename(obj: _Any, /) -> str:
     return f"{module}.{qualname}"
 
 
-def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
+def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
 
     Note that this function is simply doing ``isinstance(obj, Tensor)``.
@@ -1020,7 +1020,7 @@ def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeGuard[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
