@@ -608,7 +608,7 @@ class LocalBufferContext:
             ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_function,
     ):
-        def inner(node, *index_vars):
+        def inner(*args, **kwargs):
             with V.set_ops_handler(
                 LocalizeBufferHandler(
                     V.get_ops_handler(),
@@ -616,7 +616,7 @@ class LocalBufferContext:
                     rewrite_index=rewrite_index,
                 )
             ):
-                return fn(node, *index_vars)
+                return fn(*args, **kwargs)
 
         return inner
 
