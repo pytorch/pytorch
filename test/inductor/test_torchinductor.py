@@ -10640,11 +10640,13 @@ class CommonTemplate:
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
 
-            # For this test to be valid, Inductor must have changed the conv
-            # to be channels-last. If this assertion ever fails then we need
-            # a new test case.
-            self.assertEqual(len(bar_strides), 1)
-            self.assertNotEqual(bar_strides[0], expected_stride)
+            # Dynamic shapes invalidate this test case
+            if torch._dynamo.config.assume_static_by_default:
+                # For this test to be valid, Inductor must have changed the conv
+                # to be channels-last. If this assertion ever fails then we need
+                # a new test case.
+                self.assertEqual(len(bar_strides), 1)
+                self.assertNotEqual(bar_strides[0], expected_stride)
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_custom_op_fixed_layout(self):
