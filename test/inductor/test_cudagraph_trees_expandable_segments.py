@@ -15,7 +15,10 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 if HAS_CUDA and not TEST_WITH_ASAN:
-    from inductor.test_cudagraph_trees import CudaGraphTreeTests  # noqa: F401
+    try:
+        from .test_cudagraph_trees import CudaGraphTreeTests
+    except ImportError:
+        from test_cudagraph_trees import CudaGraphTreeTests  # noqa: F401
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
