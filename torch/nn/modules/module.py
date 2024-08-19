@@ -2520,7 +2520,7 @@ class Module:
                 local_state_dict,
                 prefix,
                 local_metadata,
-                False,
+                True,
                 missing_keys,
                 unexpected_keys,
                 error_msgs,
