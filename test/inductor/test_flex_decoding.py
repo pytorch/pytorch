@@ -284,14 +284,19 @@ class TestFlexDecoding(InductorTestCase):
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
         compiled_sdpa = torch.compile(sdpa_partial)
-        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
-        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
-        compiled_out = compiled_sdpa(q, k, v)
+        golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+        compiled_out, compiled_lse = compiled_sdpa(q, k, v, return_lse=True)
 
         self._check_out(
             golden_out,
             ref_out,
             compiled_out,
+        )
+        self._check_out(
+            gold_lse,
+            ref_lse,
+            compiled_lse,
         )
 
     def run_test_with_call(
@@ -761,6 +766,38 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(bias_mod)
+
+    @supported_platform
+    def test_fully_masked_out_rows_0_check_gqa(self):
+        # Ensure fully masked out rows won't cause NaNs.
+        query = torch.randn(
+            (B, Hq, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (B, Hkv, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (B, Hkv, S, D), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+
+        flex = torch.compile(flex_attention, dynamic=False)
+
+        out, lse = flex(
+            query, key, value, block_mask=block_mask, enable_gqa=True, return_lse=True
+        )
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+        self.assertTrue((lse[:, :, M:] == 0.0).all())
+
+        loss = out.sum() + lse.sum()
+        loss.backward()
+        self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
     @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
