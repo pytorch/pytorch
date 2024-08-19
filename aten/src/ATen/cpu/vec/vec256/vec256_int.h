@@ -241,6 +241,12 @@ public:
   Vectorized<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
+  int32_t reduce_add() const {
+    return values[0];
+  }
+  int32_t reduce_max() const {
+    return values[0];
+  }
   Vectorized<int32_t> real() const {
     return *this;
   }

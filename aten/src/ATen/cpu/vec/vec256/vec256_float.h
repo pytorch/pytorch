@@ -342,6 +342,12 @@ public:
     }
     return loadu(tmp);
   }
+  float reduce_add() const {
+    return values[0];
+  }
+  float reduce_max() const {
+    return values[0];
+  }
   Vectorized<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }

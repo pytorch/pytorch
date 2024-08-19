@@ -246,6 +246,12 @@ public:
     return _mm256_floor_pd(values);
   }
   Vectorized<double> frac() const;
+  double reduce_add() const {
+    return values[0];
+  }
+  double reduce_max() const {
+    return values[0];
+  }
   Vectorized<double> neg() const {
     return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
   }

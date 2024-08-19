@@ -542,6 +542,12 @@ public:
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(at::native::round_impl);
   }
+  T reduce_add() const {
+    return values[0];
+  }
+  T reduce_max() const {
+    return values[0];
+  }
   Vectorized<T> sin() const {
     return map(std::sin);
   }

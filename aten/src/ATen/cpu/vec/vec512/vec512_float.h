@@ -234,6 +234,52 @@ public:
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f16_u10(values));
   }
+  // from onednn graph
+  // Vectorized<float> exp_u20() const {
+  //   static __m512 const_1 =
+  //       _mm512_set1_ps(88.5999985);
+  //   static __m512 const_2 =
+  //       _mm512_set1_ps(1.44269502);
+  //   static __m512 const_3 =
+  //       _mm512_set1_ps(0.693147182);
+  //   static __m512i const_4 =
+  //       _mm512_set1_epi32(23);
+  //   static __m512 const_5 =
+  //       _mm512_set1_ps(-87.3300018);
+  //   static __m512 vec_factorial_1 =
+  //       _mm512_set1_ps(0.166666672);
+  //   static __m512 vec_factorial_2 =
+  //       _mm512_set1_ps(0.200000003);
+  //   static __m512 vec_factorial_3 =
+  //       _mm512_set1_ps(0.25);
+  //   static __m512 vec_factorial_4 =
+  //       _mm512_set1_ps(0.333333343);
+  //   static __m512 vec_factorial_5 =
+  //       _mm512_set1_ps(0.5);
+  //   static __m512 vec_one =
+  //       _mm512_set1_ps(1.f);
+  //   static __m512 vec_zero =
+  //       _mm512_set1_ps(0.f);
+
+  //   auto a_ = _mm512_min_ps(values, const_1);
+  //   auto k_float = _mm512_floor_ps(_mm512_mul_ps(a_, const_2));
+  //   __m512i k_int = _mm512_cvtps_epi32(k_float);
+  //   auto r = _mm512_sub_ps(a_, _mm512_mul_ps(k_float, const_3));
+  //   auto Tn = _mm512_set1_ps(1.f);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_factorial_1), vec_one);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_factorial_2), vec_one);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_factorial_3), vec_one);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_factorial_4), vec_one);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_factorial_5), vec_one);
+  //   Tn = _mm512_fmadd_ps(Tn, _mm512_mul_ps(r, vec_one), vec_one);
+  //   __m512i result_int = _mm512_sllv_epi32(k_int, const_4);
+  //   __m512i Tn_int = _mm512_cvtps_epi32(Tn);
+  //   result_int = _mm512_add_epi32(result_int, Tn_int);
+  //   __m512 result = _mm512_cvtepi32_ps(result_int);
+  //   __mmask16 mask = _mm512_cmp_ps_mask(values, const_5, _MM_CMPINT_GE);
+  //   auto _retval1 = _mm512_mask_blend_ps(mask, result, vec_zero);
+  //   return _retval1;
+  // }
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
     static __m512 vec_factorial_1 =
@@ -364,6 +410,12 @@ public:
     }
     return loadu(tmp);
   }
+  float reduce_add() const {
+    return _mm512_reduce_add_ps(values);
+  }
+  float reduce_max() const {
+    return _mm512_reduce_max_ps(values);
+  }
   Vectorized<float> neg() const {
     return _mm512_xor_ps(_mm512_set1_ps(-0.f), values);
   }
@@ -473,26 +525,26 @@ inline Vectorized<float> Vectorized<float>::frac() const {
 // either input is a NaN.
 template <>
 Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  auto zero_vec = _mm512_set1_epi32(0);
-  auto max = _mm512_max_ps(a, b);
-  auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
-                                                          0xFFFFFFFF));
-  // Exploit the fact that all-ones is a NaN.
-  return _mm512_or_ps(max, isnan);
+  // auto zero_vec = _mm512_set1_epi32(0);
+  return _mm512_max_ps(a, b);
+  // auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  // auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
+  //                                                         0xFFFFFFFF));
+  // // Exploit the fact that all-ones is a NaN.
+  // return _mm512_or_ps(max, isnan);
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
 Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  auto zero_vec = _mm512_set1_epi32(0);
-  auto min = _mm512_min_ps(a, b);
-  auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
-                                                          0xFFFFFFFF));
+  // auto zero_vec = _mm512_set1_epi32(0);
+  return _mm512_min_ps(a, b);
+  // auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
+  // auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
+  //                                                         0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
-  return _mm512_or_ps(min, isnan);
+  // return _mm512_or_ps(min, isnan);
 }
 
 template <>

@@ -760,7 +760,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         double a_scale,
         long o_zp,
         double o_scale) {
-  std::cout << "enter _scaled_dot_product_attention_math" << std::endl;
+  // std::cout << "enter _scaled_dot_product_attention_math" << std::endl;
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   auto dtype = query_.scalar_type();
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
