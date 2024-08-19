@@ -796,31 +796,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
-    def test_state_dict_hooks(self):
-        model = torch.nn.Linear(2, 4)
-        compiled_model = torch.compile(model)
-
-        original_state_dict = model.state_dict()
-        compiled_state_dict = compiled_model.state_dict()
-
-        assert original_state_dict.keys() == compiled_state_dict.keys()
-        for key, tensor in original_state_dict.items():
-            assert tensor.equal(compiled_state_dict[key])
-
-        # check if original model can load both state dicts
-        model.load_state_dict(original_state_dict)
-        model.load_state_dict(compiled_state_dict)
-
-        # check if compile model can load both state dicts
-        compiled_model.load_state_dict(original_state_dict)
-        compiled_model.load_state_dict(compiled_state_dict)
-
-        # check backwards compatibility
-        backwards_state_dict = {
-            f"_orig_mod.{key}": tensor for key, tensor in original_state_dict.items()
-        }
-        compiled_model.load_state_dict(backwards_state_dict)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

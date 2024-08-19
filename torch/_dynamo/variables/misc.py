@@ -158,8 +158,13 @@ class SuperVariable(VariableTracker):
             else:
                 unimplemented("super() nn.Module.__init__")
         elif self.objvar.source and inner_fn is object.__new__:
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                self.objvar
+            return tx.output.side_effects.track_object_new(
+                self.objvar.source,
+                self.objvar.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.objvar.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                {},
             )
         elif name == "__new__" and isinstance(inner_fn, types.FunctionType):
             # __new__ is a staticmethod object, but accessing __new__ from the super object, as done in
