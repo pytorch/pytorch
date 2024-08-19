@@ -877,36 +877,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
         import _collections
 
-        # print(name, subobj)
-        # breakpoint()
-
+        # In some cases, we have to do dynamo lookup because getattr_static is not enough. For example, threading.local
+        # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if (
+            # When the dynamic lookup is necessary, e.g., threading.local
             subobj is NO_SUCH_SUBOBJ
+            # TODO(anijain2305) - Move the _tuplegetter to somewhere eslse
             or isinstance(subobj, _collections._tuplegetter)
+            # For __slots__ and member descriptors, directly look into the __slots__
             or (inspect.ismemberdescriptor(subobj) and name in self.value.__slots__)
+            # TODO(anijain2305) - Maybe types.BuiltinFunctionType should go in is_wrapper_or_member_descriptor
+            # For property with C-defined fget, directly access the property
+            or (
+                isinstance(subobj, property)
+                and isinstance(subobj.fget, types.BuiltinFunctionType)
+            )
         ):
-            # Call __getattribute__, we have checked that this is not overridden. For example, threading.local has
-            # side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-            subobj = self.value.__getattribute__(name)
-            # breakpoint()
-        return subobj
+            # Call __getattribute__, we have already checked that this is not overridden and side-effect free.
+            try:
+                subobj = self.value.__getattribute__(name)
+            except AttributeError:
+                pass
 
-        # if isinstance(self.value, PyTreeSpec) or type(self.value) is threading.local:
-        #     # Cherry-picked cases where we are ok calling the getattr.
-        #     #
-        #     # Threading local has custom __getattribute__ but its side-effect free, so we speicalize here.
-        #     #
-        #     # TODO(anijain2305) - We might need to do a better job at identifying custom __getattribute__ and graph
-        #     # break early in other cases (improve object_has_getattribute). For threading local, the __getattribute__ is
-        #     # overridden in C, so we could not catch it correctly.
-        #     subobj = getattr(self.value, name)
-        # else:
-        #     subobj = inspect.getattr_static(self.value, name)
-        #     import _collections
-        #     if isinstance(subobj, _collections._tuplegetter):
-        #         breakpoint()
-        #         subobj = getattr(self.value, name)
-        # return subobj
+        return subobj
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         self._check_for_getattribute()
