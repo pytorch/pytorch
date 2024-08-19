@@ -164,6 +164,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
+        # Special handling of collections.OrderedDict.fromkeys()
+        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
+        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
+        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
+        # and we need duplicate code to handle both cases.
+        if (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            return super().var_getattr(tx, name)
+
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
@@ -177,20 +188,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
+        elif isinstance(obj, types.ClassMethodDescriptorType):
+            func = obj.__get__(None, self.value)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif source:
             # __mro__ is a member in < 3.12, an attribute in >= 3.12
             if inspect.ismemberdescriptor(obj) or (
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
-
-        # Special handling of collections.OrderedDict.fromkeys()
-        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
-        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
-        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
-        # and we need duplicate code to handle both cases.
-        if self.value is collections.OrderedDict and name == "fromkeys":
-            return super().var_getattr(tx, name)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -381,9 +390,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            and self.value.__new__ == object.__new__
+            and self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source is not None
+            and self.source
             and not is_forbidden_context_manager(self.value)
         ):
             # import here to avoid an unfortunate circular dependency.
@@ -518,7 +527,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__)
+        return new_fn in {object.__new__, Generic.__new__}
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
