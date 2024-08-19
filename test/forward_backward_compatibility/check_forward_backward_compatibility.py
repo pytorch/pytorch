@@ -328,8 +328,10 @@ def check_fc(existing_schemas):
     else:
         warnings.warn(
             "The PR is introducing a potentially forward incompatible changes to the "
-            "operator library. Please contact PyTorch team to confirm "
-            "whether this change is wanted or not. \n\nBroken ops: "
+            "operator library. If you did NOT use this op anywhere in Python frontend "
+            "code, it is safe to land.  It is UNSAFE to simultaneously land a new operator "
+            "and make use of it in pre-existing Python frontend code, this will break "
+            "FC; instead, land the C++ operator change first and wait two weeks.\n\nBroken ops: "
             "[\n\t{}\n]".format("\n\t".join(broken_ops))
         )
 
@@ -357,9 +359,8 @@ if __name__ == "__main__":
             s = parse_schema(line.strip())
             slist.append(s)
 
-    # TODO in case there is FC breaking changes,
-    # we just warn for now until there is a policy.
-    check_fc(slist)
+    if not check_fc(slist):
+        sys.exit(1)
 
     if not check_bc(slist):
         sys.exit(1)
