@@ -11,7 +11,7 @@ import sys
 import threading
 import types
 import warnings
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, Generic, List, TYPE_CHECKING
 
 import torch._dynamo.config
 import torch.nn
@@ -527,7 +527,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn is object.__new__
+        return new_fn in {object.__new__, Generic.__new__}
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
