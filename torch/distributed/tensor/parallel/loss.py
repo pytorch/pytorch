@@ -8,15 +8,15 @@ import torch._prims_common as utils
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
-from torch.distributed._tensor.ops._math_ops import (
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.placement_types import DTensorSpec, Placement, TensorMeta
 
 
 aten = torch.ops.aten
