@@ -1389,7 +1389,7 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
     skip(
         "masked.logaddexp",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="https://github.com/pytorch/pytorch/issues/133693"
+        reason="https://github.com/pytorch/pytorch/issues/133693",
     ),
     # TODO: This test currently fails only for certain inputs, e.g. shape([3, 1]).
     # Numerically the ONNX program is correct, but the output shapes for `save_mean`
