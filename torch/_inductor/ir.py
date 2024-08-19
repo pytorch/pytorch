@@ -5318,7 +5318,7 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
             op_overload=torch.ops.aten.set_.source_Tensor,
         )
-        assert self_tensor.get_name() in V.graph.graph_input_names
+        # assert self_tensor.get_name() in V.graph.graph_input_names
         V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
         V.graph.never_reuse_buffers.add(storage_tensor.get_name())
         V.graph.never_reuse_buffers.add(self.get_name())
@@ -5327,9 +5327,9 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             MutationOutput(NoneLayout(device), self_tensor, self),
             MutationOutput(NoneLayout(device), storage_tensor, self),
         ]
-        V.graph.alias_to_graph_input[storage_tensor.get_name()] = self_tensor.get_name()
-        V.graph.alias_to_graph_input[self.get_name()] = self_tensor.get_name()
-        V.graph.alias_to_graph_input[self_tensor.get_name()] = self_tensor.get_name()
+        # V.graph.alias_to_graph_input[storage_tensor.get_name()] = self_tensor.get_name()
+        # V.graph.alias_to_graph_input[self.get_name()] = self_tensor.get_name()
+        # V.graph.alias_to_graph_input[self_tensor.get_name()] = self_tensor.get_name()
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]

@@ -6090,15 +6090,6 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
-if hasattr(torch.ops.fsdp, "set_"):
-
-    @register_lowering(torch.ops.fsdp.set_.default)
-    def fsdp_set_(self, source_tensor):
-        self.realize()
-        source_tensor.realize()
-        ir.SetSourceTensorKernel(self, source_tensor)
-
-
 if hasattr(torch.ops.fsdp, "copy_"):
 
     @register_lowering(torch.ops.fsdp.copy_.default)
