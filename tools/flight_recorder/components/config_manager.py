@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import sys
 
 
 class JobConfig:
@@ -14,9 +13,13 @@ class JobConfig:
     """
 
     def __init__(self: "JobConfig"):
-        self.parser = argparse.ArgumentParser(description="PyTorch Flight recorder analyzing script.")
+        self.parser = argparse.ArgumentParser(
+            description="PyTorch Flight recorder analyzing script."
+        )
 
-        self.parser.add_argument("-d", "--dir", help="Directory with flight recorder dumps")
+        self.parser.add_argument(
+            "-d", "--dir", help="Directory with flight recorder dumps"
+        )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
             "-p",
@@ -27,6 +30,5 @@ class JobConfig:
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
 
-
-    def parse_args(self: "JobConfig"):
+    def parse_args(self: "JobConfig") -> argparse.Namespace:
         return self.parser.parse_args()
