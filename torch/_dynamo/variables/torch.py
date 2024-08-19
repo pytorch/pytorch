@@ -773,8 +773,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not args and not kwargs
             return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
 
-        return handlers
-
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
