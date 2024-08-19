@@ -1550,6 +1550,23 @@ class TestTorchFunctionMode(TestCase):
             finally:
                 del g
 
+    def test_torch_function_all_disabled_api(self):
+        from torch._C import _is_torch_function_all_disabled
+
+        state = _is_torch_function_all_disabled()
+        self.assertFalse(state)
+
+        with torch._C.DisableTorchFunction():
+            state = _is_torch_function_all_disabled()
+            self.assertTrue(state)
+
+        state = _is_torch_function_all_disabled()
+        self.assertFalse(state)
+
+        with torch._C.DisableTorchFunctionSubclass():
+            state = _is_torch_function_all_disabled()
+            self.assertFalse(state)
+
     def test_subclass_hash(self):
         class DiagTensor(torch.Tensor):
             def __init__(self, diag):
