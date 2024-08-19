@@ -41,19 +41,22 @@ if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
 fi
 
+git checkout ${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python
+cd triton
+
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
-  CXX=g++-9 pip_install "git+${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python"
+  CXX=g++-9 pip_install -e .
 elif [ -n "${UBUNTU_VERSION}" ] && [ -n "${CLANG_VERSION}" ]; then
   # Triton needs <filesystem> which surprisingly is not available with clang-9 toolchain
   add-apt-repository -y ppa:ubuntu-toolchain-r/test
   apt-get install -y g++-9
 
-  CXX=g++-9 pip_install "git+${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python"
+  CXX=g++-9 pip_install -e .
 else
-  pip_install "git+${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python"
+  pip_install -e .
 fi
 
 if [ -n "${CONDA_CMAKE}" ]; then
