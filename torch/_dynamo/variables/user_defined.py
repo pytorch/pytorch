@@ -189,6 +189,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
+            # e.g.: inspect.getattr_static(dict, "fromkeys")
+            #       inspect.getattr_static(itertools.chain, "from_iterable")
             func = obj.__get__(None, self.value)
             if source is not None:
                 return VariableBuilder(tx, source)(func)
@@ -918,8 +920,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
         from . import ConstantVariable
+        from .builder import SourcelessBuilder, VariableBuilder
 
-        value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
 
@@ -996,6 +998,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
+        elif isinstance(subobj, types.ClassMethodDescriptorType):
+            # e.g.: inspect.getattr_static({}, "fromkeys")
+            func = subobj.__get__(self.value, None)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
             subobj.__get__
         ):
@@ -1059,8 +1068,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
-                from .builder import SourcelessBuilder
-
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
