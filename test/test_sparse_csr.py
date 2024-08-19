@@ -3510,8 +3510,8 @@ class TestSparseCSR(TestCase):
 
             out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
             if sample.args[0].ndim != 1 and sample.args[0].size(-1) != 1:
-                with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
-                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                with self.assertRaisesRegex(RuntimeError, "b must be a 1D tensor"):
+                    out = torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
                 break
             if not sample.args[0].numel():
                 with self.assertRaisesRegex(RuntimeError,
@@ -3521,6 +3521,9 @@ class TestSparseCSR(TestCase):
 
             expect = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
             sample.input = sample.input.to_sparse_csr()
+            if sample.args[0].ndim != 1 and sample.args[0].size(-1) == 1:
+                expect = expect.squeeze(-1)
+                sample.args = (sample.args[0].squeeze(-1), )
             out = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
             self.assertEqual(expect, out)
 
