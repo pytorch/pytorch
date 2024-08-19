@@ -10,6 +10,9 @@
 #pragma once
 
 #include <ATen/cuda/tunable/GemmCommon.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/tunable/GemmCublasLt.h>
+#endif
 #ifdef USE_ROCM
 #include <ATen/cuda/tunable/GemmHipblaslt.h>
 #include <ATen/cuda/tunable/GemmRocblas.h>
@@ -190,11 +193,91 @@ inline std::string TypeName(c10::complex<float> v) {
   return "c10::complex<float>";
 }
 
+#ifdef USE_CUDA
+static void AddCudaValidator() {
+  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+  if (validators.find("CUDA_VERSION") == validators.end()) {
+    std::string cuda_version = c10::str(CUDA_VERSION);
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "CUDA_VERSION",
+        [cuda_version]() { return cuda_version; },
+        [cuda_version](auto&& k) { return cuda_version == k ? OK : FAIL; });
+  }
+}
+#endif
+
+#ifdef USE_ROCM
+static void AddRocblasValidator() {
+  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+  if (validators.find("ROCBLAS_VERSION") == validators.end()) {
+    std::string rocblas_version = c10::str(
+        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
+        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
+        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "ROCBLAS_VERSION",
+        [rocblas_version]() { return rocblas_version; },
+        [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
+  }
+}
+
+static void AddHipblasltValidator() {
+  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+  if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
+    std::string hipblaslt_version = c10::str(
+        XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
+        XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
+        XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
+        XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "HIPBLASLT_VERSION",
+        [hipblaslt_version]() { return hipblaslt_version; },
+        [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
+  }
+}
+
+static void AddRocmValidator() {
+  auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+  if (validators.find("ROCM_VERSION") == validators.end()) {
+    std::string rocm_version = ROCM_BUILD_INFO;
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "ROCM_VERSION",
+        [rocm_version]() { return rocm_version; },
+        [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
+  }
+
+  if (validators.find("GCN_ARCH_NAME") == validators.end()) {
+    std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+    getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+        "GCN_ARCH_NAME",
+        [gcn_arch_name]() { return gcn_arch_name; },
+        [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+  }
+}
+#endif
+
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
-  GemmTunableOp() {
+  GemmTunableOp(const GemmParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
+
+#ifdef USE_CUDA
+    bool cuda_validators = false;
+
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      cuda_validators = true;
+      for (auto&& [name, op] : GetCublasLtGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
+
+    if (cuda_validators) {
+      AddCudaValidator();
+    }
+#endif
 
 #ifdef USE_ROCM
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
@@ -252,8 +335,24 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>, StreamTimer> {
  public:
-  GemmStridedBatchedTunableOp() {
+  GemmStridedBatchedTunableOp(const GemmStridedBatchedParams<T>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
+
+#ifdef USE_CUDA
+    bool cuda_validators = false;
+
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      cuda_validators = true;
+      for (auto&& [name, op] : GetCublasLtStridedBatchedGemmTypeStringAndOps<T, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
+
+    if (cuda_validators) {
+      AddCudaValidator();
+    }
+#endif
 
 #ifdef USE_ROCM
     static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
