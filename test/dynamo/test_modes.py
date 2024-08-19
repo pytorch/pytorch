@@ -47,11 +47,19 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.default_device_old = torch.get_default_device()
         super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
+        torch.set_default_device(cls.default_device_old)
         super().tearDownClass()
+
+    def setUp(self):
+        torch.set_default_device(None)
+
+    def tearDown(self):
+        torch.set_default_device(None)
 
     def _run_torch_function_mode_guard_test(self):
         class TestMode1(BaseTorchFunctionMode):
@@ -258,6 +266,23 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             "Popping from an empty torch function mode stack",
             lambda: fn(torch.ones(2, 2)),
         )
+
+    def test_push_torch_function_mode(self):
+        m = BaseTorchFunctionMode()
+        with m:
+
+            @torch.compile(fullgraph=True)
+            def fn(x, m):
+                _push_on_torch_function_stack(m)
+                return x + 1
+
+            fn(torch.ones(2, 2), m)
+
+            self.assertEqual(_len_torch_function_stack(), 2)
+            # reset stack state
+            _pop_torch_function_stack()
+
+        self.assertEqual(_len_torch_function_stack(), 0)
 
 
 if __name__ == "__main__":
