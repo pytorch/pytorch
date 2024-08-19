@@ -877,7 +877,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
         import _collections
 
-        if subobj is NO_SUCH_SUBOBJ or isinstance(subobj, _collections._tuplegetter):
+        if (
+            subobj is NO_SUCH_SUBOBJ
+            or isinstance(subobj, _collections._tuplegetter)
+            or is_wrapper_or_member_descriptor(subobj)
+        ):
             # Call __getattribute__, we have checked that this is not overridden. For example, threading.local has
             # side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
             subobj = self.value.__getattribute__(name)
