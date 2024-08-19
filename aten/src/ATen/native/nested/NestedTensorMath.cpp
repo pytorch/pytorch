@@ -15,9 +15,10 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 int64_t num_bytes(IntArrayRef sizes) {
@@ -975,7 +976,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
 
 Tensor& normal_nested_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.normal_(mean, std, gen);
+  self_buf.normal_(mean, std, std::move(gen));
   return self;
 }
 
@@ -1089,5 +1090,4 @@ Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
   return cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

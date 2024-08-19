@@ -68,6 +68,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
+    from .remote_cache import RemoteCacheBackend
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -899,6 +901,34 @@ def maybe_realign_inputs(
             compiled_graph.current_callable = new_callable
 
 
+def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
+    """
+    Ephemerally increases the NCCL timeout when compiling for a distributed job
+    Returns amount of seconds increased
+    """
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+        return 0
+
+    increased_timeout_sec = int(time_saved_ns // 1e9)  # convert to seconds
+
+    if config.is_fbcode():
+        fudge_factor = torch._utils_internal.justknobs_getval_int(
+            "pytorch/remote_cache:ephemeral_timeout_fudge_factor_percentage"
+        )
+        log.info(
+            "Ephemeral NCCL timeout increase fudge factor %d and original increase value %d",
+            fudge_factor,
+            increased_timeout_sec,
+        )
+        increased_timeout_sec += int(increased_timeout_sec * fudge_factor / 100)
+
+    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+        timedelta(seconds=increased_timeout_sec)
+    )
+    return increased_timeout_sec
+
+
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
@@ -1145,7 +1175,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: None,
+        remote_cache: Optional[RemoteCacheBackend],
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1192,17 +1222,16 @@ class FxGraphCache:
                 write_atomic(path, content, make_dirs=True)
 
             if remote_cache:
+                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": int(
-                            disk_compiled_graph._time_taken_ns // 1e6
-                        ),  # Convert from NS to MS
+                        "time_taken_ms": time_taken_ms,
                     }
                     if config.is_fbcode()
                     else content
                 )
-                remote_cache.put(key, cache_data)
+                remote_cache.put(key, cache_data)  # type: ignore[arg-type]
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -1254,15 +1283,16 @@ class FxGraphCache:
         compiled_graph = None
         cache_state = None
         cache_event_time = None
-        key = None
-        debug_lines = None
+        cache_info: Dict[str, Any] = {}
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
+            cache_info["key"] = key
+            cache_info["components"] = debug_lines
 
-            remote_cache = None
+            remote_cache: Optional[RemoteCacheBackend] = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
@@ -1294,6 +1324,7 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
                 compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
                 FxGraphCache._save_graph(
                     key,
                     compiled_graph,
@@ -1306,18 +1337,14 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time_ns()
-                if (
-                    torch.distributed.is_available()
-                    and torch.distributed.is_initialized()
-                    and (time_taken_ns := compiled_graph._time_taken_ns) is not None
-                ):
-                    increased_timeout_sec = int(
-                        time_taken_ns // 1e9
-                    )  # convert to seconds
-                    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
-                    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                        timedelta(seconds=increased_timeout_sec)
-                    )
+                if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                    cache_info["time_saved_ns"] = time_saved_ns
+                    if (
+                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                            time_saved_ns
+                        )
+                    ) != 0:
+                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
@@ -1328,9 +1355,9 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
-        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
+        cache_info["cache_state"] = cache_state
         ChromiumEventLogger.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -1338,7 +1365,7 @@ class FxGraphCache:
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
