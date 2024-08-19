@@ -2980,7 +2980,7 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
-        if not k.startswith("_") and callable(v)
+        if not k.startswith("_") and callable(v) and k not in {"enumerate"}
     }
     rv.update(
         {
