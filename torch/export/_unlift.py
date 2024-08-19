@@ -160,8 +160,6 @@ def _unlift(
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
     state_dict: Dict[str, Any],
-    gradients_to_parameters: Dict[str, str],
-    gradients_to_user_inputs: Dict[str, str],
     constants: Dict[str, Any],
     forward_arg_names: Optional[List[str]] = None,
 ):
@@ -180,7 +178,6 @@ def _unlift(
         is used to re-insert an inplace copy_ operator to copy the mutated
         values back to the original node.
     """
-    _remove_gradient_outputs(gm, gradients_to_parameters, gradients_to_user_inputs)
     unlifted_name_to_node, input_name_to_node = _unlift_inputs_as_getattr(
         gm, lifted_inputs
     )
@@ -191,24 +188,6 @@ def _unlift(
     gm.graph.lint()
     gm.recompile()
     return gm
-
-
-def _remove_gradient_outputs(gm, gradients_to_parameters, gradients_to_user_inputs):
-    """
-    Remove the gradient outputs from the joint graph module. See note [skipping gradient outputs]
-    """
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            outputs = pytree.tree_flatten(node.args)[0]
-            new_outputs = []
-            for output in outputs:
-                if (
-                    output.name not in gradients_to_parameters
-                    and output.name not in gradients_to_user_inputs
-                ):
-                    new_outputs.append(output)
-            node.args = tuple(new_outputs)
-    gm.recompile()
 
 
 def _register_attrs_to_new_gm(
@@ -355,24 +334,15 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         for in_spec in ep.graph_signature.input_specs
     ]
 
-    mutated_outputs: List[Optional[str]] = []
-    for out_spec in ep.graph_signature.output_specs:
-        # NOTE [skipping gradient outputs]
-        # Skip if the output is gradient to parameter or user input, this likely needs to get fixed
-        # later once we have more solid understandingf for joint IR downstream uses. I don't think
-        # anyone uses these fields in a meaningful way right now.
-        if (
-            out_spec.kind == OutputKind.GRADIENT_TO_PARAMETER
-            or out_spec.kind == OutputKind.GRADIENT_TO_USER_INPUT
-        ):
-            continue
-        if out_spec.kind in (
-            OutputKind.BUFFER_MUTATION,
-            OutputKind.USER_INPUT_MUTATION,
-        ):
-            mutated_outputs.append(out_spec.target)
-        else:
-            mutated_outputs.append(None)
+    mutated_outputs: List[Optional[str]] = [
+        (
+            out_spec.target
+            if out_spec.kind
+            in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
+            else None
+        )
+        for out_spec in ep.graph_signature.output_specs
+    ]
 
     new_gm = _unlift(
         new_gm,
@@ -381,12 +351,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
-        ep.graph_signature.backward_signature.gradients_to_parameters
-        if ep.graph_signature.backward_signature
-        else {},
-        ep.graph_signature.backward_signature.gradients_to_user_inputs
-        if ep.graph_signature.backward_signature
-        else {},
         ep.constants,
         forward_arg_names=forward_arg_names,
     )

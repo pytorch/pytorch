@@ -367,41 +367,53 @@ def _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index):
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
 
-    output_specs = [
-        OutputSpec(
-            OutputKind.LOSS_OUTPUT,
-            update_arg(spec.arg, new_outputs[i]),
-            old_new_placeholder_map.get(spec.target, spec.target),
-        )
-        for i, spec in enumerate(ep.graph_signature.output_specs)
-    ]
-
-    assert graph_signature.backward_signature is not None
-    gradients = graph_signature.backward_signature.gradients_to_user_inputs
-    assert len(graph_signature.user_inputs) == len(ep.graph_signature.input_specs)
-    specs = {
-        graph_signature.user_inputs[i]: spec
-        for i, spec in enumerate(ep.graph_signature.input_specs)
-        if isinstance(spec.arg, TensorArgument)
-    }
-    for i, node in enumerate(new_outputs[len(output_specs) :]):
-        source = gradients[node.name]
-        spec = specs[source]  # type: ignore[index]
-        if spec.kind == InputKind.PARAMETER:
-            kind = OutputKind.GRADIENT_TO_PARAMETER
-            target = spec.target
-        elif spec.kind == InputKind.USER_INPUT:
-            kind = OutputKind.GRADIENT_TO_USER_INPUT
-            target = source
-        else:
-            raise AssertionError(f"Unknown input kind: {spec.kind}")
-        output_specs.append(
+    if joint_loss_index is None:
+        output_specs = [
             OutputSpec(
-                kind,
-                TensorArgument(name=node.name),
-                target,
+                spec.kind,
+                update_arg(spec.arg, new_outputs[i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
             )
-        )
+            for i, spec in enumerate(ep.graph_signature.output_specs)
+        ]
+    else:
+        output_specs = [
+            OutputSpec(
+                OutputKind.LOSS_OUTPUT,
+                update_arg(spec.arg, new_outputs[i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
+            for i, spec in enumerate(ep.graph_signature.output_specs)
+        ]
+
+    if joint_loss_index is not None:
+        assert graph_signature.backward_signature is not None
+
+        gradients = graph_signature.backward_signature.gradients_to_user_inputs
+        assert len(graph_signature.user_inputs) == len(ep.graph_signature.input_specs)
+        specs = {
+            graph_signature.user_inputs[i]: spec
+            for i, spec in enumerate(ep.graph_signature.input_specs)
+            if isinstance(spec.arg, TensorArgument)
+        }
+        for i, node in enumerate(new_outputs[len(output_specs) :]):
+            source = gradients[node.name]
+            spec = specs[source]  # type: ignore[index]
+            if spec.kind == InputKind.PARAMETER:
+                kind = OutputKind.GRADIENT_TO_PARAMETER
+                target = spec.target
+            elif spec.kind == InputKind.USER_INPUT:
+                kind = OutputKind.GRADIENT_TO_USER_INPUT
+                target = source
+            else:
+                raise AssertionError(f"Unknown input kind: {spec.kind}")
+            output_specs.append(
+                OutputSpec(
+                    kind,
+                    TensorArgument(name=node.name),
+                    target,
+                )
+            )
 
     assert len(new_placeholders) == len(old_placeholders)
 
@@ -443,7 +455,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    if joint_loss_index is not None:
+    if (
+        joint_loss_index is not None
+        or ep.graph_signature.backward_signature is not None
+    ):
         return _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index)
 
     mod = ep.module()
