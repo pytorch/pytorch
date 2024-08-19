@@ -1348,7 +1348,7 @@ class FxGraphCache:
         except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
-            log.warning("Bypassing FX Graph Cache because '%s'", str(e))
+            log.warning("Bypassing FX Graph Cache because '%s'", e)
             cache_info["cache_bypass_reason"] = str(e)
             cache_event_time = time_ns()
             if not compiled_graph:
