@@ -1610,8 +1610,8 @@ class TestLinalg(TestCase):
     # Test complex number inputs for linalg.norm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.cfloat, torch.cdouble)
-    @precisionOverride({torch.cfloat: 5e-4})
+    @dtypes(torch.cfloat, torch.cdouble, torch.chalf)
+    @precisionOverride({torch.cfloat: 5e-4, torch.chalf: 2e-3})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
@@ -1623,7 +1623,7 @@ class TestLinalg(TestCase):
         for keepdim in [False, True]:
             # vector norm
             x = torch.randn(25, device=device, dtype=dtype)
-            xn = x.cpu().numpy()
+            xn = x.to(torch.cfloat).cpu().numpy() if dtype == torch.chalf else x.cpu().numpy()
             for ord in vector_ords:
                 res = torch.linalg.norm(x, ord, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, ord, keepdims=keepdim)
@@ -1634,22 +1634,24 @@ class TestLinalg(TestCase):
                 res_out = torch.tensor([], device=device, dtype=res.dtype)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
-                self.assertEqual(res_out, expected, msg=msg)
+                self.assertEqual(res_out, expected, msg=msg, exact_dtype=False)
 
             # matrix norm
-            x = torch.randn(25, 25, device=device, dtype=dtype)
-            xn = x.cpu().numpy()
-            for ord in matrix_ords:
-                res = torch.linalg.norm(x, ord, keepdim=keepdim).cpu()
-                expected = np.linalg.norm(xn, ord, keepdims=keepdim)
-                msg = gen_error_message(x.size(), ord, keepdim)
-                self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg, exact_dtype=False)
+            # TODO: support torch.chalf
+            if dtype != torch.chalf:
+                x = torch.randn(25, 25, device=device, dtype=dtype)
+                xn = x.cpu().numpy()
+                for ord in matrix_ords:
+                    res = torch.linalg.norm(x, ord, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, ord, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), ord, keepdim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg, exact_dtype=False)
 
-                res_out = torch.tensor([], device=device, dtype=res.dtype)
-                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
-                self.assertEqual(res_out.shape, expected.shape, msg=msg)
-                self.assertEqual(res_out, expected, msg=msg)
+                    res_out = torch.tensor([], device=device, dtype=res.dtype)
+                    torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
+                    self.assertEqual(res_out.shape, expected.shape, msg=msg)
+                    self.assertEqual(res_out, expected, msg=msg)
 
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
