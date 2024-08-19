@@ -73,6 +73,8 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
