@@ -2,11 +2,11 @@ name: Nitpicker
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
     branches: [main]
 
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
     branches: [gh/**/base]
 
 jobs:
