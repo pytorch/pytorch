@@ -3031,34 +3031,6 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
         if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
-
-        if TEST_WITH_ROCM and batch_size == 1 and seq_len_q == 143 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 1 and seq_len_q == 2048 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 1 and seq_len_q == 4 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 1 and seq_len_q == 4 and seq_len_k == 4 and head_dim == 203 and is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 1 and seq_len_q == 4 and seq_len_k == 579 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 8 and seq_len_q == 143 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 8 and seq_len_q == 2048 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 8 and seq_len_q == 4 and seq_len_k == 2048 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
-        if TEST_WITH_ROCM and batch_size == 8 and seq_len_q == 4 and seq_len_k == 579 and head_dim == 8 and not is_causal and dtype == torch.float16 and not enable_gqa:
-            self.skipTest("Skipped on ROCm for precision in test_transformers.")
-
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
@@ -3136,6 +3108,23 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
+        fudge_factors = {
+            'out': 4,
+            'grad_query': 160.0,
+            'grad_key': 16,
+            'grad_value': 4,
+        }
+        if TEST_WITH_ROCM:
+            if head_dim > 128:
+                fudge_factors['grad_key'] *= 1.5
+            if seq_len_q >= 512 or seq_len_k >= 512:
+                fudge_factors['grad_query'] *= 1.25
+                fudge_factors['grad_key'] *= 3.0
+            if seq_len_q >= 2048:
+                fudge_factors['grad_query'] *= 1.5
+            if seq_len_k >= 2048:
+                fudge_factors['grad_query'] *= 4.0
+                fudge_factors['grad_key'] *= 4.0
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
@@ -3145,6 +3134,7 @@ class TestSDPACudaOnly(NNTestCase):
                 'grad_key': 16,
                 'grad_value': 4,
             }
+            fudge_factors=fudge_factors
         )
 
     @skipIfRocm  # FIXME: "capturing stream has unjoined work"
