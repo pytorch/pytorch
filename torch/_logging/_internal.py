@@ -37,6 +37,7 @@ DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
+LOG_RANK_ENV_VAR = "TORCH_LOGS_RANKS"
 TRACE_ENV_VAR = "TORCH_TRACE"
 
 
@@ -841,9 +842,41 @@ def _default_formatter():
 DEFAULT_FORMATTER = _default_formatter()
 
 
+class TorchLogsFilter(logging.Filter):
+    def __init__(self, ranks: Set[int]):
+        self.ranks = ranks
+        super().__init__()
+
+    def filter(self, _record) -> bool:
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_rank() in self.ranks
+
+        return True
+
+
+def _default_filter() -> Optional[TorchLogsFilter]:
+    ranks_str = os.environ.get(LOG_RANK_ENV_VAR, None)
+    if ranks_str is None:
+        return None
+
+    try:
+        ranks = set(map(int, ranks_str.split(",")))
+    except Exception as e:
+        raise ValueError(
+            'Expected TORCH_LOGS_RANKS as a comma separated list of int (e.g. "0,1,2,3")'
+        ) from e
+
+    return TorchLogsFilter(ranks)
+
+
+DEFAULT_FILTER = _default_filter()
+
+
 def _setup_handlers(create_handler_fn, log):
     debug_handler = _track_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
+    if DEFAULT_FILTER:
+        debug_handler.addFilter(DEFAULT_FILTER)
     debug_handler.setLevel(logging.DEBUG)
     log.addHandler(debug_handler)
 
