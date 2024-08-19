@@ -18,7 +18,10 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
+from torch.testing._internal.common_quantization import (
+    _generate_qdq_quantized_model,
+    _group_quantize_tensor,
+)
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
@@ -1072,6 +1075,89 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+
+    @unittest.skipIf(True, "Failing when K >= 2048")
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @parametrize("batch_size", (64,))
+    @parametrize(
+        "in_features",
+        (128, 256, 512, 1024, 1536, 2048, 4096),
+    )
+    @parametrize(
+        "out_features",
+        (
+            64,
+            128,
+            256,
+            512,
+        ),
+    )
+    @parametrize("inner_k_tiles", (2,))
+    @parametrize("q_group_size", (32,))  # Add support more more sizes later
+    def test_int4_woq_gemm(
+        self, batch_size, in_features, out_features, inner_k_tiles, q_group_size
+    ):
+        class WeightOnlyInt4Linear(torch.nn.Module):
+            __constants__ = ["in_features", "out_features"]
+            in_features: int
+            out_features: int
+            weight: torch.Tensor
+            scales_and_zeros: torch.Tensor
+
+            def __init__(
+                self,
+                weight: torch.Tensor,
+                scales_and_zeros: torch.Tensor,
+                groupsize: int = 128,
+                inner_k_tiles: int = 8,
+            ) -> None:
+                super().__init__()
+
+                self.out_features = out_features
+                self.groupsize = groupsize
+                self.inner_k_tiles = inner_k_tiles
+
+                # Shape (out_features // 8, in_features // (inner_k_tiles * 16), 32, inner_k_tiles // 2)
+                # dtype is torch.int32
+                self.register_buffer(
+                    "weight",
+                    weight
+                    # Shape (in_features // groupsize, out_features, 2)
+                    # dtype of scales & zeros is torch.bfloat16
+                )
+                self.register_buffer("scales_and_zeros", scales_and_zeros)
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return torch.ops.aten._weight_int4pack_mm(
+                    input, self.weight, self.groupsize, self.scales_and_zeros
+                )
+
+        torch.manual_seed(1)
+        a = torch.rand((batch_size, in_features), dtype=torch.bfloat16)
+        b = torch.rand((in_features, out_features), dtype=torch.bfloat16)
+
+        def convert_weight_to_int4pack(b):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group_size
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
+
+            return b_int4pack, b_scales_and_zeros
+
+        b_int4pack, b_scales_and_zeros = convert_weight_to_int4pack(b)
+        counters.clear()
+        ref = torch.mm(a, b)
+        mod = WeightOnlyInt4Linear(
+            b_int4pack, b_scales_and_zeros, q_group_size, inner_k_tiles
+        ).eval()
+        self.common(
+            mod, (a,), assert_equal=False, reference_in_float=False, exact_dtype=False
+        )
+        eager_mode_output = mod(a)
+        mean_err = ((eager_mode_output - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     @inductor_config.patch({"freezing": True})
     @patches

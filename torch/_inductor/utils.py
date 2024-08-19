@@ -1212,7 +1212,9 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
+def use_cpp_packed_gemm_template(
+    layout, mat1, mat2, mat2_transposed=False, q_group_size=None
+):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1231,6 +1233,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         mat2,
         out_dtype=layout.dtype if int8_gemm else None,
         mat2_transposed=mat2_transposed,
+        packed_int4_weights=q_group_size is not None,
     )
 
     # TODO(jgong5): support dynamic shapes for n or k
@@ -1239,7 +1242,9 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
-    output_dtype, _ = get_gemm_template_output_and_compute_dtype(mat1.get_dtype())
+    output_dtype, _ = get_gemm_template_output_and_compute_dtype(
+        mat1.get_dtype()
+    )
     micro_gemm = create_micro_gemm(
         "micro_gemm",
         m,
@@ -1249,6 +1254,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
+        q_group_size=q_group_size,
     )
 
     return (

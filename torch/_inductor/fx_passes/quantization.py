@@ -1536,6 +1536,31 @@ def _register_woq_mm_int8_pattern2():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
+def _register_woq_mm_int4_pattern(graph_module: torch.fx.GraphModule):
+    """
+    Replaces torch.ops.aten._weight_int4pack_mm.default with torch.ops.aten._weight_int4pack_mm._derive_groupsize
+    because the latter is amenable to auto-tuning with inductor
+    """
+    for node in graph_module.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == aten._weight_int4pack_mm
+            and len(node.all_input_nodes) == 3
+            and len(node.args) == 4
+        ):
+            X = node.args[0]
+            W = node.args[1]
+            ZPS = node.args[3]
+            with graph_module.graph.inserting_before(node):
+                new_output_node = graph_module.graph.call_function(
+                    torch.ops.aten._weight_int4pack_mm._derive_groupsize,
+                    args=(X, W, ZPS),
+                )
+                node.replace_all_uses_with(new_output_node)
+                new_output_node.meta.update(node.meta)
+            graph_module.graph.erase_node(node)
+
+
 def _register_woq_mm_int8_pattern3():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
     # case of dispatching to bmm

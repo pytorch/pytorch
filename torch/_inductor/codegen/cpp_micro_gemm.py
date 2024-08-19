@@ -466,8 +466,300 @@ inline void {{kernel_name}}_kernel(
         return result
 
 
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAVX512,
+        [(4, 64, 32), (4, 64, 64), (4, 64, 128), (4, 64, 256)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int32,
+        output_dtype=torch.bfloat16,
+        compute_dtype=torch.bfloat16,
+    ),
+)
+class CppMicroGemmInt4WoQVec(CppMicroGemmFP32Vec):
+    """
+    This class generates the code for int4 WoQ micro gemm using AVX512 intrinsics.
+    """
+
+    DECLARE_KERNEL = r"""
+template <bool accum>
+inline void {{kernel_name}}(
+{%- if kernel_extra_args_declare %}
+    {{kernel_extra_args_declare}}
+{%- endif %}
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    const {{input_t}}* {{restrict_keyword}} S,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+)
+"""
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    TORCH_CHECK(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    TORCH_CHECK(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    // TODO(jgong5): loop unroll for M and N
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            if (block_m == {{block_m}}) {
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                    A + m * lda,
+                    reinterpret_cast<const uint8_t*>(B) + n,
+                    S,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc
+                );
+            } else {
+                switch (block_m) {
+                {%- for b in range(block_m - 1, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                        A + m * lda,
+                        reinterpret_cast<const uint8_t*>(B) + n,
+                        S,
+                        C + m * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    break;
+                {%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: ", block_m);
+                }
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+
+inline bool is_block_start(int index, int BLOCK_SIZE) {
+  return !(index & (BLOCK_SIZE -1));
+}
+
+inline __m128i conver_int4_to_int8(const uint8_t* data) {
+  __m128i tmp = _mm_loadu_si64((const __m128i*)data);
+  __m128i bytes = _mm_cvtepu8_epi16(tmp);
+  const __m128i lowMask = _mm_set1_epi8(0xF);
+  __m128i high = _mm_andnot_si128(lowMask, bytes);
+  __m128i low = _mm_and_si128(lowMask, bytes);
+  high = _mm_slli_epi16(high, 4);
+  bytes = _mm_or_si128(low, high);
+  return bytes;
+}
+
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const {{input_t}}* {{restrict_keyword}} A,
+    const uint8_t* {{restrict_keyword}} B,
+    const {{input_t}}* {{restrict_keyword}} ScaleAndZeros,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc) {
+  constexpr int BLOCK_K = {{block_k}};
+  constexpr int ROWS = BLOCK_M;
+  constexpr int COLS = BLOCK_N / 16;
+
+  const int PREFETCH_SIZE_K = 16 * 4;
+  const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
+
+  // number of blocks on K
+  const int KB = K / BLOCK_K;
+
+  __m512 va;
+  __m512 vb[COLS];
+  __m512 vc[ROWS * COLS];
+  __m512 scale[COLS];
+  __m512 zero[COLS];
+
+  // Lookup table to de-quantize int4 values to bf16.
+  // Values are dequantized as truly int4 [-8, 7] range;
+  //
+  // dequant = (bf16(int4_value) * bf16_scale) + bf16_zero
+  //
+  static const __m512 lut = _mm512_set_ps(
+      7.0f, 6.0f, 5.0f, 4.0f,
+      3.0f, 2.0f, 1.0f, 0.0f,
+      -1.0f, -2.0f, -3.0f, -4.0f,
+      -5.0f, -6.0f, -7.0f, -8.0f);
+
+  // index for transpose
+  static const __m512i idx1 = _mm512_set_epi32(
+      30, 28, 26, 24, 22, 20, 18, 16,
+      14, 12, 10, 8, 6, 4, 2, 0);
+  static const __m512i idx2 = _mm512_set_epi32(
+      31, 29, 27, 25, 23, 21, 19, 17,
+      15, 13, 11, 9, 7, 5, 3, 1);
+
+  // load scale and zero point
+  auto load_scale_and_zeros = [&](int i, int _kb) {
+    // load 2x bfloat16 vector
+    __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * ldc * 2 + 32 * i));
+    if (_kb + PREFETCH_SIZE_KB < KB) {
+      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * ldc * 2 + 32 * i, _MM_HINT_T0);
+    }
+
+    // convert to 2x f32 vector
+    __m512 a, b;
+    at::vec::cvtbf16_fp32(t, a, b);
+
+    // transpose scale_and_zero from {16, 2} to {2, 16}
+    // inputs:
+    //   a: {s0, z0, s1, z1, ..., s7, z7}
+    //   b: {s8, z8, s9, z9, ..., s15, z15}
+    // output:
+    //   scale: {s0, s1, s2, ..., s15}
+    //   zero:  {z0, z1, z2, ..., z15}
+    scale[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx1, b);
+    zero[i] = _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b);
+  };
+
+  auto loadc = [&](auto i) {
+    if constexpr (accum) {
+       constexpr int row = i / COLS;
+       constexpr int col = i % COLS;
+       at::vec::cvtbf16_fp32(_mm256_loadu_si256((__m256i*)(C + row * ldc + col * 16)), vc[i]);
+    } else {
+      vc[i] = _mm512_setzero_ps();
+    }
+  };
+  c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+  auto compute = [&, COLS](auto i, int k) {
+    constexpr  int row = i / COLS;
+    constexpr  int col = i % COLS;
+
+    if constexpr (col == 0) {
+      float aa = static_cast<float>(A[row * lda + k]);
+      if (k + PREFETCH_SIZE_K < K) {
+        _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
+      }
+      va = _mm512_set1_ps(aa);
+    }
+
+    if constexpr (row == 0) {
+      if constexpr (COLS == 4) {
+        // when BLOCK_N = 64, handle each row at a time
+        // to reduce de-quantize overhead.
+        if constexpr (col == 0) {
+          __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
+          if (k + PREFETCH_SIZE_K < K) {
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
+          }
+
+          __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
+          vb[0] = _mm512_permutexvar_ps(b32, lut);
+          vb[0] = _mm512_fmadd_ps(vb[0], scale[0], zero[0]);
+          vb[2] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+          vb[2] = _mm512_fmadd_ps(vb[2], scale[2], zero[2]);
+
+          b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
+          vb[1] = _mm512_permutexvar_ps(b32, lut);
+          vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
+          vb[3] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
+          vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
+        }
+      } else {
+        __m128i b8 = conver_int4_to_int8(B + k * ldb + col * 8);
+        __m512i b32 = _mm512_cvtepu8_epi32(b8);
+        vb[col] = _mm512_permutexvar_ps(b32, lut);
+        vb[col] = _mm512_fmadd_ps(vb[col], scale[col], zero[col]);
+      }
+    }
+
+    constexpr int idx = row * COLS + col;
+    vc[idx] = _mm512_fmadd_ps(va, vb[col], vc[idx]);
+  };
+
+  for (int k = 0, kb = 0; k < K; ++k) {
+    if (is_block_start(k, BLOCK_K)) {
+      c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
+    }
+    c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+  }
+
+  //store to C
+  auto storec = [&, COLS](auto i) {
+    constexpr int row = i / COLS;
+    constexpr int col = i % COLS;
+    if constexpr (COLS == 4) {
+      // when BLOCK_N = 64, handle each row at a time
+      // to reduce `cvtfp32_bf16` overhead.
+      if constexpr (col == 0) {
+        __m512i c01 = at::vec::cvtfp32_bf16(vc[row * 4 + 0], vc[row * 4 + 1]);
+        __m512i c23 = at::vec::cvtfp32_bf16(vc[row * 4 + 2], vc[row * 4 + 3]);
+        _mm512_storeu_si512((__m512i*)(C + row * ldc + 0 * 32), c01);
+        _mm512_storeu_si512((__m512i*)(C + row * ldc + 1 * 32), c23);
+      }
+    } else {
+      __m256i ci = at::vec::cvtfp32_bf16(vc[i]);
+      _mm256_storeu_si256((__m256i*)(C + row * ldc + col * 16), ci);
+    }
+  };
+  c10::ForcedUnroll<ROWS * COLS>{}(storec);
+}
+"""
+
+    def codegen_call(
+        self,
+        kernel: CppTemplateKernel,
+        X: ir.Buffer,
+        W: ir.Buffer,
+        S: ir.Buffer,
+        Y: ir.Buffer,
+        accum: bool,
+    ) -> str:
+        """
+        Generate the code for calling the templated kernel that computes
+        `C += A @ B` if `accum` is True, or `C = A @ B` otherwise.
+        """
+        X_ptr = f"&({kernel.index(X, [0, 0])})"
+        W_ptr = f"&({kernel.index(W, [0, 0])})"
+        S_ptr = f"&({kernel.index(S, [0, 0])})"
+        Y_ptr = f"&({kernel.index(Y, [0, 0])})"
+        M = kernel.size(Y, 0)
+        N = kernel.size(Y, 1)
+        K = kernel.size(X, 1)
+        lda = kernel.stride(X, 0)
+        ldb = self.register_blocking.block_n // 2
+        ldc = kernel.stride(Y, 0)
+        res = IndentedBuffer()
+        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        with res.indent():
+            extra_args = self.get_kernel_extra_args()
+            if extra_args:
+                res.writeline(extra_args)
+            res.writeline(f"{X_ptr},")
+            res.writeline(f"{W_ptr},")
+            res.writeline(f"{S_ptr},")
+            res.writeline(f"{Y_ptr},")
+            res.writeline(f"{M},")
+            res.writeline(f"{N},")
+            res.writeline(f"{K},")
+            res.writeline(f"{lda},")
+            res.writeline(f"{ldb},")
+            res.writeline(f"{ldc}")
+        res.writeline(");")
+        return res.getvalue()
+
+
 # extra check for CppMicroGemmAMX
-def check_amx_extra(config, m, n, k, alpha, num_threads):
+def check_amx_extra(config, m, n, k, alpha, num_threads, q_group_size=None):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
     return k % vnni_size == 0 and alpha == 1
 
@@ -753,6 +1045,7 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=True,
+    q_group_size=None,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
@@ -765,6 +1058,9 @@ def create_micro_gemm(
             alpha,
         )
 
+    is_int4_woq_gemm = q_group_size is not None
+    if is_int4_woq_gemm:
+        assert input_dtype is torch.bfloat16 and input2_dtype is torch.int32
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
     m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
@@ -797,6 +1093,7 @@ def create_micro_gemm(
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
+
                 if (
                     config.vec_isa_cls == VecAMX
                     and m < block_m
@@ -804,6 +1101,9 @@ def create_micro_gemm(
                     and input2_dtype == torch.int8
                 ):
                     # For int8 WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    continue
+                if is_int4_woq_gemm and q_group_size % block_k != 0:
+                    # q_group_size must be a multiple of block_k
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC

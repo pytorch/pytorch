@@ -3256,8 +3256,7 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
 
 
-@register_meta([aten._weight_int4pack_mm])
-def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
+def meta__weight_int4pack_mm_common(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
@@ -3269,6 +3268,17 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm.default])
+def meta__weight_int4pack_mm_default(x, w, q_group_size, q_scale_and_zeros):
+    return meta__weight_int4pack_mm_common(x, w, q_group_size, q_scale_and_zeros)
+
+
+@register_meta([aten._weight_int4pack_mm._derive_groupsize])
+def meta__weight_int4pack_mm_derive_groupsize(x, w, q_scale_and_zeros):
+    q_group_size = (w.numel() * 16) / q_scale_and_zeros.numel()
+    return meta__weight_int4pack_mm_common(x, w, q_group_size, q_scale_and_zeros)
 
 
 @register_meta([aten._weight_int8pack_mm])

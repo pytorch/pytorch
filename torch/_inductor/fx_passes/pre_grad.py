@@ -260,9 +260,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
-    from .quantization import quant_lift_up
+    from .quantization import _register_woq_mm_int4_pattern, quant_lift_up
 
     quant_lift_up(gm)
+    _register_woq_mm_int4_pattern(gm)
 
     gm.graph.lint()
     gm.recompile()

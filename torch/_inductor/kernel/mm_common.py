@@ -421,16 +421,27 @@ def mm_args(
     out_dtype=None,
     use_4x2_dim=False,
     mat2_transposed=False,
+    packed_int4_weights=False,
 ):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
     mat1, mat2 = realize_inputs(mat1, mat2)
     *b1, m, k1 = mat1.get_size()
-    if mat2_transposed:
-        *b2, n, k2 = mat2.get_size()
+    if packed_int4_weights:
+        # weight format is [n/8][k/(InnerKTiles*16)][32][InnerKTiles/2] for int32
+        *b2, n_div, k_div, dim1, inner_k_tiles_div_2 = mat2.get_size()
+        inner_k_tiles = inner_k_tiles_div_2 * 2
+        # k is always a multiple of innerKtiles * 16
+        k2 = inner_k_tiles * 16 * k_div
+        # n is chosen to be a multiple of 16
+        n = n_div * 8
+        # weight is actually stored as [n/64][k][32] in uint8
     else:
-        *b2, k2, n = mat2.get_size()
+        if mat2_transposed:
+            *b2, n, k2 = mat2.get_size()
+        else:
+            *b2, k2, n = mat2.get_size()
     b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
     if use_4x2_dim:
         k2 = k2 * 2
