@@ -10,8 +10,8 @@ import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor.placement_types import DTensorSpec
 
 
 @dataclass

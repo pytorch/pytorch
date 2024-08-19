@@ -799,8 +799,16 @@ class VariableBuilder:
             return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
+            torch._dynamo.utils.store_user_object_weakref(value)
+            event_proxy = self.tx.output.create_proxy(
+                "call_function",
+                torch._dynamo.utils.get_user_object_from_id,
+                (id(value),),
+                {},
+            )
+            set_example_value(event_proxy.node, value)
             return EventVariable(
-                None,
+                event_proxy,
                 value,
                 source=self.source,
             )
