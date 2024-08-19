@@ -82,7 +82,7 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
-                
+
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 
