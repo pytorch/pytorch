@@ -223,11 +223,12 @@ struct NestedNode {
       : _is_leaf(false), _children(std::move(children)) {}
   explicit NestedNode(TensorList children)
       : _is_leaf(false), _children(children.vec()) {}
-  // NestedNode(NestedNode&) = delete;
-  // NestedNode(const NestedNode&) = delete;
-  // NestedNode& operator=(NestedNode) = delete;
   explicit NestedNode(T payload)
       : _is_leaf(true), _payload(std::move(payload)) {}
+  NestedNode(const NestedNode&) = delete;
+  NestedNode& operator=(const NestedNode&) = delete;
+  NestedNode(NestedNode&&) noexcept = default;
+  NestedNode& operator=(NestedNode&&) noexcept = default;
   inline bool is_leaf() const {
     return _is_leaf;
   }
@@ -250,7 +251,7 @@ struct NestedNode {
  private:
   bool _is_leaf;
   std::vector<T> _children;
-  T _payload;
+  T _payload{};
 };
 
 using TensorNode = NestedNode<at::Tensor>;
