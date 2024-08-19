@@ -1888,13 +1888,6 @@ class BuiltinVariable(VariableTracker):
                 )
             return variables.ListVariable(items)
 
-    def call_chain(self, tx: "InstructionTranslator", *args):
-        if all(obj.has_unpack_var_sequence(tx) for obj in args):
-            items = []
-            for obj in args:
-                items.extend(obj.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
     def call_islice(self, tx: "InstructionTranslator", iterable, *args):
         if iterable.has_unpack_var_sequence(tx) and all(
             x.is_python_constant() for x in args
