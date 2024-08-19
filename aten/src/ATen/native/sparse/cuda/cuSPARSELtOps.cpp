@@ -14,7 +14,8 @@
 #include <set>
 #include <mutex>
 
-#if AT_CUSPARSELT_ENABLED()
+//#if AT_CUSPARSELT_ENABLED()
+#if true
 
 #include <cusparseLt.h>
 
@@ -32,7 +33,7 @@ thread_local bool handle_initialized = false;
 std::mutex g_hipSparseLtSupportCacheMutex;
 static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
 const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
-static bool g_hipSparseLtSupportCache(int idx) {
+static bool isHipSparseLtSupported(int idx) {
     {
         std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
         if (g_hipSparseLtSupportCache.find(idx) != g_hipSparseLtSupportCache.end()) {
