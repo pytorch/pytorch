@@ -85,14 +85,16 @@ class DeviceContext(TorchFunctionMode):
         CURRENT_DEVICE = self.old_device
         cur_stack = []
         # Invariant: there should only be one DeviceContext on the stack at any time
-        # search the stack for the device context and pop it, restore previous stack
-        # entries popped while searching
-        for _ in range(_len_torch_function_stack()):
+        # (At the bottom), pop all mdoes until we hit the bottom, assert it's a DeviceContext
+        # or else someone else has popped it!
+        for _ in range(_len_torch_function_stack() - 1):
             mode = _pop_mode()
-            if mode is self:
-                break
-            else:
-                cur_stack.append(mode)
+            assert not isinstance(mode, DeviceContext)
+            cur_stack.append(mode)
+
+        if _len_torch_function_stack() > 0:
+            mode = _pop_mode()
+            assert isinstance(mode, DeviceContext)
 
         for mode in reversed(cur_stack):
             _push_mode(mode)
