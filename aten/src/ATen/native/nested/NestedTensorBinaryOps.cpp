@@ -329,3 +329,5 @@ Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
         return b1.eq(b2);
       });
 }
+
+} // namespace at::native
