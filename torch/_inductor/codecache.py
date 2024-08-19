@@ -68,6 +68,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
+    from .remote_cache import RemoteCacheBackend
+
 
 """
 codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
@@ -1173,7 +1175,7 @@ class FxGraphCache:
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
         local: bool,
-        remote_cache: None,
+        remote_cache: Optional[RemoteCacheBackend],
     ) -> None:
         """
         Store a serialized CompiledFxGraph on disk.
@@ -1220,17 +1222,16 @@ class FxGraphCache:
                 write_atomic(path, content, make_dirs=True)
 
             if remote_cache:
+                time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": int(
-                            disk_compiled_graph._time_taken_ns // 1e6
-                        ),  # Convert from NS to MS
+                        "time_taken_ms": time_taken_ms,
                     }
                     if config.is_fbcode()
                     else content
                 )
-                remote_cache.put(key, cache_data)
+                remote_cache.put(key, cache_data)  # type: ignore[arg-type]
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -1291,7 +1292,7 @@ class FxGraphCache:
             cache_info["key"] = key
             cache_info["components"] = debug_lines
 
-            remote_cache = None
+            remote_cache: Optional[RemoteCacheBackend] = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
