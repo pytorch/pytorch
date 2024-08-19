@@ -431,7 +431,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
-
             return handle_effects(
                 self._allow_token_discovery, self._tokens, func, args, kwargs
             )
