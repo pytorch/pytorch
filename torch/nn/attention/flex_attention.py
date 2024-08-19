@@ -735,6 +735,7 @@ def _create_block_mask_inner(
     return partial_block_mask, full_block_mask
 
 
+@torch._dynamo.disable()
 def create_block_mask(
     mask_mod: _mask_mod_signature,
     B: Optional[int],
