@@ -122,8 +122,14 @@ Base class
 
     Optimizer.add_param_group
     Optimizer.load_state_dict
+    Optimizer.register_load_state_dict_pre_hook
+    Optimizer.register_load_state_dict_post_hook
     Optimizer.state_dict
+    Optimizer.register_state_dict_pre_hook
+    Optimizer.register_state_dict_post_hook
     Optimizer.step
+    Optimizer.register_step_pre_hook
+    Optimizer.register_step_post_hook
     Optimizer.zero_grad
 
 Algorithms
@@ -217,7 +223,7 @@ Below table is showing the stability status for fused implementations:
 How to adjust learning rate
 ---------------------------
 
-:mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
+:class:`torch.optim.lr_scheduler.LRScheduler` provides several methods to adjust the learning
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
@@ -280,6 +286,7 @@ algorithms.
     :toctree: generated
     :nosignatures:
 
+    lr_scheduler.LRScheduler
     lr_scheduler.LambdaLR
     lr_scheduler.MultiplicativeLR
     lr_scheduler.StepLR

@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import functools
-
 from typing import Any, Callable, Mapping, Sequence
 
 import torch
 import torch.fx
 import torch.onnx
-
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
+
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -122,7 +121,7 @@ def _module_expansion_symbolic_trace(
 
 # TODO: Migrate to `DynamoExporter` after fake model tracing is supported.
 # Proposal at https://github.com/pytorch/pytorch/issues/95900.
-class FXSymbolicTracer(exporter.FXGraphExtractor):
+class FXSymbolicTracer(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.fx.symbolic_trace API
     Args:
         concrete_args: Inputs to be partially specialized
@@ -189,7 +188,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -236,11 +235,11 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
 
     def pre_export_passes(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: _exporter_legacy.ResolvedExportOptions,
         original_model: torch.nn.Module | Callable,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ):
-        return exporter.common_pre_export_passes(
+        return _exporter_legacy.common_pre_export_passes(
             options, original_model, fx_module, fx_module_args
         )

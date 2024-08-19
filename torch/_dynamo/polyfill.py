@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 """
 Python polyfills for common builtins.
@@ -24,7 +24,7 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in enumerate(list(iterator))[start:end]:
+    for i, elem in list(enumerate(iterator))[start:end]:
         if item == elem:
             return i
     # This will not run in dynamo
@@ -97,8 +97,57 @@ def dropwhile(predicate, iterable):
     yield from iterable
 
 
+def zip_longest(*iterables, fillvalue=None):
+    # Create a list of iterators from the input iterables
+    iterators = [iter(it) for it in iterables]
+    result = []
+    while True:
+        row = []
+        active = False
+        for it in iterators:
+            try:
+                # Try to get the next item from the iterator
+                value = next(it)
+                row.append(value)
+                active = True
+            except StopIteration:
+                # If the iterator is exhausted, use the fillvalue
+                row.append(fillvalue)
+        if not active:
+            break
+        result.append(tuple(row))
+    return result
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
     fn = getattr(wrapper_obj, attr_name)
     return fn(*args[2:], **kwargs)
+
+
+def mapping_get(obj, key, value=None):
+    try:
+        return obj.__getitem__(key)
+    except KeyError:
+        return value
+
+
+def instantiate_user_defined_class_object(*args, **kwargs):
+    cls = args[0]
+    other_args = args[1:]
+    obj = cls.__new__(cls, *other_args, **kwargs)
+    obj.__init__(*other_args, **kwargs)
+    return obj
+
+
+def fspath(path):
+    # Python equivalent of os.fspath
+    if isinstance(path, (str, bytes)):
+        return path
+    elif hasattr(path, "__fspath__"):
+        return path.__fspath__()
+    else:
+        raise TypeError(
+            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
+        )

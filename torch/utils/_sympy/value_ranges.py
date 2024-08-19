@@ -17,15 +17,15 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from torch._logging import LazyString
-
 from torch._prims_common import dtype_to_type
+
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -44,6 +44,7 @@ from .functions import (
 )
 from .interp import sympy_interp
 from .numbers import int_oo, IntInfinity, NegativeIntInfinity
+
 
 log = logging.getLogger(__name__)
 
@@ -96,11 +97,11 @@ def sympy_generic_le(lower, upper):
         return not (lower and not upper)
 
 
-def vr_is_bool(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[SympyBoolean]]:
+def vr_is_bool(vr: ValueRanges[_T]) -> TypeIs[ValueRanges[SympyBoolean]]:
     return vr.is_bool
 
 
-def vr_is_expr(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
+def vr_is_expr(vr: ValueRanges[_T]) -> TypeIs[ValueRanges[sympy.Expr]]:
     return not vr.is_bool
 
 
@@ -936,7 +937,7 @@ class SymPyValueRangeAnalysis:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "xor",

@@ -39,8 +39,6 @@ class MatchAllNode:
     fusion patterns in FX Graph Mode Quantization
     """
 
-    pass
-
 
 module_type_list = {
     torch.nn.ReLU,
@@ -513,7 +511,7 @@ def _get_path_of_module(
     Example::
 
     >> class M(torch.nn.Module):
-           def __init__(self):
+           def __init__(self) -> None:
                self.linear = torch.nn.Linear(5, 5)
            def forward(self, x):
                return self.linear(x)

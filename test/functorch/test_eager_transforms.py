@@ -2637,6 +2637,17 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_jvp_new_tensor(self):
+        def f(x):
+            y = x.new_tensor(0.5)
+            return x + y
+
+        x = torch.rand(10, 10)
+        tangents = torch.zeros_like(x)
+        actual = jvp(f, (x,), (tangents,))
+        expected = (f(x), torch.zeros_like(x))
+        self.assertEqual(actual, expected)
+
     def test_primals_tangents_length_mismatch(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
@@ -2871,7 +2882,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    def test_linearize_composition(self, device, dtype):
+    def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
 
@@ -2885,6 +2896,25 @@ class TestLinearize(TestCase):
             return jvp(fn, (x_p,), (x_t,))[1]
 
         expected_batched_jvp = vmap(jvp_fn)(x_t)
+
+        self.assertEqual(actual_batched_jvp, expected_batched_jvp)
+
+    @dtypes(torch.float)
+    def test_linearize_composition_grad(self, device, dtype):
+        x_p = make_tensor((3,), device=device, dtype=dtype)
+        x_t = make_tensor((3,), device=device, dtype=dtype)
+
+        def fn(x):
+            z = torch.ones(3, device=device, dtype=dtype)
+            return grad(lambda x: z @ x)(x)
+
+        _, jvp_fn = linearize(fn, x_p)
+        actual_batched_jvp = jvp_fn(x_t)
+
+        def jvp_fn(x_t):
+            return jvp(fn, (x_p,), (x_t,))[1]
+
+        expected_batched_jvp = jvp_fn(x_t)
 
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
@@ -3661,7 +3691,7 @@ class TestMakeFunctional(TestCase):
     @parametrize("disable_autograd_tracking", [True, False])
     def test_disable_autograd_tracking(self, disable_autograd_tracking):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
 
@@ -3679,7 +3709,7 @@ class TestMakeFunctional(TestCase):
 
     def test_parameter_tying(self):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
@@ -3708,12 +3738,12 @@ class TestMakeFunctional(TestCase):
 
     def test_buffer_tying(self):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bias = nn.Parameter(torch.randn(3))
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3740,10 +3770,10 @@ class TestMakeFunctional(TestCase):
     @parametrize("disable_autograd_tracking", [True, False])
     def test_with_buffers_disable_autograd_tracking(self, disable_autograd_tracking):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3762,10 +3792,10 @@ class TestMakeFunctional(TestCase):
     @parametrize("detach_params", [True, False])
     def test_using_detach_functional_call(self, detach_params):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
-                self.register_buffer("buffer", torch.randn(3))
+                self.buffer = nn.Buffer(torch.randn(3))
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3788,7 +3818,7 @@ class TestMakeFunctional(TestCase):
 
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
@@ -3820,13 +3850,13 @@ class TestMakeFunctional(TestCase):
 
     def test_parameter_tying_ensemble(self):
         class Foo(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
                 self.weight = self.linear.weight
                 self.bias = self.linear.bias
-                self.register_buffer("buffer", torch.randn(3))
-                self.register_buffer("buffer_tied", self.buffer)
+                self.buffer = nn.Buffer(torch.randn(3))
+                self.buffer_tied = self.buffer
 
             def forward(self, x):
                 x = self.linear(x)
@@ -3854,7 +3884,7 @@ class TestMakeFunctional(TestCase):
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_correctness_mnist(self, mechanism):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
                 self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
@@ -3965,7 +3995,7 @@ class TestMakeFunctional(TestCase):
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(3, 3)
 
@@ -4021,7 +4051,7 @@ class TestExamplesCorrectness(TestCase):
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(1, 40)
                 self.relu1 = nn.ReLU()

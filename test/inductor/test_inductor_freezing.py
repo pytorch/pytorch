@@ -193,7 +193,7 @@ class ConvMultiFunctionalBN(torch.nn.Module):
 class OptimizeForInferenceTemplate(TestCase):
     def test_mutation(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mutated_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -220,7 +220,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_aliased_param_return(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.aliased_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -263,7 +263,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class MM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -274,7 +274,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
         class MM2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -284,7 +284,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2
 
         class AddMM(MM):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.b1 = torch.nn.Parameter(torch.rand([10]))
@@ -625,7 +625,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -709,7 +709,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -735,7 +735,7 @@ class OptimizeForInferenceTemplate(TestCase):
     @skipIfRocm
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -792,7 +792,7 @@ class OptimizeForInferenceTemplate(TestCase):
         device = self.device
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = torch.tensor(
                     [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], device=device
@@ -826,7 +826,7 @@ class OptimizeForInferenceTemplate(TestCase):
     @skipIfRocm
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
