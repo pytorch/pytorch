@@ -147,7 +147,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = slice_dim_group_info
+            res_submesh._dim_group_infos = slice_dim_group_info  # type: ignore[possibly-undefined]
             self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
@@ -647,9 +647,7 @@ else:
                 root_mesh, None
             )
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
-                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][
-                    :2
-                ]
+                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][:2]  # type: ignore[index]
                 return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
             else:
                 mesh_dim = (
