@@ -46,7 +46,6 @@ class BenchmarkBase(ABC):
             print(f"instruction count for iteration {i} is {count}")
             if i != 0:
                 results.append(count)
-        breakpoint()
         return min(results)
 
     def _count_compile_time_instructions(self):
