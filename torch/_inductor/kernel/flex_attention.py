@@ -191,8 +191,13 @@ compute_flex_attention = r"""
     sparse_idx_z = off_z % SPARSE_Z
     sparse_idx_hq = off_hq % SPARSE_HQ
 
-    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
-    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
+    # The default sparse block size is 1 << 30 if users don't specify block_mask,
+    # so we need to get the actual block size used in this kernel.
+    SPARSE_Q_BLOCK_SIZE = tl.minimum(SPARSE_Q_BLOCK_SIZE, Q_LEN)
+    SPARSE_KV_BLOCK_SIZE = tl.minimum(SPARSE_KV_BLOCK_SIZE, KV_LEN)
+
+    SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
+    SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
 
     SPARSE_Q_BLOCK_CNT: tl.constexpr = tl.cdiv(Q_LEN, SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_CNT: tl.constexpr = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
@@ -255,7 +260,7 @@ compute_flex_attention = r"""
         q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         acc, l_i, m_i,
         off_z, off_hq, offs_m[:, None], offs_n[None, :],
-        kv_indices, kv_num_blocks,
+        kv_indices, kv_num_blocks, SPARSE_KV_MULTIPLE,
         0, kv_num_blocks * SPARSE_KV_MULTIPLE,
         MATMUL_PRECISION,
         IS_FULL_BLOCKS=False,
@@ -293,7 +298,7 @@ compute_flex_attention = r"""
             q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             acc, l_i, m_i,
             off_z, off_hq, offs_m[:, None], offs_n[None, :],
-            kv_indices, kv_num_blocks,
+            kv_indices, kv_num_blocks, SPARSE_KV_MULTIPLE,
             0, kv_num_blocks * SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             IS_FULL_BLOCKS=True,
@@ -335,7 +340,7 @@ def forward_inner(
     # of size [BLOCK_M, BLOCK_N] or scalar.
     off_z, off_h, offs_m, offs_n,
     # blocksparse data
-    kv_indices, kv_num_blocks,
+    kv_indices, kv_num_blocks, SPARSE_KV_MULTIPLE,
     # start kv and end kv block
     block_n_start, block_n_end,
     MATMUL_PRECISION,
@@ -343,10 +348,6 @@ def forward_inner(
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
-
-    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
-
-    # initialize offsets
 
     RCP_LN2: tl.constexpr = 1.44269504
 
@@ -919,6 +920,11 @@ flex_attention_backward_template = TritonTemplate(
     RCP_LN2 = 1.44269504
     offs_k = tl.arange(0, BLOCK_DMODEL)
 
+    # The default sparse block size is 1 << 30 if users don't specify block_mask,
+    # so we need to get the actual block size used in this kernel.
+    SPARSE_Q_BLOCK_SIZE = tl.minimum(SPARSE_Q_BLOCK_SIZE, Q_LEN)
+    SPARSE_KV_BLOCK_SIZE = tl.minimum(SPARSE_KV_BLOCK_SIZE, KV_LEN)
+
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
         # THIS BLOCK DOES DQ
@@ -988,7 +994,7 @@ flex_attention_backward_template = TritonTemplate(
             dq, q, do, Di, lse,
             off_z, off_hq2, offs_m2, offs_n2,
             stride_kn, stride_kd, stride_vn, stride_vd,
-            kv_indices, sparse_kv_num_blocks,
+            kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE,
             MATMUL_PRECISION,
             IS_FULL_BLOCKS=False,
         )
@@ -1007,7 +1013,7 @@ flex_attention_backward_template = TritonTemplate(
                 dq, q, do, Di, lse,
                 off_z, off_hq2, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
-                kv_indices, sparse_kv_num_blocks,
+                kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE,
                 MATMUL_PRECISION,
                 IS_FULL_BLOCKS=True,
             )
@@ -1081,7 +1087,7 @@ flex_attention_backward_template = TritonTemplate(
                 dk, dv, k, v,
                 off_z, off_hq1, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
-                q_indices, sparse_q_num_blocks,
+                q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE,
                 MATMUL_PRECISION,
                 IS_FULL_BLOCKS=False,
             )
@@ -1101,7 +1107,7 @@ flex_attention_backward_template = TritonTemplate(
                     dk, dv, k, v,
                     off_z, off_hq1, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
-                    q_indices, sparse_q_num_blocks,
+                    q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE,
                     MATMUL_PRECISION,
                     IS_FULL_BLOCKS=True,
                 )
@@ -1128,12 +1134,12 @@ def bwd_dq_inner(
     dq, q, do, Di, lse,
     off_z, off_hq, offs_m2, offs_n2,
     stride_kn, stride_kd, stride_vn, stride_vd,
-    kv_indices, sparse_kv_num_blocks,
+    kv_indices, sparse_kv_num_blocks, SPARSE_KV_MULTIPLE,
     MATMUL_PRECISION,
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
-    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
+
     RCP_LN2: tl.constexpr = 1.44269504
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
@@ -1309,12 +1315,12 @@ def bwd_dkdv_inner(
     dk, dv, k, v,
     off_z, off_hq, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
-    q_indices, sparse_q_num_blocks,
+    q_indices, sparse_q_num_blocks, SPARSE_Q_MULTIPLE,
     MATMUL_PRECISION,
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
-    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
+
     RCP_LN2: tl.constexpr = 1.44269504
     Q_LEN = {{size("Q", 2)}}
     KV_LEN = {{size("K", 2)}}
