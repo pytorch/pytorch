@@ -1002,15 +1002,6 @@ class BuiltinVariable(VariableTracker):
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-        if self.fn is itertools.chain and name == "from_iterable":
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            obj = args[0]
-            items = []
-            for item in obj.unpack_var_sequence(tx):
-                items.extend(item.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
