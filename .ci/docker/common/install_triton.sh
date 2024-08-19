@@ -15,15 +15,12 @@ conda_reinstall() {
 if [ -n "${ROCM_VERSION}" ]; then
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton-rocm"
-  TRITON_REPO_NAME="triton"
 elif [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
-  TRITON_REPO_NAME="triton"
 else
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton"
-  TRITON_REPO_NAME="triton"
 fi
 
 # The logic here is copied from .ci/pytorch/common_utils.sh
@@ -45,12 +42,17 @@ if [ -z "${MAX_JOBS}" ]; then
 fi
 
 # Git checkout triton
-as_jenkins git clone ${TRITON_REPO}
-cd ${TRITON_REPO_NAME}
+mkdir /var/lib/jenkins/triton
+chown -R jenkins /var/lib/jenkins/triton
+chgrp -R jenkins /var/lib/jenkins/triton
+pushd /var/lib/jenkins/
+
+as_jenkins git clone ${TRITON_REPO} triton
+cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 cd python
 
-# Patch setup.py
+# TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
 
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
