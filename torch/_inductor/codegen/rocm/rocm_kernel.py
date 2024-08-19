@@ -3,9 +3,8 @@ import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
-from ...utils import sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer, Kernel, OpOverrides
+from ..common import Kernel, OpOverrides
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
@@ -60,37 +59,11 @@ class ROCmTemplateKernel(ROCmKernel):
             node.get_name(), None
         )
 
-    def check_not_null(self, node: IRNode) -> str:
-        """
-        Generates code to check that a node is not null.
-        """
-
-        if node is None:
-            return ""
-
-        size_str = self.size(node, 0, -1)
-        name_str = self.arg_name(node)
-        if name_str is None:
-            return ""
-
-        res = IndentedBuffer(initial_indent=8)
-        res.tabwidth = 1
-        res.splice(
-            f"""
-            if (!{name_str}) {{
-                int64_t {name_str}_size = {size_str};
-                if ({name_str}_size > 0) {{
-                    throw std::runtime_error("input {name_str} is null but size is not 0!");
-                }}
-            }}
-            """
-        )
-        return res.getvalue()
-
     def def_kernel(
         self,
         inputs: List[IRNode],
         outputs: List[IRNode],
+        size_args: List[str],
         names_str: str = "",
         input_reorder: Optional[List[int]] = None,
     ) -> str:
@@ -132,7 +105,8 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+
+        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {', '.join(size_args)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
         self,
@@ -149,29 +123,39 @@ class ROCmTemplateKernel(ROCmKernel):
         """
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
+        kernel_args = []
+        for arg in call_args:
+            # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+            if V.graph.is_unspec_arg(arg):
+                arg = arg + ".item()"
             else:
-                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
+                arg = f"c_void_p({arg}.data_ptr())"
+            kernel_args.append(arg)
+
+        # add size args
+        kernel_args.extend(
+            [
+                f"c_int({V.graph.sizevars.simplify(sarg)})"
+                for sarg in node.template.size_args()
+            ]
+        )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        call_args.append("None")
+        kernel_args.append("None")
 
         if node.get_workspace_size() > 0:
             wrapper.generate_workspace_allocation(
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
-            call_args.append("c_void_p(workspace.data_ptr())")
+            kernel_args.append("c_void_p(workspace.data_ptr())")
         else:
-            call_args.append("None")
+            kernel_args.append("None")
 
         current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
-            call_args,
+            kernel_args,
             device_index=current_device.index,
             cuda=True,
             triton=False,
@@ -179,59 +163,6 @@ class ROCmTemplateKernel(ROCmKernel):
         )
         if node.get_workspace_size() > 0:
             wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
-
-    def size(
-        self,
-        node: IRNode,
-        start_index: int,
-        end_index: Optional[int] = None,
-        default_value: int = 0,
-    ) -> str:
-        """
-        Hook called from template code to get the size of an arg.
-        Generates code which represents size of a given node in [start_index, end_index).
-        If node is None, returns default_value.
-
-        TODO: Will add needed args to pass it in if it is dynamic.
-        """
-
-        if node is None:
-            return str(default_value)
-
-        start_index = _normalize_idx(start_index, len(node.get_size()))
-        if end_index is None:
-            end_index = start_index
-        end_index = _normalize_idx(end_index, len(node.get_size()))
-
-        sizes = node.get_size()[start_index : end_index + 1]
-        if len(sizes) == 0:
-            return str(default_value)
-
-        val = sympy_product(sizes)
-        return cexpr(self.rename_indexing(val))
-
-    def leading_dimension(self, node: Optional[IRNode], default_value: int = 0) -> str:
-        """
-        Hook called from template call to get the leading dimension of an arg.
-        """
-
-        if node is None:
-            return str(default_value)
-
-        stride = node.get_stride()
-
-        if 2 != len(stride):
-            leading_dim = default_value
-        elif stride[-1] == 1:
-            # row-major case
-            leading_dim = stride[-2]
-        elif stride[-2] == 1:
-            # column-major case
-            leading_dim = stride[-1]
-        else:
-            leading_dim = default_value
-
-        return cexpr(self.rename_indexing(leading_dim))
 
 
 class ROCmTemplateCaller(ChoiceCaller):

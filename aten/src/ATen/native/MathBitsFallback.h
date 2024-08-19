@@ -133,12 +133,8 @@ struct MathOpFallback {
 
     for (std::pair<Tensor, Tensor> mut_tensors: mutable_inputs_with_their_clones) {
       auto& mutable_input =  mut_tensors.first;
-      auto& cloned_mutable_input =  mut_tensors.second;
       auto& ivalue = (*stack)[stack_start];
       auto returned_output = std::move(ivalue).toTensor();
-
-      // sanity check to ensure that the tensor in stack aliases the cloned_mutable_input
-      TORCH_INTERNAL_ASSERT(cloned_mutable_input.is_same(returned_output));
 
       // necessary for out= arg
       at::native::resize_output(mutable_input, returned_output.sizes());

@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -15,6 +16,7 @@ from torch._subclasses.functional_tensor import (
     PythonFunctionalizeAPI,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -76,6 +78,34 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
         operands = body_fn(*operands)
     return operands
+
+
+def _fake_associative_scan(combine_fn, input, dim, reverse=False):
+    inp_leaves, spec = pytree.tree_flatten(input)
+    result_flat = []
+    num_leaves = len(inp_leaves)
+    op = reversed if reverse else lambda x: x
+
+    for ind in op(range(inp_leaves[0].size(dim))):
+        r = [
+            inp_leaves[leave_ind][(slice(None),) * dim + (ind,)]
+            for leave_ind in range(num_leaves)
+        ]
+        if (ind > 0 and not reverse) or (
+            ind < (inp_leaves[0].size(dim) - 1) and reverse
+        ):
+            r = combine_fn(
+                pytree.tree_unflatten(result_flat[-1], spec),
+                pytree.tree_unflatten(r, spec),
+            )
+        r_flat, _ = pytree.tree_flatten(r)
+        result_flat.append(r_flat)
+
+    results = [
+        torch.stack([e[leave_ind] for e in op(result_flat)], dim)
+        for leave_ind in range(num_leaves)
+    ]
+    return pytree.tree_unflatten(results, spec)
 
 
 def _while_loop_tests():
@@ -1173,6 +1203,116 @@ def forward(self, pred_1, x_1):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_reverse_simple(self, reverse, device):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        x = torch.randn(3, 10, 2, device=device)
+        for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+            result = associative_scan(op, x, 0, reverse=reverse)
+            result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+            self.assertEqual(result, result_exp)
+            if not reverse:
+                result_exp_PT = op_pt(x, 0)
+                self.assertEqual(result, result_exp_PT)
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=device)
+        cumsum1 = associative_scan(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        if not reverse:
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
+        else:
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
+        self.assertEqual(cumsum1, cumsum_exp)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_reverse_dim(self, reverse, device):
+        import random
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        num_dims = [random.randint(2, 5) for _ in range(10)]
+        for num_dim in num_dims:
+            shapes = [random.randint(1, 10) for _ in range(num_dim)]
+            rnd_scan_dim = random.randint(0, num_dim - 1)
+            x = torch.randn(*shapes, device=device)
+
+            for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+                result = associative_scan(op, x, rnd_scan_dim, reverse=reverse)
+                result_exp = _fake_associative_scan(
+                    op, x, rnd_scan_dim, reverse=reverse
+                )
+                self.assertEqual(result, result_exp)
+                if not reverse:
+                    result_exp_PT = op_pt(x, rnd_scan_dim)
+                    self.assertEqual(result, result_exp_PT)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
+    @parametrize("device", [torch.device("cuda")])
+    def test_pointwise_associative_scan_reverse_compile(
+        self, reverse, compile_mode, device
+    ):
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        def mul(x: torch.Tensor, y: torch.Tensor):
+            return x * y
+
+        x = torch.randn(3, 10, 2, device=device)
+        torch.compiler.reset()
+        if compile_mode == "compile":
+            associative_scan_fct = torch.compile(
+                associative_scan, fullgraph=True, dynamic=False
+            )
+        else:
+            associative_scan_fct = torch.compile(
+                associative_scan, fullgraph=True, dynamic=True
+            )
+
+        for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
+            result = associative_scan_fct(op, x, 0, reverse=reverse)
+            result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+            self.assertEqual(result, result_exp)
+            if not reverse:
+                result_exp_PT = op_pt(x, 0)
+                self.assertEqual(result, result_exp_PT)
+
+        # Jax Examples
+        x = torch.arange(0, 4, device=device)
+        cumsum1 = associative_scan_fct(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        if not reverse:
+            self.assertEqual(
+                cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
+            )
+        else:
+            self.assertEqual(
+                cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
+            )
+        self.assertEqual(cumsum1, cumsum_exp)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -3546,6 +3686,8 @@ def forward(self, l_inp_, l_tmp_):
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)
+
+instantiate_parametrized_tests(TestControlFlow)
 
 if __name__ == "__main__":
     run_tests()

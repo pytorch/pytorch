@@ -15,10 +15,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   TORCH_CHECK(self.dim() == 3, "batch1 must be a 3D tensor");
@@ -332,5 +329,4 @@ Tensor& matmul_out_nested(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
