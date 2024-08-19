@@ -3128,12 +3128,6 @@ class TestSDPACudaOnly(NNTestCase):
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
-            fudge_factors={
-                'out': 4,
-                'grad_query': 160.0,
-                'grad_key': 16,
-                'grad_value': 4,
-            }
             fudge_factors=fudge_factors
         )
 
