@@ -264,10 +264,8 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
   static A function_one(F&& fn, const Args&... nested_node) {
     return std::forward<F>(fn)(nested_node...);
   }
-  // NOTE: We must move F to avoid copying objects if it is a lambda with
-  // captures.
   static NestedNode<A> function(
-      F&& fn,
+      const F& fn,
       const NestedNode<Args>&... nested_node) {
     size_t degree = 0;
     bool all_leaf = true;
@@ -291,7 +289,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
     // types.
     std::vector<A> result;
     for (size_t i = 0; i < degree; i++) {
-      std::tuple<Args...> children = c10::guts::tuple_map(
+      auto children = c10::guts::tuple_map(
           std::forward_as_tuple(nested_node...), [&i](auto a) {
             static_assert(
                 c10::guts::is_instantiation_of<NestedNode, decltype(a)>::value,
@@ -310,7 +308,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
           });
       c10::guts::apply(
           [&result, &fn](Args... filtered) {
-            result.emplace_back(function_one(std::forward<F>(fn), filtered...));
+            result.emplace_back(function_one(fn, filtered...));
           },
           std::move(children));
     }
