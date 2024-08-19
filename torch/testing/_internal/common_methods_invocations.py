@@ -20416,7 +20416,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "norm",
         sample_inputs_func=sample_inputs_norm,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -20449,7 +20450,7 @@ op_db: List[OpInfo] = [
     OpInfo('norm',
            variant_test_name='fro',
            sample_inputs_func=sample_inputs_norm_fro,
-           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.chalf),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
@@ -20478,7 +20479,8 @@ op_db: List[OpInfo] = [
         "norm",
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
