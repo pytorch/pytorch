@@ -84,6 +84,8 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
     def make_zero_dim_all_gather_pattern(shard):
         return CallFunction(
+            torch.ops.higher_order.with_effects,
+            Ignored(),
             c10d.wait_tensor.default,
             CallFunction(
                 c10d.all_gather_into_tensor.default,
@@ -101,7 +103,11 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             operator.getitem,
             CallFunction(
                 aten.split.Tensor,
-                make_zero_dim_all_gather_pattern(shard),
+                CallFunction(
+                    operator.getitem,
+                    make_zero_dim_all_gather_pattern(shard),
+                    Ignored(),
+                ),
                 Ignored(),
                 _users=MULTIPLE,
             ),
@@ -220,6 +226,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 
     def reduce_scatter_template(inp: PatternExpr):
         return CallFunction(
+            torch.ops.higher_order.with_effects,
+            Ignored(),
             c10d.wait_tensor.default,
             CallFunction(
                 c10d.reduce_scatter_tensor.default,
@@ -255,7 +263,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 
     reduce_scatters = []
     for node in reversed(graph.nodes):
-        if node.target == c10d.wait_tensor.default:
+        if node.target == torch.ops.higher_order.with_effects:
             if match := non_zero_dim_reduce_scatter_pattern.match(node):
                 assert isinstance(match, Match)
                 reduce_scatters.append(
@@ -734,7 +742,25 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
             scatter_dim,
             group_name,
         )
+
+        users = reduce_scatter.res_node.users
+        assert len(users) == 2
+        getitem_users = [None, None]
+        for user in users.keys():
+            assert user.target == operator.getitem
+            getitem_users[user.args[1]] = user
+
+        getitem_token = getitem_users[0]
+        getitem_result = getitem_users[1]
+
         reduce_scatter.replace_with(fused_node)
+        with graph.inserting_after(fused_node):
+            make_token = graph.call_function(torch.ops.prims._make_token.default)
+            getitem_token.replace_all_uses_with(make_token)
+            graph.erase_node(getitem_token)
+        getitem_result.replace_all_uses_with(fused_node)
+        graph.erase_node(getitem_result)
+
         reduce_scatter.erase()
         matmul.erase()
 

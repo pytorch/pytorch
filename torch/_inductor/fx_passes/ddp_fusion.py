@@ -22,6 +22,7 @@ from typing import (
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.utils import is_with_effects_op
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -80,6 +81,13 @@ class CommBlock:
     outputs: Set[fx.Node]
 
 
+def is_wait_tensor(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops._c10d_functional.wait_tensor.default
+    ) or is_with_effects_op(node, torch.ops._c10d_functional.wait_tensor.default)
+
+
 def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     """
     Given a collective node (e.g., allreduce), find out all the nodes belong to
@@ -95,16 +103,13 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    wait_prefixes = "wait_tensor"
+
     # If the users of the wait node are following items, we consinder them
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
     first_user = next(iter(comm_node.users))
-    if (
-        len(comm_node.users) == 1
-        and first_user.target == torch.ops._c10d_functional.wait_tensor.default
-    ):
+    if len(comm_node.users) == 1 and is_wait_tensor(first_user):
         # Collective with only one output
         node_list = [comm_node, first_user]
         wait_nodes.append(first_user)

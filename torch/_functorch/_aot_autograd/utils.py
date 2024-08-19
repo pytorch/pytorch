@@ -241,6 +241,10 @@ def is_with_effects(node):
     return node.op == "call_function" and node.target.__name__ == "with_effects"
 
 
+def is_with_effects_op(node, op):
+    return is_with_effects(node) and node.args[1] == op
+
+
 def has_with_effects_ancestors(node):
     queue = [node]
     while queue:
