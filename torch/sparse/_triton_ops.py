@@ -1090,6 +1090,43 @@ def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     return out.view(out_shape)
 
 
+def _int_bsr_dense_addmm(
+    input: torch.Tensor,
+    bsr: torch.Tensor,
+    dense: torch.Tensor,
+    *,
+    beta=1,
+    alpha=1,
+    out: Optional[torch.Tensor] = None,
+    skip_checks: bool = False,
+    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    meta: Optional[dict] = None,
+):
+    if out is None and dense.dtype is torch.int8:
+        f_name = "_int_bsr_dense_addmm"
+        crow_indices = bsr.crow_indices()
+        batch_ndim = crow_indices.dim() - 1
+        M = bsr.shape[batch_ndim]
+        N = dense.shape[-1]
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
+        out = torch.empty(
+            original_batch_dims_broadcasted + (M, N),
+            dtype=torch.int32,
+            device=dense.device,
+        )
+    return bsr_dense_addmm(
+        input,
+        bsr,
+        dense,
+        beta=beta,
+        alpha=alpha,
+        out=out,
+        skip_checks=skip_checks,
+        max_grid=max_grid,
+        meta=meta,
+    )
+
+
 def bsr_dense_addmm(
     input: torch.Tensor,
     bsr: torch.Tensor,
@@ -1159,7 +1196,8 @@ def bsr_dense_addmm(
         torch.bfloat16: tl.float32,
         torch.float32: tl.float64,
         torch.float64: tl.float64,
-        torch.int8: tl.int8,
+        torch.int8: tl.int32,
+        torch.int32: tl.int32,
     }[out.dtype]
 
     n_batches = dense.size(0)
@@ -2355,7 +2393,7 @@ if has_triton():
             # do block mm
             output_acc_block += tl.dot(
                 values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype
-            ).to(acc_dtype)
+            )
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride

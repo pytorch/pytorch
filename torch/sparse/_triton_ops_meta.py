@@ -97,7 +97,7 @@ tune_bsr_dense_addmm to learn how to register a custom set of optimal
 kernel parameters for addmm-based operations.
 
 """
-__all__ = ["get_meta", "tune_bsr_dense_addmm"]
+__all__ = ["get_meta", "tune_bsr_dense_addmm", "tune__int_bsr_dense_addmm"]
 
 import inspect
 import itertools
@@ -173,7 +173,7 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
                 "num_warps",
             )
             meta = dict(zip(names, values))
-        elif op == "bsr_dense_addmm":
+        elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
             meta = dict(
                 zip(("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"), values)
             )
@@ -568,7 +568,7 @@ def optimize_scatter_mm(
     )
 
 
-def tune_bsr_dense_addmm(
+def tune__int_bsr_dense_addmm(
     input,
     bsr,
     dense,
@@ -580,6 +580,33 @@ def tune_bsr_dense_addmm(
     verbose=False,
     force=False,
 ):
+    return tune_bsr_dense_addmm(
+        input,
+        bsr,
+        dense,
+        beta=beta,
+        alpha=alpha,
+        out=out,
+        store=store,
+        verbose=verbose,
+        force=force,
+        opname="_int_bsr_dense_addmm",
+    )
+
+
+def tune_bsr_dense_addmm(
+    input,
+    bsr,
+    dense,
+    *,
+    beta=1,
+    alpha=1,
+    out=None,
+    store=False,
+    verbose=False,
+    force=False,
+    opname=None,
+):
     """Tune bsr_dense_addmm kernel parameters against the given inputs.
 
     When store is True, the tuning results will be stored in the
@@ -587,7 +614,13 @@ def tune_bsr_dense_addmm(
     """
     import triton
 
-    from torch.sparse._triton_ops import bsr_dense_addmm
+    if opname is None:
+        opname = "bsr_dense_addmm"
+
+    if opname == "_int_bsr_dense_addmm":
+        from torch.sparse._triton_ops import _int_bsr_dense_addmm as bsr_dense_addmm
+    else:
+        from torch.sparse._triton_ops import bsr_dense_addmm
 
     N = dense.shape[-1]
     values = bsr.values()
@@ -612,12 +645,10 @@ def tune_bsr_dense_addmm(
 
     # For tuning, for an initial state, use parameters from the
     # database if available, otherwise, use the reference parameters.
-    initial_meta = get_meta("bsr_dense_addmm", key, version=version, exact=True)
+    initial_meta = get_meta(opname, key, version=version, exact=True)
     if initial_meta is None:
         may_skip_update = False
-        initial_meta = get_meta(
-            "bsr_dense_addmm", key, version=(0, dtype, 0.5), exact=True
-        )
+        initial_meta = get_meta(opname, key, version=(0, dtype, 0.5), exact=True)
         if initial_meta is None:
             initial_meta = reference_meta
     elif not force:
@@ -676,7 +707,7 @@ def tune_bsr_dense_addmm(
     ):
         device_name = torch.cuda.get_device_name()
         update(
-            "bsr_dense_addmm",
+            opname,
             device_name,
             version,
             key,
@@ -699,6 +730,7 @@ def optimize_bsr_dense_addmm(
     sparsity=0.5,
     force=False,
     verbose=False,
+    opname=None,
 ):
     torch.manual_seed(0)
     bsr = create_blocked_tensor(
@@ -715,6 +747,7 @@ def optimize_bsr_dense_addmm(
         store=True,
         force=force,
         verbose=verbose,
+        opname=opname,
     )
 
 
@@ -755,7 +788,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     optimize_scatter_mm(
                         M, K, N, BM, BK, force=force, sparsity=sparsity, dtype=dtype
                     )
-                elif op == "bsr_dense_addmm":
+                elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
                     if M == K and N == 50432:
                         continue
                     print(f"{M, K, N, (BM, BK)=}")
@@ -772,6 +805,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                             sparsity=sparsity,
                             dtype=dtype,
                             verbose=verbose,
+                            opname=op,
                         )
                 else:
                     raise NotImplementedError(op)
@@ -6185,4 +6219,7 @@ _operation_device_version_data: Dict[Any, Dict] = {
 if __name__ == "__main__":
     for dtype in [torch.float16, torch.bfloat16, torch.float32]:
         for op in ["bsr_dense_addmm"]:
+            main(op=op, force=False, dtype=dtype)
+    for dtype in [torch.int8]:
+        for op in ["_int_bsr_dense_addmm"]:
             main(op=op, force=False, dtype=dtype)
