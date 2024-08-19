@@ -1360,11 +1360,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        if self.value.__name__ == "hints_wrapper":
-            if "hints" not in kwargs:
-                unimplemented("key hints not found in kwargs")
-            # make hints into p_kwargs
-            p_kwargs["hints"] = kwargs["hints"].as_python_constant()
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )

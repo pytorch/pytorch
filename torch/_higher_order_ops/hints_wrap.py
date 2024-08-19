@@ -30,6 +30,11 @@ class HintsWrapper(HigherOrderOperator):
         if not isinstance(kwargs, dict):
             raise RuntimeError(f"kwargs must be a dict, got {type(kwargs)}")
 
+        if len(kwargs) > 0:
+            raise RuntimeError(
+                f"kwargs except for hints are not supported, got {kwargs}"
+            )
+
         if not isinstance(hints, dict):
             raise RuntimeError(f"hints must be a dict, got {type(hints)}")
 
