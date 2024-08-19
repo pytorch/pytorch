@@ -198,7 +198,11 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
     for i, arg in enumerate(wrapped_args):
         num_indices = 1
         if is_traceable_wrapper_subclass(arg):
-            num_indices = len(get_plain_tensors(typing.cast(Tensor, arg)))
+            num_indices = (
+                len(get_plain_tensors(typing.cast(Tensor, arg)))
+                + len(filter_symints(arg.size()))
+                + len(filter_symints(arg.stride()))
+            )
 
         for _ in range(num_indices):
             if i in static_input_indices:

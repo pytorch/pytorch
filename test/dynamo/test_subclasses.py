@@ -1711,7 +1711,8 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(out_ref, out_test)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-    def test_mark_static_with_subclass_desugaring(self):
+    @parametrize("dynamic", [True, False])
+    def test_mark_static_with_subclass_desugaring(self, dynamic):
         from typing import Any, Callable, Dict, List, Optional
 
         from torch._dynamo.decorators import mark_static_address
@@ -1738,12 +1739,15 @@ class GraphModule(torch.nn.Module):
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
-            self.assertEqual(static_input_idxs, [1, 2])
+            if dynamic:
+                self.assertEqual(static_input_idxs, [2, 3, 4])
+            else:
+                self.assertEqual(static_input_idxs, [1, 2])
             return gm
 
         compiler = functools.partial(compile_fx, inner_compile=inner_compile)
 
-        @torch.compile(backend=compiler)
+        @torch.compile(backend=compiler, dynamic=dynamic)
         def fn(t0, t1, t2):
             return t0 + t1 + t2 + 2
 
