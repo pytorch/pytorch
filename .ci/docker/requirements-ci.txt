@@ -269,6 +269,10 @@ lintrunner==0.12.5
 #Pinned versions: 0.12.5
 #test that import:
 
+redis>=4.0.0
+#Description: redis database
+#test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
+
 rockset==1.0.3
 #Description: queries Rockset
 #Pinned versions: 1.0.3
