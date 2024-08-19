@@ -148,9 +148,7 @@ class APoTObserver(ObserverBase):
     """
 
     def quant_levels_visualization(self, signed=False):
-        alpha, _, quantization_levels, level_indices = self.calculate_qparams(
-            signed
-        )
+        alpha, _, quantization_levels, level_indices = self.calculate_qparams(signed)
 
         xs = [float(x) / 1000.0 for x in range(1000)]
         ys = [

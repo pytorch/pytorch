@@ -19,7 +19,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
