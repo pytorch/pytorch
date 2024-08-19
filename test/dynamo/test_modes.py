@@ -4,7 +4,13 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.overrides import BaseTorchFunctionMode
+from torch._C import (
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
+from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -150,6 +156,108 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
+
+    def test_stack_state_mutation_default_device(self):
+        m = BaseTorchFunctionMode()
+        m1 = BaseTorchFunctionMode()
+        with m, m1:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                torch.set_default_device("cpu")
+                _pop_torch_function_stack()
+
+            fn(torch.ones(2, 2))
+            _push_on_torch_function_stack(m1)
+
+            stack = _get_current_function_mode_stack()
+            self.assertIsInstance(stack[0], DeviceContext)
+            self.assertEqual(stack[0].device, torch.device("cpu"))
+            self.assertIs(stack[1], m)
+            self.assertIs(stack[2], m1)
+
+    def test_stack_state_clear_default_device(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            torch.set_default_device(None)
+            return x + 1
+
+        fn(torch.ones(2, 2))
+        stack = _get_current_function_mode_stack()
+        self.assertEqual(len(stack), 0)
+
+        m = BaseTorchFunctionMode()
+        m1 = BaseTorchFunctionMode()
+
+        # Stack populated, add device
+        with m, m1:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                torch.set_default_device("cpu")
+                torch.set_default_device(None)
+                torch.set_default_device("cpu")
+                return x + 1
+
+            fn(torch.ones(2, 2))
+            stack = _get_current_function_mode_stack()
+            self.assertEqual(stack[0].device, torch.device("cpu"))
+            self.assertIs(stack[1], m)
+            self.assertIs(stack[2], m1)
+
+        # Stack populated, remove device
+        torch.set_default_device("cpu")
+        with m, m1:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                torch.set_default_device(None)
+                return x + 1
+
+            fn(torch.ones(2, 2))
+            stack = _get_current_function_mode_stack()
+            self.assertIs(stack[0], m)
+            self.assertIs(stack[1], m1)
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            torch.set_default_device("cpu")
+            torch.set_default_device("cpu")
+            return x + 1
+
+        fn(torch.ones(2, 2))
+        stack = _get_current_function_mode_stack()
+        self.assertEqual(stack[0].device, torch.device("cpu"))
+        torch.set_default_device(None)
+
+    def test_pop_torch_function_mode(self):
+        m = BaseTorchFunctionMode()
+        with m:
+
+            @torch.compile(fullgraph=True)
+            def fn(x):
+                _pop_torch_function_stack()
+                return x + 1
+
+            fn(torch.ones(2, 2))
+
+            self.assertEqual(_len_torch_function_stack(), 0)
+            # reset stack so __exit__ doesn't crash
+            _push_on_torch_function_stack(m)
+
+        self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_error_empty_stack_pop_torch_function_mode(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            _pop_torch_function_stack()
+            return x + 1
+
+        self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Popping from an empty torch function mode stack",
+            lambda: fn(torch.ones(2, 2)),
+        )
 
 
 if __name__ == "__main__":

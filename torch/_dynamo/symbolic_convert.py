@@ -19,7 +19,20 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -59,12 +72,14 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
     Source,
+    TorchFunctionModeStackSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
+    get_torch_function_mode_stack,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -2681,6 +2696,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
+            self._init_torch_function_mode_stack()
+
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2719,6 +2736,32 @@ class InstructionTranslator(InstructionTranslatorBase):
                 f"- torch.func.{name}(fn) requires the function to be inlined by dynamo"
             )
             unimplemented(msg)
+
+    def _init_torch_function_mode_stack(self):
+        if TYPE_CHECKING:
+            from torch.overrides import TorchFunctionMode
+
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        TorchFunctionModeStackVariable.reset()
+
+        self.symbolic_torch_function_mode_stack: Deque[
+            TorchFunctionMode
+        ] = collections.deque()
+        # We want to retrieve all modes to properly reconstruct the stack if needed
+        py_stack = get_torch_function_mode_stack(filter_ignored=False)
+
+        if py_stack:
+            has_device_context = isinstance(
+                py_stack[0], torch.utils._device.DeviceContext
+            )
+
+        for i, val in enumerate(py_stack):
+            self.symbolic_torch_function_mode_stack.append(
+                variables.LazyVariableTracker.create(
+                    val, source=TorchFunctionModeStackSource(i)
+                )
+            )
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):
