@@ -145,11 +145,7 @@ class SchedulerBuffer:
 
     def get_aliases(self) -> Sequence[str]:
         assert self.node is not None
-        aliases = list(self.node.get_inputs_that_alias_output())
-        aliased_graph_input = V.graph.alias_to_graph_input.get(self.get_name(), None)
-        if aliased_graph_input:
-            aliases.extend(self.scheduler.graph_input_to_aliases[aliased_graph_input])
-        return aliases
+        return self.node.get_inputs_that_alias_output()
 
     def get_mutations(self) -> List[str]:
         assert self.node is not None
@@ -1673,9 +1669,6 @@ class Scheduler:
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
         self.name_to_fused_node: Dict[str, BaseSchedulerNode] = self.name_to_node.copy()
-        self.graph_input_to_aliases: Dict[str, Set[str]] = collections.defaultdict(set)
-        for alias, graph_input in V.graph.alias_to_graph_input.items():
-            self.graph_input_to_aliases[graph_input].add(alias)
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
