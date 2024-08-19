@@ -1159,6 +1159,7 @@ def bsr_dense_addmm(
         torch.bfloat16: tl.float32,
         torch.float32: tl.float64,
         torch.float64: tl.float64,
+        torch.int8: tl.int8,
     }[out.dtype]
 
     n_batches = dense.size(0)
@@ -1626,7 +1627,7 @@ if has_triton():
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
-            check_dtype(f_name, bsr, dense.dtype)
+            check_dtype(f_name, bsr, dense.dtype, (torch.int8,))
             check_mm_compatible_shapes(f_name, bsr, dense)
 
             n = dense.size(-1)
@@ -2354,7 +2355,7 @@ if has_triton():
             # do block mm
             output_acc_block += tl.dot(
                 values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype
-            )
+            ).to(acc_dtype)
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride

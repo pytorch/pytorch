@@ -190,6 +190,8 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
 
 def update(op, device_name, version, key, value):
     """Update the db of op parameters."""
+    # avoid storing possible optimization failures:
+    assert value, (op, device_name, version, key, value)
     if (op, device_name, version) in _operation_device_version_data:
         if _operation_device_version_data[op, device_name, version].get(key) == value:
             return
@@ -299,6 +301,7 @@ def minimize(
         if verbose and "out of resource" not in str(msg):
             print(f"{reference_parameters=} lead to failure: {msg}.")
         reference_target = None
+
     if reference_target is not None:
         all_values[to_key(reference_parameters)] = reference_target
 
@@ -433,7 +436,9 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
     assert M % blocksize[0] == 0
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
-    A = torch.bernoulli(torch.full(shape, 1 - sparsity, dtype=dtype, device=device))
+    A = torch.bernoulli(
+        torch.full(shape, 1 - sparsity, dtype=torch.float32, device=device)
+    ).to(dtype)
     expected_nnz = int((1 - sparsity) * M * N / (blocksize[0] * blocksize[1]))
     nonzero_indices = A.flatten().nonzero()
     actual_nnz = nonzero_indices.shape[0]
@@ -732,7 +737,11 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
     sizes3_lst = [3 * sz for sz in [64, 128] + sizes_lst if sz <= 2048]
     shapes_lst = [(sz, sz) for sz in sizes_lst[:-4] + sizes3_lst]
     shapes_lst.extend([(3072, 768), (768, 3072)])
-    blocksize_lst = [(16, 16), (32, 32), (64, 64), (128, 128)]
+    if dtype is torch.int8:
+        # triton does not support smaller blocks than 32
+        blocksize_lst = [(32, 32), (64, 64), (128, 128)]
+    else:
+        blocksize_lst = [(16, 16), (32, 32), (64, 64), (128, 128)]
     sparsity_lst = [0.5, 0.7, 0.3][:1]
     for sparsity in sparsity_lst:
         print(f"{op, dtype, sparsity=}")

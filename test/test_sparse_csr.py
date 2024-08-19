@@ -11,7 +11,8 @@ from torch.testing import make_tensor, FileCheck
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests,
-     load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
+     load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU,
+     suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
@@ -3978,12 +3979,13 @@ class TestSparseCompressedTritonKernels(TestCase):
         # but key is still valid:
         self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
+    @suppress_warnings
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear'])
     @parametrize("blocksize", [16, '16x32', 32])
     @onlyCUDA
     @skipIfRocm
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_kernel(self, op, device, dtype, blocksize):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm
@@ -3998,6 +4000,9 @@ class TestSparseCompressedTritonKernels(TestCase):
         def reference(input, mat1, mat2, beta=1, alpha=1):
             assert mat1.layout is torch.strided
             assert mat2.layout is torch.strided
+            if dtype is torch.int8:
+                # workaround RuntimeError: "addmm_cuda" not implemented for 'Char'
+                return beta * input + alpha * (mat1.cpu() @ mat2.cpu()).to(device)
             return beta * input + alpha * (mat1 @ mat2)
 
         def nc_copy(t, axes=(-1,)):
@@ -4029,6 +4034,13 @@ class TestSparseCompressedTritonKernels(TestCase):
         if op in {"bsr_dense_linear"} and BM != BK:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support non-square blocks")
+
+        if op in {"bsr_dense_linear"} and dtype is torch.int8:
+            # todo: eliminate this skip
+            self.skipTest(f"{op} does not support int8")
+
+        if dtype is torch.int8 and min(BM, BK) < 32:
+            self.skipTest("triton kernel does not support support int8 blocks smaller than 32")
 
         beta_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[0], bsr_dense_linear=[1])[op]
         alpha_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[1], bsr_dense_linear=[1])[op]
@@ -4099,8 +4111,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("op", ['bsr_dense_addmm'])
     @onlyCUDA
     @skipIfRocm
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_tune(self, op, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm
