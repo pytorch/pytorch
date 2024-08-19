@@ -8,7 +8,6 @@ import inspect
 import itertools
 import random
 import sys
-import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -875,18 +874,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return get_custom_getattr(self.value)
 
     def _getattr_static(self, name):
-        if isinstance(self.value, PyTreeSpec) or type(self.value) == threading.local:
-            # Cherry-picked cases where we are ok calling the getattr.
-            #
-            # Threading local has custom __getattribute__ but its side-effect free, so we speicalize here.
-            #
-            # TODO(anijain2305) - We might need to do a better job at identifying custom __getattribute__ and graph
-            # break early in other cases (improve object_has_getattribute). For threading local, the __getattribute__ is
-            # overridden in C, so we could not catch it correctly.
-            subobj = getattr(self.value, name)
-        else:
-            subobj = inspect.getattr_static(self.value, name)
+        subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
+        import _collections
+
+        if subobj is NO_SUCH_SUBOBJ or isinstance(subobj, _collections._tuplegetter):
+            # Call __getattribute__, we have checked that this is not overridden. For example, threading.local has
+            # side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
+            subobj = self.value.__getattribute__(name)
         return subobj
+
+        # if isinstance(self.value, PyTreeSpec) or type(self.value) is threading.local:
+        #     # Cherry-picked cases where we are ok calling the getattr.
+        #     #
+        #     # Threading local has custom __getattribute__ but its side-effect free, so we speicalize here.
+        #     #
+        #     # TODO(anijain2305) - We might need to do a better job at identifying custom __getattribute__ and graph
+        #     # break early in other cases (improve object_has_getattribute). For threading local, the __getattribute__ is
+        #     # overridden in C, so we could not catch it correctly.
+        #     subobj = getattr(self.value, name)
+        # else:
+        #     subobj = inspect.getattr_static(self.value, name)
+        #     import _collections
+        #     if isinstance(subobj, _collections._tuplegetter):
+        #         breakpoint()
+        #         subobj = getattr(self.value, name)
+        # return subobj
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         self._check_for_getattribute()
