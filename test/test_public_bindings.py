@@ -280,6 +280,7 @@ class TestPublicBindings(TestCase):
             except Exception as e:
                 # Some current failures are not ImportError
 
+                print("###############", modname, type(e))
                 failures.append((modname, type(e)))
 
         # It is ok to add new entries here but please be careful that these modules
