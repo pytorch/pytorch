@@ -10,6 +10,7 @@ from sympy.core.numbers import equal_valued
 
 from .numbers import int_oo
 
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
@@ -372,8 +373,6 @@ class CleanDiv(FloorDiv):
     Div where we can assume no rounding.
     This is to enable future optimizations.
     """
-
-    pass
 
 
 # Don't use sympy ceiling/floor as they will attempt simplifications involving

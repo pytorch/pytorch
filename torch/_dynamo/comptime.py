@@ -8,6 +8,7 @@
 
 import builtins
 import dis
+import time
 import traceback
 from typing import Optional, Union
 
@@ -32,7 +33,7 @@ class ComptimeVar:
     actual data in the Tensor is.)
     """
 
-    def __init__(self, v):
+    def __init__(self, v) -> None:
         self.__variable = v
 
     def as_proxy(self):
@@ -128,7 +129,7 @@ class ComptimeVar:
         """
         return self.__variable
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__variable.debug_repr()
 
     # TODO: API for adding a custom guard
@@ -141,7 +142,7 @@ class ComptimeContext:
     file a feature request at https://github.com/pytorch/pytorch/
     """
 
-    def __init__(self, tx):
+    def __init__(self, tx) -> None:
         self.__tx = tx
 
     def get_local(self, name: str, *, stacklevel=0) -> ComptimeVar:
@@ -290,6 +291,9 @@ class ComptimeContext:
         """
         return self.__tx
 
+    def sleep(self, sec):
+        time.sleep(sec)
+
 
 class _Comptime:
     @staticmethod
@@ -390,6 +394,10 @@ class _Comptime:
             builtins.breakpoint()
 
         comptime(inner)
+
+    @staticmethod
+    def sleep(sec):
+        comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
 comptime = _Comptime()

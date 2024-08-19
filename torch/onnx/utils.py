@@ -1821,45 +1821,6 @@ def _should_aten_fallback(
     return False
 
 
-def _need_symbolic_context(symbolic_fn: Callable) -> bool:
-    """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
-    params = tuple(inspect.signature(symbolic_fn).parameters.values())
-    # When the annotation is postpone-evaluated, the annotation is a string
-    # and not a type. We need to use get_type_hints to get the real type.
-    if not params:
-        return False
-    first_param_name = params[0].name
-    type_hints = typing.get_type_hints(symbolic_fn)
-    if first_param_name not in type_hints:
-        return False
-    param_type = type_hints[first_param_name]
-    return issubclass(param_type, _exporter_states.SymbolicContext)
-
-
-def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
-    """Decorator that provides the symbolic context to the symbolic function if needed."""
-    if _need_symbolic_context(symbolic_fn):
-        # TODO(justinchuby): Update the module name of GraphContext when it is public
-        warnings.warn(
-            "The first argument to symbolic functions is deprecated in 1.13 and will be "
-            "removed in the future. Please annotate treat the first argument (g) as GraphContext "
-            "and use context information from the object instead.",
-            category=FutureWarning,
-        )
-
-        def wrapper(graph_context: jit_utils.GraphContext, *args, **kwargs):
-            symbolic_context = _exporter_states.SymbolicContext(
-                params_dict=graph_context.params_dict,
-                env=graph_context.env,
-                cur_node=graph_context.original_node,
-                onnx_block=graph_context.block,
-            )
-            return symbolic_fn(symbolic_context, graph_context, *args, **kwargs)
-
-        return wrapper
-    return symbolic_fn
-
-
 def _get_aten_op_overload_name(n: _C.Node) -> str:
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
@@ -2023,13 +1984,7 @@ def register_custom_op_symbolic(
 
     _verify_custom_op_name(symbolic_name)
 
-    registration.custom_onnx_symbolic(
-        symbolic_name,
-        opset_version,
-        decorate=[
-            _symbolic_context_handler,
-        ],
-    )(symbolic_fn)
+    registration.custom_onnx_symbolic(symbolic_name, opset_version)(symbolic_fn)
 
 
 def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):

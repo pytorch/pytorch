@@ -182,11 +182,11 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
-  if (!train.has_value() || train) {
+  if (!train.has_value() || *train) {
     check_randomness(randomness); // if we are in eval mode, we don't use about randomness
   }
 
-  if ((train.has_value() && !train) ||
+  if ((train.has_value() && !*train) ||
       randomness == RandomnessType::Different) {
     if (!tensor_bdim) {
       // if tensor is unbatched, add batch dim before
