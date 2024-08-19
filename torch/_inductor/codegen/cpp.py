@@ -3167,8 +3167,8 @@ class CppVecKernelChecker(CppVecKernel):
 
 def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
-    Returns the low precision float data type (torch.float16/torch.bfloat16) contained in the nodes
-    and if all the nodes can codegen with this data type without converting tp fp32.
+    Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
+    and if all the nodes can codegen with this data type without converting to float.
     Otherwise returns None and True.
     """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
