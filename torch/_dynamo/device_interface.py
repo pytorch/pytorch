@@ -290,7 +290,7 @@ class CpuDeviceProperties:
 class CpuInterface(DeviceInterface):
     class Event(_EventBase):
         def __init__(self, enable_timing=True):
-            self.time = 0
+            self.time = 0.0
 
         def elapsed_time(self, end_event) -> float:
             return (end_event.time - self.time) * 1000
