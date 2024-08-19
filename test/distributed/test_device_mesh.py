@@ -582,7 +582,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh]["dp_cp"]
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
+            "dp_cp"
+        ]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
         ref_pg_count = _world.group_count
@@ -597,7 +599,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh]["dp_tp"]
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
+            "dp_tp"
+        ]
         self.assertEqual(flatten_mesh_root_dims, (0, 2))
 
 
