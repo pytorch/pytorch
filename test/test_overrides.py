@@ -22,6 +22,7 @@ from torch.overrides import (
     TorchFunctionMode,
     _get_current_function_mode,
     _get_current_function_mode_stack,
+    BaseTorchFunctionMode
 )
 from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
@@ -1599,6 +1600,29 @@ class TestTorchFunctionMode(TestCase):
             d_kwargs = torch.device(device=0)
             self.assertEqual(d_kwargs.type, "xla")
             self.assertEqual(d_kwargs.index, 0)
+
+    def test_device_context_semantics(self):
+        from torch._C import _len_torch_function_stack
+        from torch.utils._device import DeviceContext
+        torch.set_default_device("cuda")
+
+        def get_stack():
+            return [torch._C._get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+
+        base_mode = BaseTorchFunctionMode()
+        with base_mode:
+            torch.set_default_device("cpu")
+            x = torch.ones(2, 2)
+            stack = get_stack()
+            self.assertIsInstance(stack[0], DeviceContext)
+            self.assertEqual(stack[0].device, torch.device("cpu"))
+
+        stack = get_stack()
+        self.assertIsInstance(stack[0], DeviceContext)
+        self.assertEqual(stack[0].device, torch.device("cpu"))
+
+
+
 
 
 if __name__ == '__main__':
