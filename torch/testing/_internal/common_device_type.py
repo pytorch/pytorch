@@ -548,6 +548,10 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
