@@ -855,7 +855,7 @@ class VariableBuilder:
         elif (
             istype(value, type)
             and value in itertools.__dict__.values()
-            and (value is not itertools.chain)
+            and value not in {itertools.chain}
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
