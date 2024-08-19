@@ -45,6 +45,32 @@ def count___new__(
         n += step  # type: ignore[operator]
 
 
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
+@substitute_in_graph(itertools.islice.__new__)  # type: ignore[arg-type]
+def islice___new__(
+    cls: Type[itertools.islice[_T]],
+    iterable: Iterable[_T],
+    *args: int | None,
+) -> Iterator[_T]:
+    assert cls is itertools.islice
+
+    s = slice(*args)
+    start = 0 if s.start is None else s.start
+    stop = s.stop
+    step = 1 if s.step is None else s.step
+    if start < 0 or (stop is not None and stop < 0) or step <= 0:
+        raise ValueError(
+            "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
+        )
+
+    indices = itertools.count() if stop is None else range(max(start, stop))
+    next_i = start
+    for i, element in zip(indices, iterable):
+        if i == next_i:
+            yield element
+            next_i += step
+
+
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
 @substitute_in_graph(itertools.tee)
 def tee(iterable: Iterable[_T], n: int = 2, /) -> Tuple[Iterator[_T], ...]:
