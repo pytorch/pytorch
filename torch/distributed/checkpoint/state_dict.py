@@ -573,26 +573,21 @@ def _load_model_state_dict(
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
-        if device == torch.device("meta"):
-            for index in range(len(model)):
-                splited_state_dict = {}
-                splited_state_dict[f"{index}.weight"] = state_dict[f"{index}.weight"]
-                model[index].to_empty(device=new_device)
-                cast(
-                    _IncompatibleKeys,
-                    _state_dict_fn(model, "load_state_dict")(
-                        state_dict=splited_state_dict, strict=info.strict
-                    ),
-                )
-            return _IncompatibleKeys
-
     with info.fsdp_context():
-        return cast(
-            _IncompatibleKeys,
-            _state_dict_fn(model, "load_state_dict")(
+        if device == torch.device("meta"):
+            return cast(
+                _IncompatibleKeys,
+                _state_dict_fn(model, "load_state_dict")(
+                    state_dict=state_dict, strict=info.strict, assign=True
+                ),
+            )
+        else:
+            return cast(
+                _IncompatibleKeys,
+                _state_dict_fn(model, "load_state_dict")(
                 state_dict=state_dict, strict=info.strict
-            ),
-        )
+                ),
+            )
 
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
