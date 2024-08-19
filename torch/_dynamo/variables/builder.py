@@ -852,7 +852,11 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif istype(value, type) and value in itertools.__dict__.values():
+        elif (
+            istype(value, type)
+            and value in itertools.__dict__.values()
+            and value not in {itertools.chain, itertools.count, itertools.islice}
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
