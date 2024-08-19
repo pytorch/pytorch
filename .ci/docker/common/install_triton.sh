@@ -15,12 +15,15 @@ conda_reinstall() {
 if [ -n "${ROCM_VERSION}" ]; then
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton-rocm"
+  TRITON_REPO_NAME="triton"
 elif [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
+  TRITON_REPO_NAME="triton"
 else
   TRITON_REPO="https://github.com/openai/triton"
   TRITON_TEXT_FILE="triton"
+  TRITON_REPO_NAME="triton"
 fi
 
 # The logic here is copied from .ci/pytorch/common_utils.sh
@@ -43,7 +46,7 @@ fi
 
 # Git checkout triton
 git clone ${TRITON_REPO}
-cd triton
+cd ${TRITON_REPO_NAME}
 git checkout ${TRITON_PINNED_COMMIT}
 cd python
 
