@@ -229,7 +229,29 @@ def handle_effects(
         assert (
             allow_token_discovery
         ), f"Could not find a token for effect {key} which came from the function {op}"
-        tokens[key] = new_token_tensor()
+        proxy_tensor_mode = torch._C._get_dispatch_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        if proxy_tensor_mode is not None:
+            tracer = proxy_tensor_mode.tracer
+
+            from torch.fx.experimental.proxy_tensor import (
+                disable_proxy_modes_tracing,
+                track_tensor_tree,
+            )
+
+            with disable_proxy_modes_tracing():
+                token_tensor = new_token_tensor()
+
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(
+                "placeholder", "primals_token", (), {}, name="primals_token"
+            )
+            track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
+
+            tokens[key] = token_tensor
+        else:
+            tokens[key] = new_token_tensor()
+
     token = tokens[key]
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
