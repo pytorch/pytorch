@@ -1346,9 +1346,11 @@ class FxGraphCache:
                     ) != 0:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache:
+        except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            cache_info["cache_bypass_reason"] = str(e)
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
