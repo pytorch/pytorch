@@ -19,7 +19,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -403,7 +402,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
-        self.seen_custom_ops: Set[torch._ops.OpOverload] = set()
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -1253,11 +1251,14 @@ class GraphLowering(torch.fx.Interpreter):
     def maybe_add_custom_op_layout_constraints(self, op: Callable[..., Any]) -> None:
         if not isinstance(op, torch._ops.OpOverload):
             return
-        if op in self.seen_custom_ops:
+        # needs_fixed_stride_order only applies to ops that are FallbackKernel.
+        # Those do not have lowerings pre-registered.
+        if op in lowerings:
             return
+        # lowering an op that is FallbackKernel for the first time will automatically
+        # generate the lowering so that the following isn't called multiple times.
         if torch._C.Tag.needs_fixed_stride_order in op.tags:
             torch._inductor.lowering.add_layout_constraint(op, constrain_to_fx_strides)
-        self.seen_custom_ops.add(op)
 
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:

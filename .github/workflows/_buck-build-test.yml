@@ -8,6 +8,11 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+      runner_prefix:
+        required: false
+        type: string
+        description: |
+          Prefix for runner label
 
 defaults:
   run:
@@ -16,7 +21,7 @@ defaults:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, "${{ inputs.runner_prefix }}linux.large"]
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
