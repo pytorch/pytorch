@@ -99,6 +99,53 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK",))
+    @parametrize("autotune_in_subproc", (True,))
+    def test_max_autotune_precompile_matmul_dynamic(
+        self, max_autotune_gemm_backends, autotune_in_subproc
+    ):
+        """
+        Test matmul with dynamic shapes
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        a = torch.randn(2240, 256, **tensor_options)
+        b = torch.randn(256, 2048, **tensor_options)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+
+            @torch.compile(dynamic=True)
+            def compiled_mm(a, b):
+                return a @ b
+
+            Y_compiled = compiled_mm(a, b)
+            Y = a @ b
+            torch.testing.assert_close(Y_compiled, Y)
+
+            a1 = torch.randn(1024, 256, **tensor_options)
+            Y1_compiled = compiled_mm(a1, b)
+            Y1 = a1 @ b
+            torch.testing.assert_close(Y1_compiled, Y1)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
