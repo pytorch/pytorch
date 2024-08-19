@@ -9,6 +9,7 @@ from collections import defaultdict
 from typing import Dict, List, Set, TYPE_CHECKING
 
 import torch
+import logging
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -24,6 +25,7 @@ from .utils import (
 
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
+log = logging.getLogger("torch")
 
 if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
@@ -224,9 +226,9 @@ def _schedule_for_comm(
             ready.remove(candidate)
             schedule(candidate.snode)
             collective_cost -= snode_to_cost[candidate.snode]
-        # Schedule the comm node's corresponding wait node
-        wait_snode = comm_to_wait[snode]
-        schedule(wait_snode)
+        # # Schedule the comm node's corresponding wait node
+        # wait_snode = comm_to_wait[snode]
+        # schedule(wait_snode)
         heapq.heapify(ready)
 
     while len(ready):
@@ -493,14 +495,14 @@ def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
 
     (arg30_1 and arg129_1 are aliases of an FSDP2 unsharded parameter, both captured as graph inputs)
     ...
-    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15);  as_strided_15 = copy__7 = None
+    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15)
     ... (compute ops using arg30_1)
     ...
 
     ->
 
     ...
-    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15);  as_strided_15 = copy__7 = None
+    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15)
     ... (compute ops using arg129_1 instead of arg30_1)
     ...
     """
@@ -523,43 +525,6 @@ def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
             for graph_input in graph_inputs:
                 if graph_input is not replace_with_graph_input:
                     graph_input.replace_all_uses_with(replace_with_graph_input)
-
-
-def replace_fsdp_unsharded_param_copy_with_set(graph: torch.fx.Graph) -> None:
-    from .pattern_matcher import (
-        CallFunction,
-        KeywordArg,
-        Match,
-        PatternMatcherPass,
-        register_graph_pattern,
-    )
-
-    """
-    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_12, 8192)
-    ...
-    copy_ = torch.ops.fsdp.copy_.default(primals_12, X);  as_strided_1 = copy_ = None
-
-    ->
-
-    set_ = torch.ops.fsdp.set_.default(primals_12, X);  as_strided_1 = copy_ = None
-    """
-    graph_inputs = set(node for node in graph.nodes if node.op == "placeholder")
-    graph_input_to_resize_node = {}
-    for node in graph.nodes:
-        if node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[0] in graph_inputs:
-            graph_input_to_resize_node[node.args[0]] = node
-        if node.target == torch.ops.fsdp.copy_.default and node.args[0] in graph_inputs:
-            copy_node = node
-            graph_input = node.args[0]
-            if graph_input in graph_input_to_resize_node:
-                resize_node = graph_input_to_resize_node[graph_input]
-                graph.erase_node(resize_node)
-                with graph.inserting_after(copy_node):
-                    graph.call_function(torch.ops.fsdp.set_.default, copy_node.args)
-                graph.erase_node(copy_node)
-                del graph_input_to_resize_node[graph_input]
-            else:
-                raise RuntimeError("Found fsdp.copy_ node without corresponding resize node!")
     
 
 def get_op_idx(snode):
@@ -618,7 +583,7 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
+            # Find the "all_gather + all_gather_wait_tensor + copy_out + resize_ + copy_" code block
             allowed_ops = {
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
@@ -662,8 +627,7 @@ def enforce_comm_ordering_for_fsdp(
 
             # Find split_with_sizes_copy op's other deps
             split_with_sizes_copy_snode = None
-            for i in range(len(ag_related_snodes)):
-                cur_snode = ag_related_snodes[i]
+            for cur_snode in ag_related_snodes:
                 if is_fallback_op(
                     cur_snode.node, torch.ops.fsdp.split_with_sizes_copy.default
                 ):
@@ -676,6 +640,22 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_buf,
                 name_to_fused_node,
             )
+
+            # Find unsharded_param.copy_ op's other deps (e.g. unsharded_param.resize_)
+            unsharded_param_copy_snodes = []
+            for cur_snode in list(ag_related_snode_set):
+                if is_fallback_op(
+                    cur_snode.node, torch.ops.aten.copy_.default
+                ):
+                    unsharded_param_copy_snodes.append(cur_snode)
+            for copy_snode in unsharded_param_copy_snodes:
+                find_recursive_deps_of_node(
+                    copy_snode,
+                    ag_related_snode_set,
+                    name_to_buf,
+                    name_to_fused_node,
+                )
+
             # sort nodes by original operation order
             ag_related_snodes = sorted(
                 ag_related_snode_set, key=lambda x: get_op_idx(x)

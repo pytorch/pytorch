@@ -1764,16 +1764,11 @@ class WrapperCodeGen(CodeGen):
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        if buffer.get_name() in ['buf437']:
-            print(f"here1 defining_op: {buffer.get_defining_op()}")
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
         if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            if name in ['buf437']:
-                import traceback
-                traceback.print_stack()
             return (
                 f"{name} = empty_strided_{device.type}("
                 f"{self.codegen_shape_tuple(shape)}, "
