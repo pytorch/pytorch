@@ -18,7 +18,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeIs
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
