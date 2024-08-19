@@ -557,7 +557,6 @@ cc_library(
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
         "@fmt",
-        "@foxi",
         "@onnx",
     ] + if_cuda(
         [

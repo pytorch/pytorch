@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 inline void noop(Stack& n) {}
 
@@ -51,5 +50,4 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
