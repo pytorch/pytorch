@@ -41,8 +41,13 @@ if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
 fi
 
-git checkout ${TRITON_REPO} ${TRITON_PINNED_COMMIT}
-cd triton/python
+# Git checkout triton
+git clone ${TRITON_REPO}
+cd triton
+git checkout ${TRITON_PINNED_COMMIT}
+cd python
+
+# Patch setup.py
 sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
 
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
