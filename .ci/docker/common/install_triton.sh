@@ -45,13 +45,13 @@ if [ -z "${MAX_JOBS}" ]; then
 fi
 
 # Git checkout triton
-git clone ${TRITON_REPO}
+as_jenkins git clone ${TRITON_REPO}
 cd ${TRITON_REPO_NAME}
-git checkout ${TRITON_PINNED_COMMIT}
+as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 cd python
 
 # Patch setup.py
-sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
+as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
 
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
