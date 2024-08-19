@@ -634,6 +634,7 @@ class TestFullyShardCompile(FSDPTest):
             model_args = ModelArgs(
                 vocab_size=vocab_size,
                 n_layers=3,
+                checkpoint_activations=True,
             )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):

@@ -198,7 +198,7 @@ class Transformer(nn.Module):
         h = self.dropout(h)
         for layer in self.layers:
             if self.checkpoint_activations:
-                h = torch.utils.checkpoint.checkpoint(layer, h, use_reentrant=False)
+                h = torch.utils.checkpoint.checkpoint(layer, h, use_reentrant=True)
             else:
                 h = layer(h)
         h = self.norm(h)
