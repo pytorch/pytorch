@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import sys
 import unittest
 
 import sympy
@@ -269,7 +270,12 @@ class ExprPrinterTests(InductorTestCase):
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
         for expr, result in cpu_cases:
-            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+            self.assertEqual(
+                cexpr(expr),
+                result(1.0, "LL")
+                if sys.platform in ["darwin", "win32"]
+                else result(1.0, "L"),
+            )  # 1.0 for FP div
 
     def test_print_floor(self):
         for integer in [True, False]:
@@ -334,7 +340,10 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1L)*s1")
+        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
+            "darwin",
+            "win32",
+        ] else "(-1L)*s1"
 
     def test_print_Min_Max(self):
         cases = (
@@ -349,7 +358,9 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))",
+                f"std::{s}(static_cast<int64_t>(-2LL), static_cast<int64_t>(x))"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))",
             )
 
             expr = f(x, 2 * x, 3 * x)
@@ -357,7 +368,12 @@ class ExprPrinterTests(InductorTestCase):
                 texpr(expr),
                 f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
-            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+            self.assertEqual(
+                cexpr(expr),
+                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}({{x, 2L*x, 3L*x}})",
+            )
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
