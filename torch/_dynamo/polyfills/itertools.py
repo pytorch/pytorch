@@ -2,8 +2,10 @@
 Python polyfills for itertools
 """
 
+from __future__ import annotations
+
 import itertools
-from typing import Iterable, Iterator, Tuple, TypeVar
+from typing import Iterable, Iterator, Tuple, Type, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -12,13 +14,18 @@ _T = TypeVar("_T")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
-@substitute_in_graph(itertools.chain.__new__)
-def chain___new__(cls, *iterables: Iterable[_T]) -> Iterator[_T]:
+@substitute_in_graph(itertools.chain.__new__)  # type: ignore[arg-type]
+def chain___new__(
+    cls: Type[itertools.chain[_T]],
+    *iterables: Iterable[_T],
+) -> Iterator[_T]:
+    assert cls is itertools.chain
+
     for iterable in iterables:
         yield from iterable
 
 
-@substitute_in_graph(itertools.chain.from_iterable)
+@substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
 def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
