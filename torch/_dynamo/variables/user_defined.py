@@ -877,14 +877,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
         import _collections
 
+        # print(name, subobj)
+        # breakpoint()
+
         if (
             subobj is NO_SUCH_SUBOBJ
             or isinstance(subobj, _collections._tuplegetter)
-            or is_wrapper_or_member_descriptor(subobj)
+            or (inspect.ismemberdescriptor(subobj) and name in self.value.__slots__)
         ):
             # Call __getattribute__, we have checked that this is not overridden. For example, threading.local has
             # side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
             subobj = self.value.__getattribute__(name)
+            # breakpoint()
         return subobj
 
         # if isinstance(self.value, PyTreeSpec) or type(self.value) is threading.local:
