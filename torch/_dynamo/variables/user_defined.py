@@ -203,12 +203,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj)
 
-        if (
-            source
-            and not inspect.ismethoddescriptor(obj)
-            and not is_wrapper_or_member_descriptor(obj)
-        ):
-            return VariableBuilder(tx, source)(obj)
         return super().var_getattr(tx, name)
 
     def _call_cross_entropy_loss(self, tx: "InstructionTranslator", args, kwargs):
@@ -436,7 +430,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+            var = tx.output.side_effects.track_object_new(
+                self.source,
+                self.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                {},
+            )
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
@@ -543,13 +544,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
+    def __init__(self, value, value_type=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
-        # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
-        self.cls_source = cls_source
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -926,10 +925,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # dunder attrs. inspect.getattr_static does not return correct value for
         # them.
         if name == "__class__":
-            cls_source = source
-            if cls_source is None:
-                cls_source = self.cls_source
-            options = {"source": cls_source}
+            options = {"source": source}
             return UserDefinedClassVariable(type(self.value), **options)
 
         try:
@@ -1054,18 +1050,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
-                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
-                # sourceful variable tracker.
-                if self.cls_source is not None:
-                    subobj_from_class = inspect.getattr_static(
-                        self.value.__class__, name, NO_SUCH_SUBOBJ
-                    )
-                    if subobj_from_class is subobj:
-                        src_from_class = AttrSource(self.cls_source, name)
-                        return variables.LazyVariableTracker.create(
-                            subobj_from_class, src_from_class
-                        )
-
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder.create(tx, subobj)
