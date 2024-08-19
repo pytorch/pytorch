@@ -486,7 +486,7 @@ def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
     storage_id_to_graph_inputs = defaultdict(list)
     all_graph_inputs_used_in_copy_op = set()
     for node in graph.nodes:
-        if node.op == "placeholder" and isinstance(node.meta['val'], torch.Tensor):
+        if node.op == "placeholder" and isinstance(node.meta.get('val', None), torch.Tensor):
             storage_id_to_graph_inputs[id(node.meta['val'].untyped_storage())].append(node)
         if node.target == torch.ops.fsdp.copy_.default and node.args[0].op == "placeholder":
             all_graph_inputs_used_in_copy_op.add(node.args[0])
