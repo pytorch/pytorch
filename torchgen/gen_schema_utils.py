@@ -60,7 +60,9 @@ class TypeGen:
 
 class ReturnGen:
     @staticmethod
-    def from_example(name: str, obj: Any, annotation: Optional[Annotation]) -> Return:
+    def from_example(
+        name: Optional[str], obj: Any, annotation: Optional[Annotation]
+    ) -> Return:
         return Return(name, TypeGen.from_example(obj), annotation)
 
 
@@ -89,7 +91,7 @@ class FunctionSchemaGen:
             tuple(), None, tuple(args), tuple(), None, tuple(), tuple()
         )
         returns = tuple(
-            ReturnGen.from_example("output", out, None) for out in example_outputs
+            ReturnGen.from_example(None, out, None) for out in example_outputs
         )
         op_name = OperatorName(BaseOperatorName(op_name, False, False, False), "")
         return FunctionSchema(op_name, arguments, returns)
