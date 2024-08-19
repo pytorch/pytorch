@@ -14,10 +14,13 @@ __device__ inline __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address, __hi
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
   typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
-  __hip_bfloat162_raw bf2_v = value;
-  vec_short2 s2_in{bf2_v.x, bf2_v.y};
-  vec_short2 s2_ret = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, s2_in);
-  return __hip_bfloat162_raw{s2_ret[0], s2_ret[1]};
+  static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
+  union {
+    __hip_bfloat162_raw bf162_raw;
+    vec_short2 vs2;
+  } u{static_cast<__hip_bfloat162_raw>(value)};
+  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+  return static_cast<__hip_bfloat162>(u.bf162_raw);
 #else
   static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
   union u_hold {
@@ -44,9 +47,9 @@ __device__ inline __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   union {
     __half2_raw h2r;
     vec_fp162 fp16;
-  } u {value};
-  vec_fp162 ret = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
-  return __half2{ret[0], ret[1]};
+  } u {static_cast<__half2_raw>(value)};
+  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+  return static_cast<__half2>(u.h2r);
 #else
   static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
   union u_hold {
