@@ -1206,10 +1206,9 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    # @parametrize("reverse", [False, True])
-    @parametrize("reverse", [True])
+    @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_vmap22(self, reverse, device):
+    def test_pointwise_associative_scan_vmap(self, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1293,7 +1292,7 @@ def forward(self, pred_1, x_1):
                                 in_dim,
                             ),
                             scan_dim,
-                            reverse=reverse
+                            reverse=reverse,
                         ),
                         in_dim,
                     )
@@ -1307,6 +1306,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     # @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False])
     @parametrize("reverse", [True])
     @parametrize("device", [torch.device("cuda")])
     def test_pointwise_associative_scan_vmap_comp(self, reverse, device):

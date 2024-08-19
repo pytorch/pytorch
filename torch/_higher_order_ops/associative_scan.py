@@ -109,8 +109,8 @@ def associative_scan(
 
     result_flat = associative_scan_op(combine_fn, leaves, dim)
 
-    # if reverse:
-    #     result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+    if reverse:
+        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -200,7 +200,7 @@ def associative_scan_functionalize(ctx, combine_fn, input, dim):
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, combine_fn, input, dim):#, reverse):
+def associative_scan_batch_rule(interpreter, combine_fn, input, dim):  # , reverse):
     input_bdims = [maybe_get_bdim(x) if is_batchedtensor(x) else None for x in input]
 
     batch_size = None
@@ -228,7 +228,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):#, reverse)
             else:
                 unwrap = unwrap.movedim(bdim, 0)
         input_unwrapped.append(unwrap)
-        
+
     # if reverse:
     #     input_unwrapped = [torch.flip(elem, [dim + 1]) for elem in input_unwrapped]
 
@@ -238,7 +238,7 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):#, reverse)
     lvl = interpreter.level()
     # return [_add_batch_dim(x, 0, lvl) for x in res]
     batch_res = [_add_batch_dim(x, 0, lvl) for x in res]
-    
+
     # if reverse:
     #     batch_res = [torch.flip(elem, [dim + 1]) for elem in batch_res]
 
