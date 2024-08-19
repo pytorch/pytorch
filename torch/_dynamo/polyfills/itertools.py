@@ -11,6 +11,18 @@ from ..decorators import substitute_in_graph
 _T = TypeVar("_T")
 
 
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
+@substitute_in_graph(itertools.chain.__new__)
+def chain___new__(cls, *iterables: Iterable[_T]) -> Iterator[_T]:
+    for iterable in iterables:
+        yield from iterable
+
+
+@substitute_in_graph(itertools.chain.from_iterable)
+def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
+    return itertools.chain(*iterable)
+
+
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
 @substitute_in_graph(itertools.tee)
 def tee(iterable: Iterable[_T], n: int = 2, /) -> Tuple[Iterator[_T], ...]:

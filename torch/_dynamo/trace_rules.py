@@ -2990,9 +2990,7 @@ def _builtin_function_ids() -> Dict[int, str]:
             if not k.startswith("_") and callable(v)
         }
     )
-    rv.update(
-        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
-    )
+    rv.update({id(v): f"itertools.{v.__name__}" for v in (itertools.islice,)})
     rv.update(
         {
             id(cast): "typing.cast",
