@@ -4,15 +4,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import os
-from typing import (
-    Any,
-    Dict,
-    List,
-    Union,
-)
 import gc
+import os
+import pickle
 import time
+from typing import Any, Dict, List, Union
+
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
     basename = os.path.basename(filename)
