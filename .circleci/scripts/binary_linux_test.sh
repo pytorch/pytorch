@@ -119,6 +119,9 @@ fi
 # Test the package
 /builder/check_binary.sh
 
+# Run smoke test
+python /builder/test/smoke_test/smoke_test.py --package=torchonly
+        
 # Clean temp files
 cd /builder && git clean -ffdx
 
