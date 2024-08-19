@@ -587,6 +587,8 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# Threshold on the minimum size of a stride that will be padded.
+#
 # Don't align a too small stride since that causes too much memory increase.
 # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
 # with gaps in between. That causes less coalesced GPU memory access!
@@ -605,7 +607,7 @@ pad_channels_last = False
 # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
 align_stride_threshold = 1024
 
-# Set the padding with for comprehensive padding.
+# The width of comprehensive padding, in bytes.
 # CUDA max memory transaction size is 128 bytes for a warp.
 padding_alignment_bytes = 128
 
