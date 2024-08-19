@@ -481,18 +481,16 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  if (enableTiming) {
-    if (cudaEventCacheEnabled) {
-      ncclStartEvent_ =
-          ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
-    } else {
-      ncclStartEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
-    }
-  }
   if (cudaEventCacheEnabled) {
+    ncclStartEvent_ = enableTiming
+        ? ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming)
+        : nullptr;
     ncclEndEvent_ =
         ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
   } else {
+    ncclStartEvent_ = enableTiming
+        ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
+        : nullptr;
     ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
         enableTiming ? cudaEventDefault : cudaEventDisableTiming);
   }
