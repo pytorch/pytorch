@@ -1218,7 +1218,6 @@ exclude_patterns = [
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
     'torch/_vendor/**',
-    'torch/compiler/__init__.py',
     'torch/contrib/__init__.py',
     'torch/contrib/_tensorboard_vis.py',
     "torch/cuda/_gpu_trace.py",
