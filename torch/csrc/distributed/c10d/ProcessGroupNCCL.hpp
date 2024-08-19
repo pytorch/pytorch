@@ -433,20 +433,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   class CUDAEventCache {
    public:
     CUDAEventCache();
-    ~CUDAEventCache();
-    std::shared_ptr<at::cuda::CUDAEvent> create(int device, bool timing);
+    std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
     static CUDAEventCache& get();
 
    private:
-    struct Device {
-      std::mutex mutex;
-      // NOTE: We intentionaly store raw pointers so that
-      // we do not attempt to destroy the event objects on process exit,
-      // because cuda may be gone.
-      std::vector<at::cuda::CUDAEvent*>
-          events[2]; // 0 for timing=false, 1 for timing=true
-    };
-    std::vector<Device> caches_;
+    std::mutex cacheMutex_;
+    // NOTE: We intentionaly store raw pointers so that
+    // we do not attempt to destroy the event objects on process exit,
+    // because cuda may be gone.
+    std::vector<at::cuda::CUDAEvent*>
+        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {

@@ -483,15 +483,15 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (enableTiming) {
     if (cudaEventCacheEnabled) {
-      ncclStartEvent_ = ProcessGroupNCCL::CUDAEventCache::get().create(
-          device.index(), enableTiming);
+      ncclStartEvent_ =
+          ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
     } else {
       ncclStartEvent_ = std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
     }
   }
   if (cudaEventCacheEnabled) {
-    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get().create(
-        device.index(), enableTiming);
+    ncclEndEvent_ =
+        ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
   } else {
     ncclEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
         enableTiming ? cudaEventDefault : cudaEventDisableTiming);
@@ -763,22 +763,18 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-ProcessGroupNCCL::CUDAEventCache::CUDAEventCache()
-    : caches_(at::cuda::device_count()) {}
+ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() {}
 
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
-    int device,
     bool timing) {
-  auto& deviceCache = caches_[device];
-  auto deleter = [this, device, timing](at::cuda::CUDAEvent* event) {
-    auto& deviceCache = caches_[device];
-    std::lock_guard<std::mutex> lock(deviceCache.mutex);
-    deviceCache.events[timing ? 1 : 0].push_back(event);
+  auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
+    std::lock_guard<std::mutex> lock(this->cacheMutex_);
+    this->eventsArray_[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
-    std::lock_guard<std::mutex> lock(deviceCache.mutex);
-    auto& events = deviceCache.events[timing ? 1 : 0];
+    std::lock_guard<std::mutex> lock(cacheMutex_);
+    auto events = eventsArray_[timing ? 1 : 0];
     if (!events.empty()) {
       event = events.back();
       events.pop_back();
@@ -791,7 +787,7 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
-static ProcessGroupNCCL::CUDAEventCache& get() {
+ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
   static ProcessGroupNCCL::CUDAEventCache cache;
   return cache;
 }
