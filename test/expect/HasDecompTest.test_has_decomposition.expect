@@ -454,13 +454,7 @@ aten::_nested_get_ragged_idx
 aten::_nested_get_values
 aten::_nested_get_values_copy
 aten::_nested_get_values_copy.out
-aten::_nested_jagged_to_strided
-aten::_nested_jagged_to_strided_copy
-aten::_nested_jagged_to_strided_copy.out
 aten::_nested_select_backward
-aten::_nested_strided_to_jagged
-aten::_nested_strided_to_jagged_copy
-aten::_nested_strided_to_jagged_copy.out
 aten::_nested_sum_backward
 aten::_nested_tensor_from_mask
 aten::_nested_tensor_from_mask.out

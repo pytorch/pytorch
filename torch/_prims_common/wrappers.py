@@ -268,10 +268,12 @@ def out_wrapper(
             else:
                 result = fn(*args, **kwargs)
             assert (
-                isinstance(result, TensorLike)
-                and is_tensor
-                or isinstance(result, Tuple)  # type: ignore[arg-type]
-                and len(result) == len(out_names)  # type: ignore[arg-type]
+                (isinstance(result, TensorLike) and is_tensor)
+                or (
+                    isinstance(result, Tuple)  # type: ignore[arg-type]
+                    and len(result) == len(out_names)   # type: ignore[arg-type]
+                )
+                or (fn.__name__ == "unbind" and isinstance(result, list))
             )
             if out is not None:
                 # Naively you might expect this assert to be true, but

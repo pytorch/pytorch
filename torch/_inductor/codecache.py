@@ -26,6 +26,7 @@ import warnings
 from bisect import bisect_right
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
@@ -50,6 +51,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
+import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -100,6 +102,7 @@ from torch._inductor.utils import (
     BoxedBool,
     clear_on_fresh_inductor_cache,
     is_linux,
+    is_windows,
     set_tracing_context_output_strides,
 )
 from torch._logging import trace_structured
@@ -521,7 +524,7 @@ def _reduce_tensor(
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache
+        raise BypassFxGraphCache("mkldnn tensors unpickleable.")
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -552,7 +555,7 @@ def _reduce_unsupported(s: Any) -> NoReturn:
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
     """
-    raise BypassFxGraphCache
+    raise BypassFxGraphCache("Reduce unsupported.")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -590,7 +593,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 # Some configs options are callables, e.g., post_grad_custom_pre_pass,
                 # and may not pickle.
                 log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache from e
+                raise BypassFxGraphCache("Config options may be unpickleable.") from e
             return stream.getvalue()
 
     @classmethod
@@ -706,8 +709,6 @@ class BypassFxGraphCache(Exception):
     """
     Exception to indicate that the FxGraphCache should be bypassed.
     """
-
-    pass
 
 
 class FxGraphHashDetails:
@@ -896,6 +897,34 @@ def maybe_realign_inputs(
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
+
+
+def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
+    """
+    Ephemerally increases the NCCL timeout when compiling for a distributed job
+    Returns amount of seconds increased
+    """
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+        return 0
+
+    increased_timeout_sec = int(time_saved_ns // 1e9)  # convert to seconds
+
+    if config.is_fbcode():
+        fudge_factor = torch._utils_internal.justknobs_getval_int(
+            "pytorch/remote_cache:ephemeral_timeout_fudge_factor_percentage"
+        )
+        log.info(
+            "Ephemeral NCCL timeout increase fudge factor %d and original increase value %d",
+            fudge_factor,
+            increased_timeout_sec,
+        )
+        increased_timeout_sec += int(increased_timeout_sec * fudge_factor / 100)
+
+    log.info("Increasing NCCL timeout by %d", increased_timeout_sec)
+    dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
+        timedelta(seconds=increased_timeout_sec)
+    )
+    return increased_timeout_sec
 
 
 class FxGraphCache:
@@ -1143,7 +1172,6 @@ class FxGraphCache:
         key: str,
         compiled_graph: CompiledFxGraph,
         example_inputs: List[torch.Tensor],
-        time_taken_ns: int,
         local: bool,
         remote_cache: None,
     ) -> None:
@@ -1195,8 +1223,9 @@ class FxGraphCache:
                 cache_data = (
                     {
                         "data": content,
-                        "time_taken_ms": time_taken_ns
-                        // 1000000,  # Convert from NS to MS
+                        "time_taken_ms": int(
+                            disk_compiled_graph._time_taken_ns // 1e6
+                        ),  # Convert from NS to MS
                     }
                     if config.is_fbcode()
                     else content
@@ -1214,24 +1243,26 @@ class FxGraphCache:
         """
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache
+            raise BypassFxGraphCache(
+                "Freezing may introduce constants that aren't static across runs."
+            )
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache
+            raise BypassFxGraphCache("No shape env.")
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache
+                raise BypassFxGraphCache("Can't cache HigherOrderOperators.")
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject
             ):
-                raise BypassFxGraphCache
+                raise BypassFxGraphCache("Can't cache torchbind objects.")
 
     @staticmethod
     def load(  # type: ignore[no-untyped-def]
@@ -1251,13 +1282,14 @@ class FxGraphCache:
         compiled_graph = None
         cache_state = None
         cache_event_time = None
-        key = None
-        debug_lines = None
+        cache_info: Dict[str, Any] = {}
         try:
             FxGraphCache._check_can_cache(gm)
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )
+            cache_info["key"] = key
+            cache_info["components"] = debug_lines
 
             remote_cache = None
             if remote:
@@ -1290,12 +1322,12 @@ class FxGraphCache:
                 compiled_graph = compile_fx_fn(
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
-                time_taken_ns = time_ns() - start_time
+                compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
                 FxGraphCache._save_graph(
                     key,
                     compiled_graph,
                     example_inputs,
-                    time_taken_ns,
                     local,
                     remote_cache,
                 )
@@ -1304,6 +1336,14 @@ class FxGraphCache:
                 counters["inductor"]["fxgraph_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time_ns()
+                if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                    cache_info["time_saved_ns"] = time_saved_ns
+                    if (
+                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                            time_saved_ns
+                        )
+                    ) != 0:
+                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
@@ -1314,9 +1354,9 @@ class FxGraphCache:
                     gm, example_inputs, inputs_to_check, fx_kwargs
                 )
         assert compiled_graph is not None
-        cache_args = {"key": key, "cache_state": cache_state, "components": debug_lines}
+        cache_info["cache_state"] = cache_state
         ChromiumEventLogger.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_args
+            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -1324,7 +1364,7 @@ class FxGraphCache:
                 "name": "fx_graph_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
@@ -1379,6 +1419,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
+    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
 
@@ -3017,12 +3058,25 @@ class DLLWrapper:
 
             if hasattr(syms, "dlclose"):
                 f_dlclose = syms.dlclose
+        elif is_windows():
+            import ctypes
+
+            kernel32 = ctypes.CDLL("kernel32", use_last_error=True)
+
+            f_dlclose = kernel32.FreeLibrary
         else:
             raise NotImplementedError("Unsupported env, failed to do dlclose!")
 
         if f_dlclose is not None:
-            f_dlclose.argtypes = [c_void_p]
-            f_dlclose(self.DLL._handle)
+            if is_linux():
+                f_dlclose.argtypes = [c_void_p]
+                f_dlclose(self.DLL._handle)
+            elif is_windows():
+                import ctypes
+                from ctypes import wintypes
+
+                f_dlclose.argtypes = [wintypes.HMODULE]
+                f_dlclose(self.DLL._handle)
         else:
             log.warning(
                 "dll unloading function was not found, library may not be unloaded properly!"
