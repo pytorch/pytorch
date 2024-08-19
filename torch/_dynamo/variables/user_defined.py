@@ -203,7 +203,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj)
 
-        if source and not inspect.ismethoddescriptor(obj):
+        if (
+            source
+            and not inspect.ismethoddescriptor(obj)
+            and not is_wrapper_or_member_descriptor(obj)
+        ):
             return VariableBuilder(tx, source)(obj)
         return super().var_getattr(tx, name)
 
