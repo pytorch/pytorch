@@ -572,7 +572,17 @@ def _load_model_state_dict(
             _distribute_state_dict(state_dict, local_state_dict, device=new_device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
-    torch.distributed.breakpoint()
+
+        if device == torch.device("meta"):
+            splited_state_dict = {}
+            index = 0
+            for index in range(len(model)):
+                splited_state_dict = {}
+                splited_state_dict[f"{index}.weight"] = state_dict[f"{index}.weight"]
+                model[index].to_empty(device=new_device)
+                cast(_IncompatibleKeys,_state_dict_fn(model, "load_state_dict")(state_dict=splited_state_dict, strict=info.strict))
+            return _IncompatibleKeys
+        
     with info.fsdp_context():
         return cast(
             _IncompatibleKeys,
