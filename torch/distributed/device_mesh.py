@@ -3,6 +3,8 @@
 import logging
 import math
 import threading
+from functools import reduce
+from itertools import chain
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -78,30 +80,61 @@ else:
             return self.mesh_stack[-1]
 
         def create_sub_mesh(
-            self, device_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
+            self,
+            device_mesh: "DeviceMesh",
+            submesh_dim_names: Tuple[str, ...],
+            submesh_dims: List[Tuple[int, ...]],
         ) -> "DeviceMesh":
-            if device_mesh != self.get_root_mesh(device_mesh):
-                raise RuntimeError("Cannot create a submesh from a submesh.")
-
-            # submesh_dims are the mesh dimension of the submesh in the device mesh.
-            submesh_dims = [
-                not_none(device_mesh.mesh_dim_names).index(mesh_dim_name)
-                for mesh_dim_name in submesh_dim_names
-            ]
-            submesh_dim_sizes = [
-                device_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
+            submesh_dim_size = [
+                reduce(
+                    lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
+                    mesh_dim,
+                )
+                if len(mesh_dim) > 1
+                else device_mesh.mesh.size(mesh_dim[0])
+                for mesh_dim in submesh_dims
             ]
 
-            mesh_dims_remained = list(range(device_mesh.mesh.ndim))
-            for submesh_dim in submesh_dims:
-                mesh_dims_remained.remove(submesh_dim)
+            mesh_tensor = device_mesh.mesh
+            slice_submesh_dims = []
+            num_dims_flatten = 0
+            slice_dim_group_info = []
+            for mesh_dims, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
+                if len(mesh_dims) > 1:
+                    mesh_tensor = mesh_tensor.flatten(
+                        start_dim=mesh_dims[0], end_dim=mesh_dims[-1]
+                    )
+                    slice_submesh_dims.append(
+                        mesh_dims[0]
+                        if num_dims_flatten == 0
+                        else mesh_dims[0] - num_dims_flatten
+                    )
+                    num_dims_flatten += len(mesh_dims) - 1
+                    slice_dim_group_info.append(
+                        self.root_to_flatten_mapping[device_mesh][
+                            mesh_dim_name
+                        ]._dim_group_infos[0]
+                    )
+                else:
+                    slice_dim_group_info.append(
+                        device_mesh._dim_group_infos[mesh_dims[0]]
+                    )
+                    slice_submesh_dims.append(
+                        mesh_dims[0]
+                        if num_dims_flatten == 0
+                        else mesh_dims[0] - num_dims_flatten
+                    )
+
+            mesh_dims_remained = list(range(mesh_tensor.ndim))
+            for slice_dim in slice_submesh_dims:
+                mesh_dims_remained.remove(slice_dim)
 
             # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
             # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
             # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
-            pg_ranks_by_dim = device_mesh.mesh.permute(
-                *mesh_dims_remained, *submesh_dims
-            ).reshape(-1, *submesh_dim_sizes)
+            pg_ranks_by_dim = mesh_tensor.permute(
+                *mesh_dims_remained, *slice_submesh_dims
+            ).reshape(-1, *submesh_dim_size)
 
             cur_rank = device_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
@@ -114,9 +147,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_infos = [  # type: ignore[possibly-undefined]
-                device_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
-            ]
+            res_submesh._dim_group_infos = slice_dim_group_info
             self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
@@ -223,6 +254,53 @@ else:
             pg_options: Optional[ProcessGroup.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
+
+        def _get_slice_mesh_dims(
+            self, device_mesh, mesh_dim_names
+        ) -> List[Tuple[int, ...]]:
+            """
+            Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
+            If valid, return dim indexes of the slice mesh in the device mesh.
+            """
+            if device_mesh != self.get_root_mesh(device_mesh):
+                raise RuntimeError("Cannot create a submesh from a submesh.")
+
+            # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
+            # or its flattened mesh's mesh_dim_names.
+            self.flatten_name_to_root_dims.setdefault(device_mesh, {})
+            valid_mesh_dim_names = [
+                *device_mesh.mesh_dim_names,
+                *self.flatten_name_to_root_dims[device_mesh].keys(),
+            ]
+
+            if not all(
+                mesh_dim_name in valid_mesh_dim_names
+                for mesh_dim_name in mesh_dim_names
+            ):
+                raise KeyError(
+                    f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                    f"Valid mesh_dim_names are {valid_mesh_dim_names}."
+                )
+
+            # Validate the order of the slice mesh dim indexes.
+            # This needs to be in ascending order.
+            slice_mesh_dims = [
+                self.flatten_name_to_root_dims[device_mesh][mesh_dim_name]
+                if mesh_dim_name in self.flatten_name_to_root_dims[device_mesh]
+                else (device_mesh.mesh_dim_names.index(mesh_dim_name),)
+                for mesh_dim_name in mesh_dim_names
+            ]
+            slice_mesh_dims_iter = chain(*slice_mesh_dims)
+            mesh_dims_iter = iter(range(len(device_mesh.mesh_dim_names)))
+            if not all(
+                slice_mesh_dim in mesh_dims_iter
+                for slice_mesh_dim in slice_mesh_dims_iter
+            ):
+                raise KeyError(
+                    f"Invalid slice {mesh_dim_names}. ",
+                    "Please check the order of the slice dims. ",
+                )
+            return slice_mesh_dims
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -524,19 +602,16 @@ else:
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
-            it = iter(self.mesh_dim_names)
             if mesh_dim_names == self.mesh_dim_names:
                 return self
-            elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
-                mesh_dim_name in it for mesh_dim_name in mesh_dim_names
-            ):
-                raise KeyError(
-                    f"Invalid mesh_dim_name {mesh_dim_names} specified. "
-                    f"Valid mesh_dim_names should be a subsequence of {self.mesh_dim_names}."
+            else:
+                slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
+                    self, mesh_dim_names
                 )
-
-            submesh = _mesh_resources.create_sub_mesh(self, mesh_dim_names)
-            return submesh
+                submesh = _mesh_resources.create_sub_mesh(
+                    self, mesh_dim_names, slice_mesh_dims
+                )
+                return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
@@ -561,18 +636,30 @@ else:
                     "please use `get_all_groups()` instead.",
                 )
 
+            # Quick return if the current device_mesh is a 1D mesh.
             if self.mesh.ndim == 1 and mesh_dim is None:
-                mesh_dim = 0
+                return not_none(
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])  # type: ignore[index]
+                )
+
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            root_to_flatten_mapping = _mesh_resources.root_to_flatten_mapping.get(
+                root_mesh, None
+            )
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
+                dim_group_infos = root_to_flatten_mapping[mesh_dim]._dim_group_infos[0][
+                    :2
+                ]
+                return not_none(_find_pg_by_ranks_and_tag(*dim_group_infos))
             else:
                 mesh_dim = (
                     _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
-
-            return not_none(
-                _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
-            )
+                return not_none(
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
+                )
 
         def get_all_groups(self) -> List[ProcessGroup]:
             """
