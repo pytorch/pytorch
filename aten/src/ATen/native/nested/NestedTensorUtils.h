@@ -179,7 +179,7 @@ inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
 }
 
 // Helper function to get size / stride / offset for a nested/normal tensor.
-inline IntArrayRef get_size_for_index(const Tensor& tensor, int i) {
+inline IntArrayRef get_size_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     std::vector<IntArrayRef> tensor_sizes =
         NestedTensor_get_sizes(get_nested_tensor_impl(tensor));
@@ -189,7 +189,7 @@ inline IntArrayRef get_size_for_index(const Tensor& tensor, int i) {
   }
 }
 
-inline IntArrayRef get_stride_for_index(const Tensor& tensor, int i) {
+inline IntArrayRef get_stride_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     std::vector<IntArrayRef> tensor_strides =
         NestedTensor_get_strides(get_nested_tensor_impl(tensor));
@@ -199,7 +199,7 @@ inline IntArrayRef get_stride_for_index(const Tensor& tensor, int i) {
   }
 }
 
-inline int64_t get_offset_for_index(const Tensor& tensor, int i) {
+inline int64_t get_offset_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     int64_t* offsets_ptr = get_nested_tensor_impl(tensor)
                                ->get_storage_offsets()
