@@ -14,10 +14,10 @@ from typing import (
     overload,
     SupportsFloat,
     TYPE_CHECKING,
-    TypeGuard,
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
