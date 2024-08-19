@@ -680,11 +680,10 @@ class CppPackedGemmTemplate(CppTemplate):
                 # By using the new packed weight for the GEMM template, we can prune the
                 # old weight if it has no other users. This saves memory but makes the FX graph
                 # non-retraceable. To support retracing, we can add a repack node to the
-                # FX graph as:
+                # FX graph. For example:
                 # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
                 for node in reversed(V.graph.graph.nodes):
                     if node.name == W_node.get_name() and len(node.users) == 1:
-                        assert V.graph.constants[node.name].is_mkldnn
                         del V.graph.constants[node.name]
                         delattr(V.graph.module, node.name)
                         delattr(V.graph.graph.owning_module, node.name)
