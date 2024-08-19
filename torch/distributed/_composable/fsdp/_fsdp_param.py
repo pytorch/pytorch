@@ -69,6 +69,15 @@ data, so we use storage resizing on the all-gather output.
 
 lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
 
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+@torch.library.impl(lib, "set_", "Meta")
+@torch.library.impl(lib, "set_", "CUDA")
+@torch.library.impl(lib, "set_", "CPU")
+def set_(tensor, data):
+    tensor.set_(data)
+
+
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
 
@@ -104,6 +113,25 @@ so it's safe to call .copy_() in the middle of the graph to update its content a
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
 """
+
+
+@torch.library.impl(lib, "set_", "Functionalize")
+def set__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
+    # AOTDispatcher needs to know if any inputs had their storages mutated.
+    # (Why? It sometimes detaches inputs before sending them into the graph,
+    #  when it sees that they do not need to have any gradients computed)
+    torch._functionalize_set_storage_changed(tensor)
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.set_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
 
 
 @torch.library.impl(lib, "copy_", "Functionalize")

@@ -1517,7 +1517,8 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         """
         for snode in self.snodes:
             self.scheduler.name_to_fused_node[snode.get_name()] = snode
-        del self.scheduler.name_to_fused_node[self.get_name()]
+        if self.get_name() in self.scheduler.name_to_fused_node:
+            del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
     def add_fake_dep(self, fake_dep: Dep) -> None:
@@ -1851,7 +1852,7 @@ class Scheduler:
         for node in self.nodes:
             for buf1 in node.get_outputs():
                 buf1_name = buf1.get_name()
-                for buf2_name in buf1.get_aliases():
+                for buf2_name in buf1.get_aliases():  TODO: for .set_(X, Y), how do you detect that X and Y are aliases??
                     if buf1_name in name_to_users and buf2_name in name_to_users:
                         # merge the two
                         list1 = name_to_users[buf1_name]

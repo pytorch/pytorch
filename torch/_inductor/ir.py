@@ -5326,6 +5326,8 @@ class SetSourceTensorKernel(ExternKernelAlloc):
             MutationOutput(NoneLayout(device), self_tensor, self),
             MutationOutput(NoneLayout(device), storage_tensor, self),
         ]
+        self_tensor.alias_names.append(storage_tensor.get_name())
+        storage_tensor.alias_names.append(self_tensor.data.get_name())
 
     def get_inputs_that_alias_output(self):
         return [self.inputs[0].get_name(), self.inputs[1].get_name()]
@@ -5963,6 +5965,13 @@ class FallbackKernel(ExternKernelAlloc):
             )
         else:
             self.codegen_comment(wrapper)
+            # args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+            # # out= allocation
+            # out_bufs = kwargs.get("out", None)
+            # if out_bufs and not isinstance(out_bufs, (list, tuple)):
+            #     out_bufs = [out_bufs]
+            # for out_buf in out_bufs:
+            #     V.graph.wrapper_code.codegen_allocation(out_buf)
             args = [*self.codegen_args(), *self.codegen_kwargs()]
             V.graph.wrapper_code.generate_fallback_kernel(self, args)
             if isinstance(self.layout, Layout):

@@ -107,6 +107,8 @@ def _schedule_for_comm(
     buf_name_to_snode = {}
     name_to_fused_node = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
+    output_name_to_comm_snode = {}
+    comm_to_wait = {}
     for idx, snode in enumerate(snodes):
         for buf_name in snode.get_buffer_names():
             buf_name_to_snode[buf_name] = snode
@@ -120,6 +122,20 @@ def _schedule_for_comm(
         scores_1[node_name] = 0
         scores_2[node_name] = idx
 
+        if contains_collective(snode):
+            for output in snode.get_outputs():
+                output_name_to_comm_snode[output.get_name()] = snode
+        if contains_wait(snode):
+            wait_snode = snode
+            for dep in wait_snode.unmet_dependencies:
+                # print(f"dep.name: {dep.name}")
+                # print(f"output_name_to_comm_snode.keys(): {output_name_to_comm_snode.keys()}")
+                # print(f"dep.name in output_name_to_comm_snode: {dep.name in output_name_to_comm_snode}")
+                if dep.name in output_name_to_comm_snode:
+                    comm_snode = output_name_to_comm_snode[dep.name]
+                    comm_to_wait[comm_snode] = wait_snode
+                    break
+            
     comm_idx = 0
     for snode in snodes:
         if raise_comms and contains_collective(snode):
@@ -157,20 +173,22 @@ def _schedule_for_comm(
         if len(deps) == 0:
             heapq.heappush(ready, Runnable(snode))
         for dep in deps:
-            if dep not in snode.get_buffer_names():  # avoid circular dep
-                buffer_users[dep].add(snode)
+            buffer_users[dep].add(snode)
 
     scheduled = []
+    scheduled_set = set()
 
     def schedule(snode):
         """
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
+        if snode in scheduled_set:
+            return
         scheduled.append(snode)
+        scheduled_set.add(snode)
         for buf_name in snode.get_buffer_names():
             for snode in buffer_users[buf_name]:
-                unmet_deps[snode].remove(buf_name)
-                # print(f"unmet_deps[snode]: {unmet_deps[snode]}")
+                unmet_deps[snode].discard(buf_name)
                 if len(unmet_deps[snode]) == 0:
                     heapq.heappush(ready, Runnable(snode))
 
@@ -198,17 +216,21 @@ def _schedule_for_comm(
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
-        assert collective_cost > 0
         while (
             collective_cost > 0
             and (candidate := get_overlapping_candidate()) is not None
         ):
+            # print("looking for candidate!")
             ready.remove(candidate)
             schedule(candidate.snode)
             collective_cost -= snode_to_cost[candidate.snode]
+        # Schedule the comm node's corresponding wait node
+        wait_snode = comm_to_wait[snode]
+        schedule(wait_snode)
         heapq.heapify(ready)
 
     while len(ready):
+        # print("popping from ready queue!")
         snode = heapq.heappop(ready).snode
         if reorder_for_overlap and contains_collective(snode):
             schedule_collective_for_overlap(snode)
@@ -294,7 +316,7 @@ def visualize_overlap(order):
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
-            elif is_wait(snode.node):
+            elif contains_wait(snode):
                 raise AssertionError(
                     "Wait is not expected when there is no collective running"
                 )
@@ -307,7 +329,7 @@ def visualize_overlap(order):
                     "Found two collectives running at the same time. "
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
-            elif is_wait(snode.node):  # end of this comm op
+            elif contains_wait(snode):  # end of this comm op
                 overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
                 cur_comm_node = None
             else:  # overlapped compute op
@@ -489,7 +511,7 @@ def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
     storage_id_to_graph_inputs = defaultdict(list)
     all_graph_inputs_used_in_copy_op = set()
     for node in graph.nodes:
-        if node.op == "placeholder" and isinstance(node.meta.get('val', None), torch.Tensor):
+        if node.op == "placeholder" and isinstance(node.meta['val'], torch.Tensor):
             storage_id_to_graph_inputs[id(node.meta['val'].untyped_storage())].append(node)
         if node.target == torch.ops.fsdp.copy_.default and node.args[0].op == "placeholder":
             all_graph_inputs_used_in_copy_op.add(node.args[0])
@@ -502,6 +524,43 @@ def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
                 if graph_input is not replace_with_graph_input:
                     graph_input.replace_all_uses_with(replace_with_graph_input)
 
+
+def replace_fsdp_unsharded_param_copy_with_set(graph: torch.fx.Graph) -> None:
+    from .pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    """
+    resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(primals_12, 8192)
+    ...
+    copy_ = torch.ops.fsdp.copy_.default(primals_12, X);  as_strided_1 = copy_ = None
+
+    ->
+
+    set_ = torch.ops.fsdp.set_.default(primals_12, X);  as_strided_1 = copy_ = None
+    """
+    graph_inputs = set(node for node in graph.nodes if node.op == "placeholder")
+    graph_input_to_resize_node = {}
+    for node in graph.nodes:
+        if node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[0] in graph_inputs:
+            graph_input_to_resize_node[node.args[0]] = node
+        if node.target == torch.ops.fsdp.copy_.default and node.args[0] in graph_inputs:
+            copy_node = node
+            graph_input = node.args[0]
+            if graph_input in graph_input_to_resize_node:
+                resize_node = graph_input_to_resize_node[graph_input]
+                graph.erase_node(resize_node)
+                with graph.inserting_after(copy_node):
+                    graph.call_function(torch.ops.fsdp.set_.default, copy_node.args)
+                graph.erase_node(copy_node)
+                del graph_input_to_resize_node[graph_input]
+            else:
+                raise RuntimeError("Found fsdp.copy_ node without corresponding resize node!")
+    
 
 def get_op_idx(snode):
     assert not isinstance(
@@ -600,6 +659,27 @@ def enforce_comm_ordering_for_fsdp(
                     break
 
             ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
+
+            # Find split_with_sizes_copy op's other deps
+            split_with_sizes_copy_snode = None
+            for i in range(len(ag_related_snodes)):
+                cur_snode = ag_related_snodes[i]
+                if is_fallback_op(
+                    cur_snode.node, torch.ops.fsdp.split_with_sizes_copy.default
+                ):
+                    split_with_sizes_copy_snode = cur_snode
+                    break
+            ag_related_snode_set = set(ag_related_snodes)
+            find_recursive_deps_of_node(
+                split_with_sizes_copy_snode,
+                ag_related_snode_set,
+                name_to_buf,
+                name_to_fused_node,
+            )
+            # sort nodes by original operation order
+            ag_related_snodes = sorted(
+                ag_related_snode_set, key=lambda x: get_op_idx(x)
+            )
 
             # Group "cast + copy_in + getitem + all_gather" into one GroupedSchedulerNode
             wait_node_idx = None

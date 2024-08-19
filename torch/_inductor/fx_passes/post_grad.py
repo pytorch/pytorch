@@ -143,6 +143,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     comms.reinplace_fsdp_all_gather(gm.graph)
     comms.dedup_fsdp_unsharded_param_aliases(gm.graph)
+    comms.replace_fsdp_unsharded_param_copy_with_set(gm.graph)
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
