@@ -817,8 +817,6 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    # kv_len = _round_up_to_multiple(key.size()[-2], 128)
-    # q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
