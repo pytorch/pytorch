@@ -13,9 +13,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor NestedTensor_abs(const Tensor& self) {
   return map_nt(self, at::abs);
@@ -179,5 +177,4 @@ Tensor _pin_memory_nested(const Tensor& self, std::optional<Device> device) {
       nt_input->get_storage_offsets());
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
