@@ -4,9 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 import ast
 import math
-import pickle
 import sys
 from enum import Enum
 from typing import (  # type: ignore[attr-defined]
@@ -21,6 +21,7 @@ from typing import (  # type: ignore[attr-defined]
     Type,
     TypeVar,
 )
+
 
 try:
     from tabulate import tabulate
