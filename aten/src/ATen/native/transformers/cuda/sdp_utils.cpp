@@ -634,9 +634,14 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
+#if USE_ROCM
+  constexpr bool backend_supports_grouped_query_attention = false;
+#else
+  constexpr bool backend_supports_grouped_query_attention = true;
+#endif
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>,
+        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {
