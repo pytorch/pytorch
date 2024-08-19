@@ -131,3 +131,23 @@ def mapping_get(obj, key, value=None):
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def instantiate_user_defined_class_object(*args, **kwargs):
+    cls = args[0]
+    other_args = args[1:]
+    obj = cls.__new__(cls, *other_args, **kwargs)
+    obj.__init__(*other_args, **kwargs)
+    return obj
+
+
+def fspath(path):
+    # Python equivalent of os.fspath
+    if isinstance(path, (str, bytes)):
+        return path
+    elif hasattr(path, "__fspath__"):
+        return path.__fspath__()
+    else:
+        raise TypeError(
+            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
+        )
