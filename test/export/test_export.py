@@ -4172,7 +4172,7 @@ def forward(self, x):
         schema = get_hop_schema(ep)
         self.assertExpectedInline(
             str(schema),
-            """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1] output""",
+            """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
@@ -5566,7 +5566,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         schema = get_hop_schema(ep)
         self.assertExpectedInline(
             str(schema),
-            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
         )
 
         cond_top_level_nn_module_stack = [
@@ -5656,7 +5656,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         schema = get_hop_schema(exported_program)
         self.assertExpectedInline(
             str(schema),
-            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",  # noqa: B950
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",  # noqa: B950
         )
 
         self.assertExpectedInline(
