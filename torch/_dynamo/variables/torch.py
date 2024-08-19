@@ -756,6 +756,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TorchFunctionModeStackVariable.register_mutation(tx)
             return tx.symbolic_torch_function_mode_stack.pop()
 
+        @register(torch._C._push_on_torch_function_stack)
+        def handle_push_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert len(args) == 1 and not kwargs
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            tx.symbolic_torch_function_mode_stack.append(args[0])
+            return ConstantVariable(None)
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
