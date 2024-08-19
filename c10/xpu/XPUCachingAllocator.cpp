@@ -60,16 +60,6 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
-void decrease_stat_array(
-    StatArray& stat_array,
-    size_t amount,
-    const StatTypes& stat_types) {
-  for_each_selected_stat_type(
-      stat_types, [&stat_array, amount](size_t stat_type) {
-        decrease_stat(stat_array[stat_type], amount);
-      });
-}
-
 struct Block;
 typedef bool (*Comparison)(const Block*, const Block*);
 bool BlockComparatorSize(const Block* a, const Block* b);
