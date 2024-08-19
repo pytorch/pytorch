@@ -1578,6 +1578,20 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, list(args), {}) for args in zip(*unpacked)]
             return variables.TupleVariable(items)
 
+    def call_filter(self, tx: "InstructionTranslator", fn, seq):
+        if seq.has_unpack_var_sequence(tx):
+            seq_unpacked = seq.unpack_var_sequence(tx)
+            try:
+                items = list(
+                    filter(
+                        lambda x: fn.call_function(tx, [x], {}).as_python_constant(),
+                        seq_unpacked,
+                    )
+                )
+                return variables.TupleVariable(items)
+            except NotImplementedError:
+                return
+
     def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
         if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
@@ -1633,7 +1647,6 @@ class BuiltinVariable(VariableTracker):
         from . import (
             ConstantVariable,
             GetAttrVariable,
-            PythonModuleVariable,
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
         )
@@ -1720,7 +1733,8 @@ class BuiltinVariable(VariableTracker):
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+        elif isinstance(obj, DummyModule):
+            # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
                 member = getattr(obj.value, name)
             else:
