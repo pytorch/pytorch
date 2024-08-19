@@ -4687,7 +4687,8 @@ class LoopNestWithSplit:
         assert self.root is not None
         loops = self.root
         for loop in loops:
-            loop.parallel = par_depth
+            if loop.offset == sympy.Integer(0):
+                loop.parallel = par_depth
         for i in range(1, par_depth):
             loops = loops[0].inner
             loops[0].collapsed = True
