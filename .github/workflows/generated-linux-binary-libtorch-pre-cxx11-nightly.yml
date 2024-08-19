@@ -51,6 +51,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -72,6 +73,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: amz2023.
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -114,6 +116,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -136,6 +139,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -179,6 +183,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -201,6 +206,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -244,6 +250,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -266,6 +273,7 @@ jobs:
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
+      runner_prefix: amz2023.
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -309,6 +317,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -415,6 +424,7 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      runner_prefix: amz2023.
       build_name: libtorch-rocm6_2-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
