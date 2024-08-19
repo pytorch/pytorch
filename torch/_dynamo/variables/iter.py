@@ -12,7 +12,6 @@ from ..exc import (
     unimplemented,
 )
 from .base import MutableLocal, VariableTracker
-from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -51,14 +50,6 @@ class ItertoolsVariable(VariableTracker):
             items = []
             for item in itertools.product(*seqs):
                 items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
-            self.value is itertools.chain
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
@@ -185,8 +176,6 @@ class ItertoolsVariable(VariableTracker):
             return tx.inline_user_function_return(
                 SourcelessBuilder.create(tx, polyfill.repeat), args, kwargs
             )
-        elif self.value is itertools.count:
-            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.dropwhile:
@@ -216,24 +205,6 @@ class RepeatIteratorVariable(IteratorVariable):
 
     # Repeat needs no mutation, clone self
     def next_variable(self, tx):
-        return self.item
-
-
-class CountIteratorVariable(IteratorVariable):
-    def __init__(self, item: int = 0, step: int = 1, **kwargs) -> None:
-        super().__init__(**kwargs)
-        if not isinstance(item, VariableTracker):
-            item = ConstantVariable.create(item)
-        if not isinstance(step, VariableTracker):
-            step = ConstantVariable.create(step)
-        self.item = item
-        self.step = step
-
-    def next_variable(self, tx):
-        assert self.mutable_local
-        tx.output.side_effects.mutation(self)
-        next_item = self.item.call_method(tx, "__add__", [self.step], {})
-        self.item = next_item
         return self.item
 
 

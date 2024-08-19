@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -92,19 +92,6 @@ IN_PLACE_DESUGARING_MAP = {
     operator.ior: operator.or_,
     operator.ixor: operator.xor,
 }
-
-
-def _polyfill_call_impl(name):
-    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
-
-    def call_fn(self, tx: "InstructionTranslator", *args, **kwargs):
-        return tx.inline_user_function_return(
-            variables.UserFunctionVariable(fn), args, kwargs
-        )
-
-    fn = getattr(polyfill, name)
-    call_fn.__name__ = f"call_{name}"
-    return call_fn
 
 
 class BuiltinVariable(VariableTracker):
@@ -1015,15 +1002,6 @@ class BuiltinVariable(VariableTracker):
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-        if self.fn is itertools.chain and name == "from_iterable":
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            obj = args[0]
-            items = []
-            for item in obj.unpack_var_sequence(tx):
-                items.extend(item.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -1606,50 +1584,6 @@ class BuiltinVariable(VariableTracker):
             except NotImplementedError:
                 return
 
-    def call_sum(self, tx: "InstructionTranslator", seq, start=_SENTINEL):
-        # Special case for sum on tuple of floats and ints
-        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
-            isinstance(x, variables.ConstantVariable)
-            and isinstance(x.value, (int, float))
-            for x in seq.items
-        ):
-            if start is self._SENTINEL:
-                return variables.ConstantVariable.create(
-                    sum(x.value for x in seq.items),
-                )
-            if isinstance(start, variables.ConstantVariable) and isinstance(
-                start.value, (int, float)
-            ):
-                return variables.ConstantVariable.create(
-                    sum((x.value for x in seq.items), start=start.value),
-                )
-        if seq.has_unpack_var_sequence(tx):
-            if start is self._SENTINEL:
-                start = variables.ConstantVariable.create(0)
-            items = seq.unpack_var_sequence(tx)
-            return BuiltinVariable(functools.reduce).call_function(
-                tx,
-                [
-                    BuiltinVariable(operator.add),
-                    variables.TupleVariable(items),
-                    start,
-                ],
-                {},
-            )
-
-    def call_reduce(
-        self, tx: "InstructionTranslator", function, iterable, initial=_SENTINEL
-    ):
-        if iterable.has_unpack_var_sequence(tx):
-            items = iterable.unpack_var_sequence(tx)
-            if initial is self._SENTINEL:
-                value, items = items[0], items[1:]
-            else:
-                value = initial
-            for element in items:
-                value = function.call_function(tx, [value, element], {})
-            return value
-
     def call_getattr(
         self,
         tx: "InstructionTranslator",
@@ -1954,22 +1888,6 @@ class BuiltinVariable(VariableTracker):
                 )
             return variables.ListVariable(items)
 
-    def call_chain(self, tx: "InstructionTranslator", *args):
-        if all(obj.has_unpack_var_sequence(tx) for obj in args):
-            items = []
-            for obj in args:
-                items.extend(obj.unpack_var_sequence(tx))
-            return variables.TupleVariable(items)
-
-    def call_islice(self, tx: "InstructionTranslator", iterable, *args):
-        if iterable.has_unpack_var_sequence(tx) and all(
-            x.is_python_constant() for x in args
-        ):
-            const_args = [x.as_python_constant() for x in args]
-            items = iterable.unpack_var_sequence(tx)
-            items = list(itertools.islice(items, *const_args))
-            return variables.TupleVariable(items)
-
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):
@@ -2122,9 +2040,6 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ):
         return a.call_method(tx, "__contains__", [b], {})
-
-    call_all = _polyfill_call_impl("all")
-    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager

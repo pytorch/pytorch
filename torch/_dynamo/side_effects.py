@@ -191,7 +191,7 @@ class SideEffects:
         return (
             inspect.getattr_static(cls, "__getattribute__", None)
             is object.__getattribute__
-        )
+        ) or (inspect.getattr_static(cls, "__getattr__", None) is None)
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
