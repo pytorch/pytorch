@@ -22,7 +22,7 @@ const std::shared_ptr<SafePyObject>& PythonTorchFunctionTLS::get_stack_at(int64_
 }
 
 int64_t PythonTorchFunctionTLS::stack_len() {
-  return pythonTorchFunctionState.stack_.size();
+  return static_cast<int64_t>(pythonTorchFunctionState.stack_.size());
 }
 
 void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disabled_state) {
