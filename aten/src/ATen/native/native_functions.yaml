@@ -1236,6 +1236,8 @@
     CompositeExplicitAutograd: copysign_out
   tags: pointwise
 
+#test
+
 - func: _lazy_clone(Tensor self) -> Tensor
   # Like clone, but the copy takes place lazily, only if either the
   # input or the output are written.
