@@ -173,7 +173,7 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self.dynamo_ctx, CompileEnabledContext):
+        if isinstance(self.dynamo_ctx, (CompileEnabledContext, OldDisableContext)):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif isinstance(self._orig_mod.forward, types.MethodType) and (
@@ -589,6 +589,64 @@ class RunOnlyContext(_TorchDynamoContext):
             torch._dynamo.mutation_guard.GenerationTracker.generation += 1
 
         super().__init__(callback=False, on_enter=on_enter)
+
+    def __reduce__(self):
+        return (self.__class__, ())
+
+
+# Old disable context used to support previous compile/disable interaction
+# where the 2 had the same priority. Used in case the new behavior (CompileEnabledContext)
+# causes unexpected problems
+class OldDisableContext(_TorchDynamoContext):
+    def __init__(self) -> None:
+        super().__init__(callback=None)
+
+    def __call__(self, fn):
+        # Earlier this code was in the base class _TorchDynamoContext. But we
+        # moved it here to have better code organization. For disable, we just
+        # want the callback to be None. We don't have to check trace_rules or
+        # create any wrapper.
+        fn = innermost_fn(fn)
+
+        if isinstance(fn, torch.nn.Module):
+            mod = fn
+            new_mod = OptimizedModule(mod, self)
+            new_mod._torchdynamo_orig_callable = mod.forward
+            return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            # Disable on init is useful for reconstruction of bytecodes where we
+            # want to prevent Dynamo from tracing into the init function. Check
+            # test_reconstruction in test_model_output.py.
+            cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
+        assert callable(fn)
+
+        callback = self.callback
+
+        @functools.wraps(fn)
+        def _fn(*args, **kwargs):
+            prior = _maybe_set_eval_frame(callback)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _maybe_set_eval_frame(prior)
+
+        _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+
+        # Save the function pointer to find the original callable while nesting
+        # of decorators.
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        return _fn
 
     def __reduce__(self):
         return (self.__class__, ())

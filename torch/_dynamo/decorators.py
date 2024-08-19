@@ -6,9 +6,14 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from . import trace_rules, variables
+from . import config, trace_rules, variables
 from .comptime import comptime
-from .eval_frame import CompileEnabledContext, innermost_fn, RunOnlyContext
+from .eval_frame import (
+    CompileEnabledContext,
+    innermost_fn,
+    OldDisableContext,
+    RunOnlyContext,
+)
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 
@@ -50,10 +55,17 @@ def disable(fn=None, recursive=True):
     but still process recursively invoked frames.
     """
     if recursive:
+        ctx = (
+            OldDisableContext()
+            if config.old_compile_disable_behavior
+            else CompileEnabledContext(False)
+        )
         if fn is not None:
+            if config.old_compile_disable_behavior:
+                fn = innermost_fn(fn)
             assert callable(fn)
-            return CompileEnabledContext(False)(fn)
-        return CompileEnabledContext(False)
+            return ctx(fn)
+        return ctx
     else:
         return skip(fn)
 
@@ -64,6 +76,8 @@ def enable(fn=None):
 
     Compilation will only occur if there was a previous `compile` call.
     """
+    if config.old_compile_disable_behavior:
+        return fn
     if fn is not None:
         assert callable(fn)
         return CompileEnabledContext(True)(fn)

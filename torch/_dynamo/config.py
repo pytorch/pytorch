@@ -374,6 +374,12 @@ enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Re-enable old torch.compile/torch._dynamo.disable behavior,
+# where compile and disable have the same priority.
+# Killswitch in case internal breaks.
+# See https://github.com/pytorch/pytorch/pull/132926.
+old_compile_disable_behavior = False
+
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]
