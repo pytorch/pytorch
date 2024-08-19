@@ -50,13 +50,9 @@ __all__ = ["MemTracker"]
 class _RefType(str, Enum):
     """Base Class for defining memory reference types, categorizing tensors based on their usage within a model."""
 
-    pass
-
 
 class _State(str, Enum):
     """Base Class for defining module state to capture snapshots ."""
-
-    pass
 
 
 class _MemRefType(_RefType):

@@ -719,7 +719,6 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-        pass
 
     # Dictionary for tensors from annotations
     kwargs: Dict[str, Any] = {}
@@ -744,7 +743,8 @@ def aot_graph_input_parser(
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
-                resolved_shape.append(int(dim))
+                if dim:
+                    resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
