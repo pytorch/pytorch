@@ -608,6 +608,9 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
+        if isinstance(self, GroupedSchedulerNode):
+            return sum(snode.get_estimated_runtime() for snode in self.snodes)
+
         buf = self.get_nodes()[0].get_outputs()[0]
         layout = buf.node.get_layout()
         dtype = buf.node.get_dtype()
@@ -615,6 +618,9 @@ class BaseSchedulerNode:
         if layout.device is not None and not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
+
+        def _is_known_0_runtime_node(node):
+            return isinstance(node, (ir.MultiOutput, ir.ResizeStorageBytes, ir.RandomSeeds))
 
         # Collective kernels
         if is_collective(self.node):
@@ -624,7 +630,8 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
-                log.info(e)
+                # if not _is_known_0_runtime_node(self.node):
+                #     log.info(f"estimated runtime: here1 returning 0 because NCCL runtime estimation fails. self: {self}. Node: {self.node}")
                 return 0
 
         elif is_wait(self.node):
@@ -637,7 +644,9 @@ class BaseSchedulerNode:
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
-        except Exception:
+        except Exception as e:
+            # if not _is_known_0_runtime_node(self.node):
+            #     log.info(f"estimated runtime: here2 returning 0 because bandwidth/flops calculation fails. self: {self}. Node: {self.node}")
             return 0
 
         if isinstance(self, ExternKernelSchedulerNode):
@@ -657,6 +666,8 @@ class BaseSchedulerNode:
                 ):
                     # Tensor has unbacked symints, we don't know how to estimate
                     # runtime for that today
+                    # if not _is_known_0_runtime_node(self.node):
+                    #     log.info(f"estimated runtime: has unbacked symints in input, returning 0! self: {self}. node: {self.node}")
                     return 0
 
                 with FakeTensorMode() as fake_mode, FlopCounterMode(
@@ -691,6 +702,8 @@ class BaseSchedulerNode:
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
 
+        # if not _is_known_0_runtime_node(self.node):
+        #     log.info(f"estimated runtime: falling back to 0 for self: {self}. node: {self.node}")
         return 0
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:

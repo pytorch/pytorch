@@ -157,7 +157,8 @@ def _schedule_for_comm(
         if len(deps) == 0:
             heapq.heappush(ready, Runnable(snode))
         for dep in deps:
-            buffer_users[dep].add(snode)
+            if dep not in snode.get_buffer_names():  # avoid circular dep
+                buffer_users[dep].add(snode)
 
     scheduled = []
 
@@ -169,6 +170,7 @@ def _schedule_for_comm(
         for buf_name in snode.get_buffer_names():
             for snode in buffer_users[buf_name]:
                 unmet_deps[snode].remove(buf_name)
+                # print(f"unmet_deps[snode]: {unmet_deps[snode]}")
                 if len(unmet_deps[snode]) == 0:
                     heapq.heappush(ready, Runnable(snode))
 
@@ -196,6 +198,7 @@ def _schedule_for_comm(
         schedule(snode)
 
         collective_cost = snode_to_cost[snode]
+        assert collective_cost > 0
         while (
             collective_cost > 0
             and (candidate := get_overlapping_candidate()) is not None
@@ -660,28 +663,28 @@ def enforce_comm_ordering_for_fsdp(
         new_order.append(snode)
         scheduled.add(snode)
 
-    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # before next AllGather's "copy_in then AG" group node
-    prev_ag_wait = None
-    for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
-        if prev_ag_wait is not None:
-            mutating_buf = next(iter(ag_group_node.get_buffer_names()))
-            for o in prev_ag_wait.get_outputs():
-                ag_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
-                )
-        prev_ag_wait = wait_group_node
+    # # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # # before next AllGather's "copy_in then AG" group node
+    # prev_ag_wait = None
+    # for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
+    #     if prev_ag_wait is not None:
+    #         mutating_buf = next(iter(ag_group_node.get_buffer_names()))
+    #         for o in prev_ag_wait.get_outputs():
+    #             ag_group_node.add_fake_dep(
+    #                 WeakDep(o.get_name(), mutating_buf=mutating_buf)
+    #             )
+    #     prev_ag_wait = wait_group_node
 
-    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # before next ReduceScatter's "copy_in then RS" group node
-    prev_rs_wait = None
-    for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
-        if prev_rs_wait is not None:
-            mutating_buf = next(iter(rs_group_node.get_buffer_names()))
-            for o in prev_rs_wait.get_outputs():
-                rs_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
-                )
-        prev_rs_wait = wait_group_node
+    # # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # # before next ReduceScatter's "copy_in then RS" group node
+    # prev_rs_wait = None
+    # for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
+    #     if prev_rs_wait is not None:
+    #         mutating_buf = next(iter(rs_group_node.get_buffer_names()))
+    #         for o in prev_rs_wait.get_outputs():
+    #             rs_group_node.add_fake_dep(
+    #                 WeakDep(o.get_name(), mutating_buf=mutating_buf)
+    #             )
+    #     prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]
