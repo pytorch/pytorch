@@ -5,7 +5,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._C import (
-    _is_torch_function_all_disabled,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
@@ -322,25 +321,8 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with BaseTorchFunctionMode(), torch._C.DisableTorchFunctionSubclass():
             with torch._C.DisableTorchFunction():
                 fn(inp)
-
             fn(inp)
-
         self.assertEqual(cnt.frame_count, 2)
-
-    def test_torch_function_all_disabled_api(self):
-        state = _is_torch_function_all_disabled()
-        self.assertFalse(state)
-
-        with torch._C.DisableTorchFunction():
-            state = _is_torch_function_all_disabled()
-            self.assertTrue(state)
-
-        state = _is_torch_function_all_disabled()
-        self.assertFalse(state)
-
-        with torch._C.DisableTorchFunctionSubclass():
-            state = _is_torch_function_all_disabled()
-            self.assertFalse(state)
 
 
 if __name__ == "__main__":
