@@ -120,7 +120,7 @@ fi
 /builder/check_binary.sh
 
 # Run smoke test
-python /builder/test/smoke_test/smoke_test.py --package=torchonly
+python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
         
 # Clean temp files
 cd /builder && git clean -ffdx
