@@ -2127,6 +2127,12 @@ class CppVecKernel(CppKernel):
             else:
                 return self.num_elems
 
+        def get_tiling_size(dtype: torch.dtype) -> int:
+            if dtype.itemsize < 4:
+                return self.tiling_factor * (4 // dtype.itemsize)
+            else:
+                return self.tiling_factor
+
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
             code = BracesBuffer()
@@ -2137,10 +2143,11 @@ class CppVecKernel(CppKernel):
                 if vec_dtype == torch.bool:
                     vec_dtype = torch.float
                 result_size = get_result_size(vec_dtype)
+                tiling_size = get_tiling_size(vec_dtype)
                 code.writeline(
-                    f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
+                    f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {tiling_size}> tmpbuf;"
                 )
-                line = f"{vec_var}.store(tmpbuf.data(), {result_size});"
+                line = f"{vec_var}.store(tmpbuf.data(), {cexpr_index(result_size)});"
                 code.writeline(line)
                 code.writeline("return tmpbuf;")
             code.writeline("()")
@@ -2152,12 +2159,15 @@ class CppVecKernel(CppKernel):
         code.writeline("[&]")
         with code.indent():
             result_size = get_result_size(dtype)
+            tiling_size = get_tiling_size(dtype)
             result_declare = (
-                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {result_size}> tmpbuf;"
+                f"__at_align__ std::array<{DTYPE_TO_CPP[dtype]}, {tiling_size}> tmpbuf;"
             )
             code.writeline(result_declare)
             if store_value:
-                code.writeline(f"{store_value}.store(tmpbuf.data(), {result_size});")
+                code.writeline(
+                    f"{store_value}.store(tmpbuf.data(), {cexpr_index(result_size)});"
+                )
             itervar_inner = sympy_index_symbol(
                 f"{self.itervars[self.tiling_idx]}_inner"
             )
@@ -2183,9 +2193,9 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if cpp_builder.is_gcc():
-                code.writeline(f"#pragma GCC unroll {cexpr_index(self.num_elems)}")
+                code.writeline(f"#pragma GCC unroll {self.tiling_factor}")
             else:
-                code.writeline(f"#pragma unroll {cexpr_index(self.num_elems)}")
+                code.writeline(f"#pragma unroll {self.tiling_factor}")
             code.writeline(
                 f"for (long {itervar_inner} = 0; "
                 + f"{itervar_inner} < {cexpr_index(self.num_elems)}; "
@@ -4548,7 +4558,11 @@ class LoopLevel:
             if self.simd_omp and self.simd_nelements > 1
             else ""
         )
-        if self.parallel:
+        # TODO: parallel dynamic tail loop
+        if self.parallel and (
+            self.offset == sympy.Integer(0)
+            or not (isinstance(self.size, sympy.Expr) and not self.size.is_number)
+        ):
             # TODO(jansel): look into chunk size and other schedules
             line1 = "#pragma omp for"
             if self.parallel > 1:
@@ -4658,8 +4672,7 @@ class LoopNestWithSplit:
         assert self.root is not None
         loops = self.root
         for loop in loops:
-            if loop.offset == sympy.Integer(0):
-                loop.parallel = par_depth
+            loop.parallel = par_depth
         for i in range(1, par_depth):
             loops = loops[0].inner
             loops[0].collapsed = True
