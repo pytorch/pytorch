@@ -19,7 +19,7 @@ from torch._guards import TracingContext
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import ObservedException, raise_observed_exception, unimplemented
+from ..exc import ObservedAttributeError, raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -882,7 +882,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             # When the dynamic lookup is necessary, e.g., threading.local
             subobj is NO_SUCH_SUBOBJ
-            # TODO(anijain2305) - Move the _tuplegetter to somewhere eslse
+            # This is somewhat ugly but no other easy way. For named tuples, field values are represented by an internal
+            # data structure called _tuplegetter.
             or isinstance(subobj, _collections._tuplegetter)
             # For __slots__ and member descriptors, directly look into the __slots__
             or (inspect.ismemberdescriptor(subobj) and name in self.value.__slots__)
@@ -893,11 +894,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and isinstance(subobj.fget, types.BuiltinFunctionType)
             )
         ):
-            # Call __getattribute__, we have already checked that this is not overridden and side-effect free.
+            # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
+            # want to call getattr because it can be user-overridden.
             try:
                 subobj = self.value.__getattribute__(name)
             except AttributeError:
-                pass
+                if isinstance(self.value, torch.nn.Module):
+                    subobj = getattr(self.value, name, NO_SUCH_SUBOBJ)
+                    return subobj
 
         return subobj
 
@@ -1097,31 +1101,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             unimplemented("hasattr with custom __getattribute__")
 
         try:
-            self._getattr_static(name)
+            self.var_getattr(tx, name)
             return variables.ConstantVariable.create(True)
-        except AttributeError:
-            # Now check in __getattr__ function
-            getattr_fn = self._check_for_getattr()
-            if isinstance(getattr_fn, types.FunctionType):
-                # Dynamo is going to trace the __getattr__ function with
-                # args=name. Set the source accordingly.
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                try:
-                    result = variables.UserMethodVariable(
-                        getattr_fn, self, source=new_source
-                    ).call_function(tx, [variables.ConstantVariable.create(name)], {})
-
-                    return variables.ConstantVariable.create(
-                        not isinstance(result, variables.DeletedVariable)
-                    )
-                except ObservedException:
-                    return variables.ConstantVariable.create(False)
-            elif getattr_fn is None:
-                return variables.ConstantVariable.create(False)
-            else:
-                unimplemented("UserDefined with non-function __getattr__")
+        except ObservedAttributeError:
+            return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
         from .builder import VariableBuilder
