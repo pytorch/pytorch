@@ -23,7 +23,7 @@ list(APPEND CMAKE_PREFIX_PATH ${CUDSS_ROOT})
 
 set(CUDSS_INCLUDE_DIR $ENV{CUDSS_INCLUDE_DIR} CACHE PATH "Folder containing NVIDIA CUDSS header files")
 
-find_path(CUDSS_INCLUDE_PATH cuDSS.h
+find_path(CUDSS_INCLUDE_PATH cudss.h
   HINTS ${CUDSS_INCLUDE_DIR}
   PATH_SUFFIXES cuda/include cuda include)
 
