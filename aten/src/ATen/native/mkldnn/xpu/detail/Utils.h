@@ -10,6 +10,7 @@
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <oneapi/dnnl/dnnl_version.h>
 
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #define ONEDNN_SUPPORT_DETERMINISTIC (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=4)
 
@@ -82,6 +83,20 @@ dnnl::memory::dims compatible_dilation(Vec&& dilation){
         *it -=1;
     }
     return ret;
+}
+
+template <typename T>
+dnnl::memory dnnl_memory_from_host_scalar(
+    T host_value,
+    Tensor& holder,
+    dnnl::engine& engine) {
+  auto options = at::TensorOptions()
+                     .dtype(c10::CppTypeToScalarType<T>::value)
+                     .device(kXPU);
+  holder = at::empty({1}, options).fill_(host_value);
+  dnnl::memory::desc md = get_onednn_md(holder);
+  dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
+  return mem;
 }
 
 } // namespace at::native::onednn
