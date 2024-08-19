@@ -47,20 +47,6 @@ static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qc
   return {src_usr_md, wgh_usr_md, dst_usr_md};
 }
 
-template <typename T>
-dnnl::memory dnnl_memory_from_host_scalar(
-    T host_value,
-    Tensor& holder,
-    dnnl::engine& engine) {
-  auto options = at::TensorOptions()
-                     .dtype(c10::CppTypeToScalarType<T>::value)
-                     .device(kXPU);
-  holder = at::empty({1}, options).fill_(host_value);
-  dnnl::memory::desc md = get_onednn_md(holder);
-  dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
-  return mem;
-}
-
 at::Tensor quantized_convolution_pt2(
     at::Tensor act,
     double act_scale,
