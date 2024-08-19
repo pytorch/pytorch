@@ -12,6 +12,7 @@ import functools
 import gc
 import inspect
 import itertools
+import os
 import random
 import unittest
 import warnings
@@ -5609,6 +5610,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         del y
         mem_after = torch.cuda.memory_allocated()
         self.assertEqual(mem_before, mem_after)
+
+    def test_os_fspath(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            os.fspath(".")
+            return torch.sin(x)
+
+        fn(torch.randn(4))
 
 
 instantiate_parametrized_tests(ReproTests)
