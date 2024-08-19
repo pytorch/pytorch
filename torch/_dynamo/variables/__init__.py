@@ -30,6 +30,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -40,7 +41,6 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
-    CountIteratorVariable,
     CycleIteratorVariable,
     IteratorVariable,
     ItertoolsVariable,
@@ -111,7 +111,6 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
-    "CountIteratorVariable",
     "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
@@ -138,6 +137,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",
