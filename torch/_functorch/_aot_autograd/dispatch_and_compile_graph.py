@@ -33,7 +33,6 @@ from .traced_function_transforms import (
     handle_effect_tokens_fn,
 )
 from .utils import (
-    add_discovered_token_in_backward_as_input,
     copy_fwd_metadata_to_bw_nodes,
     root_module_when_exporting_non_strict,
     unlift_tokens,
@@ -297,27 +296,6 @@ def aot_dispatch_autograd_graph(
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
 
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
-
-    # See Note [Side-Effectful Tokens in AOTAutograd]
-    # If forward graph does not use effectful ops with Tokens, we have not added additional token arguments before final tracing.
-    # If backward graph does use effectful ops with Tokens,
-    # we have to add additional token argument to the joint graph manually after tracing.
-    if fw_metadata.num_backward_discovered_tokens > 0:
-        add_discovered_token_in_backward_as_input(
-            fx_g, fw_metadata.num_backward_discovered_tokens
-        )
-        if aot_config.enable_log:
-            aot_graphs_effects_log.debug(
-                "%s",
-                lazy_format_graph_code(
-                    "aot_config id: %s, fw_metadata=%s, Joint graph after adding effect tokens discovered in backward",
-                    fx_g,
-                    aot_config.aot_id,
-                    include_stride=True,
-                    include_device=True,
-                    colored=True,
-                ),
-            )
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)

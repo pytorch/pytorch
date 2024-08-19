@@ -815,15 +815,15 @@ def forward(self, getitem_2, tangents_1, tangents_2):
             self.assertExpectedInline(
                 fw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_bw_token):
+def forward(self, primals_1, primals_token):
     sin = torch.ops.aten.sin.default(primals_1)
-    return (sin, primals_1, primals_bw_token)""",
+    return (sin, primals_1, primals_token)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_bw_token, tangents_1):
-    with_effects = torch.ops.higher_order.with_effects(primals_bw_token, torch.ops.aten.cos.default, primals_1);  primals_bw_token = primals_1 = None
+def forward(self, primals_1, primals_token, tangents_1):
+    with_effects = torch.ops.higher_order.with_effects(primals_token, torch.ops.aten.cos.default, primals_1);  primals_token = primals_1 = None
     getitem_1 = with_effects[1]
     mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
     getitem = with_effects[0];  with_effects = None
@@ -843,16 +843,16 @@ def forward(self, primals_1, primals_bw_token, tangents_1):
             self.assertExpectedInline(
                 fw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_2, primals_bw_token):
+def forward(self, primals_1, primals_2, primals_token):
     sin = torch.ops.aten.sin.default(primals_1)
     sin_1 = torch.ops.aten.sin.default(primals_2)
-    return (sin, sin_1, primals_1, primals_2, primals_bw_token)""",
+    return (sin, sin_1, primals_1, primals_2, primals_token)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_2, primals_bw_token, tangents_1, tangents_2):
-    with_effects = torch.ops.higher_order.with_effects(primals_bw_token, torch.ops.aten.cos.default, primals_1);  primals_bw_token = primals_1 = None
+def forward(self, primals_1, primals_2, primals_token, tangents_1, tangents_2):
+    with_effects = torch.ops.higher_order.with_effects(primals_token, torch.ops.aten.cos.default, primals_1);  primals_token = primals_1 = None
     getitem_1 = with_effects[1]
     mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
     getitem = with_effects[0];  with_effects = None

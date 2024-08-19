@@ -26,6 +26,7 @@ OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 SIDE_EFFECTS: Dict[OpType, _EffectType] = {
     torch.ops.aten._print.default: _EffectType.ORDERED,
     call_torchbind: _EffectType.ORDERED,
+    torch.ops._c10d_functional.wait_tensor.default: _EffectType.ORDERED,
 }
 
 
@@ -123,6 +124,11 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     return None
 
 
+def new_token_tensor() -> torch.Tensor:
+    # Use dtype bool to not affect Inductor dtype promotions
+    return torch.tensor([], dtype=torch.bool)
+
+
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
@@ -131,7 +137,7 @@ def with_effects_dense(
     **kwargs: Dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
-    new_token = torch.tensor([])
+    new_token = new_token_tensor()
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
@@ -223,7 +229,29 @@ def handle_effects(
         assert (
             allow_token_discovery
         ), f"Could not find a token for effect {key} which came from the function {op}"
-        tokens[key] = torch.tensor([])
+        proxy_tensor_mode = torch._C._get_dispatch_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        if proxy_tensor_mode is not None:
+            tracer = proxy_tensor_mode.tracer
+
+            from torch.fx.experimental.proxy_tensor import (
+                disable_proxy_modes_tracing,
+                track_tensor_tree,
+            )
+
+            with disable_proxy_modes_tracing():
+                token_tensor = new_token_tensor()
+
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(
+                "placeholder", "primals_token", (), {}, name="primals_token"
+            )
+            track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
+
+            tokens[key] = token_tensor
+        else:
+            tokens[key] = new_token_tensor()
+
     token = tokens[key]
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
