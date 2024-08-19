@@ -9,9 +9,6 @@ from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch.nn
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import trace_rules, variables
 from ..exc import (
     ObservedException,
@@ -23,6 +20,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
@@ -43,8 +41,13 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
+from .lazy import LazyVariableTracker
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
@@ -129,7 +132,7 @@ class NNModuleVariable(VariableTracker):
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
@@ -772,7 +775,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     Giving one graph per module class.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
@@ -1055,6 +1058,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             "_forward_hooks",
             "_forward_pre_hooks",
         ):
+            # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
+            # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(
                 self, name
             ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
@@ -1068,6 +1073,44 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                             )
                         )
                     return variables.ConstDictVariable({})
+
+        # For non-empty hook dicts, one way is to just fallback to VariableBuilder and create a ConstDictVariable.
+        # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
+        # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
+        # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
+        # ConstDictVariable to avoid any guard on the keys.
+        if (
+            self.source
+            and name
+            in (
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            )
+            and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            hooks_dict = getattr(self.value, name)
+            hooks_dict_source = AttrSource(self.source, name)
+            install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            tx.output.guard_on_key_order.add(hooks_dict_source.name())
+
+            def build_key_value(i, k, v):
+                # Make key sourceless to avoid any guard on it
+                key = variables.ConstantVariable.create(k)
+
+                # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
+                # value. This removes the reliance on the actual key value.
+                source_key = ConstDictKeySource(hooks_dict_source, i)
+                source_value = GetItemSource(hooks_dict_source, source_key)
+                value = LazyVariableTracker.create(v, source_value)
+                return key, value
+
+            result = dict(
+                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+            )
+
+            return variables.ConstDictVariable(
+                result, type(hooks_dict), source=hooks_dict_source
+            )
         return super().var_getattr(tx, name)
 
     def manually_trace_nn_module_getattr(self, tx: "InstructionTranslator", name):
@@ -1100,7 +1143,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
         assert (
             source is not None

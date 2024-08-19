@@ -4,10 +4,8 @@ import inspect
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
+from torch.fx.experimental._backward_state import BackwardState
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-from ...fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
@@ -17,6 +15,10 @@ from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class DistributedVariable(VariableTracker):
@@ -30,7 +32,7 @@ class DistributedVariable(VariableTracker):
     and hold the tracking value for the corresponding distributed object.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
@@ -272,6 +274,8 @@ class ProcessGroupVariable(DistributedVariable):
             return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
             return variables.ConstantVariable.create(self.value.size())
+        if name == "_get_backend_name":
+            return variables.ConstantVariable.create(self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -360,7 +364,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
         **options,
-    ):
+    ) -> None:
         super().__init__(**options)
         self.proxy = proxy
         self.module = module

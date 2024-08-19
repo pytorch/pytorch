@@ -478,7 +478,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -507,7 +507,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_raises_index_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -529,7 +529,7 @@ class TestStackDataset(TestCase):
 
     def test_getitems_value_error(self):
         class GetItemsDataset(Dataset):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.data = torch.randn(4)
 
             def __getitem__(self, item):
@@ -2992,7 +2992,7 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
 
 
 class StringDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.s = "12345"
 
     def __len__(self):
@@ -3029,9 +3029,7 @@ class DictDataset(Dataset):
     def __getitem__(self, ndx):
         return {
             "a_tensor": torch.empty(4, 2).fill_(ndx),
-            "another_dict": {
-                "a_number": ndx,
-            },
+            "another_dict": {"a_number": ndx},
         }
 
 
@@ -3105,7 +3103,7 @@ class TestDictDataLoader(TestCase):
 
 
 class DummyDataset(torch.utils.data.Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.data = list(range(10))
 
     def __len__(self):
@@ -3485,7 +3483,7 @@ class TestSetAffinity(TestCase):
 
 
 class ConvDataset(Dataset):
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = torch.ones(1, 1, 24000)
         # Call convolution on parent process
         self[0]

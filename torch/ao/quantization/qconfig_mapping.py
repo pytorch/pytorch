@@ -229,7 +229,7 @@ class QConfigMapping:
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # In increasing match priority:
         self.global_qconfig: QConfigAny = None
         self.object_type_qconfigs: OrderedDict[

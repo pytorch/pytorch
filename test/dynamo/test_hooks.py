@@ -8,7 +8,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
@@ -768,6 +767,59 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     # Mimic optimizer.zero_grad() to clear the gradient
                     x.grad = None
                     run(i).sum().backward()
+
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_no_recompile_on_same_hook(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fw_hook(inp):
+            return (inp[0] + 1,)
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList()
+                for i in range(10):
+                    layer = torch.nn.Linear(16, 16)
+                    layer.register_forward_pre_hook(lambda _, inp: fw_hook(inp))
+                    layer = torch.compile(layer, backend=cnts)
+                    self.layers.append(layer)
+
+            def forward(self, x):
+                for l in self.layers:
+                    x = l(x)
+                return x
+
+        mod = Mod()
+        x = torch.ones(16, 16, requires_grad=True)
+        mod(x)
+
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_state_dict_hooks(self):
+        model = torch.nn.Linear(2, 4)
+        compiled_model = torch.compile(model)
+
+        original_state_dict = model.state_dict()
+        compiled_state_dict = compiled_model.state_dict()
+
+        assert original_state_dict.keys() == compiled_state_dict.keys()
+        for key, tensor in original_state_dict.items():
+            assert tensor.equal(compiled_state_dict[key])
+
+        # check if original model can load both state dicts
+        model.load_state_dict(original_state_dict)
+        model.load_state_dict(compiled_state_dict)
+
+        # check if compile model can load both state dicts
+        compiled_model.load_state_dict(original_state_dict)
+        compiled_model.load_state_dict(compiled_state_dict)
+
+        # check backwards compatibility
+        backwards_state_dict = {
+            f"_orig_mod.{key}": tensor for key, tensor in original_state_dict.items()
+        }
+        compiled_model.load_state_dict(backwards_state_dict)
 
 
 if __name__ == "__main__":

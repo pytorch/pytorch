@@ -1,11 +1,10 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
+    CUDADeviceVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
@@ -36,6 +35,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
@@ -80,7 +80,6 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -93,11 +92,13 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
     WeakRefVariable,
 )
+
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -111,6 +112,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DefaultDictVariable",

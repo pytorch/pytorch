@@ -134,7 +134,11 @@ class OpsHandler(Protocol[T]):
         ...
 
     def to_dtype(
-        self, x: T, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        self,
+        x: T,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
     ) -> T:
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original

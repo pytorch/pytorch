@@ -32,6 +32,7 @@ import torch
 import torch._ops
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -54,7 +55,7 @@ from ..utils import (
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
-from .triton_utils import config_of, signature_to_meta
+from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
 if TYPE_CHECKING:
@@ -181,7 +182,9 @@ def user_defined_kernel_grid_fn_code(
         return (
             wrapper.codegen_shape_tuple(sympy_grid),
             wrapper.codegen_shape_tuple(
-                tuple(wrapper.generate_example_arg_value(g) for g in sympy_grid)
+                tuple(
+                    wrapper.generate_example_arg_value(g, type(g)) for g in sympy_grid
+                )
             )
             if config.triton.autotune_at_compile_time
             else None,
@@ -189,7 +192,11 @@ def user_defined_kernel_grid_fn_code(
 
     def writeline(line: str, example_grid: Optional[str] = None):
         output.writeline(line)
-        if wrapper and config.triton.autotune_at_compile_time:
+        if (
+            wrapper
+            and config.triton.autotune_at_compile_time
+            and name not in wrapper.kernel_autotune_names
+        ):
             wrapper.kernel_autotune_calls.writeline(example_grid or line)
 
     fn_name = f"grid_wrapper_for_{name}"
@@ -351,7 +358,6 @@ class MemoryPlanningLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Second pass to output code"""
-        pass
 
     def __str__(self) -> str:
         """
@@ -463,7 +469,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
-        self.kernel_autotun_names: Set[str] = set()
+        self.kernel_autotune_names: Set[str] = set()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
@@ -525,6 +531,11 @@ class WrapperCodeGen(CodeGen):
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
 
+        # intermediate tensor value printing utility
+        self.debug_printer = DebugPrinterManager(
+            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+        )
+
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
@@ -536,7 +547,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(
             f"""
                 {aot_config_comment}
-                from ctypes import c_void_p, c_long
+                from ctypes import c_void_p, c_long, c_int
                 import torch
                 import math
                 import random
@@ -558,6 +569,7 @@ class WrapperCodeGen(CodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -718,6 +730,8 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_exit(self) -> None:
         self.writeline(ExitDeviceContextManagerLine())
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.do_unindent()
 
     def generate_return(self, output_refs: List[str]) -> None:
         if output_refs:
@@ -828,8 +842,11 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
-    @dynamo_timed
     def generate(self, is_inference):
+        with dynamo_timed("WrapperCodeGen.generate"):
+            return self._generate(is_inference)
+
+    def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
@@ -1530,7 +1547,7 @@ class WrapperCodeGen(CodeGen):
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-                return arg + ".item()" if V.graph.is_unspec_arg(arg) else arg
+                return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
@@ -1544,7 +1561,7 @@ class WrapperCodeGen(CodeGen):
 
         return device_index, call_args
 
-    def generate_example_arg_value(self, arg, arg_type=None, raw_arg=None, index=None):
+    def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
             if V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
@@ -1573,9 +1590,7 @@ class WrapperCodeGen(CodeGen):
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
             return buf_name
-        elif isinstance(arg, (int, float, bool)):
-            return str(arg)
-        else:
+        elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
                 if arg in self._meta_vars:
@@ -1593,6 +1608,11 @@ class WrapperCodeGen(CodeGen):
                     fallback=config.unbacked_symint_fallback,
                 )
             )
+        elif isinstance(arg, (str, int, float, bool)):
+            return str(arg)
+        else:
+            breakpoint()
+            raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def generate_kernel_call(
         self,
@@ -1637,7 +1657,7 @@ class WrapperCodeGen(CodeGen):
                 )
                 if (
                     config.triton.autotune_at_compile_time
-                    and kernel_name not in self.kernel_autotun_names
+                    and kernel_name not in self.kernel_autotune_names
                 ):
                     # Create example args for autotune in a separate epilogue
                     assert arg_types is not None and len(call_args) == len(
@@ -1680,7 +1700,7 @@ class WrapperCodeGen(CodeGen):
                         grid_str = grid_fn
                     else:
                         grid_str = ", ".join(
-                            self.generate_example_arg_value(g) for g in grid
+                            self.generate_example_arg_value(g, type(g)) for g in grid
                         )
                         grid_str = f"{grid_fn}({grid_str})"
 
@@ -1690,7 +1710,7 @@ class WrapperCodeGen(CodeGen):
                     self.kernel_autotune_calls.writeline(
                         f"del {', '.join(arg for arg in tensor_args.values())}\n",
                     )
-                    self.kernel_autotun_names.add(kernel_name)
+                    self.kernel_autotune_names.add(kernel_name)
             else:
                 stream_ptr = f"c_void_p({stream_name})"
                 self.writeline(
@@ -1747,7 +1767,7 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        if device.type in ("cpu", "cuda"):
+        if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             return (
                 f"{name} = empty_strided_{device.type}("

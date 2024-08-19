@@ -1194,7 +1194,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1303,7 +1303,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 

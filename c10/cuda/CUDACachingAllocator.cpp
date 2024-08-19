@@ -124,6 +124,7 @@ constexpr size_t kMinLargeAlloc =
     10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 
+char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
   SHAREABLE_CUDA_EXPANDABLE_SEGMENT = 'e'
@@ -426,7 +427,9 @@ struct ExpandableSegment {
       CUmemGenericAllocationHandle handle = 0;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#ifndef FBCODE_CAFFE2
       prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       prop.location.id = static_cast<int>(device_);
@@ -1544,6 +1547,7 @@ class DeviceCachingAllocator {
   ShareableHandle shareIpcHandle(Block* block) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::ostringstream ss;
+    ss.put(SHAREABLE_HANDLE_VERSION);
     ptrdiff_t offset = 0;
     if (!block->expandable_segment_) {
       ss.put(SHAREABLE_CUDA_MALLOC);
@@ -2638,12 +2642,20 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
+#ifdef FBCODE_CAFFE2
+    bool in_fbcode = true;
+#else
+    bool in_fbcode = false;
+#endif
 
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (CUDAAllocatorConfig::expandable_segments()) {
+      // Temporarily disable checkpointing & cudagraphs internally
+    } else if (
+        CUDAAllocatorConfig::expandable_segments() &&
+        !(in_fbcode && p.pool->owner_PrivatePool)) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -3554,9 +3566,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[dev_to_access]->addPeerAccess(dev);
     std::lock_guard<std::mutex> lock(IpcMutex);
     for (auto& entry : ipcMemHandle_to_devptr) {
-      if (entry.second->device_ == dev_to_access &&
-          entry.second->expandable_segment_) {
-        entry.second->expandable_segment_->addPeer(dev);
+      if (entry.second.device_ == dev_to_access &&
+          entry.second.expandable_segment_) {
+        entry.second.expandable_segment_->addPeer(dev);
       }
     }
   }
@@ -3611,9 +3623,19 @@ class NativeCachingAllocator : public CUDAAllocator {
         c10::DeviceIndex device,
         std::string& handle,
         const DeviceCachingAllocator& allocator)
-        : device_(device), cuda_ipc_ptr_(nullptr) {
+        : device_(device),
+          expandable_segment_(nullptr),
+          cuda_ipc_ptr_(nullptr) {
+      int type = SHAREABLE_CUDA_MALLOC;
       std::istringstream ss(handle);
-      auto type = ss.get();
+      if (handle.size() != CUDA_IPC_HANDLE_SIZE) {
+        auto version = ss.get();
+        TORCH_CHECK(
+            version <= SHAREABLE_HANDLE_VERSION,
+            "received sharable handle from a future version of torch that this version does not know how to handle")
+        type = ss.get();
+      } // otherwise this is coming from an old pytorch where it has to be a raw
+        // SHARABLE_CUDA_MALLOC
       if (type == SHAREABLE_CUDA_MALLOC) {
         cudaIpcMemHandle_t cuda_handle;
         ss.read((char*)&cuda_handle, CUDA_IPC_HANDLE_SIZE);
@@ -3621,18 +3643,28 @@ class NativeCachingAllocator : public CUDAAllocator {
             &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {
         expandable_segment_ =
-            ExpandableSegment::fromShared(device, allocator.peers(), ss);
+            ExpandableSegment::fromShared(device, allocator.peers(), ss)
+                .release();
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "unexpected or illformed shareable handle type");
       }
     }
-    MemHandleCacheEntry(const MemHandleCacheEntry&) = delete;
-    MemHandleCacheEntry& operator=(const MemHandleCacheEntry&) = delete;
-    ~MemHandleCacheEntry() {
+    // this struct expects that clear is explicitly called to
+    // free resources, because we only want this code running when
+    // the shared pointer to this entry is destructed, not during
+    // deinitialization when cuda may already have been shutdown.
+    // This replicates the previous behavior of this map when it
+    // stored raw cuda_ipc_ptr_ handles.
+    void clear() {
       if (cuda_ipc_ptr_) {
         cuda::CUDAGuard device_guard(device_);
         C10_CUDA_CHECK(cudaIpcCloseMemHandle(cuda_ipc_ptr_));
+        cuda_ipc_ptr_ = nullptr;
+      }
+      if (expandable_segment_) {
+        delete expandable_segment_;
+        expandable_segment_ = nullptr;
       }
     }
     void* ptr() {
@@ -3643,19 +3675,18 @@ class NativeCachingAllocator : public CUDAAllocator {
       }
     }
     c10::DeviceIndex device_;
-    std::unique_ptr<ExpandableSegment> expandable_segment_;
+    ExpandableSegment* expandable_segment_;
     void* cuda_ipc_ptr_; // nullptr if expandable_segment_ is not null
     std::weak_ptr<void> wp_;
   };
 
-  ska::flat_hash_map<std::string, std::unique_ptr<MemHandleCacheEntry>>
-      ipcMemHandle_to_devptr;
+  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipcMemHandle_to_devptr;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
     std::lock_guard<std::mutex> lock(IpcMutex);
 
     auto iter = ipcMemHandle_to_devptr.find(handle);
     if (iter != ipcMemHandle_to_devptr.end()) {
-      auto devptr = iter->second->wp_.lock();
+      auto devptr = iter->second.wp_.lock();
       // the weak_ptr should always be valid because we delete the entry from
       // the cache when the shared_ptr is destructed, so we should never get
       // here.
@@ -3667,14 +3698,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     auto inserted = ipcMemHandle_to_devptr.insert(
         iter,
         {handle,
-         std::make_unique<MemHandleCacheEntry>(
+         MemHandleCacheEntry(
              curr_device, handle, *device_allocator[curr_device])});
     auto sp = std::shared_ptr<void>(
-        inserted->second->ptr(), [handle, this](void* ptr) {
+        inserted->second.ptr(), [handle, this](void* ptr) {
           std::lock_guard<std::mutex> deleter_lock(IpcMutex);
-          ipcMemHandle_to_devptr.erase(handle);
+          auto it = ipcMemHandle_to_devptr.find(handle);
+          TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
+          it->second.clear();
+          ipcMemHandle_to_devptr.erase(it);
         });
-    inserted->second->wp_ = sp;
+    inserted->second.wp_ = sp;
     return sp;
   }
 
@@ -3768,3 +3802,58 @@ std::atomic<CUDAAllocator*> allocator;
 BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
+
+namespace c10::cuda {
+
+// uid_ is incremented when a user creates a MemPool,
+// for example: using graph_pool_handle() or c10::cuda::MemPool().
+//
+// uuid_ is incremented when CUDAGraph creates a MemPool
+// as a result of a user not providing a pool.
+//
+// MempoolId_t of {0, 0} is used to denote when no MemPool has been
+// passed to a function, either by user or CUDAGraphs. For example,
+// default value of MempoolId_t for capture_begin function is {0, 0}.
+// That's why uid_ and uuid_ start at 1.
+std::atomic<CaptureId_t> MemPool::uid_{1};
+std::atomic<CaptureId_t> MemPool::uuid_{1};
+
+MemPool::MemPool(
+    CUDACachingAllocator::CUDAAllocator* allocator,
+    bool is_user_created)
+    : allocator_(allocator), is_user_created_(is_user_created) {
+  if (is_user_created_) {
+    id_ = {0, uid_++};
+  } else {
+    id_ = {uuid_++, 0};
+  }
+}
+
+MempoolId_t MemPool::id() {
+  return id_;
+}
+
+CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
+  return allocator_;
+}
+
+// Note that active_mempool_ is a global variable here
+// and not inside MemPoolContext class, because in windows we
+// can't use __declspec(dllexport) and __declspec(thread)
+// together: https://stackoverflow.com/a/50967977
+static thread_local MemPool* active_mempool_ = nullptr;
+
+MemPoolContext::MemPoolContext(MemPool* mempool)
+    : prev_mempool_(active_mempool_) {
+  active_mempool_ = mempool;
+}
+
+MemPoolContext::~MemPoolContext() {
+  active_mempool_ = prev_mempool_;
+}
+
+MemPool* MemPoolContext::getActiveMemPool() {
+  return active_mempool_;
+}
+
+} // namespace c10::cuda

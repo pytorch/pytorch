@@ -27,7 +27,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
-    _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
     ExportGraphSignature,
@@ -40,7 +39,8 @@ from torch.export.graph_signature import (
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
@@ -65,9 +65,6 @@ def capture_pre_autograd_graph_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
-    log.warning("Please switch to use torch.export instead.")
-    if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
 
 
 @compatibility(is_backward_compatible=False)
@@ -116,6 +113,9 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _combine_args
 
     capture_pre_autograd_graph_warning()
+
+    if sys.platform == "win32":
+        raise RuntimeError("capture_pre_autograd_graph not yet supported on Windows")
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
@@ -204,6 +204,12 @@ def capture_pre_autograd_graph(
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+
+    # Remove Proxy because they cannot be deepcopied or pickled.
+    if hasattr(module, "_buffers"):
+        torch._export.utils.remove_proxy_from_state_dict(
+            module._buffers, in_place=True
+        )
     return module
 
 
@@ -301,6 +307,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
+        flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
