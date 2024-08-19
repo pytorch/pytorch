@@ -419,6 +419,10 @@ def should_use_remote_fx_graph_cache():
         return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
     try:
         from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
     except ModuleNotFoundError:
@@ -701,6 +705,12 @@ def fx_codegen_and_compile(
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
+    if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+        import time
+
+        log.warning("Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec)
+        time.sleep(sleep_sec)
+
     with dynamo_utils.preserve_rng_state():
         if is_tf32_warning_applicable(gm):
             _warn_tf32_disabled()
@@ -1511,6 +1521,7 @@ def compile_fx(
                 decompositions=decompositions,
                 partition_fn=partition_fn,
                 keep_inference_input_mutations=True,
+                cudagraphs=cudagraphs,
             )(model_, example_inputs_)
 
 

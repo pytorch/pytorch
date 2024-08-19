@@ -1039,9 +1039,7 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return (
-        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
-    )
+    return config.max_autotune or config.max_autotune_gemm
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
@@ -1519,6 +1517,10 @@ def reduction_num_outputs(reduction_type):
 
 def is_linux() -> bool:
     return platform.system() == "Linux"
+
+
+def is_windows():
+    return sys.platform == "win32"
 
 
 def has_free_symbols(itr: Iterable[Any]):
