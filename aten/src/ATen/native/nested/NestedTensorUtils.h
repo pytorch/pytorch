@@ -25,8 +25,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct NestedTensorImpl;
 
 // The following functions are used to construct nested tensors from buffers and
@@ -220,8 +219,8 @@ namespace impl {
 template <typename T>
 struct NestedNode {
   NestedNode() = delete;
-  explicit NestedNode(std::vector<T>&& children)
-      : _is_leaf(false), _children(children) {}
+  explicit NestedNode(std::vector<T> children)
+      : _is_leaf(false), _children(std::move(children)) {}
   explicit NestedNode(TensorList children)
       : _is_leaf(false), _children(children.vec()) {}
   // NestedNode(NestedNode&) = delete;
@@ -446,5 +445,4 @@ inline at::Tensor map_nested_tensor(F&& fn, A... a) {
       std::nullopt);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
