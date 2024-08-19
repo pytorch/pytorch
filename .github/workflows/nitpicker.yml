@@ -23,7 +23,7 @@ jobs:
     - uses: ethanis/nitpicker@v1
       with:
         nitpicks: '.github/nitpicks.yml'
-        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        token: "${{ secrets.GITHUB_TOKEN }}"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
