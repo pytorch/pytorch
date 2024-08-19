@@ -40,7 +40,6 @@ from .utils import (
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
-aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 
 
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:

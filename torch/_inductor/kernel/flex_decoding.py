@@ -13,11 +13,11 @@ from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from .flex_attention import (
-    compute_forward_block,
+    compute_forward_block_mn,
+    compute_forward_inner,
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
-    fwd_compute_block_mn,
 )
 
 
@@ -185,6 +185,7 @@ flex_decoding_template = TritonTemplate(
     offs_n = tl.arange(0, BLOCK_N) + off_n
 
     acc, l_i, m_i = forward_inner(
+        {{gen_argdefs()}},
         q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
@@ -194,7 +195,6 @@ flex_decoding_template = TritonTemplate(
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
         MATMUL_PRECISION,
-        {{gen_argdefs()}},
         IS_FULL_BLOCKS=False,
     )
 
@@ -230,6 +230,7 @@ flex_decoding_template = TritonTemplate(
         offs_n = tl.arange(0, BLOCK_N) + off_n
 
         acc, l_i, m_i = forward_inner(
+            {{gen_argdefs()}},
             q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
@@ -239,7 +240,6 @@ flex_decoding_template = TritonTemplate(
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
             MATMUL_PRECISION,
-            {{gen_argdefs()}},
             IS_FULL_BLOCKS=True,
         )
 
@@ -284,9 +284,9 @@ flex_decoding_template = TritonTemplate(
     acc = acc.reshape(G, BLOCK_M_PER_HQ, BLOCK_DMODEL)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
-    + compute_forward_block
+    + compute_forward_inner
     + compute_next_offset_func
-    + fwd_compute_block_mn,
+    + compute_forward_block_mn,
 )
 
 
