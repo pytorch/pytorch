@@ -16753,12 +16753,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_jit_alias_remapping",
             ),
-            # TensorIterator does not support symbolic shapes.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestEagerFusionOpInfo",
-                "test_aot_autograd_symbolic_exhaustive",
-            ),
         ),
     ),
     BinaryUfuncInfo(
@@ -16778,12 +16772,6 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestJit",
                 "test_jit_alias_remapping",
-            ),
-            # TensorIterator does not support symbolic shapes.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestEagerFusionOpInfo",
-                "test_aot_autograd_symbolic_exhaustive",
             ),
         ),
     ),
