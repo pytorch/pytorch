@@ -3167,13 +3167,14 @@ class CppVecKernelChecker(CppVecKernel):
 
 def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
-    Returns the low precision float data type (torch.float16/torch.bfloat16) if all the
-    nodes can codegen with this data type. Otherwise returns None.
+    Returns the low precision float data type (torch.float16/torch.bfloat16) contained in the nodes
+    and if all the nodes can codegen with this data type without converting tp fp32.
+    Otherwise returns None and True.
     """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
     _lowp_fp_type: Optional[torch.dtype] = None
-    all_nodes_support_lowp = False
+    _use_fp32 = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
             if _node.op == "placeholder" or _node.target in (
@@ -3190,25 +3191,23 @@ def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bo
                 "neg",
                 "output",
             ]:
-                all_nodes_support_lowp = False
+                _use_fp32 = True
 
             if hasattr(_node, "meta") and _node.meta:
                 assert OptimizationContext.key in _node.meta
                 opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
                 if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
-                    all_nodes_support_lowp = False
-                elif _lowp_fp_type:
+                    _use_fp32 = True
+                elif _lowp_fp_type is not None:
                     if _lowp_fp_type != opt_ctx.dtype:
-                        warnings.warn(
-                            "bf16 and fp16 are mixed in the scheduler node."
-                        )
-                        return None, False
+                        warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
+                        return None, True
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:
-                all_nodes_support_lowp = False
+                _use_fp32 = True
 
-    return _lowp_fp_type, all_nodes_support_lowp
+    return _lowp_fp_type, _use_fp32
 
 
 class TilingSelect:
@@ -3462,7 +3461,10 @@ class CppKernelProxy(CppKernel):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
-        return get_loop_body_lowp_fp(scheduler_node._body)[1]
+        return (
+            get_loop_body_lowp_fp(scheduler_node._body)[0] is not None
+            and not get_loop_body_lowp_fp(scheduler_node._body)[1]
+        )
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
