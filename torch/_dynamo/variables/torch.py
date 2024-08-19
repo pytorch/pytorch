@@ -763,7 +763,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
             tx.symbolic_torch_function_mode_stack.append(args[0])
-            return ConstantVariable(None)
+            return ConstantVariable.create(None)
+
+        @register(torch._C._len_torch_function_stack)
+        def handle_len_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
 
         @register(torch.set_default_device)
         def handle_set_default_device(
