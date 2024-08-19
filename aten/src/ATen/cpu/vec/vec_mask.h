@@ -2,7 +2,6 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
-
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 

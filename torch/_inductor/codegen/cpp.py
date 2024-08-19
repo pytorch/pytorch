@@ -7,6 +7,7 @@ import logging
 import math
 import re
 import sys
+import warnings
 from copy import copy, deepcopy
 from enum import Enum
 from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
@@ -2442,9 +2443,9 @@ class CppVecKernel(CppKernel):
                 )
                 is_bool = dtype == torch.bool
                 # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = "float" if is_bool else DTYPE_TO_CPP[dtype]
-                vec = f"at::vec::Vectorized<{vec_dtype}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{vec_dtype}>"
+                vec_dtype = torch.float if is_bool else dtype
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
@@ -2472,6 +2473,8 @@ class CppVecKernel(CppKernel):
             if out_dtype.is_floating_point
             else torch.int64
         )
+        out_num_vectors = V.kernel._get_num_vectors(out_dtype)
+        src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2482,9 +2485,15 @@ class CppVecKernel(CppKernel):
             # Vertical reduction
             if out_dtype != dtype:
                 converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                code.writeline(
-                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                )
+                if src_num_vectors == out_num_vectors == 1:
+                    code.writeline(
+                        f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                    )
+                else:
+                    code.writeline(
+                        f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
+                        f"{out_num_vectors},{DTYPE_TO_CPP[dtype]},{src_num_vectors}>({value});"
+                    )
                 value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
@@ -3156,7 +3165,7 @@ class CppVecKernelChecker(CppVecKernel):
         return self
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
+def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision float data type (torch.float16/torch.bfloat16) if all the
     nodes can codegen with this data type. Otherwise returns None.
@@ -3164,7 +3173,7 @@ def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
     _lowp_fp_type: Optional[torch.dtype] = None
-
+    all_nodes_support_lowp = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
             if _node.op == "placeholder" or _node.target in (
@@ -3181,23 +3190,25 @@ def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Optional[torch.dtype]:
                 "neg",
                 "output",
             ]:
-                return None
+                all_nodes_support_lowp = False
 
             if hasattr(_node, "meta") and _node.meta:
                 assert OptimizationContext.key in _node.meta
                 opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
                 if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
-                    return None
-                if _lowp_fp_type:
-                    assert (
-                        _lowp_fp_type == opt_ctx.dtype
-                    ), "do not support bf16/fp16 mix"
+                    all_nodes_support_lowp = False
+                elif _lowp_fp_type:
+                    if _lowp_fp_type != opt_ctx.dtype:
+                        warnings.warn(
+                            "bf16 and fp16 are mixed in the scheduler node."
+                        )
+                        return None, False
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:
-                return None
+                all_nodes_support_lowp = False
 
-    return _lowp_fp_type
+    return _lowp_fp_type, all_nodes_support_lowp
 
 
 class TilingSelect:
@@ -3234,9 +3245,9 @@ class TilingSelect:
         assert loop_bodies is not None
 
         dtype = torch.float
-        _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])
+        _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
-            (get_loop_body_lowp_fp(loop_body) == _lowp_fp_dtype)
+            (get_loop_body_lowp_fp(loop_body)[0] == _lowp_fp_dtype)
             for loop_body in loop_bodies[1:]
         ):
             dtype = _lowp_fp_dtype
@@ -3438,7 +3449,7 @@ class CppKernelProxy(CppKernel):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
-        return get_loop_body_lowp_fp(scheduler_node._body) is not None
+        return get_loop_body_lowp_fp(scheduler_node._body)[1]
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
