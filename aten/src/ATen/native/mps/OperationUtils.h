@@ -86,7 +86,10 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
 MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
 MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
 
+MPSNDArray* getMPSNDArray(const at::Tensor& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
+MPSNDArray* getMPSNDArray(const at::Tensor& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
+Tensor getTensorView(const Tensor& t, MPSShape* shape);
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
@@ -98,8 +101,9 @@ class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr), _tensor(Tensor()) {}
   Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr), _tensor(Tensor()) {}
+  Placeholder(MPSGraphTensor* mpsGraphTensor, MPSNDArray* mpsNDArray);
   Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr,
-              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid);
+              bool gatherTensorData = true, MPSDataType dataType = MPSDataTypeInvalid, bool useMPSStridedAPI = true);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -452,7 +456,8 @@ inline bool supportedFloatingOrComplexType(const Tensor& t) {
 
 
 inline bool needsGather(const Tensor& t) {
-  return !t.is_contiguous() || t.storage_offset();
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset()) ;
 }
 
 } // namespace at::native::mps
