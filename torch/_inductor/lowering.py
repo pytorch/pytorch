@@ -2018,8 +2018,7 @@ def bucketize(
         V.graph.has_feature(input, BackendFeature.BUCKETIZE)
         and V.graph.has_feature(boundaries, BackendFeature.BUCKETIZE)
     ):
-        if isinstance(input, TensorBox):
-            return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
             )
         
