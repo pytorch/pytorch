@@ -443,7 +443,7 @@ class SetVariable(ConstDictVariable):
     ) -> "VariableTracker":
         from . import ListVariable, TupleVariable
 
-        # We foward the calls to the dictionary model
+        # We forward the calls to the dictionary model
         if name == "add":
             assert not kwargs
             assert len(args) == 1

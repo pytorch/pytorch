@@ -3306,6 +3306,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    def test_add_global_set(self):
+        ss = set()
+
+        # Add tests that expected guards are inserted (follow animesh tests)
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            ss.add(x)
+            return x
+
+        self.assertEqual(fn(torch.ones(1)), torch.ones(1))
+
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
