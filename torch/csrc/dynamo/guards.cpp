@@ -1,3 +1,6 @@
+#include <ATen/PythonTorchFunctionTLS.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/core/impl/PyInterpreter.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -2510,6 +2513,68 @@ std::unique_ptr<GuardManager> make_guard_manager(
   return std::make_unique<GuardManager>(root, std::move(source));
 }
 
+class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
+ public:
+  TORCH_FUNCTION_MODE_STACK(
+      const py::list& initial_stack,
+      const py::list& ignored_types,
+      py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _ref_stack(),
+        _ignored_types() {
+    Py_ssize_t len = PyList_Size(initial_stack.ptr());
+    for (Py_ssize_t idx = 0; idx < len; idx++) {
+      PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
+      this->_ref_stack.push_back(Py_TYPE(mode));
+    }
+
+    len = PyList_Size(ignored_types.ptr());
+    for (Py_ssize_t idx = 0; idx < len; idx++) {
+      PyObject* type_obj =
+          PyList_GetItem(ignored_types.ptr(), idx); // borrowed ref
+      if (PyType_Check(type_obj) == 0) {
+        PyErr_SetString(
+            PyExc_TypeError, "ignored_types should contain a list of types");
+        return;
+      }
+      PyTypeObject* type = (PyTypeObject*)type_obj;
+      this->_ignored_types.insert(type);
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, only used to satisfy the interface
+    size_t ref_ind = 0;
+    int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t ref_stack_size = this->_ref_stack.size();
+
+    for (int64_t idx = 0; idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+
+      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      // skip ignored types
+      if (this->_ignored_types.count(mode_type) > 0) {
+        continue;
+      }
+      // if we already have more non-ignored modes than the ref stack
+      // or if the mode doesn't match at the current index, return false
+      else if (
+          (ref_stack_size == 0) || (ref_ind > ref_stack_size - 1) ||
+          mode_type != _ref_stack[ref_ind]) {
+        return false;
+      }
+      ref_ind++;
+    }
+
+    return ref_ind == this->_ref_stack.size();
+  }
+
+ private:
+  std::vector<PyTypeObject*> _ref_stack;
+  std::set<PyTypeObject*> _ignored_types;
+};
+
 class TENSOR_MATCH : public LeafGuard {
  public:
   TENSOR_MATCH(
@@ -3604,6 +3669,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<py::list>())
       .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
+  py::class_<
+      TORCH_FUNCTION_MODE_STACK,
+      LeafGuard,
+      std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
+      py_m, "TORCH_FUNCTION_MODE_STACK")
+      .def(py::init<py::list, py::list, py::list>())
+      .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
@@ -3828,6 +3900,15 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<GLOBAL_STATE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_torch_function_mode_stack_guard",
+          [](GuardManager& self,
+             const py::list& initial_stack,
+             const py::list& ignored_types,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
+                initial_stack, ignored_types, std::move(verbose_code_parts)));
           })
       .def(
           "add_data_ptr_guard",
