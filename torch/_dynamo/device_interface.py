@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
@@ -287,6 +288,16 @@ class CpuDeviceProperties:
 
 
 class CpuInterface(DeviceInterface):
+    class Event(_EventBase):
+        def __init__(self, enable_timing=True):
+            self.time = 0
+
+        def elapsed_time(self, end_event) -> float:
+            return (end_event.time - self.time) * 1000
+
+        def record(self):
+            self.time = time.perf_counter()
+
     @staticmethod
     def is_available() -> bool:
         return True

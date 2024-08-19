@@ -667,15 +667,12 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        if device_interface.current_device().type == "cpu":
-            return benchmarker.benchmark_cpu(kernel_call)
-        else:
-            if with_profiler:
-                from torch._inductor.utils import do_bench_using_profiling
+        if with_profiler:
+            from torch._inductor.utils import do_bench_using_profiling
 
-                return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
+            return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-            return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark(kernel_call, fn_args=(), fn_kwargs={}, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
