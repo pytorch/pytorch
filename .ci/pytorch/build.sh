@@ -176,7 +176,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  export USE_XPU=1
+  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
+  export USE_KINETO=0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -228,6 +229,10 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+  export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
 # Do not change workspace permissions for ROCm CI jobs

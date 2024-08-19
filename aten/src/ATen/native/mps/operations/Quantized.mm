@@ -60,12 +60,18 @@ kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
   const uint N = sizes.x;
-  const uint K = sizes.y;
+  const uint K_int32 = sizes.y;
   const uint n = thread_index.x; // 0..N-1
-  const uint k2 = thread_index.y; // 0..K/2-1
-  int32_t src_val0 = W[n * K + 2 * k2];
-  int32_t src_val1 = W[n * K + 2 * k2 + 1];
-  outputData[n * (K / 2) + k2] = (uint8_t(src_val1) << 4) | uint8_t(src_val0);
+  const uint k = thread_index.y; // 0..K_int32-1
+  int32_t src_val = W[n * K_int32 + k];
+  uint8_t src_val0 = (uint8_t)((src_val & 0xFF000000) >> 24);
+  uint8_t src_val1 = (uint8_t)((src_val & 0x00FF0000) >> 16);
+  uint8_t src_val2 = (uint8_t)((src_val & 0x0000FF00) >> 8);
+  uint8_t src_val3 = (uint8_t)(src_val & 0x000000FF);
+  outputData[n * K_int32 * 4 + k * 4] = ((src_val3 & 0xF) << 4) | (src_val3 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 1] = ((src_val2 & 0xF) << 4) | (src_val2 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 2] = ((src_val1 & 0xF) << 4) | (src_val1 >> 4);
+  outputData[n * K_int32 * 4 + k * 4 + 3] = ((src_val0 & 0xF) << 4) | (src_val0 >> 4);
 }
 
 /*
@@ -165,22 +171,16 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   // affecting performance. This is the trick applied in MLX kernels.
   float4 act_div_scales = {1.f, 1 / 16.f, 1 / 256.f, 1 / 4096.f};
 
-  // Find specific group to which channels handled by this thread
-  // belong.
-  uint k_block_index = k / group_size;
-  // Since scales_and_zeros are packed as [num_groups, N, 2].
-  // Finding a specific's group's scales and zero points requires jump by factor
-  // of N*2
-  uint scales_group_offset = (k_block_index * N + n) * 2;
-  uint zeros_gruop_offset = scales_group_offset + 1;
-  const uint scales_jump =
-      N * 2 *
-      (k_jump /
-       group_size); /* the last term accounts for identifying the group this
-                      thread will have to process in each iteration. This mean
-                      each iteration it must jump to a different group. Thus
-                      k_jump must be > group_size */
   for (; k < K; k += k_jump) {
+    // Find specific group to which channels handled by this thread
+    // belong.
+    uint k_block_index = k / group_size;
+    // Since scales_and_zeros are packed as [num_groups, N, 2].
+    // Finding a specific's group's scales and zero points requires jump by factor
+    // of N*2
+    uint scales_group_offset = (k_block_index * N + n) * 2;
+    uint zeros_gruop_offset = scales_group_offset + 1;
+
     const T scale0 = scales_and_zeros[scales_group_offset];
     // Adding zero point results in 10% perf penalty.
     const T zero0 = scales_and_zeros[zeros_gruop_offset] - scale0 * T(8);
@@ -193,9 +193,6 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
 
     const T scale3 = scales_and_zeros[scales_group_offset + 6];
     const T zero3 = scales_and_zeros[zeros_gruop_offset + 6] - scale3 * T(8);
-
-    scales_group_offset += scales_jump;
-    zeros_gruop_offset += scales_jump;
 
     const float4 zeros = float4(zero0, zero1, zero2, zero3);
 
@@ -240,9 +237,9 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   int4pack_mm<DTYPE, GSIZE>(                                                   \
       constant DTYPE * A [[buffer(0)]], constant uchar * B [[buffer(1)]],      \
       constant DTYPE * scales_and_zeros [[buffer(2)]],                         \
-      device DTYPE * output_data [[buffer(3)]],                                 \
+      device DTYPE * output_data [[buffer(3)]],                                \
       constant uint3 & sizes [[buffer(4)]],                                    \
-      uint3 thread_index [[thread_position_in_grid]],                           \
+      uint3 thread_index [[thread_position_in_grid]],                          \
       uint tid_in_simdgroup [[thread_index_in_simdgroup]])
 
 INSTANTIATE_INT4MV(float, 32);
@@ -717,7 +714,7 @@ INSTANTIATE_MV(bfloat);
 
 Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
   TORCH_CHECK(in.dim() == 2, __func__, " : expect weight to be 2D tensor.");
-  TORCH_CHECK(in.dtype() == at::kInt, __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(in.dtype() == at::kByte, __func__, " : expect weight to be kByte.");
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
               __func__,
               " : innerKTiles need to be 2, 4, or 8, got ",
@@ -725,21 +722,21 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
-  auto K = weight.size(1);
+  auto Kdiv2 = weight.size(1);
+  auto K = Kdiv2 * 2;
 
   // Create fake shapes for cpu. The meta registration in dynamo requires
   // operator has the same output shape for each device. So creating a fake
   // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
   auto weight_packed = at::empty({N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2},
                                  at::TensorOptions().dtype(at::kInt).device(at::kMPS));
-
   MPSStream* mpsStream = getCurrentMPSStream();
-  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(K), 0, 0};
+  std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N), static_cast<uint32_t>(Kdiv2 / 4), 0, 0};
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCaptureEnabled()) {
-        getMPSProfiler().startCapture(fmt::format("weight_to_int4pack_{}x{}", N, K), mpsStream);
+        getMPSProfiler().startCapture(fmt::format("weight_to_int4pack_{}x{}", N, Kdiv2), mpsStream);
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
@@ -749,8 +746,8 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, weight, 0);
       mtl_setBuffer(computeEncoder, weight_packed, 1);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:2];
-      [computeEncoder dispatchThreads:MTLSizeMake(N, K / 2, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      mtl_setBytes(computeEncoder, sizes, 2);
+      [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2 / 4, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);
@@ -808,7 +805,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
       mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, sizes, 4);
       [computeEncoder dispatchThreads:MTLSizeMake(N / 4 * 32, 1, M) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
@@ -863,7 +860,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, scales, 2);
       mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_setBytes(computeEncoder, sizes, 4);
       if (M < 12) {
         [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
         [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, M, 1)

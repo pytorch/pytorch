@@ -34,12 +34,17 @@ on:
         default: "5.2"
         description: |
           List of CUDA architectures CI build should target.
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: Prefix for runner label
       runner:
         required: false
         type: string
         default: "linux.2xlarge"
         description: |
-          List of CUDA architectures CI build should target.
+          Label of the runner this job should run on.
       test-matrix:
         required: false
         type: string
@@ -91,7 +96,7 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -228,7 +233,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build != 'true'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -236,9 +241,9 @@ jobs:
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
 
-      - name: Store PyTorch Build Artifacts on S3
+      - name: Store PyTorch Build Artifacts on S3 for split build
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build == 'true'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build
         with:
           name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14

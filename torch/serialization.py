@@ -5,6 +5,7 @@ import functools
 import io
 import os
 import pickle
+import re
 import shutil
 import struct
 import sys
@@ -26,7 +27,7 @@ from typing import (
     Type,
     Union,
 )
-from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
+from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -56,6 +57,7 @@ __all__ = [
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",
+    "safe_globals",
 ]
 
 
@@ -227,6 +229,31 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
         #          [-0.8234,  2.0500, -0.3657]])
     """
     _weights_only_unpickler._add_safe_globals(safe_globals)
+
+
+class safe_globals(_weights_only_unpickler._safe_globals):
+    r"""Context-manager that adds certain globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals: List of globals for weights_only load.
+
+    Example:
+        >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
+        >>> import tempfile
+        >>> class MyTensor(torch.Tensor):
+        ...     pass
+        >>> t = MyTensor(torch.randn(2, 3))
+        >>> with tempfile.NamedTemporaryFile() as f:
+        ...     torch.save(t, f.name)
+        # Running `torch.load(f.name, weights_only=True)` will fail with
+        # Unsupported global: GLOBAL __main__.MyTensor was not an allowed global by default.
+        # Check the code and make sure MyTensor is safe to be used when loaded from an arbitrary checkpoint.
+        ...     with torch.serialization.safe_globals([MyTensor]):
+        ...         torch.load(f.name, weights_only=True)
+        # MyTensor([[-0.5024, -1.8152, -0.5455],
+        #          [-0.8234,  2.0500, -0.3657]])
+        >>> assert torch.serialization.get_safe_globals() == []
+    """
 
 
 def _is_zipfile(f) -> bool:
@@ -522,7 +549,7 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
+def _is_path(name_or_buffer) -> TypeIs[Union[str, os.PathLike]]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
@@ -738,7 +765,7 @@ def save(
         >>> # xdoctest: +SKIP("makes cwd dirty")
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
-        >>> torch.save(x, 'tensor.pt')
+        >>> torch.save(x, "tensor.pt")
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
@@ -766,7 +793,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages = {}
+    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -1087,32 +1114,64 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt', weights_only=True)
+        >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
+        ... )
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     weights_only=True,
+        ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
-        >>> with open('tensor.pt', 'rb') as f:
+        >>> with open("tensor.pt", "rb") as f:
         ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
-        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
+        >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
-        " will likely succeed, but it can result in arbitrary code execution."
-        " Do it only if you get the file from a trusted source. Alternatively, to load"
-        " with `weights_only` please check the recommended steps in the following error message."
-        " WeightsUnpickler error: "
+        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "but it can result in arbitrary code execution. Do it only if you got the file from a "
+        "trusted source."
     )
+    DOCS_MESSAGE = (
+        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
+        "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
+    )
+
+    def _get_wo_message(message: str) -> str:
+        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+        blocklist_pattern = r"whose module (\S+) is blocked"
+        has_blocklist = re.search(blocklist_pattern, message) is not None
+        if has_unsafe_global:
+            updated_message = (
+                "Weights only load failed. This file can still be loaded, to do so you have two options, "
+                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
+                f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
+                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
+                + message
+            )
+        else:
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blocklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+            updated_message += message
+        return updated_message + DOCS_MESSAGE
+
     if weights_only is None:
         weights_only, warn_weights_only = False, True
     else:
@@ -1199,8 +1258,8 @@ def load(
                             overall_storage=overall_storage,
                             **pickle_load_args,
                         )
-                    except RuntimeError as e:
-                        raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+                    except pickle.UnpicklingError as e:
+                        raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
                     map_location,
@@ -1223,8 +1282,8 @@ def load(
                     _weights_only_unpickler,
                     **pickle_load_args,
                 )
-            except RuntimeError as e:
-                raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+            except pickle.UnpicklingError as e:
+                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
         )

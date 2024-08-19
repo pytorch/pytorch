@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
+
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -140,7 +142,6 @@ def disallow_in_graph(fn):
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
-    pass
 
 
 def forbid_in_graph(fn):
@@ -165,6 +166,7 @@ def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
     attrs, ctx = t.__tensor_flatten__()
+    assert isinstance(t, torch.Tensor)
     for attr in attrs:
         inner = getattr(t, attr)
         if inner.dim() == t.dim():
@@ -345,7 +347,6 @@ def _allow_in_graph_einops():
         )
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
-        pass
     except ImportError:
         # einops <= 0.6.1
         allow_in_graph(einops.rearrange)

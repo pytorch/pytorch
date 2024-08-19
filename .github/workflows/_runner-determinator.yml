@@ -54,11 +54,40 @@ jobs:
       # Hardcoding below is temporary for testing ALI runners
       # This file below should match the script found in .github/scripts/runner_determinator.py
       - name: Hardcode runner-determinator script
+        id: hardcode-script
         run: |
           cat <<EOF > runner_determinator.py
-          import json
+          # flake8: noqa: G004
+
+          """
+          This runner determinator is used to determine which set of runners to run a
+          GitHub job on. It uses the first comment of a GitHub issue (by default
+          https://github.com/pytorch/test-infra/issues/5132) as a user list to determine
+          which users will get their jobs to run on experimental runners. This user list
+          is also a comma separated list of additional features or experiments which the
+          user could be opted in to.
+
+          The user list has the following rules:
+
+          - Users are GitHub usernames with the @ prefix
+          - If the first line is a "*" then all users will use the new runners
+          - If the first line is a "!" then all users will use the old runners
+          - Each user is also a comma-separated list of features/experiments to enable
+          - A "#" prefix indicates the user is opted out of the new runners but is opting
+            into features/experiments.
+
+          Example user list:
+
+              @User1
+              @User2,amz2023
+              #@UserOptOutOfNewRunner,amz2023
+          """
+
+          import logging
+          import os
           from argparse import ArgumentParser
-          from typing import Any, Iterable, Tuple
+          from logging import LogRecord
+          from typing import Any, Iterable
 
           from github import Auth, Github
           from github.Issue import Issue
@@ -66,9 +95,56 @@ jobs:
 
           WORKFLOW_LABEL_META = ""  # use meta runners
           WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
-          LABEL_TYPE_KEY = "label_type"
-          MESSAGE_KEY = "message"
-          MESSAGE = ""  # Debug message to return to the caller
+          WORKFLOW_LABEL_LF_CANARY = "lf.c."  # use canary runners from the linux foundation
+
+          RUNNER_AMI_LEGACY = ""
+          RUNNER_AMI_AMZ2023 = "amz2023"
+
+          GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
+          GH_OUTPUT_KEY_AMI = "runner-ami"
+          GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
+
+
+          class ColorFormatter(logging.Formatter):
+              """Color codes the log messages based on the log level"""
+
+              COLORS = {
+                  "WARNING": "\033[33m",  # Yellow
+                  "ERROR": "\033[31m",  # Red
+                  "CRITICAL": "\033[31m",  # Red
+                  "INFO": "\033[0m",  # Reset
+                  "DEBUG": "\033[0m",  # Reset
+              }
+
+              def format(self, record: LogRecord) -> str:
+                  log_color = self.COLORS.get(record.levelname, "\033[0m")  # Default to reset
+                  record.msg = f"{log_color}{record.msg}\033[0m"
+                  return super().format(record)
+
+
+          handler = logging.StreamHandler()
+          handler.setFormatter(ColorFormatter(fmt="%(levelname)-8s: %(message)s"))
+
+          log = logging.getLogger(os.path.basename(__file__))
+          log.addHandler(handler)
+          log.setLevel(logging.INFO)
+
+
+          def set_github_output(key: str, value: str) -> None:
+              """
+              Defines outputs of the github action that invokes this script
+              """
+              if not GITHUB_OUTPUT:
+                  # See https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/ for deprecation notice
+                  log.warning(
+                      "No env var found for GITHUB_OUTPUT, you must be running this code locally. Falling back to the deprecated print method."
+                  )
+                  print(f"::set-output name={key}::{value}")
+                  return
+
+              with open(GITHUB_OUTPUT, "a") as f:
+                  log.info(f"Setting output: {key}='{value}'")
+                  f.write(f"{key}={value}\n")
 
 
           def parse_args() -> Any:
@@ -149,45 +225,82 @@ jobs:
               return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
-          def get_workflow_type(
-              issue: Issue, workflow_requestors: Iterable[str]
-          ) -> Tuple[str, str]:
+          def get_workflow_type(issue: Issue, workflow_requestors: Iterable[str]) -> str:
               try:
                   first_comment = issue.get_comments()[0].body.strip("\n\t ")
 
                   if first_comment[0] == "!":
-                      MESSAGE = "LF Workflows are disabled for everyone. Using meta runners."
-                      return WORKFLOW_LABEL_META, MESSAGE
+                      log.info("LF Workflows are disabled for everyone. Using meta runners.")
+                      return WORKFLOW_LABEL_META
                   elif first_comment[0] == "*":
-                      MESSAGE = "LF Workflows are enabled for everyone. Using LF runners."
-                      return WORKFLOW_LABEL_LF, MESSAGE
+                      log.info("LF Workflows are enabled for everyone. Using LF runners.")
+                      return WORKFLOW_LABEL_LF
                   else:
                       all_opted_in_users = {
-                          usr_raw.strip("\n\t@ ") for usr_raw in first_comment.split()
+                          usr_raw.strip("\n\t@ ").split(",")[0]
+                          for usr_raw in first_comment.split()
                       }
                       opted_in_requestors = {
                           usr for usr in workflow_requestors if usr in all_opted_in_users
                       }
                       if opted_in_requestors:
-                          MESSAGE = f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
-                          return WORKFLOW_LABEL_LF, MESSAGE
+                          log.info(
+                              f"LF Workflows are enabled for {', '.join(opted_in_requestors)}. Using LF runners."
+                          )
+                          return WORKFLOW_LABEL_LF
                       else:
-                          MESSAGE = f"LF Workflows are disabled for {', '.join(workflow_requestors)}. Using meta runners."
-                          return WORKFLOW_LABEL_META, MESSAGE
+                          log.info(
+                              f"LF Workflows are disabled for {', '.join(workflow_requestors)}. Using meta runners."
+                          )
+                          return WORKFLOW_LABEL_META
 
               except Exception as e:
-                  MESSAGE = f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
-                  return WORKFLOW_LABEL_META, MESSAGE
+                  log.error(
+                      f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
+                  )
+                  return WORKFLOW_LABEL_META
+
+
+          def get_optin_feature(
+              issue: Issue, workflow_requestors: Iterable[str], feature: str, fallback: str
+          ) -> str:
+              try:
+                  first_comment = issue.get_comments()[0].body.strip("\n\t ")
+                  userlist = {u.lstrip("#").strip("\n\t@ ") for u in first_comment.split()}
+                  all_opted_in_users = set()
+                  for user in userlist:
+                      for i in user.split(","):
+                          if i == feature:
+                              all_opted_in_users.add(user.split(",")[0])
+                  opted_in_requestors = {
+                      usr for usr in workflow_requestors if usr in all_opted_in_users
+                  }
+
+                  if opted_in_requestors:
+                      log.info(
+                          f"Feature {feature} is enabled for {', '.join(opted_in_requestors)}. Using feature {feature}."
+                      )
+                      return feature
+                  else:
+                      log.info(
+                          f"Feature {feature} is disabled for {', '.join(workflow_requestors)}. Using fallback \"{fallback}\"."
+                      )
+                      return fallback
+
+              except Exception as e:
+                  log.error(
+                      f'Failed to determine if user has opted-in to feature {feature}. Using fallback "{fallback}". Exception: {e}'
+                  )
+                  return fallback
 
 
           def main() -> None:
               args = parse_args()
 
               if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
-                  output = {
-                      LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
-                      MESSAGE_KEY: f"Exception branch: '{args.github_branch}', using meta runners",
-                  }
+                  log.info(f"Exception branch: '{args.github_branch}', using meta runners")
+                  label_type = WORKFLOW_LABEL_META
+                  runner_ami = RUNNER_AMI_LEGACY
               else:
                   try:
                       gh = get_gh_client(args.github_token)
@@ -200,25 +313,35 @@ jobs:
                           args.github_ref_type,
                           args.github_branch,
                       )
-                      label_type, message = get_workflow_type(
+                      label_type = get_workflow_type(
                           issue,
                           (
                               args.github_issue_owner,
                               username,
                           ),
                       )
-                      output = {
-                          LABEL_TYPE_KEY: label_type,
-                          MESSAGE_KEY: message,
-                      }
+                      runner_ami = get_optin_feature(
+                          issue=issue,
+                          workflow_requestors=(
+                              args.github_issue_owner,
+                              username,
+                          ),
+                          feature=RUNNER_AMI_AMZ2023,
+                          fallback=RUNNER_AMI_LEGACY,
+                      )
                   except Exception as e:
-                      output = {
-                          LABEL_TYPE_KEY: WORKFLOW_LABEL_META,
-                          MESSAGE_KEY: f"Failed to get issue. Falling back to meta runners. Exception: {e}",
-                      }
+                      log.error(
+                          f"Failed to get issue. Falling back to meta runners. Exception: {e}"
+                      )
+                      label_type = WORKFLOW_LABEL_META
+                      runner_ami = RUNNER_AMI_LEGACY
 
-              json_output = json.dumps(output)
-              print(json_output)
+              # For Canary builds use canary runners
+              if args.github_repo == "pytorch/pytorch-canary" and label_type == WORKFLOW_LABEL_LF:
+                  label_type = WORKFLOW_LABEL_LF_CANARY
+
+              set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, label_type)
+              set_github_output(GH_OUTPUT_KEY_AMI, runner_ami)
 
 
           if __name__ == "__main__":
@@ -237,16 +360,11 @@ jobs:
           curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
-          output="$(python3 runner_determinator.py \
+          python3 runner_determinator.py \
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
             --github-branch "$curr_branch" \
             --github-actor "$TRIGGERING_ACTOR" \
             --github-issue-owner "$ISSUE_OWNER" \
             --github-ref-type "$curr_ref_type" \
-            --github-repo "$GITHUB_REPOSITORY")"
-
-          echo "Output: '${output}'"
-
-          LABEL_TYPE=$(echo "${output}" | jq -r '.label_type')
-          echo "label-type=$LABEL_TYPE" >> "$GITHUB_OUTPUT"
+            --github-repo "$GITHUB_REPOSITORY"
