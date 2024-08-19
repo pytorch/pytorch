@@ -362,7 +362,12 @@ class OutputGraph:
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+
+        # Note this returns true iff TF Mode and TF Subclasses are enabled
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
+        self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
+        # This records the initial torch function mode stack for guarding
         self.torch_function_mode_stack = get_torch_function_mode_stack()
 
         # Tracks if the output graph has a user defined allowed function in the
