@@ -3309,7 +3309,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_add_global_set(self):
         ss = set()
 
-        # Add tests that expected guards are inserted (follow animesh tests)
         @torch.compile(fullgraph=True)
         def fn(x):
             ss.add(x)

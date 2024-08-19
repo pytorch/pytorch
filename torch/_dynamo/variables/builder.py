@@ -539,17 +539,15 @@ class VariableBuilder:
             result = CustomizedDictVariable.wrap(self, value)
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif istype(
-            value, (dict, collections.defaultdict, collections.OrderedDict, set)
-        ):
+        elif istype(value, set):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            result = ConstantVariable.create(value=value)
+            return self.set_source_and_track_mutable(value, result)
+        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-            # A set in dynamo is a dictionary with no values associated to keys.
-            is_set = istype(value, set)
-
             # Optimization for the common case strings, ints, etc
-            all_keys = value if is_set else value.keys()
-            all_const = all(ConstantVariable.is_literal(k) for k in all_keys)
+            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
             if all_const:
                 # TODO(anijain2305) - Do we have to guard on all the keys? Can
                 # keys be guarded lazily, similar to values?
@@ -571,9 +569,6 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-
-                # Do we need to guard on key order for sets?
-                # if not is_set:
                 self.tx.output.guard_on_key_order.add(self.source.name())
 
             # We need all the keys to be hashable. We do this within the
@@ -591,23 +586,9 @@ class VariableBuilder:
 
                 return key, value
 
-            def build_set_keys(i, k):
-                if all_const:
-                    key = ConstantVariable.create(k)
-                    source_key = k
-                else:
-                    source_key = ConstDictKeySource(self.get_source(), i)
-                    key = LazyVariableTracker.create(k, source_key)
-
-                source_value = GetItemSource(self.get_source(), source_key)
-                return key
-
-            if is_set:
-                result = [build_set_keys(i, k) for i, k in enumerate(value)]
-            else:
-                result = dict(
-                    build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
-                )
+            result = dict(
+                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+            )
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -619,8 +600,6 @@ class VariableBuilder:
                     ),
                     source=self.source,
                 )
-            elif is_set:
-                result = SetVariable(result, source=self.source)
             else:
                 result = ConstDictVariable(result, type(value), source=self.source)
 
