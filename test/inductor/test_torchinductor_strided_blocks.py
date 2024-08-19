@@ -42,19 +42,23 @@ class TritonBlockPointerTest(InductorTestCase):
         expected_num_block_pointers: Optional[int] = None,
         expected_num_programs: int = 1,
         expected_num_triton_kernels: int = 1,
+        config_patches: Optional[dict] = None,
     ):
         """
         Runs the module through Inductor, comparing to eager reference.
         """
         if compile_kwargs is None:
             compile_kwargs = {}
+        if config_patches is None:
+            config_patches = {}
 
         def flatten_tensors(tensors):
             flat, spec = pytree.tree_flatten(tensors)
             return flat
 
-        compiled = torch.compile(func, backend="inductor", **compile_kwargs)
-        result, code = run_and_get_code(compiled, *args)
+        with config.patch(config_patches):
+            compiled = torch.compile(func, backend="inductor", **compile_kwargs)
+            result, code = run_and_get_code(compiled, *args)
 
         # Check numerical accuracy
         ref_tensors = flatten_tensors(func(*args))
@@ -101,6 +105,7 @@ class TritonBlockPointerTest(InductorTestCase):
                 foo, *inputs, expected_num_block_pointers=expected_num_block_pointers
             )
 
+    @parametrize("prefer_nd_tiling", [(False, True)])
     @parametrize(
         "full_size,view_size,stride,offset,require_block_ptr",
         [
@@ -141,6 +146,7 @@ class TritonBlockPointerTest(InductorTestCase):
         stride: Optional[Tuple[int]],
         offset: Optional[int],
         require_block_ptr: bool,
+        prefer_nd_tiling: bool,
     ):
         """
         Test generating strided ND block pointers for a pointwise kernel.
@@ -167,8 +173,10 @@ class TritonBlockPointerTest(InductorTestCase):
             torch.add,
             *args,
             expected_num_block_pointers=3 if require_block_ptr else None,
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
+    @parametrize("prefer_nd_tiling", [(False, True)])
     @parametrize(
         "x_size,y_size",
         [
@@ -184,7 +192,9 @@ class TritonBlockPointerTest(InductorTestCase):
             ),  # Unmatched dims for first operand.
         ],
     )
-    def test_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
+    def test_broadcast(
+        self, x_size: Tuple[int], y_size: Tuple[int], prefer_nd_tiling: bool
+    ):
         """
         Test that we can generate strided block pointers when inputs have different
         shapes, and they are broadcast together.
@@ -212,8 +222,15 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertIn(1, all_dims)
 
         # Expect 3 block pointers: 2 inputs one output
-        self.run_and_compare(foo, x, y, expected_num_block_pointers=3)
+        self.run_and_compare(
+            foo,
+            x,
+            y,
+            expected_num_block_pointers=3,
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
+        )
 
+    @parametrize("prefer_nd_tiling", [(False, True)])
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
@@ -231,7 +248,11 @@ class TritonBlockPointerTest(InductorTestCase):
         ],
     )
     def test_reduction(
-        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+        self,
+        view_size: Tuple[int],
+        num_block_pointers: int,
+        num_triton_kernels: int,
+        prefer_nd_tiling: bool,
     ):
         """
         Tests a reduction kernel.
@@ -249,6 +270,7 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=num_block_pointers,
             expected_num_triton_kernels=num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
     @parametrize(
@@ -352,6 +374,76 @@ class TritonBlockPointerTest(InductorTestCase):
         self.run_and_compare(
             x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=2
         )
+
+    @parametrize(
+        "full_size,view_size,num_block_pointers,num_tiles",
+        [
+            (
+                (32, 32),
+                (16, 32),
+                3,
+                1,
+            ),  # Contiguous 2D tensor. Does not require tiling.
+            ((5, 9), (3, 7), 3, 2),  # 2D tensor with 1 discontiguous dim.
+            ((11, 13, 7), (9, 13, 5), 3, 2),  # 3D tensor with 1 discontiguous dim (2).
+            (
+                (3, 11, 13, 7),
+                (2, 9, 13, 7),
+                3,
+                2,
+            ),  # 4D tensor with 1 discontiguous dim (1).
+            (
+                (3, 11, 13, 7),
+                (2, 11, 9, 7),
+                3,
+                2,
+            ),  # 4D tensor with 1 discontiguous dim (2).
+            (
+                (5, 5, 5, 5, 5),
+                (3, 3, 5, 3, 5),
+                1,
+                2,
+            ),  # 5D tensor with 2 discontiguous dims (3, 1). Block pointers unexpected.
+        ],
+    )
+    def test_nd_tiling_odd_shapes_pointwise(
+        self,
+        full_size: Tuple[int],
+        view_size: Tuple[int],
+        num_block_pointers: int,
+        num_tiles: int,
+    ):
+        """
+        Test odd shapes with ND tiling enabled.
+        Uses a pointwise op.
+        """
+
+        def get_input() -> torch.Tensor:
+            device = torch.device(GPU_TYPE)
+            full = torch.randn(full_size).to(device)
+            return torch.as_strided(full, view_size, full.stride())
+
+        args = [get_input() for arg_idx in range(2)]
+
+        # Expect up to 3 block pointers: 2 inputs 1 output.
+        result, code = self.run_and_compare(
+            torch.add,
+            *args,
+            expected_num_block_pointers=num_block_pointers,
+            config_patches={
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check the code for the expected tiling.
+        all_tiles = ("XBLOCK", "YBLOCK", "ZBLOCK")
+        expected_tiles = set(all_tiles[:num_tiles])
+        for tile_name in all_tiles:
+            for program in code:
+                if tile_name in expected_tiles:
+                    self.assertIn(tile_name, program)
+                else:
+                    self.assertNotIn(tile_name, program)
 
 
 if __name__ == "__main__":

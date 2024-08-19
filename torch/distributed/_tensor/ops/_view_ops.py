@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
@@ -55,8 +56,6 @@ DimMap = Tuple[DimSpec, ...]
 @dataclass
 class Singleton(DimSpec):
     """Output dimension is a singleton."""
-
-    pass
 
 
 @dataclass

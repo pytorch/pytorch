@@ -30,7 +30,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
                     (K2, N), (1, K2), device="cuda", dtype=torch.float32
@@ -62,7 +62,7 @@ class PadMMTest(TestCase):
         N = 100
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
                     (K2, N), (1, K2), device="cuda", dtype=torch.float32
@@ -95,7 +95,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -122,7 +122,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -151,7 +151,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -190,7 +190,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -219,7 +219,7 @@ class PadMMTest(TestCase):
         N = 41
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -248,7 +248,7 @@ class PadMMTest(TestCase):
         N = 41
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -277,7 +277,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c):
@@ -306,7 +306,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c):

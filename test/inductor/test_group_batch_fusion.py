@@ -19,7 +19,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
@@ -523,7 +522,7 @@ class TestGroupBatchFusion(TestCase):
 
 
 class TestBMMFusionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.my_modules = torch.nn.ModuleList()
         for _ in range(10):

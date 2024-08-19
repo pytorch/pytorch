@@ -39,7 +39,7 @@ class TORCH_API StreamSampler : public Sampler<BatchSize> {
   explicit StreamSampler(size_t epoch_size);
 
   /// Resets the internal state of the sampler.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns a `BatchSize` object with the number of elements to fetch in the
   /// next batch. This number is the minimum of the supplied `batch_size` and

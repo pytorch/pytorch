@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from typing import Optional, Tuple
@@ -129,7 +130,7 @@ def quantize_per_tensor_tensor(
         scale.numel() == 1
     ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
     return quantize_per_tensor(
-        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype  # type: ignore[arg-type]
+        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype
     )
 
 
@@ -188,9 +189,9 @@ def quantize_per_tensor_tensor2(
     return quantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
-        quant_min.item(),  # type: ignore[arg-type]
-        quant_max.item(),  # type: ignore[arg-type]
+        zero_point.item(),
+        quant_min.item(),
+        quant_max.item(),
         dtype,
     )
 
@@ -205,7 +206,7 @@ def quantize_per_tensor_tensor2_meta(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return quantize_per_tensor_tensor_meta(
-        input, scale, zero_point, quant_min, quant_max, dtype  # type: ignore[arg-type]
+        input, scale, zero_point, quant_min, quant_max, dtype
     )
 
 
@@ -321,7 +322,7 @@ def dequantize_per_tensor_tensor(
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
+        zero_point.item(),
         quant_min,
         quant_max,
         dtype,
@@ -391,9 +392,9 @@ def dequantize_per_tensor_tensor2(
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),  # type: ignore[arg-type]
-        quant_min.item(),  # type: ignore[arg-type]
-        quant_max.item(),  # type: ignore[arg-type]
+        zero_point.item(),
+        quant_min.item(),
+        quant_max.item(),
         dtype,
         out_dtype=out_dtype,
     )
@@ -588,15 +589,15 @@ def quantize_per_channel(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input)
 
-    for i in range(input.size(0)):
-        res[i] = torch.clamp(
-            torch.round(input[i] * (1.0 / scales[i])) + zero_points[i],
-            quant_min,
-            quant_max,
-        )
+    new_shape = [1] * input.dim()
+    new_shape[0] = scales.shape[0]
+    scales = scales.view(new_shape)
+    zero_points = zero_points.view(new_shape)
 
+    res = torch.clamp(
+        torch.round(input * (1.0 / scales)) + zero_points, quant_min, quant_max
+    )
     out = res.permute(tuple(permute_axis_list))
     return out.to(dtype)
 
@@ -679,14 +680,16 @@ def dequantize_per_channel(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
-    res = torch.zeros_like(input, dtype=out_dtype)
 
-    for i in range(input.size(0)):
-        zp = zero_points[i] if zero_points is not None else 0
-        # TODO: investigate why
-        # (input[i] - zero_points[i]).to(out_dtype) * scales[i]
-        # failed the test
-        res[i] = (input[i].to(out_dtype) - zp) * scales[i]
+    new_shape = [1] * input.dim()
+    new_shape[0] = scales.shape[0]
+    scales = scales.view(new_shape)
+    if zero_points is not None:
+        res = (input - zero_points.view(new_shape)) * scales
+    else:
+        res = input * scales
+
+    res = res.to(out_dtype)
 
     out = res.permute(tuple(permute_axis_list))
     return out

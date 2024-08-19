@@ -190,8 +190,8 @@ void scatter_meta_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
-    const std::optional<Tensor>& src = nullopt,
-    const std::optional<c10::string_view> reduce = nullopt) {
+    const std::optional<Tensor>& src = std::nullopt,
+    const std::optional<c10::string_view> reduce = std::nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
@@ -241,7 +241,7 @@ TORCH_META_FUNC2(scatter, value_reduce)
  const Tensor& index,
  const Scalar& src,
  const c10::string_view reduce) {
-  scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
+  scatter_meta_impl(*this, self, dim, index, std::nullopt, reduce);
 }
 
 TORCH_META_FUNC(scatter_add)
@@ -811,7 +811,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<std::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-  if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
+  if ((self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU) && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
@@ -1795,7 +1795,7 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const std::optional<c10::string_view> reduce = nullopt,
+    const std::optional<c10::string_view> reduce = std::nullopt,
     bool reduce_includes_self = true) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());

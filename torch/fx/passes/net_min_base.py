@@ -36,7 +36,6 @@ class FxNetMinimizerBadModuleError(Exception):
     Raised if failed to split out a minimize module
     """
 
-    pass
 
 
 @compatibility(is_backward_compatible=False)
@@ -45,7 +44,6 @@ class FxNetMinimizerRunFuncError(Exception):
     Raised if error occurs during run_a or run_b functions
     """
 
-    pass
 
 
 @compatibility(is_backward_compatible=False)
@@ -54,7 +52,6 @@ class FxNetMinimizerResultMismatchError(Exception):
     Raised if comparing function thinks the results are mismatching.
     """
 
-    pass
 
 
 @dataclass
@@ -302,7 +299,7 @@ class _MinimizerBase:
 
         # Find submodule containing colored nodes
         submodule_name: str = ""
-        for child_name, _ in split_module.named_children():  # type: ignore[union-attr]
+        for child_name, _ in split_module.named_children():
             # Skip submodules we're not interested in at the moment
             if "minimize" not in child_name:
                 continue
@@ -319,7 +316,7 @@ class _MinimizerBase:
                 f"Minimize submodule was not found with nodes {nodes}"
             )
 
-        return split_module, submodule_name  # type: ignore[return-value]
+        return split_module, submodule_name
 
     def _run_and_compare(
         self,
@@ -391,10 +388,10 @@ class _MinimizerBase:
             report.append(f"Result mismatch for {result_key}")
             if self.module_exporter:
                 self.module_exporter(
-                    a_input, submodule, str(result_key[0]) + "_cpu",  # type: ignore[index]
+                    a_input, submodule, str(result_key[0]) + "_cpu",
                 )
                 self.module_exporter(
-                    b_input, submodule, str(result_key[0]) + "_acc",  # type: ignore[index]
+                    b_input, submodule, str(result_key[0]) + "_acc",
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 

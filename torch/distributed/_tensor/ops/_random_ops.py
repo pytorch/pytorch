@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 from torch.distributed._tensor._op_schema import (
