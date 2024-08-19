@@ -295,7 +295,8 @@ class ScriptMeta(type):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
-            return super().__init__(name, bases, attrs)
+            super().__init__(name, bases, attrs)
+            return
 
         original_init = getattr(cls, "__init__", lambda self: None)
 
