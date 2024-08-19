@@ -625,7 +625,7 @@ def enforce_comm_ordering_for_fsdp(
 
             ag_related_snodes = ag_related_snodes[:end_idx_of_current_ag_block]
 
-            # Find split_with_sizes_copy op's other deps
+            # Find split_with_sizes_copy op's other deps (e.g. out= buffers allocation)
             split_with_sizes_copy_snode = None
             for cur_snode in ag_related_snodes:
                 if is_fallback_op(
