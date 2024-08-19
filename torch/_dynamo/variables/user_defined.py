@@ -877,7 +877,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
         import _collections
 
-        # In some cases, we have to do dynamo lookup because getattr_static is not enough. For example, threading.local
+        # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if (
             # When the dynamic lookup is necessary, e.g., threading.local
@@ -927,7 +927,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if isinstance(result, variables.DeletedVariable):
+                raise_observed_exception(AttributeError, tx, self)
+            return result
 
         if name == "__dict__":
             options = {"source": source}
@@ -1085,24 +1088,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(AttributeError, tx, self)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if tx.output.side_effects.is_attribute_mutation(self):
-            try:
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                return variables.ConstantVariable.create(
-                    not isinstance(result, variables.DeletedVariable)
-                )
-            except KeyError:
-                pass
+        if self._check_for_getattribute():
+            unimplemented("hasattr with custom __getattribute__")
+
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute():
-            unimplemented("hasattr with custom __getattribute__")
 
         try:
-            self.var_getattr(tx, name)
-            return variables.ConstantVariable.create(True)
+            var_vt = self.var_getattr(tx, name)
+            return variables.ConstantVariable.create(
+                not isinstance(var_vt, variables.DeletedVariable)
+            )
         except ObservedAttributeError:
             return variables.ConstantVariable.create(False)
 
