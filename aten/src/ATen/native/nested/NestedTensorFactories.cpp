@@ -3,8 +3,8 @@
 #include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
@@ -232,18 +232,16 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
 
 Tensor alias_nested(const Tensor& self) {
   auto* nt_impl = get_nested_tensor_impl(self);
-  const at::Tensor& buffer = nt_impl->get_unsafe_storage_as_tensor();
+  auto buffer = nt_impl->get_unsafe_storage_as_tensor();
   const auto& nested_sizes = nt_impl->get_nested_sizes();
   const auto& nested_strides = nt_impl->get_nested_strides();
   const auto& storage_offsets = nt_impl->get_storage_offsets();
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       std::move(buffer),
-      std::move(nested_sizes),
-      std::move(nested_strides),
-      std::move(storage_offsets));
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
 }
 
-
-} // namespace native
-} // namespace at
+} // namespace at::native

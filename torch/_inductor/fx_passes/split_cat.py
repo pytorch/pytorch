@@ -56,6 +56,7 @@ pre_grad_pass_names = [
     "split_cat_to_slices_pass",
     "unbind_cat_to_view_pass",
     "split_stack_to_cats_pass",
+    "unbind_stack_to_slices_pass",
 ]
 
 post_grad_pass_names = [
@@ -2074,17 +2075,17 @@ def reshape_cat_node_to_stack(
     graph: torch.fx.Graph,
     cat_node: torch.fx.Node,
     stack_node: torch.fx.Node,
-    split_dim: int,
+    split_or_unbind_dim: int,
 ) -> None:
     # reshape the cat node to the stack node shape
     stack_shape = stack_node.meta["example_value"].shape
     stack_dim = _get_dim(stack_node)
-    if stack_dim != split_dim:
+    if stack_dim != split_or_unbind_dim:
         # case 1: the stack dim is not the same as the split dim
         # we need to reshape the split input before we do the reshape
         reshape_list = list(stack_shape)
-        reshape_list[stack_dim], reshape_list[split_dim] = (
-            reshape_list[split_dim],
+        reshape_list[stack_dim], reshape_list[split_or_unbind_dim] = (
+            reshape_list[split_or_unbind_dim],
             reshape_list[stack_dim],
         )
         reshape_node = graph.call_function(
@@ -2095,8 +2096,8 @@ def reshape_cat_node_to_stack(
             cat_node.meta["example_value"], tuple(reshape_list)
         )
         permute_list = list(range(len(stack_shape)))
-        permute_list[stack_dim], permute_list[split_dim] = (
-            permute_list[split_dim],
+        permute_list[stack_dim], permute_list[split_or_unbind_dim] = (
+            permute_list[split_or_unbind_dim],
             permute_list[stack_dim],
         )
         permute_node = graph.call_function(
@@ -2121,7 +2122,6 @@ def reshape_cat_node_to_stack(
     graph.erase_node(stack_node)
     # check the input of stack node, and remove nodes that have no users
     remove_split_unbind_children(graph, stack_inputs)  # type: ignore[arg-type]
-    counters["inductor"]["split_stack_to_cats_pass"] += 1
 
 
 # ############pattern to be optimized is#########
@@ -2181,6 +2181,7 @@ def split_stack_to_cats(match: Match, split_sections: List[int], dim: int):
         # case 1: only one node in the new cat args, don't need to cat
         if len(new_cat_args) == 1:
             reshape_cat_node_to_stack(graph, new_cat_args[0], stack_node, split_dim)
+            counters["inductor"]["split_stack_to_cats_pass"] += 1
             continue
         if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
             with graph.inserting_after(stack_node):
@@ -2193,3 +2194,77 @@ def split_stack_to_cats(match: Match, split_sections: List[int], dim: int):
                     new_cat_args_meta, dim=split_dim
                 )
                 reshape_cat_node_to_stack(graph, cat_node, stack_node, split_dim)
+                counters["inductor"]["split_stack_to_cats_pass"] += 1
+
+
+# ############pattern to be optimized is#########
+
+#               unbind(dim=1)  -> user=multiple
+#                  \         ...       /         \
+# others    getitem        getitem     getitem   -> user=multiple
+#  \          \                    /            \
+#                stack(user=mul, dim=1)             other_op
+#                      |
+
+# ################after transformation#############
+
+#                 input_of_unbind
+#                           |    \
+#                         slice
+#                           |
+#                          view   others
+#                           |    /
+#                          stack
+#                           |
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.stack,
+        getitem_unbind,
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("unbind_stack_to_slices_pass"),
+)
+def unbind_stack_to_slices(match: Match, unbind_input: torch.fx.Node, dim: int):
+    unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
+    graph = match.graph
+    # get the cat_node and check its inputs and meta data
+    next_users = find_next_users(unbind_node)
+    threshold_to_cat = torch._inductor.config.pre_grad_fusion_options[
+        "unbind_stack_to_slices_pass"
+    ].get("threshold_to_cat", 10)
+    # get the cat_node and check its inputs and meta data
+    for stack_node in next_users:
+        if stack_node.target != torch.stack or not is_node_meta_valid(stack_node):
+            continue
+        inputs = get_arg_value(stack_node, 0, "tensors")  # type: ignore[union-attr]
+        new_cat_args, new_cat_args_meta = construct_cat_args(
+            graph,
+            stack_node,
+            inputs,
+            unbind_node,
+            threshold_to_cat,
+            update_args_from_unbind_getitem,
+        )
+        unbind_dim = get_arg_value(unbind_node, 1, "dim") or 0
+        # case 1: only one node in the new cat args, don't need to cat
+        if len(new_cat_args) == 1:
+            reshape_cat_node_to_stack(graph, new_cat_args[0], stack_node, unbind_dim)
+            counters["inductor"]["unbind_stack_to_slices_pass"] += 1
+            continue
+        if len(new_cat_args) > 1 and len(new_cat_args) < len(inputs):
+            # get the view shape
+            cat_dim = get_arg_value(stack_node, 1, "dim")
+            with graph.inserting_after(stack_node):
+                new_cat_node = graph.call_function(
+                    torch.cat,
+                    args=(new_cat_args,),
+                    kwargs={"dim": cat_dim},
+                )
+                new_cat_node.meta["example_value"] = torch.cat(
+                    new_cat_args_meta, dim=cat_dim
+                )
+                reshape_cat_node_to_stack(graph, new_cat_node, stack_node, unbind_dim)
+            counters["inductor"]["unbind_stack_to_slices_pass"] += 1

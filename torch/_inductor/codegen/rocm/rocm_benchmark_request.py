@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from ctypes import byref, c_size_t, c_void_p
+from ctypes import byref, c_int, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
@@ -56,6 +56,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
         ]
+        size_args = [c_int(arg) for arg in self.extra_args]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.kernel_name,
@@ -80,7 +81,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return functools.partial(
             run_method,
             *args,
-            *self.extra_args,
+            *size_args,
             None,  # null workspace size ptr
             workspace_ptr,  # set workspace ptr,
             stream_ptr,
@@ -97,9 +98,10 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
+        size_args = [c_int(arg) for arg in self.extra_args]
         run_method(
             *args,  # input ptrs and output ptrs
-            *self.extra_args,
+            *size_args,
             byref(
                 c_workspace_size
             ),  # set workspace size ptr to retrieve workspace size

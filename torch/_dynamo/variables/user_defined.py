@@ -20,7 +20,7 @@ from torch._guards import TracingContext
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import ObservedException, unimplemented
+from ..exc import ObservedException, raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -370,6 +370,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
+        elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
+            assert args[0].is_python_constant()
+            return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -495,6 +498,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            not self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(
+                    tx, polyfill.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -1028,7 +1043,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if subobj is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(subobj):
+        if subobj is not NO_SUCH_SUBOBJ:
+            if is_wrapper_or_member_descriptor(subobj):
+                options = {"source": source}
+                return variables.GetAttrVariable(self, name, **options)
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
@@ -1036,8 +1054,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 return SourcelessBuilder.create(tx, subobj)
 
-        options = {"source": source}
-        return variables.GetAttrVariable(self, name, **options)
+        # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
+        raise_observed_exception(AttributeError, tx, self)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if tx.output.side_effects.is_attribute_mutation(self):
