@@ -11,7 +11,7 @@ import torch.nn
 
 from .. import trace_rules, variables
 from ..exc import (
-    ObservedException,
+    ObservedAttributeError,
     unimplemented,
     UnspecializeRestartAnalysis,
     Unsupported,
@@ -1127,7 +1127,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
-            raise ObservedException(f"object has no attribute {name}")
+            raise ObservedAttributeError(f"object has no attribute {name}")
         return out
 
 
