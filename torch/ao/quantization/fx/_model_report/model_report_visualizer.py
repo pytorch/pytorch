@@ -702,7 +702,7 @@ class ModelReportVisualizer:
             )
             plt.xticks(bins)
         else:
-            val, bins, _ = plt.hist(
+            _, bins, _ = plt.hist(
                 y_data,
                 bins=num_bins,
                 stacked=False,

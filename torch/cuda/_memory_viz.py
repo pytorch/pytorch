@@ -213,7 +213,6 @@ def segsum(data):
     Args:
         data: snapshot dictionary created from _snapshot()
     """
-    segments = []
     out = io.StringIO()
     out.write(f"Summary of segments >= {Bytes(PAGE_SIZE)} in size\n")
     total_reserved = 0
@@ -272,7 +271,6 @@ def segsum(data):
     out.write(f'segments: {len(data["segments"])}\n')
     out.write(f'total_reserved: {Bytes(total_reserved)}\n')
     out.write(f'total_allocated: {Bytes(total_allocated)}\n')
-    internal_external = f' ({Bytes(free_internal)} internal + {Bytes(free_external)} external)' if free_internal else ''
     out.write(f'total_free: {_report_free(free_external, free_internal)}\n')
     out.write(legend)
     assert free_internal + free_external + total_allocated == total_reserved
@@ -478,10 +476,8 @@ def _profile_to_snapshot(profile):
 
     kv_to_elem = {}
 
-
-
     # create the device trace
-    for time, action, (tensor_key, version), size in memory_profile.timeline:
+    for _, action, (tensor_key, version), size in memory_profile.timeline:
         if not isinstance(tensor_key, TensorKey):
             continue
         if action == Action.CREATE:

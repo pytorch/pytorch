@@ -431,9 +431,6 @@ def create_submodule_from_subgraph(
             len(cur_node_orig.users.keys()) == 1
         ), f"{cur_node_orig} has more than 1 users, not supported yet"
         cur_node_orig = next(iter(cur_node_orig.users.keys()))
-        cur_args_orig = cur_node_orig.args
-        cur_kwargs_orig = cur_node_orig.kwargs
-
         cur_iteration += 1
         if cur_iteration > iteration_limit:
             raise AssertionError("iteration limit exceeded")

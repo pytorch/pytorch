@@ -421,7 +421,6 @@ def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
-    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -1082,7 +1081,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -1399,7 +1398,6 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        t = type(val)
         if np:
             np_types: Tuple[Type[Any], ...] = (
                 np.int8,
@@ -1566,7 +1564,6 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not (config.enable_cpp_guard_manager and isinstance(value, dict)):
             # C++ DICT_LENGTH checks for type
@@ -1640,7 +1637,6 @@ class GuardBuilder(GuardBuilderBase):
         # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         self.TYPE_MATCH(guard)
         code = []
@@ -1678,7 +1674,6 @@ class GuardBuilder(GuardBuilderBase):
         """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not config.enable_cpp_guard_manager:
             # DictGuardManager supports TYPE_MATCH internally
@@ -1929,7 +1924,7 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(
+            static, _ = tensor_always_has_static_shape(
                 value, is_tensor=True, guard_source=guard.source
             )
 
@@ -2615,7 +2610,7 @@ def get_guard_fail_reason_helper(
             with report_compile_source_on_error():
                 try:
                     fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
+                except Exception:
                     if is_recompiles_verbose_enabled():
                         continue
                     else:
@@ -2648,7 +2643,7 @@ def get_guard_fail_reason(
             guard_fn.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )

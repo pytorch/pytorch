@@ -325,9 +325,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 add_dequantize_op_kwargs(dequantize_op, input_node),
             )
 
-            def remap_fn(x):
-                return dequantized_node if x is node else x
-
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
