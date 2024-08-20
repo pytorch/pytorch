@@ -12,7 +12,7 @@ from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.utils import ceildiv, run_and_get_code, run_and_get_triton_code
+from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -661,9 +661,11 @@ class PaddingTest(TestCaseBase):
         self.assertTrue(in_strides == out_strides)
 
     @parametrize("alignment_bytes", (32, 128))
-    @parametrize("shape", [(21, 19), (3,5,71)])
+    @parametrize("shape", [(21, 19), (3, 5, 71)])
     @parametrize("dtype", (torch.float16, torch.float32))
-    def test_pad_outputs(self, dtype: torch.dtype, shape: tuple[int], alignment_bytes: int):
+    def test_pad_outputs(
+        self, dtype: torch.dtype, shape: tuple[int], alignment_bytes: int
+    ):
         """
         Tests padding output tensors to a specific alignment.
         This is enabled by a config flag.
@@ -672,12 +674,14 @@ class PaddingTest(TestCaseBase):
         inputs = tuple(torch.randn(*shape, dtype=dtype) for input_idx in range(2))
 
         # Compile and run
-        with config.patch({
-            "align_stride_threshold": 0,
-            "comprehensive_padding": True,
-            "padding_alignment_bytes": alignment_bytes,
-            "pad_outputs": True,
-        }):
+        with config.patch(
+            {
+                "align_stride_threshold": 0,
+                "comprehensive_padding": True,
+                "padding_alignment_bytes": alignment_bytes,
+                "pad_outputs": True,
+            }
+        ):
             compiled_func = torch.compile(func)
             compiled_out = compiled_func(*inputs)
 
