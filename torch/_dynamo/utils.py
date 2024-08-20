@@ -53,7 +53,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeGuard
+from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -61,14 +61,8 @@ import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._C import (
-    _get_function_stack_at,
-    _len_torch_function_stack,
-    _pop_torch_function_stack,
-    _push_on_torch_function_stack,
-)
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import Source, TracingContext
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -532,14 +526,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeGuard[T]:
+) -> TypeIs[T]:
     ...
 
 
@@ -1469,16 +1463,6 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
-def get_safe_global_name(tx, root, obj):
-    # The global_mangled_class_name should be different for different
-    # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
-    # but the global's lifetime is tied to the first invocation (and
-    # may be deleted when the first torch.compile invocation is deleted)
-    # We mangle it based off of the output_graph's id.
-    return f"{root}_{id(obj)}_c{tx.output.compile_id}"
-
-
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -2264,7 +2248,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    tensor_source: Source,
+    guard_source: torch._guards.GuardSource,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2277,20 +2261,12 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from .source import is_from_unspecialized_param_buffer_source
-
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
-    ) and config.force_nn_module_property_static_shapes:
+        guard_source.is_specialized_nn_module()
+        and config.force_nn_module_property_static_shapes
+    ):
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-
-    if (
-        type(tensor) is torch.nn.Parameter
-        or is_from_unspecialized_param_buffer_source(tensor_source)
-    ) and config.force_parameter_static_shapes:
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
@@ -3033,29 +3009,6 @@ def _disable_saved_tensors_hooks_during_tracing():
 
 def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
-
-
-def get_torch_function_mode_stack(filter_ignored=True):
-    from .variables.torch_function import IGNORED_MODES
-
-    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
-    if filter_ignored:
-        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
-
-    return stack
-
-
-def get_torch_function_mode_stack_at(ind):
-    assert ind < _len_torch_function_stack() and ind >= 0
-    return torch._C._get_function_stack_at(ind)
-
-
-def set_torch_function_mode_stack(stack):
-    for i in range(_len_torch_function_stack()):
-        _pop_torch_function_stack()
-
-    for mode in stack:
-        _push_on_torch_function_stack(mode)
 
 
 def verify_guard_fn_signature(value):
