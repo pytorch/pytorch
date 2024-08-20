@@ -842,7 +842,7 @@ void brgemm(
   }
 #endif
   TORCH_CHECK(false,
-  "Half Brgemm is only supported on X64 when mkldnn is enabled and avx512_core_fp16 is supported");
+  "Half Brgemm is only supported on X64 when mkldnn is enabled and avx512_fp16 is supported");
 }
 
 void brgemm(
@@ -865,7 +865,7 @@ void brgemm(
   }
 #endif
   TORCH_CHECK(false,
-  "BFloat16 Brgemm is only supported on X64 when mkldnn is enabled and avx512_core_fp16 is supported");
+  "BFloat16 Brgemm is only supported on X64 when mkldnn is enabled and avx512 is supported");
 }
 
 void brgemm_release() {
