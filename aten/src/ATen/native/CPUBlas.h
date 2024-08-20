@@ -558,7 +558,7 @@ struct hash<at::native::cpublas::BrgemmKey> {
     // Use beta, M, N, and K to compute hash to reduce the overhead as
     // batch size, alpha, and data types are unlikely to change within the same kernel and
     // leading dimensions are likely to be related to M, K, N or use fixed values.
-    std::size_t h = std::hash<bool>()(key.beta + 1);
+    std::size_t h = std::hash<float>()(key.beta + 1);
     h = std::hash<int64_t>()(key.M) ^ (h << 1);
     h = std::hash<int64_t>()(key.N) ^ (h << 1);
     h = std::hash<int64_t>()(key.K) ^ (h << 1);
