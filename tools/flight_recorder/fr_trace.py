@@ -48,6 +48,8 @@ from typing import (  # type: ignore[attr-defined]
     Union,
 )
 
+from tools.flight_recorder.components.config_manager import JobConfig
+
 
 try:
     from tabulate import tabulate
@@ -965,20 +967,7 @@ def read_dir(prefix: str, folder: str) -> Dict[Any, Any]:  # TODO; fix types
     return details
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-d", "--dir", help="Directory with flight recorder dumps")
-    parser.add_argument("-o", "--output", default=None)
-    parser.add_argument(
-        "-p",
-        "--prefix",
-        help="prefix to strip such that rank can be extracted",
-        default="rank_",
-    )
-    parser.add_argument("-j", "--just_print_entries", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-
+def main(args: argparse.Namespace) -> None:
     details = read_dir(args.prefix, args.dir)
     db = build_db(details, args)
     if args.output:
@@ -987,4 +976,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    config = JobConfig()
+    main(config.parse_args())
