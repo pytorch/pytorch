@@ -85,7 +85,11 @@ else:
             submesh_dim_names: Tuple[str, ...],
             submesh_dims: List[Tuple[int, ...]],
         ) -> "DeviceMesh":
-            submesh_dim_size = [
+            # Get the submesh dim size from the submesh_dims.
+            # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
+            # to slice out mesh["dp_cp"], then submesh_dims = [(0, 1), (2,)] and submesh_dim_size = [2 * 2, 2] = [4, 2].
+            # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
+            slice_dim_size = [
                 reduce(
                     lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
                     mesh_dim,
@@ -96,45 +100,48 @@ else:
             ]
 
             mesh_tensor = device_mesh.mesh
-            slice_submesh_dims = []
-            num_dims_flatten = 0
+            # slice_dim_idx could be differnt from submesh_dims, as we may need to flatten out some dims.
+            slice_dim_idx = []
             slice_dim_group_info = []
-            for mesh_dims, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
-                if len(mesh_dims) > 1:
+            # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
+            # flattened mesh tensor.
+            num_dims_flatten = 0
+            for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
+                # Currently, this only allows slicing out a contiguous flattened dim.
+                # TODO: we need to handle reconstructing a non-contiguous flattened dim.
+                if len(mesh_dim_indices) > 1:
+                    # We need to move the start_dim and end_dim to the left if some dims are already flattened.
                     mesh_tensor = mesh_tensor.flatten(
-                        start_dim=mesh_dims[0], end_dim=mesh_dims[-1]
+                        start_dim=mesh_dim_indices[0] - num_dims_flatten,
+                        end_dim=mesh_dim_indices[-1] - num_dims_flatten,
                     )
-                    slice_submesh_dims.append(
-                        mesh_dims[0]
-                        if num_dims_flatten == 0
-                        else mesh_dims[0] - num_dims_flatten
-                    )
-                    num_dims_flatten += len(mesh_dims) - 1
+                    # If some dims are already flattened, we need to adjust the slice_dim_idx accordingly.
+                    # For example, if the submesh_dims = [(0, 1), (2,), (3, 4)] with 0-1 flattened and 3-4 flattened,
+                    # then the final slice_dim_idx should be [0, 1, 2].
+                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
+                    num_dims_flatten += len(mesh_dim_indices) - 1
                     slice_dim_group_info.append(
                         self.root_to_flatten_mapping[device_mesh][
                             mesh_dim_name
                         ]._dim_group_infos[0]
                     )
                 else:
+                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
                     slice_dim_group_info.append(
-                        device_mesh._dim_group_infos[mesh_dims[0]]
-                    )
-                    slice_submesh_dims.append(
-                        mesh_dims[0]
-                        if num_dims_flatten == 0
-                        else mesh_dims[0] - num_dims_flatten
+                        device_mesh._dim_group_infos[mesh_dim_indices[0]]
                     )
 
-            mesh_dims_remained = list(range(mesh_tensor.ndim))
-            for slice_dim in slice_submesh_dims:
-                mesh_dims_remained.remove(slice_dim)
+            # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
+            mesh_dims_remained_idx = list(range(mesh_tensor.ndim))
+            for idx in slice_dim_idx:
+                mesh_dims_remained_idx.remove(idx)
 
-            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
+            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *slice_dim_idx]
             # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
             # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
             pg_ranks_by_dim = mesh_tensor.permute(
-                *mesh_dims_remained, *slice_submesh_dims
-            ).reshape(-1, *submesh_dim_size)
+                *mesh_dims_remained_idx, *slice_dim_idx
+            ).reshape(-1, *slice_dim_size)
 
             cur_rank = device_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:

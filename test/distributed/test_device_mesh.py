@@ -578,9 +578,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten contiguous dims
         dp_cp_mesh = mesh_3d["dp", "cp"]
-        # print(f"{dp_cp_mesh}")
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
-        # print(f"{dp_cp_mesh.mesh.flatten()=}, {flattened_dp_cp_mesh.mesh=}")
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
