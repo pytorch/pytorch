@@ -38,11 +38,13 @@ from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch._inductor.utils import fresh_inductor_cache
+from torch._utils_internal import justknobs_check
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -1303,8 +1305,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(IS_FBCODE, "Internal JustKnob may override duck shape")
     @torch._dynamo.config.patch(error_on_recompile=True)
-    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
         class TestModel(nn.Module):
             def __init__(
@@ -1326,6 +1328,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         o2_ref = main_model(x2, 20)
         o2 = opt_model(x2, 20)
+
+    @parametrize(
+        "mock_jk",
+        [True, False],
+    )
+    def test_dynamic_shape_disable_duck_size_mock_jk(self, mock_jk):
+        class TestModel(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, val: int) -> torch.Tensor:
+                return x + val
+
+        def mock_justknobs_check(name: str) -> bool:
+            if name == "pytorch/dynamo:disable_default_duck_sizing":
+                return mock_jk
+            return justknobs_check(name)  # not mocked
+
+        with mock.patch(
+            "torch._utils_internal.justknobs_check", side_effect=mock_justknobs_check
+        ), torch._dynamo.config.patch(error_on_recompile=mock_jk):
+            main_model = TestModel().to(memory_format=torch.channels_last)
+            opt_model = torch.compile(main_model, backend="eager", dynamic=True)
+
+            x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
+            x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
+
+            o1_ref = main_model(x1, 4)
+            o1 = opt_model(x1, 4)
+
+            o2_ref = main_model(x2, 20)
+            o2 = opt_model(x2, 20)
 
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])

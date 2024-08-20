@@ -2424,7 +2424,11 @@ class ShapeEnv:
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
         if duck_shape is None:
-            duck_shape = config.use_duck_shape
+            # TODO: Delete and simplify this logic post-rollout
+            if not torch._utils_internal.justknobs_check("pytorch/dynamo:disable_default_duck_sizing"):
+                duck_shape = True
+            else:
+                duck_shape = config.use_duck_shape
 
         self.settings = ShapeEnvSettings(
             # Not directly used by ShapeEnv; indirectly used by FakeTensor
