@@ -4271,15 +4271,18 @@ class DistributedTest:
                         if sys.platform == "win32":
                             torch.save(model_DDP, tmp)
                             tmp.seek(0)
-                            model_DDP = torch.load(tmp)
+                            # weights_only=False as this is legacy code that saves the model
+                            model_DDP = torch.load(tmp, weights_only=False)
                         else:
                             torch.save(model_DDP, tmp.name)
-                            model_DDP = torch.load(tmp.name)
+                            # weights_only=False as this is legacy code that saves the model
+                            model_DDP = torch.load(tmp.name, weights_only=False)
 
             with tempfile.TemporaryFile() as tmp_file:
                 torch.save(model_DDP, tmp_file)
                 tmp_file.seek(0)
-                saved_model = torch.load(tmp_file)
+                # weights_only=False as this is legacy code that saves the model
+                saved_model = torch.load(tmp_file, weights_only=False)
             for k in model_DDP.state_dict():
                 self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
@@ -4320,10 +4323,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # dummy data initialization
             local_bs = len(gpu_subset)
@@ -5598,10 +5603,12 @@ class DistributedTest:
                 if sys.platform == "win32":
                     torch.save(model_DDP, tmp)
                     tmp.seek(0)
-                    model_DDP = torch.load(tmp)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp, weights_only=False)
                 else:
                     torch.save(model_DDP, tmp.name)
-                    model_DDP = torch.load(tmp.name)
+                    # weights_only=False as this is legacy code that saves the model
+                    model_DDP = torch.load(tmp.name, weights_only=False)
 
             # data initialization
             input_cpu = torch.randn(global_bs, 2)
@@ -8859,6 +8866,8 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
+            # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+            os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
             # tests expected behavior when nonzero rank hangs and we want to
             # report all timed out ranks.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)

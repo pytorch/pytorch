@@ -74,8 +74,7 @@ static bool is_empty_tensor(const Tensor& self) {
 }
 
 static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
-  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
-              "MPS support unary op with uint8 natively starting from macOS 13.0");
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   auto output = output_;
   bool needsCopyToOutput = false;
@@ -98,7 +97,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
 
     // If self is non-densely mapped in storage, create a dense output-like representation
     at::Tensor self_;
-    if (!is_dense_in_storage(self)) {
+    if (!is_dense_in_storage(self) && !is_macOS_15_0_or_newer) {
       self_ = at::empty_like(output, self.scalar_type());
       mps::mps_copy_(self_, self, false);
     } else {
@@ -150,19 +149,8 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return inputTensor;
   }
 
-  if (!is_macos_13_or_newer()) {
-    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-    MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                          secondaryTensor:zeroTensor
-                                                                     name:nil];
-    return [mpsGraph selectWithPredicateTensor:predicateTensor
-                           truePredicateTensor:[mpsGraph ceilWithTensor:inputTensor name:nil]
-                          falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                          name:nil];
-  } else {
-    return [mpsGraph truncateWithTensor:inputTensor name:nil];
-  }
-};
+  return [mpsGraph truncateWithTensor:inputTensor name:nil];
+}
 
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
@@ -444,17 +432,6 @@ static void cumulative_op_impl(const Tensor& self,
               "(original dim is ",
               dim,
               ")");
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE(op_name, " supported by MPS on MacOS 13+, please upgrade");
-    Tensor cpu_result;
-    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
-      cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
-    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
-      cpu_result = self.to(at::Device(kCPU)).cumprod(dim, dtype);
-    }
-    at::_copy_from_and_resize(cpu_result, result);
-    return;
-  }
   TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
 
