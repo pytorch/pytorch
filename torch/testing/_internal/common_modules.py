@@ -16,7 +16,8 @@ from torch.testing._internal.common_dtype import (
     floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipCUDAVersionIn)
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipMPSVersionIfLessThan,
+    skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
@@ -4072,11 +4073,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.Hardtanh,
@@ -4195,11 +4192,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.LeakyReLU,
@@ -4237,11 +4230,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.LogSigmoid,
@@ -4300,11 +4289,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.Tanhshrink,
@@ -4313,11 +4298,7 @@ module_db: List[ModuleInfo] = [
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
+                       skipMPSVersionIfLessThan(15, 0)
                    ),)
                ),
     ModuleInfo(torch.nn.Threshold,

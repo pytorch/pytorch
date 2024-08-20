@@ -12,6 +12,7 @@ import functools
 import gc
 import inspect
 import itertools
+import os
 import random
 import unittest
 import warnings
@@ -5561,6 +5562,62 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         mod.eval()
         self.assertFalse(opt_mod.training)
+
+    @requires_cuda
+    def test_memleak_when_graph_input_has_tensor_attr(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+
+        x = torch.ones(2, device="cuda")
+        x.foo = torch.zeros(2, device="cuda")
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check when non-tensor data structure attribute contains a tensor
+        @torch.compile(backend="eager")
+        def f(x):
+            x.add_(1)
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device="cuda")
+        x.foo = [torch.zeros(2, device="cuda") for _ in range(5)]
+        f(x)
+        del x.foo
+        del x
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+        # check with tensor refcycle
+        @torch.compile(backend="eager")
+        def g(x, y):
+            return x + y
+
+        mem_before = torch.cuda.memory_allocated()
+        x = torch.ones(2, device="cuda")
+        y = torch.zeros(2, device="cuda")
+        x.foo = [y]
+        y.foo = [x]
+        g(x, y)
+        del x.foo
+        del y.foo
+        del x
+        del y
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_before, mem_after)
+
+    def test_os_fspath(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            os.fspath(".")
+            return torch.sin(x)
+
+        fn(torch.randn(4))
 
 
 instantiate_parametrized_tests(ReproTests)
