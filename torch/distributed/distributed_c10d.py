@@ -4351,7 +4351,7 @@ def split_group(
         raise RuntimeError(
             "No device associated with the default pg, not safe to split any process groups"
         )
-    default_backend, default_store = _world.pg_map[default_pg]
+    _, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 

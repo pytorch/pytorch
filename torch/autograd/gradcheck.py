@@ -674,7 +674,7 @@ def _get_numerical_vJu(
 ):
     # Note that all_v can also be None, in that case, this function only computes Ju.
     reduced_jacobians: List[List[torch.Tensor]] = []
-    for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
+    for inp_idx, u in zip(inp_indices, all_u):
         all_Ju = _get_numerical_jvp_wrt_specific_input(
             fn, inp_idx, inputs, u, eps, is_forward_ad
         )
