@@ -6521,6 +6521,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
