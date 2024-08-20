@@ -1250,7 +1250,7 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutErrorMsg(
     const std::string& extraMsg) {
   return c10::str(
       logPrefix(),
-      "Received a dump signal from ",
+      "Received a dump signal due to a collective timeout from ",
       extraMsg,
       " and will ",
       "start to dump the debug info. ",
