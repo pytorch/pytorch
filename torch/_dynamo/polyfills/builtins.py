@@ -3,14 +3,9 @@ Python polyfills for builtins
 """
 
 import builtins
-import functools
-import operator
-from typing import Iterable, TypeVar
+from typing import Iterable
 
 from ..decorators import substitute_in_graph
-
-
-_T = TypeVar("_T")
 
 
 @substitute_in_graph(builtins.all)
@@ -27,8 +22,3 @@ def any(iterable: Iterable[object], /) -> bool:
         if elem:
             return True
     return False
-
-
-@substitute_in_graph(builtins.sum)  # type: ignore[arg-type]
-def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignment]
-    return functools.reduce(operator.add, iterable, start)
