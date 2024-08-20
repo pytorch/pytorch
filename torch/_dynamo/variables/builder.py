@@ -539,7 +539,7 @@ class VariableBuilder:
             result = CustomizedDictVariable.wrap(self, value)
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif istype(value, set) and  ConstantVariable.is_literal(value):
+        elif istype(value, set) and ConstantVariable.is_literal(value):
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             result = ConstantVariable.create(value=value)
             return self.set_source_and_track_mutable(value, result)

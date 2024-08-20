@@ -3307,11 +3307,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(z), fn_opt(z))
 
     def test_add_global_set(self):
-        # This fail with enable_cpp_guard_manager = True.
-        torch._dynamo.config.enable_cpp_guard_manager = False
-
         ss = set()
-
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
