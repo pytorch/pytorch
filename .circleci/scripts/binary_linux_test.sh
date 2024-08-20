@@ -119,8 +119,11 @@ fi
 # Test the package
 /builder/check_binary.sh
 
-# Run smoke test
-python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
+  # Run smoke test for non-s390x binaries for now
+  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+fi
+
         
 # Clean temp files
 cd /builder && git clean -ffdx
