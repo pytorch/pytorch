@@ -1326,9 +1326,8 @@ class GraphLowering(torch.fx.Interpreter):
 
                 if len(strides):
                     allow_padding = (
-                        (config.pad_outputs or n.name not in self.user_visible_outputs)
-                        and not is_input_for_as_strided
-                    )
+                        config.pad_outputs or n.name not in self.user_visible_outputs
+                    ) and not is_input_for_as_strided
                     if not isinstance(result.data, ir.ReinterpretView):
                         result = ir.ExternKernel.require_exact_strides(
                             result, strides, allow_padding=allow_padding
