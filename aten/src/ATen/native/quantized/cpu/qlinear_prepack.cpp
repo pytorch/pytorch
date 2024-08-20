@@ -57,7 +57,6 @@ void calc_col_offsets_transpose(
 } // namespace
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
     std::optional<at::Tensor> bias) {
   TORCH_CHECK(
@@ -73,7 +72,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
   const auto qtype = weight.qscheme();
   std::vector<int32_t> weight_zero_points_int32(1, 0);
   if (qtype == c10::kPerTensorAffine) {
-    weight_zero_points_int32[0] = {static_cast<int32_t>(weight.q_zero_point())};
+    weight_zero_points_int32[0] = weight.q_zero_point();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
     for (const auto i : c10::irange(N)) {
@@ -83,7 +82,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
   }
   std::vector<float> weight_scales_float(1, 0.0);
   if (qtype == c10::kPerTensorAffine) {
-    weight_scales_float[0] = {static_cast<float>(weight.q_scale())};
+    weight_scales_float[0] = weight.q_scale();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
     for (const auto i : c10::irange(N)) {
@@ -96,8 +95,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
 
   std::vector<int32_t> col_offsets(N);
   calc_col_offsets_transpose(
-      /*K=*/static_cast<int>(K),
-      /*N=*/static_cast<int>(N),
+      /*K=*/K,
+      /*N=*/N,
       /*Bint8=*/weight_ptr_int8,
       /*B_zero_point=*/weight_zero_points_int32.data(),
       /*col_offsets=*/col_offsets.data(),
@@ -132,7 +131,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
 
 #ifdef USE_PYTORCH_QNNPACK
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
     std::optional<at::Tensor> bias_in) {
   TORCH_CHECK(
@@ -182,9 +180,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
 #ifdef USE_FBGEMM
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     at::Tensor weight,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::optional<at::Tensor> bias) {
 
   weight = at::_saturate_weight_to_fp16(weight);
@@ -307,7 +303,8 @@ inline at::Tensor pack_weight_to_onednn_tensor(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at::native {
+namespace at {
+namespace native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
@@ -390,11 +387,7 @@ class QLinearPackWeightFp16 final {
 
 class QLinearPackWeightInt8Legacy final {
  public:
-  static Tensor run(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] at::Tensor weight,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] std::optional<Tensor> bias) {
+  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -403,11 +396,7 @@ class QLinearPackWeightInt8Legacy final {
 
 class QLinearPackWeightFp16Legacy final {
  public:
-  static Tensor run(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] at::Tensor weight,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] std::optional<Tensor> bias) {
+  static Tensor run(at::Tensor weight, std::optional<Tensor> bias) {
     TORCH_CHECK(false,
         "This model uses an outdated version of quantized.linear_prepack_fp16. "
         "Please re-export your model using the newer definitions in torch.jit.quantized");
@@ -417,10 +406,8 @@ class QLinearPackWeightFp16Legacy final {
 class QLinearPackWeightInt8Onednn final {
  public:
   static at::Tensor run(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] at::Tensor weight, // Not QTensor
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    [[maybe_unused]] std::optional<torch::List<int64_t>> input_shape) {
+    at::Tensor weight, // Not QTensor
+    std::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else
@@ -457,4 +444,5 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
 }
 
 } // namespace
-} // namespace at::native
+} // namespace native
+} // namespace at
