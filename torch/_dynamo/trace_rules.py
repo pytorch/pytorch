@@ -47,7 +47,6 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
-    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -3460,7 +3459,7 @@ def check_verbose(obj, is_inlined_call=False):
     rule = torch._dynamo.trace_rules.lookup_inner(
         fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
-    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
+    if issubclass(rule, UserFunctionVariable):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
