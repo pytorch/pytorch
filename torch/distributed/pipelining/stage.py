@@ -164,6 +164,7 @@ class _PipelineStageBase(ABC):
         # Number of backward chunks seen. This is used to determine when to do
         # grad reduction in DDP or FSDP.
         self._seen_bwd_chunks = 0
+        self._seen_wt_update_chunks = 0
 
         # To be populated later by the Schedule
         self.chunks: Optional[int] = None
@@ -406,6 +407,15 @@ class _PipelineStageBase(ABC):
         self.output_chunks.clear()
         # Reset bwd chunk counter
         self._seen_bwd_chunks = 0
+        # Reset weight update counter
+        self._seen_wt_update_chunks = 0
+
+        # Clear grad of input buffers in between schedule steps. This is because
+        # `torch.autograd.backward()` will accumulate gradients into leaf
+        # tensors by default. For gradients to pass back to previous stages, we
+        # don't want such accumulation.
+        for recv_tuple in self.args_recv_info.values():  # iterate over all chunks
+            for a in recv_tuple:  # iterate over all input args
 
         # Clear grad of input buffers in between schedule steps. This is because
         # `torch.autograd.backward()` will accumulate gradients into leaf
@@ -629,6 +639,10 @@ class _PipelineStageBase(ABC):
                 if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
                     bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
+                # ensure that FSDP does not reshard the params before the weight update
+                self.submod.set_reshard_after_backward(False)
+                self.submod.set_is_last_backward(False)
+
                 dinputs, param_groups = stage_backward_input(
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
@@ -653,6 +667,9 @@ class _PipelineStageBase(ABC):
             f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
             " without first calling `backward_one_chunk(full_backward=False)`"
         )
+
+        self.submod.set_reshard_after_backward(False)
+        last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
 
         if self.dw_builder is not None:
             self.dw_runner.pop(bwd_chunk_id)()
