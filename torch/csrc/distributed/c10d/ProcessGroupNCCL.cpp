@@ -793,7 +793,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
-  dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
@@ -874,7 +874,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
             << "NCCL version: " << getNcclVersion()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1252,7 +1252,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
-  bool checkDumpSignal = (dumpOnException_ && local_id_ == 0);
+  bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -1730,9 +1730,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastCompletedSeq,
             ".");
         // try to notify other ranks via global TCPStore to dump the flight
-        // recorder if exception happens. Flight recorder behavior is
-        // independent of desync Debug.
-        if (dumpOnException_) {
+        // recorder when a collective timeout or exception happens. Flight
+        // recorder behavior is independent of desync Debug.
+        if (dumpOnTimeoutOrEx_) {
           try {
             auto rank = globalRank();
             auto vec = std::vector<uint8_t>(
@@ -1742,7 +1742,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (!shouldDump_.load()) {
               LOG(ERROR)
                   << logPrefix()
-                  << "Broadcasting the dump signal of flight-recorder to other processes via TCPStore.";
+                  << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
             }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
