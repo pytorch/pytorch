@@ -14,6 +14,7 @@ from .pt2e._numeric_debugger import (  # noqa: F401
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
+    CUSTOM_KEY,
     prepare_for_propagation_comparison,
 )
 from .pt2e.export_utils import (
@@ -162,6 +163,7 @@ __all__ = [
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
+    "CUSTOM_KEY",
     "NUMERIC_DEBUG_HANDLE_KEY",
     "prepare_for_propagation_comparison",
     "extract_results_from_loggers",
