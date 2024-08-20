@@ -885,18 +885,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if (
-            # When the dynamic lookup is necessary, e.g., threading.local
-            subobj is NO_SUCH_SUBOBJ
-            # This is somewhat ugly but no other easy way. For named tuples, field values are represented by an internal
-            # data structure called _tuplegetter.
-            or isinstance(subobj, _collections._tuplegetter)
-            # For __slots__ and member descriptors, directly look into the __slots__
-            or (inspect.ismemberdescriptor(subobj) and name in self.value.__slots__)
-            # TODO(anijain2305) - Maybe types.BuiltinFunctionType should go in is_wrapper_or_member_descriptor
-            # For property with C-defined fget, directly access the property
+            subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
+            or isinstance(
+                subobj, _collections._tuplegetter
+            )  # namedtuple fields are represented by _tuplegetter
+            or (
+                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
+            )  # handle memberdecriptor and slots
             or (
                 isinstance(subobj, property)
-                and isinstance(subobj.fget, types.BuiltinFunctionType)
+                and isinstance(
+                    subobj.fget, types.BuiltinFunctionType
+                )  # property with C-defined fget
             )
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
