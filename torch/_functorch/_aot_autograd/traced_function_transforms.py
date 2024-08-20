@@ -246,8 +246,10 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                     # Prevent partitioner from moving effectful ops happened in backward to forward for side-effects correctness.
 
                     functional_tensor_mode._tokens_forward_output = (
-                        functional_tensor_mode._tokens.copy()
+                        functional_tensor_mode._tokens
                     )
+                    functional_tensor_mode._tokens = {}
+
                 from torch._functorch._aot_autograd.traced_function_transforms import (
                     set_partitioner_tag,
                 )
@@ -410,18 +412,6 @@ def create_functionalized_fn(
                 f_outs = fn(*f_args)
 
             if trace_joint:
-                functional_tensor_mode = (
-                    torch.utils._python_dispatch._detect_infra_mode(
-                        torch._C._TorchDispatchModeKey.FUNCTIONAL
-                    )
-                )
-                assert functional_tensor_mode is not None
-                if len(meta.tokens) != len(functional_tensor_mode._tokens):
-                    # New effect tokens were discovered in backward
-                    meta.num_backward_discovered_tokens = len(
-                        functional_tensor_mode._tokens
-                    ) - len(meta.tokens)
-
                 # We support a limited amount of mutation of graph inputs during the backward pass.
                 # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
                 # Here, we perform extra checks for primals that were mutated in the **backward**
@@ -710,20 +700,12 @@ def handle_effect_tokens_fn(
             assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
             fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
 
-            # meta is collected from tracing forward only, so len(meta.tokens) is the number of tokens used in forward.
-            # New effect tokens can be discovered in backward. In this case len(functional_tensor_mode._tokens) != len(meta.tokens)
-
             bwd_out_tokens = functional_tensor_mode._tokens.values()
-            # Not adding tokens, that were not updated in backward
-            fwd_out_tokens_set = set(fwd_out_tokens)
-            bwd_out_tokens_used_in_bw = [
-                t for t in bwd_out_tokens if t not in fwd_out_tokens_set
-            ]
 
             f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
-            f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens_used_in_bw]
+            f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens]
 
-            meta.num_backward_out_tokens = len(bwd_out_tokens_used_in_bw)
+            meta.num_backward_tokens = len(bwd_out_tokens)
             return ((*f_fwd_out_tokens, *outs[0]), (*outs[1], *f_bwd_out_tokens))
 
         out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]

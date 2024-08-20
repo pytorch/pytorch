@@ -658,13 +658,12 @@ class EffectTokensWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            if num_tokens > 0 or runtime_metadata.num_backward_discovered_tokens > 0:
+            if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
                 args = [
                     *([None] * num_tokens),
                     *args,
-                    *([None] * runtime_metadata.num_backward_discovered_tokens),
                 ]
                 old_args.clear()
 
@@ -1733,20 +1732,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                bw_tokens = [None] * CompiledFunction.metadata.num_backward_tokens
+
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
                     *flat_bw_args_with_grads,
+                    *bw_tokens,
                     *rng_args,
                 ]
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (
-                    len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
+                    len(all_args)
+                    - num_flat_bw_args_with_grads
+                    - len(rng_args)
+                    - len(bw_tokens)
                 )
-                tangents_end_idx = len(all_args) - len(rng_args)
+                tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1774,9 +1779,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
                 )
-                grad_output_types = [
-                    type(x) for x in all_args[-num_flat_bw_args_with_grads:]
-                ]
+
+                _l = -num_flat_bw_args_with_grads
+                _r = None
+                roffset = len(rng_args) + len(bw_tokens)
+                if roffset > 0:
+                    _l -= roffset
+                    _r = -roffset
+
+                grad_output_types = [type(x) for x in all_args[_l:_r]]
                 # In general, we can add more asserts/guards here for when we partitioned
                 # with incorrect assumptions about the grad_outputs.
                 # Normalize FakeTensor -> torch.Tensor
@@ -1858,7 +1869,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     all_args = unwrap_tensor_subclasses(
                         all_args, is_joint_structure=False
                     )
-                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
+                    tangents_start_idx = (
+                        len(all_args) - len_tangents - len(rng_args) - len(bw_tokens)
+                    )
                     tangents_end_idx = tangents_start_idx + len_tangents
 
                 # Make the tangents contiguous. Note that we must do this after subclass desugaring
@@ -1973,11 +1986,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Toss out the backward output tokens
-                    num_bw_out_tokens = (
-                        CompiledFunction.metadata.num_backward_out_tokens
-                    )
-                    if num_bw_out_tokens > 0:
-                        out = out[:-num_bw_out_tokens]
+                    num_bw_tokens = CompiledFunction.metadata.num_backward_tokens
+                    if num_bw_tokens > 0:
+                        out_tokens = out[-num_bw_tokens:]
+                        for t in out_tokens:
+                            assert t.numel() == 0
+
+                        out = out[:-num_bw_tokens]
 
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                     out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
