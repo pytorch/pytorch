@@ -653,9 +653,9 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
-
   // do nothing if we got 0-element tensors
-  if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() || !softmaxstats.numel()) {
+  if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() ||
+      !softmaxstats.numel()) {
     return;
   }
 
