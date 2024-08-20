@@ -1516,7 +1516,6 @@ class CommonTemplate:
 
     @config.patch(debug_index_asserts=False)
     @skipIfWindows
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
         def test(
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
@@ -1587,7 +1586,7 @@ class CommonTemplate:
             (a,),
             has_assert=ifdynstaticdefault(False, True),
             has_wrapping=False,
-            vectorize=True,
+            vectorize=False,  # Constant propagation off -> indirect indexing -> no vec
         )
 
         def unsafe_index(a, b):
