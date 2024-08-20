@@ -64,6 +64,16 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused) {
   }
 }
 
+PyObject* THPModule_isAllDisabledTorchFunction(
+    PyObject* self,
+    PyObject* unused) {
+  if (at::impl::torch_function_all_disabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyMethodDef DisableTorchFunctionSubclass_methods[] = { // NOLINT
     {"__enter__", DisableTorchFunctionSubclass__enter, METH_NOARGS, nullptr},
     {"__exit__", DisableTorchFunctionSubclass__exit, METH_VARARGS, nullptr},
