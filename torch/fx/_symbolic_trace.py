@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import builtins
+import contextlib
 import copy
 import functools
 import inspect
@@ -684,6 +685,25 @@ class Tracer(TracerBase):
             return flatten_fn, flat_args
         return root_fn, args
 
+    @compatibility(is_backward_compatible=False)
+    def _tracing_context(self):
+        """
+        Context under which to run trace().
+
+        This sets _is_tracing_fx_flag = True
+        """
+        @contextlib.contextmanager
+        def ctx():
+            global _is_fx_tracing_flag
+            old_is_fx_tracing_flag = _is_fx_tracing_flag
+            _is_fx_tracing_flag = True
+            try:
+                yield
+            finally:
+                _is_fx_tracing_flag = old_is_fx_tracing_flag
+
+        return ctx()
+
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
@@ -713,10 +733,7 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        global _is_fx_tracing_flag
-        old_is_fx_tracing_flag = _is_fx_tracing_flag
-        _is_fx_tracing_flag = True
-        try:
+        with self._tracing_context():
             if isinstance(root, torch.nn.Module):
 
                 # do real recompilation for _LazyGraphModule before retracing since the trace
@@ -826,8 +843,6 @@ class Tracer(TracerBase):
                 )
 
             self.submodule_paths = None
-        finally:
-            _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
 
     def __deepcopy__(self, memo):

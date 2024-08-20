@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 import logging
@@ -1612,6 +1613,15 @@ class _ModuleStackTracer(PythonKeyTracer):
         else:
             self.attr_proxy_map[attr_val].reset_proxy_mapping(attr_val, attr)
         return self.attr_proxy_map[attr_val]
+
+    def _tracing_context(self):  # type: ignore[no-untyped-def]
+        """
+        Override the default Tracer._tracing_context, which normally sets `is_fx_tracing()`
+        to return true during tracing.
+
+        For make_fx, we generally don't want this behavior.
+        """
+        return contextlib.nullcontext()
 
     def trace(
         self, root: Union[Module, Callable], concrete_args: Optional[Dict[str, object]]
