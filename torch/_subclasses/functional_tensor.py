@@ -299,7 +299,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}
 
-        # Filled after forward tracing is done, see on_forward_tracing_end
+        # Filled after forward tracing.
         self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
