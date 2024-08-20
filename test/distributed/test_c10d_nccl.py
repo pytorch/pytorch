@@ -817,6 +817,8 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(
