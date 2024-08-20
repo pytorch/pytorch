@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
+
 log = logging.getLogger(__name__)
 
 if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
@@ -81,6 +82,10 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
+
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
             return StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
@@ -123,7 +128,11 @@ def log_export_usage(**kwargs):
     pass
 
 
-def log_torchscript_usage(api: str):
+def log_trace_structured_event(*args, **kwargs) -> None:
+    pass
+
+
+def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
@@ -133,7 +142,10 @@ def check_if_torch_exportable():
 
 
 def log_torch_jit_trace_exportability(
-    api: str, type_of_export: str, export_outcome: str, result: str
+    api: str,
+    type_of_export: str,
+    export_outcome: str,
+    result: str,
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
@@ -174,6 +186,10 @@ def justknobs_getval_int(name: str) -> int:
     Read warning on justknobs_check
     """
     return 0
+
+
+def is_fb_unit_test() -> bool:
+    return False
 
 
 @functools.lru_cache(None)

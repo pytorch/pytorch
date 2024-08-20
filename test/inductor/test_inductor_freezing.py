@@ -9,13 +9,14 @@ import unittest
 import weakref
 
 import torch
-
 from torch import nn
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_utils import skipIfRocm
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
+
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -38,10 +40,12 @@ if IS_WINDOWS and IS_CI:
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
+
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -189,7 +193,7 @@ class ConvMultiFunctionalBN(torch.nn.Module):
 class OptimizeForInferenceTemplate(TestCase):
     def test_mutation(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mutated_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -216,7 +220,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_aliased_param_return(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.aliased_param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -259,7 +263,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class MM(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -270,7 +274,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
         class MM2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.t1 = torch.nn.Parameter(torch.rand(10, 10))
@@ -280,7 +284,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2
 
         class AddMM(MM):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.b1 = torch.nn.Parameter(torch.rand([10]))
@@ -621,7 +625,7 @@ class OptimizeForInferenceTemplate(TestCase):
             raise unittest.SkipTest("NYI CPU")
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([10, 10]))
 
@@ -646,6 +650,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
@@ -704,7 +709,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -727,9 +732,10 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod(x)
             self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
@@ -786,7 +792,7 @@ class OptimizeForInferenceTemplate(TestCase):
         device = self.device
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = torch.tensor(
                     [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]], device=device
@@ -817,9 +823,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
+    @skipIfRocm
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False

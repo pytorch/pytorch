@@ -12,9 +12,18 @@ from contextlib import contextmanager
 from inspect import getframeinfo, stack
 from typing import Any, Dict, List, Optional, Set
 
-__all__ = ['TimerRequest', 'TimerClient', 'RequestQueue', 'TimerServer', 'configure', 'expires']
+
+__all__ = [
+    "TimerRequest",
+    "TimerClient",
+    "RequestQueue",
+    "TimerServer",
+    "configure",
+    "expires",
+]
 
 logger = logging.getLogger(__name__)
+
 
 class TimerRequest:
     """
@@ -58,7 +67,6 @@ class TimerClient(abc.ABC):
         given the scope_id and expiration_time. Typically registers
         the timer with the TimerServer.
         """
-        pass
 
     @abc.abstractmethod
     def release(self, scope_id: str):
@@ -67,7 +75,6 @@ class TimerClient(abc.ABC):
         client represents. After this method is
         called, the countdown timer on the scope is no longer in effect.
         """
-        pass
 
 
 class RequestQueue(abc.ABC):
@@ -94,7 +101,6 @@ class RequestQueue(abc.ABC):
         res = q.get(size * 2, timeout=1)
         assert size <= len(res) <= size * 2
         """
-        pass
 
     @abc.abstractmethod
     def get(self, size: int, timeout: float) -> List[TimerRequest]:
@@ -102,7 +108,6 @@ class RequestQueue(abc.ABC):
         Gets up to ``size`` number of timer requests in a blocking fashion
         (no more than ``timeout`` seconds).
         """
-        pass
 
 
 class TimerServer(abc.ABC):
@@ -136,14 +141,12 @@ class TimerServer(abc.ABC):
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
         """
-        pass
 
     @abc.abstractmethod
     def clear_timers(self, worker_ids: Set[Any]) -> None:
         """
         Clears all timers for the given ``worker_ids``.
         """
-        pass
 
     @abc.abstractmethod
     def get_expired_timers(self, deadline: float) -> Dict[str, List[TimerRequest]]:
@@ -152,7 +155,6 @@ class TimerServer(abc.ABC):
         is a timer for which the expiration_time is less than or equal to
         the provided deadline.
         """
-        pass
 
     @abc.abstractmethod
     def _reap_worker(self, worker_id: Any) -> bool:
@@ -192,9 +194,9 @@ class TimerServer(abc.ABC):
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
             logger.info(
-                "Reaping worker_id=[%s]."
-                " Expired timers: %s",
-                worker_id, self._get_scopes(expired_timers)
+                "Reaping worker_id=[%s]." " Expired timers: %s",
+                worker_id,
+                self._get_scopes(expired_timers),
             )
             if self._reap_worker_no_throw(worker_id):
                 logger.info("Successfully reaped worker=[%s]", worker_id)
@@ -210,10 +212,10 @@ class TimerServer(abc.ABC):
 
     def start(self) -> None:
         logger.info(
-            "Starting %s..."
-            " max_interval=%s,"
-            " daemon=%s",
-            type(self).__name__, self._max_interval, self._daemon
+            "Starting %s..." " max_interval=%s," " daemon=%s",
+            type(self).__name__,
+            self._max_interval,
+            self._daemon,
         )
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon

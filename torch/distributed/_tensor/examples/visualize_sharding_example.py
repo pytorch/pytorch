@@ -1,8 +1,14 @@
+"""
+To run the example, use the following command:
+torchrun --standalone --nnodes=1 --nproc-per-node=4 visualize_sharding_example.py
+"""
+
 import os
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.debug.visualize_sharding import visualize_sharding
+
 
 world_size = int(os.environ["WORLD_SIZE"])
 rank = int(os.environ["RANK"])

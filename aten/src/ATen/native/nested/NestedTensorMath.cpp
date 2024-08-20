@@ -15,9 +15,10 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 int64_t num_bytes(IntArrayRef sizes) {
@@ -164,10 +165,10 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
   const auto bias_contig = bias.expect_contiguous();
   auto output_buffer = at::native::empty_like(
       input_buffer,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
   auto options = input_buffer.options();
   if (input_buffer.is_cuda()) {
@@ -232,7 +233,7 @@ Tensor nested_from_padded_generic(
     IntArrayRef sizes_i(
         size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
-        sizes_i, true, kBool, c10::nullopt, c10::nullopt, c10::nullopt);
+        sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
   }
   at::Tensor final_mask = at::stack(masks);
@@ -538,6 +539,46 @@ Tensor softmax_nested(
   return output;
 }
 
+Tensor NestedTensor_all(
+    const Tensor& input,
+    const int64_t dim,
+    const bool keepdim) {
+  auto input_ptr = get_nested_tensor_impl(input);
+  int64_t ntensors = input_ptr->size(0);
+  if (ntensors == 0) {
+    return input.clone();
+  }
+  int64_t positive_dim = at::maybe_wrap_dim(dim, input_ptr->dim());
+  TORCH_CHECK(
+      positive_dim >= 1,
+      "Cannot apply all across nested dimension 0");
+  const Tensor& buffer = input_ptr->get_unsafe_storage_as_tensor(),
+      & sizemat = input_ptr->get_nested_sizes();
+
+
+  Tensor output_buffer = buffer.new_empty(buffer.sizes());
+
+  Tensor output_size = sizemat.clone();
+  if (keepdim) {
+    output_size.select(1, positive_dim - 1).fill_(1);
+  } else {
+    output_size = output_size.slice(1, 0, positive_dim - 1);
+  }
+
+  Tensor output = wrap_buffer(output_buffer, output_size.contiguous());
+
+  std::vector<Tensor> input_unbind = input.unbind(),
+      output_unbind = output.unbind();
+  for (int64_t i = 0; i < ntensors; i++) {
+    at::all_out(
+        output_unbind[i],
+        input_unbind[i],
+        positive_dim - 1,
+        keepdim);
+  }
+  return output;
+}
+
 Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_ptr = get_nested_tensor_impl(self);
   // check input dimensions
@@ -795,9 +836,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  bool viewable;
-  Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
+  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   TORCH_CHECK(
       viewable,
@@ -888,9 +927,7 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   // reshaping underlying tensor dimensions does not change offset
   // determine reshaped size and stride
   const Tensor& sizemat = self_ptr->get_nested_sizes();
-  bool viewable{false};
-  Tensor sizemat_reshaped, stridemat_reshaped;
-  std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
+  auto [viewable, sizemat_reshaped, stridemat_reshaped] = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
   if (viewable) {
     return self.view(proposed_shape);
@@ -939,7 +976,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
 
 Tensor& normal_nested_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.normal_(mean, std, gen);
+  self_buf.normal_(mean, std, std::move(gen));
   return self;
 }
 
@@ -1053,5 +1090,4 @@ Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
   return cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

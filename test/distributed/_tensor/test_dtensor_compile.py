@@ -74,6 +74,7 @@ bw_compiler = functools.partial(extract_graph, graph_cell=bw_graph_cell)
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 
+
 aot_eager_graph = aot_autograd(
     fw_compiler=fw_compiler,
     bw_compiler=bw_compiler,
@@ -298,6 +299,26 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dynamo_dtensor_recompile(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            return torch.mul(x, x)
+
+        x = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(0)], run_check=False)
+        x2 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(0)], run_check=False)
+        x3 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(1)], run_check=False)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=False)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x2), opt_fn(x2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x3), opt_fn(x3))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -467,6 +488,37 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_dont_recompile_on_same_placement_devicemesh(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [placement], run_check=False)
+
+        x = torch.ones(4, 4, requires_grad=True)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Shard(1)
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Shard(1)
+        # no recompile, placement is unchanged
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Partial()
+        # recompile since placement is different
+        fn(x)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placement = Partial()
+        # no recompile, placement is unchanged
+        fn(x)
+
+        # 2 total frames (one for Partial(), one for Shard())
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_dtensor_dynamo_device_mesh_attrs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -509,7 +561,7 @@ def forward(self, primals_1):
     wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
     sin = torch.ops.aten.sin.default(wait_tensor)
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return [sin_1, primals_1, wait_tensor]""",
+    return (sin_1, primals_1, wait_tensor)""",
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -537,7 +589,7 @@ def forward(self, primals_1):
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     def test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.wq = nn.Linear(16, 16)
                 self.wk = nn.Linear(16, 16)
@@ -553,7 +605,7 @@ def forward(self, primals_1):
                 return self.wo(xo)
 
         class FakeTransformerBlock(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attn = FakeAttention()
 
@@ -561,7 +613,7 @@ def forward(self, primals_1):
                 return self.attn(x)
 
         class FakeTransformer(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = FakeTransformerBlock()
 
@@ -599,7 +651,7 @@ def forward(self, primals_1):
         code = run_and_get_triton_code(compiled_model, inp)
         FileCheck().check(
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
-        ).check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0").check(
+        ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
             "extern_kernels.mm(buf0,"
         ).run(
             code

@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
-import torch.utils.hooks as hooks
 from torch._namedtensor_internals import (
     check_serializing_named_tensor,
     is_ellipsis,
@@ -26,7 +25,6 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
-from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
@@ -247,8 +245,11 @@ class Tensor(torch._C.TensorBase):
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
+
+        from torch.utils.hooks import warn_if_has_hooks
+
         # See Note [Don't serialize hooks]
-        torch.utils.hooks.warn_if_has_hooks(self)
+        warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
@@ -565,7 +566,10 @@ class Tensor(torch._C.TensorBase):
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
                 self.grad_fn._register_hook_dict(self)
-        handle = hooks.RemovableHandle(self._backward_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -621,7 +625,10 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
-        handle = hooks.RemovableHandle(self._post_accumulate_grad_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._post_accumulate_grad_hooks)
         self._post_accumulate_grad_hooks[handle.id] = hook
         return handle
 
@@ -715,7 +722,7 @@ class Tensor(torch._C.TensorBase):
         It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
+        :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
@@ -761,22 +768,22 @@ class Tensor(torch._C.TensorBase):
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def solve(self, other):
-        from ._linalg_utils import solve
+        from torch._linalg_utils import solve
 
         return solve(self, other)
 
     def lstsq(self, other):
-        from ._linalg_utils import lstsq
+        from torch._linalg_utils import lstsq
 
         return lstsq(self, other)
 
     def eig(self, eigenvectors=False):
-        from ._linalg_utils import eig
+        from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
 
     def symeig(self, eigenvectors=False):
-        from ._linalg_utils import _symeig
+        from torch._linalg_utils import _symeig
 
         return _symeig(self, eigenvectors=eigenvectors)
 
@@ -1096,7 +1103,7 @@ class Tensor(torch._C.TensorBase):
             array = array.astype("uint8")
         return torch.from_numpy(array)
 
-    def __contains__(self, element):
+    def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
 
         Args:
@@ -1109,7 +1116,7 @@ class Tensor(torch._C.TensorBase):
             element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
         ):
             # type hint doesn't understand the __contains__ result array
-            return (element == self).any().item()  # type: ignore[union-attr]
+            return bool((element == self).any().item())  # type: ignore[union-attr]
 
         raise RuntimeError(
             f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
@@ -1124,7 +1131,11 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
@@ -1152,14 +1163,19 @@ class Tensor(torch._C.TensorBase):
         typestr = {
             torch.complex64: "<c8",
             torch.complex128: "<c16",
+            torch.bfloat16: "<f2",
             torch.float16: "<f2",
             torch.float32: "<f4",
             torch.float64: "<f8",
             torch.uint8: "|u1",
             torch.int8: "|i1",
+            torch.uint16: "<u2",
             torch.int16: "<i2",
+            torch.uint32: "<u4",
             torch.int32: "<i4",
+            torch.uint64: "<u8",
             torch.int64: "<i8",
+            torch.bool: "|b1",
         }[self.dtype]
 
         itemsize = self.element_size()
@@ -1503,6 +1519,9 @@ class Tensor(torch._C.TensorBase):
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+
+        from torch.utils.dlpack import DLDeviceType
+
         device = self.device
         idx = device.index if device.index is not None else 0
         torch_device_type = device.type

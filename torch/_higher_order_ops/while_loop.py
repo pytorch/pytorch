@@ -3,9 +3,7 @@ from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
-
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -20,7 +18,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("while_loop")
 
     def __call__(
@@ -58,9 +56,6 @@ class WhileLoopOp(HigherOrderOperator):
 
 
 while_loop_op = WhileLoopOp()
-# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
-# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
-while_loop_op.__module__ = "torch.ops.higher_order"
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):
@@ -120,7 +115,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
-    additional_inputs: Tuple = tuple()
+    additional_inputs: Tuple = ()
     if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -138,8 +133,13 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     _validate_input(cond_fn, body_fn, carried_inputs)
 
+    # Dynamo is expecting a callable with "__code__" attribute.
+    # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    def _while_loop_op_wrapper(*args, **kwargs):
+        return while_loop_op(*args, **kwargs)
+
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+        return torch.compile(_while_loop_op_wrapper, backend="eager", fullgraph=True)(
             cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
@@ -219,12 +219,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
-    if mode.enable_tracing:
-        return _trace_while_loop(
-            mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
-        )
-    else:
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return _trace_while_loop(
+        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+    )
 
 
 @while_loop_op.py_impl(FakeTensorMode)

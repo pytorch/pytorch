@@ -10,6 +10,7 @@ from typing import (
     Optional,
     OrderedDict,
     overload,
+    Set,
     Tuple,
     TypeVar,
 )
@@ -20,6 +21,7 @@ from torch import nn
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -281,7 +283,7 @@ def _to_kwargs(
 def _verify_param_shape_across_processes(
     process_group: dist.ProcessGroup,
     tensors: List[torch.Tensor],
-    logger: Optional[dist.Logger] = None,
+    logger: Optional["dist.Logger"] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
@@ -354,3 +356,28 @@ def _replace_by_prefix(
 
 def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
     return tensor.untyped_storage().data_ptr() > 0
+
+
+def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
+    """
+    Returns the modules in ``modules`` that are root modules (i.e.
+    parent-less) with respect to the set ``modules``. In other words, these
+    are the modules in ``modules`` that are the not child of any other
+    module in ``modules``.
+    """
+    root_modules: List[nn.Module] = []
+    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {
+        module: set(module.modules()) for module in modules
+    }
+    for candidate_module in modules:
+        is_root_module = True
+        for module, _modules in module_to_modules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in _modules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.append(candidate_module)
+    return root_modules

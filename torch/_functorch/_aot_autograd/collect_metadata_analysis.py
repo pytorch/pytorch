@@ -11,12 +11,13 @@ a functionalized version of the graph under compilation.
 import collections
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List
+from typing import Callable, DefaultDict, Dict, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -25,6 +26,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -44,12 +46,13 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-
 from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+
 
 zip = strict_zip
 
 log = logging.getLogger(__name__)
+static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
 # Note [Tangents must be contiguous]
@@ -76,8 +79,8 @@ def coerce_tangent(x):
     #     with a Replicate/Shard placement, we have no way to convert the tangent "back" to a _Partial placement.
     #     This method lets us avoid the problem entirely by allowing subclasses to ensure that we can never
     #     have a tangent with "problematic" metadata, that we cannot convert to.
-    # (1) __coerce_same_metadata_as_tangent__(self, target)
-    #     Given a subclass, and a target subclass with differing metadata,
+    # (1) __coerce_same_metadata_as_tangent__(self, metadata)
+    #     Given a subclass, and a target differing metadata,
     #     convert self to have the same metadata as the target.
     #     With DTensor being the main example, we can use this to convert a DTensor with a Replicate()
     #     placement into one with a Shard() placement, in the case that we "guessed wrong",
@@ -86,7 +89,7 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        out = out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
     # It's possible to have a subclass that advertises as contiguous,
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
@@ -124,6 +127,8 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
+    # Note: this is guaranteed to be set when running under dynamo
+    static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
@@ -167,6 +172,7 @@ def run_functionalized_fw_and_collect_metadata(
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
+                fake_mode.reset_nt_tensor_id_counter()
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
@@ -666,14 +672,19 @@ from a multi-output view call"
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            static_parameter_input_indices = [
+        nonlocal static_input_indices
+        static_input_indices = static_input_indices or []
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            passed_indices = set(static_input_indices)
+            static_input_indices = [
                 i
                 for i, arg in enumerate(flat_args)
-                if isinstance(arg, torch.nn.Parameter)
+                if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
             ]
-        else:
-            static_parameter_input_indices = []
+
+        static_input_logger.debug(
+            "static input indices metadata analysis: %s", static_input_indices
+        )
 
         f_mutated_inputs = [
             inp
@@ -726,7 +737,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            static_parameter_indices=static_parameter_input_indices,
+            static_input_indices=static_input_indices,
             tokens=mode._tokens,
         )
         return metadata

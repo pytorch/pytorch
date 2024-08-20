@@ -40,6 +40,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
 
+
 STATE_DICT_2D_LAYOUT = Dict[str, Tuple[Optional[Sequence[int]], Sequence[int]]]
 
 
@@ -98,13 +99,20 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
 def _alloc_tensor(
     props: TensorProperties, size: Sequence[int], device_type: str = "cuda"
 ) -> torch.Tensor:
+    if device_type == "cpu":
+        device = cast(torch.device, _get_device_module(device_type).current_device())
+    else:
+        device = torch.device(
+            device_type, _get_device_module(device_type).current_device()
+        )
+
     return torch.empty(
         size=size,
         dtype=props.dtype,
         layout=props.layout,
         requires_grad=props.requires_grad,
         pin_memory=props.pin_memory,
-        device=cast(torch.device, _get_device_module(device_type).current_device()),
+        device=device,
     )
 
 

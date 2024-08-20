@@ -10,8 +10,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
@@ -79,5 +78,4 @@ variable_list GraphRoot::apply_with_saved(
   return result;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

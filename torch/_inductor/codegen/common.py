@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import re
+from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
@@ -16,7 +17,6 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Set,
     Tuple,
     Union,
 )
@@ -28,6 +28,8 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
@@ -68,13 +70,18 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)
+    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    alias_of: Optional[str] = None  # halide only
 
 
 @dataclasses.dataclass
 class SizeArg:
     name: str
     expr: sympy.Expr
+
+    @property
+    def alias_of(self):
+        return None
 
 
 @dataclasses.dataclass
@@ -138,6 +145,37 @@ def register_backend_for_device(
     )
 
 
+class BackendFeature(Enum):
+    FOREACH = auto()
+    BUCKETIZE = auto()
+    INPLACE_BUFFERS = auto()
+    MASKED_SCATTER_WITH_INDEX = auto()
+    SCAN = auto()
+    SORT = auto()
+    TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
+    REDUCE_TO_SINGLE_ELEMENT = auto()
+
+
+def get_backend_features(device: Union[torch.device, str]):
+    init_backend_registration()
+    if isinstance(device, torch.device):
+        device_type = device.type
+    else:
+        assert isinstance(device, str)
+        device_type = device
+        device = torch.device(device_type)
+    scheduling = get_scheduling_for_device(device_type)
+    return scheduling(None).get_backend_features(device)
+
+
+def has_backend_feature(device, feature):
+    """See also V.graph.has_feature"""
+    assert isinstance(feature, BackendFeature)
+    return feature in get_backend_features(device)
+
+
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
@@ -152,6 +190,60 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
         )
     else:
         return None
+
+
+@functools.lru_cache(None)
+def init_backend_registration():
+    from .cpp import CppScheduling
+    from .cpp_wrapper_cpu import CppWrapperCpu
+    from .cpp_wrapper_cuda import CppWrapperCuda
+    from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .halide import HalideScheduling
+    from .triton import TritonScheduling
+    from .wrapper import WrapperCodeGen
+
+    if get_scheduling_for_device("cpu") is None:
+        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        register_backend_for_device(
+            "cpu",
+            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            WrapperCodeGen,
+            CppWrapperCpu,
+        )
+
+    if get_scheduling_for_device("cuda") is None:
+        # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        cuda_backends = {"triton": CUDACombinedScheduling, "halide": HalideScheduling}
+        register_backend_for_device(
+            "cuda",
+            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            WrapperCodeGen,
+            CppWrapperCuda,
+        )
+
+    if get_scheduling_for_device("xpu") is None:
+        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if (
+        private_backend != "privateuseone"
+        and get_scheduling_for_device(private_backend) is None
+    ):
+        from torch.utils.backend_registration import _get_custom_mod_func
+
+        try:
+            device_scheduling = _get_custom_mod_func("Scheduling")
+            wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodeGen")
+            if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
+                register_backend_for_device(
+                    private_backend,
+                    device_scheduling,
+                    wrapper_codegen,
+                    cpp_wrapper_codegen,
+                )
+        except RuntimeError:
+            pass
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
@@ -181,7 +273,6 @@ def boolean_ops():
     return (
         "is_inf",
         "is_nan",
-        "bitwise_xor",
         "logical_not",
         "signbit",
         "le",
@@ -213,6 +304,47 @@ DTYPE_TO_COMPUTATION_DTYPE = {
         ]
     },
 }
+
+
+def deduce_output_dtype_by_name(
+    op_name: str,
+    *args,
+    **kwargs,
+) -> Optional[torch.dtype]:
+    """
+    Given op name and a list of input dtypes, deduce the output dtype
+    """
+    if op_name in boolean_ops():
+        return torch.bool
+    elif op_name in (
+        "to_dtype",
+        "index_expr",
+    ):
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
+    elif op_name in (
+        "rand",
+        "randn",
+    ):
+        return torch.float
+    elif op_name in (
+        "get_index",
+        "randint64",
+        "load_seed",
+    ):
+        return torch.int64
+    elif op_name == "reduction":
+        return kwargs["dtype"] if "dtype" in kwargs else args[1]
+    elif op_name == "constant":
+        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
+        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+    elif op_name in (
+        "load",
+        "store",
+        "store_reduction",
+    ):
+        buf_name = args[1]
+        return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+    return None
 
 
 class DataTypePropagation:
@@ -252,57 +384,29 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
-        if node.target in boolean_ops():
-            return torch.bool
-
         if node.op == "placeholder":
             return None
 
-        if node.target == "output":
+        if node.target == "output" and len(node.args) != 1:
             # we can infer output node if it only have 1 arg
-            if len(node.args) != 1:
-                return None
-
-        if node.target in (
-            "to_dtype",
-            "index_expr",
-        ):
-            return node.args[-1]
-
-        if node.target in (
-            "rand",
-            "randn",
-        ):
-            return torch.float
-
-        if node.target in (
-            "get_index",
-            "index_expr",
-            "randint64",
-        ):
-            return torch.int64
-
-        if node.target in (
-            "load",
-            "store",
-            "store_reduction",
-        ):
-            buf_name = node.args[1]
-            return V.graph.get_dtype(buf_name)  # type: ignore[arg-type]
+            return None
 
         if node.target == operator.getitem:
             return self.deduce_node_dtype(node.args[0])  # type: ignore[arg-type]
 
         assert isinstance(node.target, str)
 
-        if node.target == "reduction":
-            return node.args[1]
-
-        if node.target == "constant":
-            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]  # type: ignore[index]
-
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
+
+        if (
+            output_dtype := deduce_output_dtype_by_name(
+                node.target,
+                *node.args,
+                **node.kwargs,
+            )
+        ) is not None:
+            return output_dtype
 
         return self.deduce_node_dtype_by_inputs(node)
 
@@ -362,8 +466,8 @@ class ExprPrinter(Printer):
 
         if (
             isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.I)
-            or re.match(r"^\([^)]*\)$", string, re.I)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
             or string == ""
         ):
             return string
@@ -392,6 +496,9 @@ class ExprPrinter(Printer):
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
+
+    def _print_Identity(self, expr):
+        return self._print(expr.args[0])
 
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
@@ -1091,10 +1198,10 @@ class KernelArgs:
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
-        self.output_buffers = dict()
-        self.inplace_buffers = dict()
-        self.sizevars = sizevars or dict()
+        self.input_buffers = {}
+        self.output_buffers = {}
+        self.inplace_buffers = {}
+        self.sizevars = sizevars or {}
         self.workspace_arg = None
 
     def __repr__(self):
@@ -1228,9 +1335,9 @@ class KernelArgs:
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
-        arg_defs = []
-        call_args = []
-        arg_types = []
+        arg_defs: List[str] = []
+        call_args: List[str] = []
+        arg_types: List[torch.dtype] = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
@@ -1263,7 +1370,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            arg_types.append(type(outer))
+            arg_types.append(type(outer))  # type: ignore[arg-type]
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1271,7 +1378,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1301,7 +1407,7 @@ class KernelArgs:
     # after you do a call into this kernel, which buffers actually contain
     # updated data?  Modeled off of python_argdefs.
     def live_output_buffers(self):
-        live_outs = set()
+        live_outs = OrderedSet()  # type: ignore[var-annotated]
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -1377,10 +1483,10 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = set()
+        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: Set[str]):
+    def invalidate(self, keep_vars: OrderedSet[str]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1454,7 +1560,7 @@ class CSE:
 
 
 class CodeGen:
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 
@@ -1509,20 +1615,21 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = set()
-        self.store_buffer_names = set()
+        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
         self._load_mask = None
-        # set in set_current_node
+        self._load_other = None
+        # OrderedSet in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
+        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key
-        self.inplace_update_buffers = dict()
+        self.inplace_update_buffers = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
         self.kernel_name = None
@@ -1604,6 +1711,15 @@ class Kernel(CodeGen):
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        raise NotImplementedError
+
     def var_ranges(self):
         raise NotImplementedError
 
@@ -1629,7 +1745,7 @@ class Kernel(CodeGen):
         var: Union[CSEVariable, str],
         lower: Optional[str],
         upper: Optional[str],
-        mask: Optional[str] = None,
+        mask: Optional[Union[CSEVariable, str]] = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
@@ -1676,7 +1792,9 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
+                        csevar = V.kernel.cse.generate(
+                            V.kernel.compute, v, bounds=bounds
+                        )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
@@ -1729,7 +1847,10 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+                var: CSEVariable,
+                size: Union[sympy.Expr, int],
+                check: bool = True,
+                wrap_neg=True,
             ):
                 if isinstance(size, int):
                     size = sympy.Integer(size)
@@ -1737,11 +1858,14 @@ class Kernel(CodeGen):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
-                    stm = ops.add(var, ops.index_expr(size, torch.long))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, 0)
-                        stm = ops.where(lt, stm, var)
+                    if wrap_neg:
+                        stm = ops.add(var, ops.index_expr(size, torch.long))
+                        # Mixed negative and non-negative
+                        if var.bounds.upper >= 0:  # type: ignore[operator]
+                            lt = ops.lt(var, 0)
+                            stm = ops.where(lt, stm, var)
+                    else:
+                        stm = var
 
                     # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()
@@ -1751,13 +1875,13 @@ class Kernel(CodeGen):
                         # Take the negative part of the bound and add size to it
                         # Then take union of that and the positive part
                         # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg_bounds = var.bounds & ValueRanges(-sympy.oo, -1)
+                        neg_bounds = var.bounds & ValueRanges(-int_oo, -1)
                         new_bounds = ValueRanges(
                             neg_bounds.lower + size, neg_bounds.upper + size
                         )
                         # We don't have a good way of representing the empty range
                         if var.bounds.upper >= 0:  # type: ignore[operator]
-                            pos = var.bounds & ValueRanges(0, sympy.oo)
+                            pos = var.bounds & ValueRanges(0, int_oo)
                             new_bounds = new_bounds | pos
 
                     var = self.cse.generate(self.compute, stm, bounds=new_bounds)
@@ -1797,15 +1921,20 @@ class Kernel(CodeGen):
                 return out
 
             @staticmethod
+            def _update_store_cache(name: str, value: CSEVariable):
+                self.cse.store_cache[name] = value
+                if self.current_node and name in V.graph.name_to_buffer:
+                    buf = self.current_node.get_output(name)
+                    for other_name in buf.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+            @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    self.cse.store_cache[name] = value
-                    if self.current_node:
-                        for other_name in self.current_node.get_mutations():
-                            self.cse.store_cache[other_name] = value
+                    CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
                 else:
@@ -1814,10 +1943,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
                 self.store_buffer_names.add(name)
-                self.cse.store_cache[name] = value
-                if self.current_node:
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                CSEProxy._update_store_cache(name, value)
 
                 if name not in V.graph.removed_buffers:
                     return self.store_reduction(name, index, value)
@@ -1842,6 +1968,15 @@ class Kernel(CodeGen):
                 values: Tuple[CSEVariable, ...],
             ) -> Tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
+
+            @staticmethod
+            def sort(
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
+                stable: bool,
+                descending: bool,
+            ) -> Tuple[CSEVariable, ...]:
+                return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(
@@ -1955,7 +2090,44 @@ class KernelTemplate:
         env = jinja2_env()
         if env is not None:
             env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            return env.from_string(source)
+            from jinja2 import TemplateSyntaxError
+
+            class DetailedTemplateSyntaxError(TemplateSyntaxError):
+                def __init__(self, original_error):
+                    super().__init__(
+                        original_error.message,
+                        original_error.lineno,
+                        original_error.name,
+                        original_error.filename,
+                    )
+                    self.original_error = original_error
+
+                def __str__(self):
+                    error_info = f"Error in template at line {self.lineno}\n"
+                    error_info += f"Error message: {self.message}\n"
+                    if hasattr(self.original_error, "source"):
+                        lines = self.original_error.source.split("\n")
+                        error_info += "Context:\n"
+                        start = max(0, self.lineno - 2)
+                        end = min(len(lines), self.lineno + 2)
+                        for i in range(start, end):
+                            if i == self.lineno - 1:
+                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                if hasattr(self.original_error, "column"):
+                                    error_info += (
+                                        "     "
+                                        + " " * (self.original_error.column - 1)
+                                        + "^\n"
+                                    )
+                            else:
+                                error_info += f"{i+1}:     {lines[i]}\n"
+                    return error_info
+
+            try:
+                return env.from_string(source)
+            except TemplateSyntaxError as e:
+                raise DetailedTemplateSyntaxError(e) from e
+
         return None
 
     @staticmethod
@@ -1982,7 +2154,7 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
-        except NotImplementedError:
+        except NotImplementedError as e:
             pass
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":

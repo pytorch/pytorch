@@ -9,28 +9,17 @@ import struct
 import subprocess
 import sys
 import threading
+import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from typing import Any, Callable, Dict
 
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
+
 log = logging.getLogger(__name__)
-
-
-class Pipe(typing.Protocol):
-    def write(self, data: bytes):
-        ...
-
-    def read(self, n: int) -> bytes:
-        ...
-
-    def close(self):
-        ...
-
-    def flush(self):
-        ...
 
 
 def _pack_msg(job_id, length):
@@ -73,24 +62,50 @@ def _get_ld_library_path():
     return path
 
 
+class _SubprocExceptionInfo:
+    """
+    Carries exception info from subprocesses across the wire. traceback
+    objects are not pickleable, so we store the trace as a string and
+    use it for the message in the exception thrown in the main process.
+    """
+
+    def __init__(self, details) -> None:
+        self.details = details
+
+
+class SubprocException(Exception):
+    """
+    Thrown when a job in a subprocess raises an Exception.
+    """
+
+    def __init__(self, details) -> None:
+        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+
+
 class SubprocPool:
     """
     Mimic a concurrent.futures.ProcessPoolExecutor, but wrap it in
     a subprocess.Popen() to try to avoid issues with forking/spawning
     """
 
-    def __init__(self, nprocs: int):
+    def __init__(self, nprocs: int) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
+
+        subproc_read_fd, write_fd = os.pipe()
+        read_fd, subproc_write_fd = os.pipe()
+        self.write_pipe = os.fdopen(write_fd, "wb")
+        self.read_pipe = os.fdopen(read_fd, "rb")
+
         cmd = [
             sys.executable,
             entry,
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
+            f"--read-fd={str(subproc_read_fd)}",
+            f"--write-fd={str(subproc_write_fd)}",
         ]
         self.process = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
             env={
                 **os.environ,
                 # We need to set the PYTHONPATH so the subprocess can find torch.
@@ -102,10 +117,9 @@ class SubprocPool:
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": _get_ld_library_path(),
             },
+            pass_fds=(subproc_read_fd, subproc_write_fd),
         )
-        self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
         self.write_lock = threading.Lock()
-        self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
@@ -146,7 +160,13 @@ class SubprocPool:
                 with self.futures_lock:
                     if not self.running:
                         return
-                    if isinstance(result, Exception):
+                    if isinstance(result, _SubprocExceptionInfo):
+                        # An exception occurred in the submitted job
+                        self.pending_futures[job_id].set_exception(
+                            SubprocException(result.details)
+                        )
+                    elif isinstance(result, Exception):
+                        # An exception occurred in some of our subprocess machinery.
                         self.pending_futures[job_id].set_exception(result)
                     else:
                         self.pending_futures[job_id].set_result(result)
@@ -176,20 +196,24 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs: int, read_pipe: Pipe, write_pipe: Pipe):
+    def __init__(self, nprocs, read_pipe, write_pipe) -> None:
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
-        self.pool = ProcessPoolExecutor(
+        self.nprocs = nprocs
+        self.pool = self._new_pool(nprocs, True)
+        self.running = True
+
+    def _new_pool(self, nprocs, warm):
+        pool = ProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context("fork"),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
-        multiprocessing.util.Finalize(
-            None, self.pool.shutdown, exitpriority=sys.maxsize
-        )
-        self.running = True
-        _warm_process_pool(self.pool, nprocs)
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        if warm:
+            _warm_process_pool(pool, nprocs)
+        return pool
 
     def main(self):
         while True:
@@ -210,6 +234,17 @@ class SubprocMain:
         self.pool.shutdown()
 
     def submit(self, job_id, data):
+        while self.running:
+            try:
+                self._submit_inner(job_id, data)
+                return
+            except BrokenProcessPool:
+                # If any subprocess in the pool crashes, we get a BrokenProcessPool
+                # exception and the whole pool becomes unusable. Handle crashes by
+                # recreating the pool and resubmitting.
+                self.pool = self._new_pool(self.nprocs, False)
+
+    def _submit_inner(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
 
         def callback(_):
@@ -231,7 +266,10 @@ class SubprocMain:
     def do_job(data):
         # do the pickle/unpickle in the sub-subproc
         job = pickle.loads(data)
-        result = job()
+        try:
+            result = job()
+        except Exception as e:
+            result = _SubprocExceptionInfo(traceback.format_exc())
         return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
 
 
