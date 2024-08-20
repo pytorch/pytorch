@@ -1265,7 +1265,7 @@ def _is_supported_equivalence(expr):
             (_is_supported_equivalence(lhs) and isinstance(rhs, sympy.Integer)) or
             (isinstance(lhs, sympy.Integer) and _is_supported_equivalence(rhs))
         )
-    return isinstance(expr, sympy.Symbol) or isinstance(expr, sympy.Number)
+    return isinstance(expr, (sympy.Symbol, sympy.Number))
 
 def _has_unsupported_sympy_function(expr) -> bool:
     return expr.has(
@@ -4757,8 +4757,10 @@ class ShapeEnv:
         assert isinstance(a, sympy.Symbol)
 
         if self.prefer_deferred_runtime_asserts_over_guards and not _is_supported_equivalence(tgt):
-            # continuing leads to placeholder shapes having complex expressions that we can't do anything useful with
-            return  
+            # continuing leads to placeholder shapes having complex expressions that we can't do anything useful with.
+            # we'll allow numbers (specialization), symbols, and linear expressions (a*s0 + b).
+            # in fact, export will complain if you don't correctly specify these relations in the first place. 
+            return
 
         # Handles nested tensor symbolic variables which don't have
         # var_to_range bounds

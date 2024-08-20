@@ -6339,7 +6339,7 @@ def forward(self, x, y):
             RuntimeError,
             r"Runtime assertion failed for expression Eq\(s0\*s1, s4\) on node 'eq.*'",
         ):
-            ep.module()(torch.randn(5,8), torch.randn(5,8), torch.randn(41))
+            ep.module()(torch.randn(5, 8), torch.randn(5, 8), torch.randn(41))
 
         # case 3: 3d reshape (previously failing with different issue)
         class Reshape3d(torch.nn.Module):
