@@ -3388,10 +3388,10 @@ utils_device.CURRENT_DEVICE == None""".split(
             def __hash__(self):
                 return id(self)
 
-        # Defined in CPython's Include/object.h
-        TPFLAGS_MAPPING = 1 << 6
-
         def fn(x, mod_class):
+            # Defined in CPython's Include/object.h
+            TPFLAGS_MAPPING = 64
+
             if mod_class.__flags__ & TPFLAGS_MAPPING:
                 return x + 1
             else:
