@@ -6147,7 +6147,7 @@ def forward(self, x):
         schema = get_hop_schema(ep)
         self.assertExpectedInline(
             str(schema),
-            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1] output""",
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
         )
         # test cond subgraph
         expected_names_and_ops = [
