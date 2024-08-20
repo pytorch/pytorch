@@ -245,16 +245,6 @@ def is_with_effects_op(node, op):
     return is_with_effects(node) and node.args[1] == op
 
 
-def has_with_effects_ancestors(node):
-    queue = [node]
-    while queue:
-        node = queue.pop()
-        if is_with_effects(node):
-            return True
-        queue.extend(node.all_input_nodes)
-    return False
-
-
 def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with

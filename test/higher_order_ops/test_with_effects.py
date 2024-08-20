@@ -465,14 +465,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 torch.ops._mylib.zoo2(grad)
                 return grad.clone()
 
-            if torch._C._dispatch_has_kernel_for_dispatch_key(
-                "_mylib::zoo", "Autograd"
-            ):
-                self.skipTest(
-                    "Double registration of Autograd kernel for test custom op"
-                )
-
-            torch.library.register_autograd("_mylib::zoo", foo_bwd)
+            torch.library.register_autograd("_mylib::zoo", foo_bwd, lib=lib)
 
             from torch._higher_order_ops.effects import (
                 _EffectType,
@@ -694,14 +687,7 @@ def forward(self, arg0_1, arg1_1):
             for backend in ["CPU", "CUDA", "Meta"]:
                 lib.impl("foo", foo_impl, backend)
 
-            if torch._C._dispatch_has_kernel_for_dispatch_key(
-                "_mylib::foo", "Autograd"
-            ):
-                self.skipTest(
-                    "Double registration of Autograd kernel for test custom op"
-                )
-
-            torch.library.register_autograd("_mylib::foo", foo_bwd)
+            torch.library.register_autograd("_mylib::foo", foo_bwd, lib=lib)
 
             from torch._higher_order_ops.effects import (
                 _deregister_effectful_op,
