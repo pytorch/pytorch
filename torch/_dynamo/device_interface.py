@@ -307,6 +307,10 @@ class CpuInterface(DeviceInterface):
         return ""
 
     @staticmethod
+    def get_raw_stream():
+        return 0
+
+    @staticmethod
     def current_device():
         return 0
 

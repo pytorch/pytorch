@@ -601,8 +601,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
-        if "cpu" not in V.graph.device_types:
-            self.write_get_raw_stream_header_once()
+        self.write_get_raw_stream_header_once()
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
@@ -1642,11 +1641,7 @@ class WrapperCodeGen(CodeGen):
                 device_index, call_args
             )
             call_args_str = ", ".join(call_args_str)
-
-        if cuda:
             stream_name = self.write_get_raw_stream(device_index, V.graph)
-        else:
-            stream_name = "0"
 
         if triton:
             self.write_triton_header_once()
