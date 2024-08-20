@@ -826,84 +826,6 @@ void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t bs,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::Half* A,
-    const at::Half* B,
-    const std::vector<std::pair<int64_t, int64_t>>& offsets,
-    float* C) {
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
-  if (Brgemm::device_check(ScalarType::Half)) {
-    Brgemm::call<at::Half, at::Half, float>(
-      M, N, K, bs, ld_a, ld_b, ld_c, alpha, beta, A, B, offsets, C);
-    return;
-  }
-#endif
-  for (int64_t i = 0; i < bs; i++) {
-    gemm(
-        TransposeType::NoTranspose,
-        TransposeType::NoTranspose,
-        N,
-        M,
-        K,
-        alpha,
-        B + offsets[i].second / sizeof(at::Half),
-        ld_b,
-        A + offsets[i].first / sizeof(at::Half),
-        ld_a,
-        i == 0 ? beta : 1.f,
-        C,
-        ld_c);
-  }
-}
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t bs,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::BFloat16* A,
-    const at::BFloat16* B,
-    const std::vector<std::pair<int64_t, int64_t>>& offsets,
-    float* C) {
-#if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
-  if (Brgemm::device_check(ScalarType::BFloat16)) {
-    Brgemm::call<at::BFloat16, at::BFloat16, float>(
-      M, N, K, bs, ld_a, ld_b, ld_c, alpha, beta, A, B, offsets, C);
-    return;
-  }
-#endif
-  for (int64_t i = 0; i < bs; i++) {
-    gemm(
-        TransposeType::NoTranspose,
-        TransposeType::NoTranspose,
-        N,
-        M,
-        K,
-        alpha,
-        B + offsets[i].second / sizeof(at::BFloat16),
-        ld_b,
-        A + offsets[i].first / sizeof(at::BFloat16),
-        ld_a,
-        i == 0 ? beta : 1.f,
-        C,
-        ld_c);
-  }
-}
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
@@ -919,20 +841,8 @@ void brgemm(
     return;
   }
 #endif
-  gemm(
-      TransposeType::NoTranspose,
-      TransposeType::NoTranspose,
-      N,
-      M,
-      K,
-      alpha,
-      B,
-      ld_b,
-      A,
-      ld_a,
-      beta,
-      C,
-      ld_c);
+  TORCH_CHECK(false,
+  "Half Brgemm is only supported on X64 when mkldnn is enabled and avx512_core_fp16 is supported");
 }
 
 void brgemm(
@@ -954,20 +864,40 @@ void brgemm(
     return;
   }
 #endif
-  gemm(
-      TransposeType::NoTranspose,
-      TransposeType::NoTranspose,
-      N,
-      M,
-      K,
-      alpha,
-      B,
-      ld_b,
-      A,
-      ld_a,
-      beta,
-      C,
-      ld_c);
+  TORCH_CHECK(false,
+  "BFloat16 Brgemm is only supported on X64 when mkldnn is enabled and avx512_core_fp16 is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const float* A,
+    const float* B,
+    float* C) {
+  TORCH_CHECK(false,
+  "float Brgemm is currently not supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const double* A,
+    const double* B,
+    double* C) {
+  TORCH_CHECK(false,
+  "double Brgemm is currently not supported");
 }
 
 void brgemm_release() {
