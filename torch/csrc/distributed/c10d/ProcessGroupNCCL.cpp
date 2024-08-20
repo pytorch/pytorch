@@ -2305,9 +2305,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // TODO(kwen2501): is ncclEvents_ used anywhere else?
   ncclEvents_.emplace(deviceKey, at::cuda::CUDAEvent(cudaEventDisableTiming));
 
-  // Record the communicators based on ncclUniqueId.
-  ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComm);
-
   // Move the NCCL resource to cache
   auto it = inInitializationCommMap_.find(deviceKey);
   // A previous thread could've already removed devicesKey from
@@ -2350,7 +2347,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
   uint64_t ret = 0;
-  for (const auto& i : ncclIdToCommMap_) {
+  for (const auto& i : devNCCLCommMap_) {
     auto& ncclComm = i.second;
     ret += ncclComm->getCommSplitCounter();
   }
