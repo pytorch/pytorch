@@ -2,4 +2,4 @@
 Python polyfills for C functions.
 """
 
-from . import builtins, functools, itertools  # noqa: F401
+from . import builtins, functools, itertools, os  # noqa: F401
