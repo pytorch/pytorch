@@ -218,7 +218,7 @@ pygments==2.15.0
 #test that import:
 
 scikit-image==0.19.3 ; python_version < "3.10"
-scikit-image==0.20.0 ; python_version >= "3.10"
+scikit-image==0.22.0 ; python_version >= "3.10"
 #Description: image processing routines
 #Pinned versions:
 #test that import: test_nn.py
@@ -269,6 +269,10 @@ lintrunner==0.12.5
 #Pinned versions: 0.12.5
 #test that import:
 
+redis>=4.0.0
+#Description: redis database
+#test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
+
 rockset==1.0.3
 #Description: queries Rockset
 #Pinned versions: 1.0.3
@@ -316,5 +320,15 @@ PyGithub==2.3.0
 sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
+#Pinned versions:
+#test that import:
+
+onnx==1.16.1
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+onnxscript==0.1.0.dev20240817
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
