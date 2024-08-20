@@ -2186,7 +2186,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
     if (getCvarBool(TORCH_NCCL_BCAST_UNIQUEID, true) && !isSendRecvSelf) {
-      // For point-to-point communication, lower rank of the two will get unique id.
+      // For point-to-point communication, lower rank of the two will get unique
+      // id.
       if (rank_ == 0 || (singleP2POp && p2pRank == 0)) {
         C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
       }
