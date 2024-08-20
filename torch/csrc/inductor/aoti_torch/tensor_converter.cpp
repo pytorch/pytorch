@@ -1,7 +1,8 @@
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
-namespace torch::aot_inductor {
+namespace torch {
+namespace aot_inductor {
 
 std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
     std::vector<at::Tensor>& tensors) {
@@ -44,4 +45,5 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
   return result;
 }
 
-} // namespace torch::aot_inductor
+} // namespace aot_inductor
+} // namespace torch
