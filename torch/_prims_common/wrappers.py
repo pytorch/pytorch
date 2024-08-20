@@ -271,9 +271,9 @@ def out_wrapper(
                 (isinstance(result, TensorLike) and is_tensor)
                 or (
                     isinstance(result, Tuple)  # type: ignore[arg-type]
-                    and len(result) == len(out_names)   # type: ignore[arg-type]
+                    and len(result) == len(out_names)  # type: ignore[arg-type]
                 )
-                or (fn.__name__ == "unbind" and isinstance(result, list))
+                or (fn.__name__ == "unbind" and isinstance(result, (list, tuple)))
             )
             if out is not None:
                 # Naively you might expect this assert to be true, but
@@ -292,7 +292,7 @@ def out_wrapper(
                 # the output tensor, but not the result--which will
                 # be a normal meta tensor, but this is perfectly
                 # harmless.
-                if is_tensor:
+                if is_tensor and fn.__name__ != "unbind":
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
