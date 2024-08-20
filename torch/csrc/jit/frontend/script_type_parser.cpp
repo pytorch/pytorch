@@ -362,7 +362,16 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // XXX: We need to turn optimization off here because otherwise we try to
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
-  cu.get_function(def.name().name()).run(stack);
+  auto& f = cu.get_function(def.name().name());
+  auto* gf = dynamic_cast<GraphFunction*>(&f);
+  TORCH_INTERNAL_ASSERT(gf);
+  // 2024.08.14: Since we are starting to deprecate Torchscript usages,
+  // we are going to log all the calls for GraphFunction::run. The logging was
+  // noisy we also call GraphFunction::run for the default value evaluation
+  // which generates a lot of useless log samples. Therefore as a workaround we
+  // just directly use the executor API which avoids this placing producing
+  // un-necessary log entries.
+  gf->get_executor().run(stack);
   return stack.at(0).toTupleRef().elements().vec();
 }
 

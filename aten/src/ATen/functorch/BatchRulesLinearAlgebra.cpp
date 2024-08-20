@@ -656,7 +656,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
-  VMAP_SUPPORT(_scaled_dot_product_efficient_attention_backward, _scaled_dot_product_efficient_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
