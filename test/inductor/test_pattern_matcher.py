@@ -1446,7 +1446,7 @@ class TestPatternMatcher(TestCase):
             (t, [64, 128, 8, 8]),
             {"dim": 1, "out": [t, t, t, t]},
         )
-        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check("call_function", torch.ops.fsdp.copy_, (t, t), {})
         check(
             "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
         )
