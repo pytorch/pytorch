@@ -50,8 +50,6 @@ SLOW_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix slow-t
 DISABLED_TESTS_VER=$(aws s3api list-object-versions --bucket ossci-metrics --prefix disabled-tests-condensed.json --query 'Versions[?IsLatest].[VersionId]' --output text)
 sed -i -e s#unstable-jobs.json#"unstable-jobs.json?versionId=${UNSTABLE_VER}"# .github/scripts/filter_test_configs.py
 sed -i -e s#disabled-jobs.json#"disabled-jobs.json?versionId=${DISABLED_VER}"# .github/scripts/filter_test_configs.py
-# please note we want to match slow-tests.json not .pytorch-slow-tests.json hence "/" is needed here
-sed -i -e s#/slow-tests.json#"/slow-tests.json?versionId=${SLOW_VER}"#  tools/stats/import_test_stats.py
 sed -i -e s#disabled-tests-condensed.json#"disabled-tests-condensed.json?versionId=${DISABLED_TESTS_VER}"# tools/stats/import_test_stats.py
 # Optional
 git commit -m "[RELEASE-ONLY CHANGES] Branch Cut for Release {RELEASE_VERSION}"

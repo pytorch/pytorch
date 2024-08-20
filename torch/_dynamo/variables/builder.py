@@ -73,6 +73,7 @@ from ..trace_rules import (
     is_numpy_type_info,
 )
 from ..utils import (
+    _extract_tensor_dict,
     build_checkpoint_variable,
     clone_input,
     common_constant_types,
@@ -166,11 +167,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import (
-    FSDPManagedNNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
@@ -204,6 +201,9 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+static_inputs_log = torch._logging.getArtifactLogger(
+    __name__, "cudagraph_static_inputs"
+)
 
 
 DimList = List
@@ -799,8 +799,16 @@ class VariableBuilder:
             return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
+            torch._dynamo.utils.store_user_object_weakref(value)
+            event_proxy = self.tx.output.create_proxy(
+                "call_function",
+                torch._dynamo.utils.get_user_object_from_id,
+                (id(value),),
+                {},
+            )
+            set_example_value(event_proxy.node, value)
             return EventVariable(
-                None,
+                event_proxy,
                 value,
                 source=self.source,
             )
@@ -831,7 +839,7 @@ class VariableBuilder:
             return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
         elif PlacementClassVariable.is_placement_type(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
@@ -839,7 +847,7 @@ class VariableBuilder:
             return PlacementClassVariable(value, source=self.source)
         elif PlacementVariable.is_placement(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return PlacementVariable(
                 value,
                 source=self.source,
@@ -1146,9 +1154,9 @@ class VariableBuilder:
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
-                tensor_variable.proxy.node.meta["tensor_dict"] = value[
-                    i
-                ].__dict__.copy()
+                tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
+                    value[i]
+                )
 
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
@@ -1203,6 +1211,9 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
 
+        static_inputs_log.debug(
+            "Marking static input %s, id: %s)", self.source.name(), id(value)
+        )
         mark_static_address(value, guard=guard)
 
         # Check if we've seen this tensor before and update graph metadata if needed
@@ -1280,11 +1291,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
-            else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
-
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1313,7 +1320,6 @@ class VariableBuilder:
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1503,7 +1509,7 @@ class VariableBuilder:
 
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
-        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
+        tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
 
         # Note: this information is conveyed via subclass_type now
         fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
@@ -1531,7 +1537,6 @@ class VariableBuilder:
                 # One can not easily make nditer elements writable,
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
-                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
@@ -2548,9 +2553,7 @@ def wrap_to_fake_tensor_and_record(
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
-            e,
-            is_tensor,
-            tensor_source=source,
+            e, is_tensor, guard_source=source.guard_source()
         )
 
         if not parent_context:
