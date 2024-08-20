@@ -277,7 +277,7 @@ if sys.platform == "win32":
 
 def _preload_pypi_cuda_deps() -> None:
     """Try to preloads cuda deps if possible."""
-    # Should only be called on Linux
+    # Only a Linux issue for now
     if platform.system() != "Linux":
         return
 
