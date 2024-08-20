@@ -698,7 +698,7 @@ class WhileLoopTests(TestCase):
 
 class AssociativeScanTests(TestCase):
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
+    @parametrize("device", [torch.device("cuda")])
     @parametrize("backend", ["inductor"])
     def test_pointwise_associative_scan_CUDA_flip(self, device, backend):
         def fct(x: torch.Tensor, y: torch.Tensor):

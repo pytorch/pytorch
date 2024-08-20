@@ -24,7 +24,7 @@ CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.0"
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9"}
 
 
-ROCM_ARCHES = ["6.1", "6.2"]
+ROCM_ARCHES = ["6.0", "6.1"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -365,9 +365,10 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on rocm, aarch64, windows
+            # TODO: Enable python 3.13 on rocm, xpu, aarch64, windows
             if (
-                gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
+                gpu_arch_type in ["rocm", "xpu"]
+                or (os != "linux" and os != "linux-s390x")
             ) and python_version == "3.13":
                 continue
 

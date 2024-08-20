@@ -2,6 +2,7 @@
 import dataclasses
 import inspect
 import sys
+import weakref
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
@@ -231,6 +232,8 @@ class _ConstraintTarget:
     class directly; instead, use :func:`dynamic_dim`.
     """
 
+    w_tensor: Any  # weakref to torch.Tensor
+    # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
 
@@ -246,12 +249,20 @@ class _ConstraintFactory(type):
             f"Please use torch.export.dynamic_dim() to create one"
         )
 
-    def _create(cls, t_id, dim, constraint_range, shared=None, debug_name=None):
-        return super().__call__(t_id, dim, constraint_range, shared, debug_name)
+    def _create(
+        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+    ):
+        return super().__call__(
+            w_tensor, t_id, dim, constraint_range, shared, debug_name
+        )
 
 
-def _create_constraint(t_id, dim, constraint_range, shared=None, debug_name=None):
-    return _Constraint._create(t_id, dim, constraint_range, shared, debug_name)
+def _create_constraint(
+    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+):
+    return _Constraint._create(
+        w_tensor, t_id, dim, constraint_range, shared, debug_name
+    )
 
 
 @dataclasses.dataclass
@@ -287,6 +298,7 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             warn_only=False,
         )
         return _create_constraint(
+            self.w_tensor,
             self.t_id,
             self.dim,
             constraint_range,
@@ -353,10 +365,11 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             assert other.debug_name is None or self.debug_name == other.debug_name
             debug_name = self.debug_name
         return _create_constraint(
+            self.w_tensor,
             self.t_id,
             self.dim,
             constraint_range,
-            shared=_ConstraintTarget(other.t_id, other.dim),
+            shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
             debug_name=debug_name,
         )
 
@@ -513,6 +526,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     from torch.utils._sympy.value_ranges import ValueRanges
 
     return _create_constraint(
+        weakref.ref(t),
         id(t),
         index,
         StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
@@ -943,6 +957,7 @@ def _process_dynamic_shapes(
                 # root represents an input shape dimension
                 root_constraint = symbols[dim_root.__name__][0]
                 root = _ConstraintTarget(
+                    root_constraint.w_tensor,
                     root_constraint.t_id,
                     root_constraint.dim,
                 )
@@ -960,6 +975,7 @@ def _process_dynamic_shapes(
             else:
                 root = phantom_roots[dim_root.__name__]  # type: ignore[assignment]
             constraint = _DerivedConstraint(
+                weakref.ref(tensor),
                 id(tensor),
                 i,
                 root,
@@ -976,6 +992,7 @@ def _process_dynamic_shapes(
                 derived_constraints_with_phantom_root.append(constraint)
         elif isinstance(dim, _StaticDim):
             constraint = _create_constraint(
+                weakref.ref(tensor),
                 id(tensor),
                 i,
                 StrictMinMaxConstraint(
