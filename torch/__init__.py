@@ -313,7 +313,11 @@ def _preload_pypi_cuda_deps() -> None:
         if candidate_lib_paths:
             ctypes.CDLL(candidate_lib_paths[0])
         else:
-            raise ValueError(f"{lib_name} not found in {nvidia_path}, system path: {sys.path}")
+            import warnings
+
+            warnings.warn(
+                f"Failed to load {lib_name} library in {nvidia_path}, please try to reinstall PyTorch.",
+            )
 
 
 # See Note [Global dependencies]
