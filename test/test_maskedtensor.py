@@ -19,6 +19,7 @@ from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
     reduction_ops,
     unary_ufuncs,
+    ops_and_refs,
 )
 
 from torch.masked import as_masked_tensor, masked_tensor, _combine_input_and_mask
@@ -26,6 +27,7 @@ from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES
 from torch.masked.maskedtensor.reductions import REDUCE_NAMES
+from torch.masked.maskedtensor.like import LIKE_NAMES
 
 
 def _compare_mt_t(mt_result, t_result, rtol=1e-05, atol=1e-05):
@@ -763,6 +765,45 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             masked_tensor(d, m, requires_grad=True)
 
+    def test_any_true_dtype(self):
+        mt = torch.masked.MaskedTensor(
+            torch.rand(2, 2),
+            torch.rand(2, 2) > 0.5
+        )
+        msg = "expected a boolean tensor"
+        with self.assertRaisesRegex(ValueError, msg):
+            mt._is_any_true()
+
+    def test__is_any_true(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[True, False, False], [False, True, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(True), torch.tensor(True)),
+            mt._is_any_true(),
+        )
+
+    def test__is_any_true_false(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[False, False, False], [False, False, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(False), torch.tensor(True),),
+            mt._is_any_true(),
+        )
+
+    def test_backward(self):
+        # See https://github.com/pytorch/pytorch/issues/128557
+        with torch.autograd.detect_anomaly():
+            mt = torch.masked.MaskedTensor(
+                torch.rand(2, 2),
+                torch.rand(2, 2) > 0.5,
+                requires_grad=True
+            )
+            mt.sum().backward()
+
 
 def is_unary(op):
     return op.name in UNARY_NAMES
@@ -773,15 +814,29 @@ def is_binary(op):
 def is_reduction(op):
     return op.name in REDUCE_NAMES and op.name not in {"all", "mean", "std", "var"}
 
+def is_like(op):
+    return op.name in LIKE_NAMES
+
 mt_unary_ufuncs = [op for op in unary_ufuncs if is_unary(op)]
 mt_binary_ufuncs = [op for op in binary_ufuncs if is_binary(op)]
 mt_reduction_ufuncs = [op for op in reduction_ops if is_reduction(op)]
+mt_like_funcs = [op for op in ops_and_refs if is_like(op)]
 
 MASKEDTENSOR_FLOAT_TYPES = {
     torch.float16,
     torch.float32,
     torch.float64,
 }
+
+MASKEDTENSOR_SUPPORTED_TYPES = [
+    *MASKEDTENSOR_FLOAT_TYPES,
+    torch.bool,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+]
+
 
 class TestOperators(TestCase):
     def _convert_mt_args(self, args, mask, layout):
@@ -927,6 +982,43 @@ class TestOperators(TestCase):
             return
 
         self._test_reduction_equality(device, dtype, op, layout)
+
+    @ops(mt_like_funcs, allowed_dtypes=MASKEDTENSOR_SUPPORTED_TYPES)  # type: ignore[arg-type]
+    @parametrize("layout", [torch.strided, torch.sparse_coo, torch.sparse_csr])
+    def test_like(self, device, dtype, op, layout):
+        samples = op.sample_inputs(device, dtype, requires_grad=dtype in MASKEDTENSOR_FLOAT_TYPES)
+
+        for sample in samples:
+            input = sample.input
+            sample_args, sample_kwargs = sample.args, sample.kwargs
+            mask = _create_random_mask(input.shape, device)
+
+            if layout == torch.sparse_coo:
+                mask = mask.to_sparse_coo().coalesce()
+                input = input.sparse_mask(mask)
+            elif layout == torch.sparse_csr:
+                if input.ndim != 2 or mask.ndim != 2:
+                    continue
+                mask = mask.to_sparse_csr()
+                input = input.sparse_mask(mask)
+
+            mt = masked_tensor(input, mask)
+
+            try:
+                t_result = op(input, *sample_args, **sample_kwargs)
+            except NotImplementedError:
+                self.skipTest(f"{op.name} is not supported for {layout}")
+
+            mt_result = op(mt, *sample_args, **sample_kwargs)
+
+            if 'rand' not in op.name and op.name != 'empty_like':
+                _compare_mt_t(mt_result, t_result.to_dense())
+
+            self.assertEqual(mt_result.shape, t_result.shape)
+            self.assertEqual(mt_result.dtype, t_result.dtype)
+            self.assertEqual(mt_result.layout, t_result.layout)
+            self.assertEqual(mt_result.device, t_result.device)
+            self.assertEqual(mt_result.requires_grad, t_result.requires_grad)
 
 
 only_for = ("cpu", "cuda")
