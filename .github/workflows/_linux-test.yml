@@ -48,9 +48,6 @@ on:
         type: string
         default: ""
     secrets:
-      github-token:
-        required: true
-        description: Github Token
       HUGGING_FACE_HUB_TOKEN:
         required: false
         description: |
@@ -62,7 +59,6 @@ on:
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-  GITHUB_TOKEN: ${{ secrets.github-token }}
 
 jobs:
   test:

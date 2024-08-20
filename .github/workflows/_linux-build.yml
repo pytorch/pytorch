@@ -82,13 +82,6 @@ on:
         required: false
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
-      github-token:
-        required: true
-        description: Github Token
-      SCRIBE_GRAPHQL_ACCESS_TOKEN:
-        required: false
-        description: |
-          FB app token to write to scribe endpoint
 
 
     outputs:
@@ -98,9 +91,6 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
-
-env:
-  GITHUB_TOKEN: ${{ secrets.github-token }}
 
 jobs:
   build:
