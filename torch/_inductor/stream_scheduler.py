@@ -1,17 +1,22 @@
-from os import environ
-from .virtualized import V
 import logging
-from collections import deque
+from os import environ
+
+from .virtualized import V
+
+
 log = logging.getLogger(__name__)
-import torch
 import os
-import json
 import sys
-# It is 1000 by default. But the call depth for dig_node can be larger than this number.
+
+import torch
+
+
+# It is 1000 by default. But the call depth for dig_node can be larger than this number. @TODO: FIXME
 sys.setrecursionlimit(5000)
-DEFAULT_STREAM_ID = torch.cuda.current_stream().cuda_stream
-# @Yueming: DO NOT CHANGE THIS VALUE. This is a fake stream id. The actual stream id will be decided by GPU driver.
-CRITICAL_PATH_STREAM_ID = 0
+# By default, we use the same mechanism with the original default stream assignment, which take the stream{device_index} as default stream id. It is initialized in stream_schedule
+DEFAULT_STREAM_ID = None
+
+
 class SSNode:
     """
     Stream Scheduler Node is a wrapper of the original node. It contains the information of the original node and the information for stream scheduling.
@@ -20,7 +25,7 @@ class SSNode:
         successors: {buf_name: SSNode}. It records the successors of the node. The buf_name is the name of the original node(scheduler node or fused node).
         predecessors: {buf_name: SSNode}. It records the predecessors of the node. The buf_name is the name of the original node(scheduler node or fused node).
         first_predecessor: SSNode. A node should have same stream id with its first predecessor.
-        fake_successors, fake_predecessors: {buf_name: SSNode}. 
+        fake_successors, fake_predecessors: {buf_name: SSNode}.
         name: the name of the original node.
         original_user_names: the names of the original users of the node. If the original node is a fused node, we'll check the users of scheduler nodes included in this fused node.
         stream_id: the stream id of the node. -1 means not assigned.
@@ -36,6 +41,7 @@ class SSNode:
 
     def __init__(self, original_node, skip_cpu_nodes=True) -> None:
         from .scheduler import NopKernelSchedulerNode
+
         self.successors = {}
         self.predecessors = {}
         self.first_successor = None
@@ -60,11 +66,11 @@ class SSNode:
         if self.skip_cpu_nodes and original_node:
             if hasattr(original_node, "group"):
                 for device in original_node.group:
-                    if isinstance(device, torch.device) and device.type != 'cpu':
+                    if isinstance(device, torch.device) and device.type != "cpu":
                         self.device = device.type
                         break
                 else:
-                    self.device = 'cpu'
+                    self.device = "cpu"
             elif hasattr(original_node, "get_device"):
                 self.device = original_node.get_device().type
         if self.name and original_node.read_writes.var_ranges:
@@ -78,11 +84,14 @@ class SSNode:
                 self.snode_names.append(snode.get_name())
             for snode in original_node.snodes:
                 for user in snode.users:
-                    if user.get_name() == 'OUTPUT':
+                    if user.get_name() == "OUTPUT":
                         self.to_output_node = True
                 # TODO: change to follow rules same with create_fx_from_snodes
                 for user in snode.read_writes.reads:
-                    if user.name not in self.snode_names and user.name not in self.original_user_names:
+                    if (
+                        user.name not in self.snode_names
+                        and user.name not in self.original_user_names
+                    ):
                         if user.name != snode.get_name():
                             self.original_user_names.append(user.name)
 
@@ -90,7 +99,7 @@ class SSNode:
             self.is_fused = False
             if original_node is not None:
                 for user in original_node.users:
-                    if user.get_name() == 'OUTPUT':
+                    if user.get_name() == "OUTPUT":
                         self.to_output_node = True
                 for user in original_node.read_writes.reads:
                     if user.name != original_node.get_name():
@@ -131,7 +140,6 @@ class SSGraph:
         self.skip_cpu_nodes = True
         self.build_graph(nodes)
 
-
     def build_graph(self, nodes):
         output_node = SSNode(None, skip_cpu_nodes=self.skip_cpu_nodes)
         output_node.name = "OUTPUT"
@@ -153,7 +161,10 @@ class SSGraph:
             for user in snode.original_user_names:
                 if user not in self.name_mapping:
                     snode.original_user_names = [
-                        user for user in snode.original_user_names if user in self.name_mapping]
+                        user
+                        for user in snode.original_user_names
+                        if user in self.name_mapping
+                    ]
                     break
         self.ssnodes.append(output_node)
 
@@ -162,6 +173,7 @@ class SSGraph:
                 user_ssnode = self.name_mapping[user]
                 user_ssnode.successors[ssnode.get_name()] = ssnode
                 ssnode.predecessors[user_ssnode.get_name()] = user_ssnode
+
         for ssnode in self.ssnodes:
             if ssnode.to_output_node:
                 output_node.predecessors[ssnode.get_name()] = ssnode
@@ -174,7 +186,9 @@ class SSGraph:
             if len(predecessor.successors) == 1:
                 tmp_queue.append(predecessor)
         if len(tmp_queue) == 0:
-            log.warning("This graph doesn't have nodes whose single successor is the OUTPUT node.")
+            log.warning(
+                "This graph doesn't have nodes whose single successor is the OUTPUT node."
+            )
             for predecessor in output_node.predecessors.values():
                 tmp_queue.append(predecessor)
         finished = set()
@@ -191,7 +205,11 @@ class SSGraph:
                         if len(cur_node.successors) == 1 and successor not in tmp_queue:
                             tmp_queue.append(successor)
                         # a workaround to fix hanging nodes
-                        if len(successor.successors.values()) == 0 and successor not in tmp_queue and successor != output_node:
+                        if (
+                            len(successor.successors.values()) == 0
+                            and successor not in tmp_queue
+                            and successor != output_node
+                        ):
                             tmp_queue.append(successor)
                         tmp_queue.append(cur_node)
                     break
@@ -221,11 +239,15 @@ class SSGraph:
                         tmp_queue.append(predecessor)
                 finished.add(cur_node)
         else:
-            log.warning("This warning is not supposed to happen. The graph may be too densely connected.")
+            log.warning(
+                "This warning is not supposed to happen. The graph may be too densely connected."
+            )
         if len(tmp_queue) != 0:
-            raise RuntimeError("Error when processing the queue. The queue is not empty after the loop.")
+            raise RuntimeError(
+                "Error when processing the queue. The queue is not empty after the loop."
+            )
         cur_node = self.ssnodes[0]
-        while (cur_node.get_name() != "OUTPUT"):
+        while cur_node.get_name() != "OUTPUT":
             self.critical_path.append(cur_node)
             cur_node = self.reverse_level_predecessors[cur_node]
         self.critical_path.append(cur_node)
@@ -252,7 +274,7 @@ class SSGraph:
             if cur_node in self.critical_path:
                 cur_node.stream_id = CRITICAL_PATH_STREAM_ID
             # if the node has only one predecessor and the predecessor has only one successor, then we can assign the same stream_id to the node
-            elif self.skip_cpu_nodes and cur_node.device == 'cpu':
+            elif self.skip_cpu_nodes and cur_node.device == "cpu":
                 if len(cur_node.predecessors) == 0:
                     cur_node.stream_id = CRITICAL_PATH_STREAM_ID
                 else:
@@ -267,12 +289,19 @@ class SSGraph:
                     cur_node.stream_id = self.stream_pool_pop(predecessor)
                 else:
                     tmp_arg = None
-                    if os.getenv("TORCHINDUCTOR_BYPASS_TINY", "0") == "1" and cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN:
+                    if (
+                        os.getenv("TORCHINDUCTOR_BYPASS_TINY", "0") == "1"
+                        and cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN
+                    ):
                         tmp_arg = predecessor
                     cur_node.stream_id = self.stream_pool_pop(tmp_arg)
             else:
                 tmp_arg = None
-                if os.getenv("TORCHINDUCTOR_BYPASS_TINY", "0") == "1" and cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN and len(cur_node.predecessors) != 0:
+                if (
+                    os.getenv("TORCHINDUCTOR_BYPASS_TINY", "0") == "1"
+                    and cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN
+                    and len(cur_node.predecessors) != 0
+                ):
                     tmp_arg = list(cur_node.predecessors.values())[0]
                 cur_node.stream_id = self.stream_pool_pop(tmp_arg)
         for successor in cur_node.successors.values():
@@ -296,38 +325,47 @@ class SSGraph:
         # The stream 0 is reserved when do the stream pool pop
         self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])
+
         def check_all_nodes_assigned():
             for ssnode in self.ssnodes:
                 if ssnode.stream_id == -1:
-                    log.info(f"Hanging node {ssnode.get_name()} found when doing stream assignment.")
+                    log.info(
+                        f"Hanging node {ssnode.get_name()} found when doing stream assignment."
+                    )
                     self.dig_node(ssnode)
                     return False
             return True
-        while (not check_all_nodes_assigned()):
-            pass
 
+        while not check_all_nodes_assigned():
+            pass
 
     def dfs_search(self, cur_node: SSNode):
         # sort the predecessors by their stream_id and sort from large to small
         if len(cur_node.predecessors) != 0:
-            sorted_predecessors = sorted(cur_node.predecessors.values(), key=lambda x: x.stream_id, reverse=True)
+            sorted_predecessors = sorted(
+                cur_node.predecessors.values(), key=lambda x: x.stream_id, reverse=True
+            )
             for predecesor in sorted_predecessors:
                 if predecesor not in self.final_order:
                     self.dfs_search(predecesor)
         if cur_node not in self.final_order:
             self.final_order.append(cur_node)
         if len(cur_node.successors) != 0:
-            sorted_successors = sorted(cur_node.successors.values(), key=lambda x: x.stream_id, reverse=True)
+            sorted_successors = sorted(
+                cur_node.successors.values(), key=lambda x: x.stream_id, reverse=True
+            )
             if self.name_mapping["OUTPUT"] in sorted_successors:
                 sorted_successors.remove(self.name_mapping["OUTPUT"])
                 sorted_successors.append(self.name_mapping["OUTPUT"])
-            
+
             for successor in sorted_successors:
                 if successor not in self.final_order:
                     self.dfs_search(successor)
 
 
 def stream_schedule(snodes):
+    global DEFAULT_STREAM_ID
+    DEFAULT_STREAM_ID = V.graph.scheduler.get_current_device_or_throw().index
     ssgraph = SSGraph(snodes)
     ssgraph.stream_assign()
     ssgraph.event_assign()
