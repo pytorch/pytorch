@@ -118,6 +118,7 @@ _CACHES = (
         "torch._inductor.runtime.triton_heuristics.LocalAutotuneCache",
         _MockLocalAutotuneCacheBackend,
     ),
+    # This causes any mocking test to require 'redis'.
     CacheDecl("redis.Redis", _MockRedisRemoteCache),
 )
 
