@@ -418,8 +418,8 @@ def flex_attention_fake_tensor_mode(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    v_head_dim = value.size(-1)
     with mode:
+        v_head_dim = value.size(-1)
         batch_size, num_heads, seq_len_q, q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
