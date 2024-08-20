@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional, Set
+from typing import Any, cast, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -69,6 +69,7 @@ class _AllGatherMatch:
     res_node: torch.fx.Node
     gather_dim: int
     group_name: str
+    with_effects: torch.fx.Node
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
         self.res_node.replace_all_uses_with(new_node)
@@ -93,6 +94,14 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                 Ignored(),
                 KeywordArg("group_name"),
             ),
+            _users=MULTIPLE,
+        )
+
+    def make_with_effects_result_pattern(with_effects):
+        return CallFunction(
+            operator.getitem,
+            with_effects,
+            Ignored(),
         )
 
     # Matches funcol.all_gather_tensor with gather_dim == 0
@@ -103,10 +112,8 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             operator.getitem,
             CallFunction(
                 aten.split.Tensor,
-                CallFunction(
-                    operator.getitem,
+                make_with_effects_result_pattern(
                     make_zero_dim_all_gather_pattern(shard),
-                    Ignored(),
                 ),
                 Ignored(),
                 _users=MULTIPLE,
@@ -130,8 +137,10 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
     # viewed back as the original dtype.
     zero_dim_type_erased_all_gather_pattern = CallFunction(
         aten.view.dtype,
-        make_zero_dim_all_gather_pattern(
-            KeywordArg("shard"),
+        make_with_effects_result_pattern(
+            make_zero_dim_all_gather_pattern(
+                KeywordArg("shard"),
+            )
         ),
         Ignored(),
     )
@@ -164,7 +173,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             (non_zero_dim_type_erased_all_gather_pattern, 0),
             (zero_dim_type_erased_all_gather_pattern, 0),
         ],
-        c10d.wait_tensor.default: [
+        torch.ops.higher_order.with_effects: [
             (zero_dim_all_gather_pattern, 0),
         ],
     }
@@ -172,6 +181,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
     # Match in reverse to ensure longer patterns is prioritized
     all_gathers = []
     visited_ag_nodes = set()
+
     for node in reversed(graph.nodes):
         for target, patterns in res_node_target_to_patterns.items():
             if node.target != target:
@@ -183,6 +193,8 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
                 assert isinstance(match, Match)
                 ag_node = match.nodes[ag_node_idx]
+                with_effects_node = match.nodes[ag_node_idx + 1]
+
                 assert ag_node.target == c10d.all_gather_into_tensor.default
 
                 if ag_node in visited_ag_nodes:
@@ -196,6 +208,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                     res_node=node,
                     gather_dim=match.kwargs.get("gather_dim", 0),
                     group_name=match.kwargs["group_name"],
+                    with_effects=with_effects_node,
                 )
                 all_gathers.append(ag_match)
 
@@ -531,19 +544,19 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         or not torch.distributed.is_nccl_available()
     ):
         return
-
     c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
     )
 
-    shard_node, ag_node, ag_res_node, gather_dim, group_name = (
+    shard_node, ag_node, ag_res_node, gather_dim, group_name, with_effects = (
         all_gather.shard_node,
         all_gather.ag_node,
         all_gather.res_node,
         all_gather.gather_dim,
         all_gather.group_name,
+        all_gather.with_effects,
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
@@ -553,9 +566,11 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         # Decomposing the matmul on the K dimension is not supported
         return
 
+    with_effects_output_token, with_effects_result = with_effects_users(with_effects)
     # Find consumer matmuls
+    if ag_res_node == with_effects:
+        ag_res_node = with_effects_result
     matmuls = _find_consumer_matmuls(ag_res_node)
-
     # The matmuls are only fusible if non-A args don't depend on the all-gather
     # result node
     matmuls = [
@@ -563,7 +578,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         for matmul in matmuls
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
-
     if len(matmuls) == 0 or len(set(map(type, matmuls))) != 1:
         return
 
@@ -583,6 +597,11 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         fused_node = _insert_fused_all_gather_matmul(
             graph, matmuls, shard_node, gather_dim, group_name
         )
+        with graph.inserting_after(fused_node):
+            make_token = graph.call_function(torch.ops.prims._make_token.default)
+            with_effects_output_token.replace_all_uses_with(make_token)
+            graph.erase_node(with_effects_output_token)
+
         new_ag_node = graph.call_function(
             operator.getitem,
             args=(fused_node, 0),
@@ -598,7 +617,10 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             )
             matmul.replace_with(new_out_node)
             matmul.erase()
-        all_gather.replace_with(new_ag_node)
+
+        # all_gather.replace_with(new_ag_node)
+        ag_res_node.replace_all_uses_with(new_ag_node)
+        graph.erase_node(ag_res_node)
         all_gather.erase()
 
     # Raise ancestors of non-A args that are topologically ordered between
@@ -673,6 +695,18 @@ def _insert_fused_matmul_reduce_scatter(
         raise AssertionError(f"Unexpected matmul match type: {type(matmul)}")
 
 
+def with_effects_users(node: torch.fx.Node) -> Tuple[torch.fx.Node, torch.fx.Node]:
+    assert node.target == torch.ops.higher_order.with_effects
+    users = node.users
+    assert len(users) == 2
+    getitem_users = [None, None]
+    for user in users.keys():
+        assert user.target == operator.getitem
+        getitem_users[user.args[1]] = user
+
+    return getitem_users[0], getitem_users[1]
+
+
 def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     """
     Fused the pattern
@@ -743,23 +777,17 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
             group_name,
         )
 
-        users = reduce_scatter.res_node.users
-        assert len(users) == 2
-        getitem_users = [None, None]
-        for user in users.keys():
-            assert user.target == operator.getitem
-            getitem_users[user.args[1]] = user
-
-        getitem_token = getitem_users[0]
-        getitem_result = getitem_users[1]
+        with_effects_output_token, with_effects_result = with_effects_users(
+            reduce_scatter.res_node
+        )
 
         reduce_scatter.replace_with(fused_node)
         with graph.inserting_after(fused_node):
             make_token = graph.call_function(torch.ops.prims._make_token.default)
-            getitem_token.replace_all_uses_with(make_token)
-            graph.erase_node(getitem_token)
-        getitem_result.replace_all_uses_with(fused_node)
-        graph.erase_node(getitem_result)
+            with_effects_output_token.replace_all_uses_with(make_token)
+            graph.erase_node(with_effects_output_token)
+        with_effects_result.replace_all_uses_with(fused_node)
+        graph.erase_node(with_effects_result)
 
         reduce_scatter.erase()
         matmul.erase()
