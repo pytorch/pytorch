@@ -37,17 +37,29 @@ jobs:
     permissions:
       id-token: write
       contents: read
+
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
@@ -63,19 +75,21 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-build:
     name: linux-focal-cuda12.4-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_4-py3_10-gcc9-test:
@@ -93,14 +107,16 @@ jobs:
   parallelnative-linux-jammy-py3_8-gcc11-build:
     name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: parallelnative-linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
 
   parallelnative-linux-jammy-py3_8-gcc11-test:
@@ -117,13 +133,15 @@ jobs:
   linux-focal-cuda11_8-py3_9-gcc9-build:
     name: linux-focal-cuda11.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
@@ -139,17 +157,19 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-debug-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda11_8-py3_10-gcc9-debug-test:
@@ -166,16 +186,18 @@ jobs:
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
     uses: ./.github/workflows/_win-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       build-environment: win-vs2019-cuda11.8-py3
       cuda-version: "11.8"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.g5.4xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
 
   win-vs2019-cuda11_8-py3-test:
@@ -228,6 +250,7 @@ jobs:
     name: buck-build-test
     uses: ./.github/workflows/_buck-build-test.yml
     with:
+      runner_prefix: "amz2023."
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
@@ -237,6 +260,7 @@ jobs:
     name: android-emulator-build-test
     uses: ./.github/workflows/_run_android_tests.yml
     with:
+      runner_prefix: "amz2023."
       test-matrix: |
         { include: [
           { config: 'default',
@@ -252,12 +276,14 @@ jobs:
   linux-vulkan-focal-py3_11-clang10-build:
     name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-vulkan-focal-py3.11-clang10
       docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
 
   linux-vulkan-focal-py3_11-clang10-test:
@@ -272,7 +298,9 @@ jobs:
   linux-focal-rocm6_1-py3_8-build:
     name: linux-focal-rocm6.1-py3.8
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
@@ -299,16 +327,19 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       use_split_build: true
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
+
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
@@ -324,14 +355,16 @@ jobs:
   linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
       use_split_build: true
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
