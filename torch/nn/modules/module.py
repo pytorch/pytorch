@@ -2585,10 +2585,10 @@ class Module:
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
-                if v is None or v in memo:
+                if v is None or id(v) in memo:
                     continue
                 if remove_duplicate:
-                    memo.add(v)
+                    memo.add(id(v))
                 name = module_prefix + ("." if module_prefix else "") + k
                 yield name, v
 
@@ -2728,8 +2728,8 @@ class Module:
         """
         memo = set()
         for name, module in self._modules.items():
-            if module is not None and module not in memo:
-                memo.add(module)
+            if module is not None and id(module) not in memo:
+                memo.add(id(module))
                 yield name, module
 
     def modules(self) -> Iterator["Module"]:
@@ -2761,14 +2761,14 @@ class Module:
 
     def named_modules(
         self,
-        memo: Optional[Set["Module"]] = None,
+        memo: Optional[Set[int]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):
         r"""Return an iterator over all modules in the network, yielding both the name of the module as well as the module itself.
 
         Args:
-            memo: a memo to store the set of modules already added to the result
+            memo: a memo to store the set of id of modules already added to the result
             prefix: a prefix that will be added to the name of the module
             remove_duplicate: whether to remove the duplicated module instances in the result
                 or not
@@ -2796,9 +2796,9 @@ class Module:
         """
         if memo is None:
             memo = set()
-        if self not in memo:
+        if id(self) not in memo:
             if remove_duplicate:
-                memo.add(self)
+                memo.add(id(self))
             yield prefix, self
             for name, module in self._modules.items():
                 if module is None:

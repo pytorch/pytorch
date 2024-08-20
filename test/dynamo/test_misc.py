@@ -3361,8 +3361,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_class_duner_flags(self):
         class ModuleA(torch.nn.ModuleDict, collections.abc.MutableMapping):
-            def __hash__(self):
-                return id(self)
+            pass
 
         # Defined in CPython's Include/object.h
         TPFLAGS_MAPPING = 1 << 6

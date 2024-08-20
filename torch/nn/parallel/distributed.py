@@ -1290,11 +1290,11 @@ class DistributedDataParallel(Module, Joinable):
         # Deduplicate any parameters that might be shared across child modules.
         memo = set()
         modules_and_parameters = [
-            # "p not in memo" is the deduplication check.
-            # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
+            # "id(p) not in memo" is the deduplication check.
+            # "not memo.add(id(p))" is always True, and it's only there to cause "add(id(p))" if needed.
             (m, p)
             for m, p in modules_and_parameters
-            if p not in memo and not memo.add(p)  # type: ignore[func-returns-value]
+            if id(p) not in memo and not memo.add(id(p))  # type: ignore[func-returns-value]
         ]
 
         # Build list of parameters.

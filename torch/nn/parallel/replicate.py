@@ -57,7 +57,7 @@ def _is_jit_enabled() -> "EnabledProxy":
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
-def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> bool:
+def _replicatable_module(module: Module, memo: Optional[Set[int]] = None) -> bool:
     # module.modules() contains module itself as the first element
     def descendant_modules(module: Module) -> Iterator[Module]:
         gen = module.modules()
@@ -70,9 +70,9 @@ def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> 
         memo = set()
 
     # memoize visited modules
-    memo.add(module)
+    memo.add(id(module))
     if _is_script_module(module):
-        memo.update(descendant_modules(module))
+        memo.update(map(id, descendant_modules(module)))
         return all(
             _is_script_module(descendant) for descendant in descendant_modules(module)
         )
@@ -80,7 +80,7 @@ def _replicatable_module(module: Module, memo: Optional[Set[Module]] = None) -> 
     for child in module.children():
         # since any unreplicatable module will cause the check to return
         # False early, visited modules here can be safely ignored.
-        if child in memo:
+        if id(child) in memo:
             continue
         if not _replicatable_module(child, memo):
             return False
