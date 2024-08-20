@@ -485,6 +485,49 @@ pinv_batch_rule(
     const std::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
 }
+
+fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
+  const Tensor& query, optional<int64_t> query_bdim,
+  const Tensor& key, optional<int64_t> key_bdim,
+  const Tensor& value, optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, optional<int64_t> attn_bias_bdim,
+  bool compute_log_sumexp,
+  double dropout_p,
+  bool is_causal,
+  c10::optional<double> scale
+) {
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  int64_t extra_batch_size = 1;
+  if (query_bdim.has_value()) {
+    extra_batch_size = query.size(0);
+  } else if (key_bdim.has_value()) {
+    extra_batch_size = key.size(0);
+  } else if (value_bdim.has_value()) {
+    extra_batch_size = value.size(0);
+  }
+  query_ = query_.expand({extra_batch_size, query_.size(-4), query_.size(-3), query_.size(-2), query_.size(-1)});
+  key_ = key_.expand({extra_batch_size, key_.size(-4), key_.size(-3), key_.size(-2), key_.size(-1)});
+  value_ = value_.expand({extra_batch_size, value_.size(-4), value_.size(-3), value_.size(-2), value_.size(-1)});
+
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  std::optional<Tensor> attn_bias_;
+  if (attn_bias.has_value() && attn_bias->defined()) {
+    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+  }
+  const auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
+      query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, scale);
+  const auto batch_size = extra_batch_size;
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  const auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  // philox seed is always non-batched
+  return std::make_tuple(res0_, 0, res1_, 0, res2, std::nullopt, res3, std::nullopt);
+}
+
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -612,6 +655,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention_backward, _scaled_dot_product_efficient_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
