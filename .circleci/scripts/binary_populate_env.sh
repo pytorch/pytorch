@@ -102,10 +102,10 @@ fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* && $(uname) == "Linux" ]]; then
-    TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+    TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-xpu.txt)
-        TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}+${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+        TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}+${TRITON_SHORTHASH}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
