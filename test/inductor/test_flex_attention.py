@@ -1153,7 +1153,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     def test_non_equal_head_dims(self, dtype, score_mod):
-        self.run_test(score_mod, dtype, B, H, S, D, B, H, S, KV_D=(D, D * 2))
+        self.run_test(score_mod, dtype, B, H, S, D, B, H, S, V_D=D//2)
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
