@@ -562,16 +562,15 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        new_device = device
         if device == torch.device("meta"):
-            new_device = dist.distributed_c10d._get_pg_default_device()
+            device = dist.distributed_c10d._get_pg_default_device()
             assign = True
         if info.broadcast_from_rank0:
             _broadcast_state_dict(
-                state_dict, local_state_dict, device=new_device, strict=info.strict
+                state_dict, local_state_dict, device=device, strict=info.strict
             )
         elif info.full_state_dict:
-            _distribute_state_dict(state_dict, local_state_dict, device=new_device)
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
