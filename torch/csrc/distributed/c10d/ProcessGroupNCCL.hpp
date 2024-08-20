@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control broadcasting of NCCL uniqueId
+static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
+  "TORCH_NCCL_BCAST_UNIQUEID"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
