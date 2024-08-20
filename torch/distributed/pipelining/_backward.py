@@ -2,7 +2,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-import weakref
 from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
@@ -38,7 +37,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 
 
 def reverse_closure(
-    roots: List[Node], target_nodes: Set[Node]
+    roots: List[Node], target_nodes: Set[Node], reverse_edges_dict
 ) -> Tuple[Set[Node], Set[Node]]:
     """
     This function returns the reverse closure of the given roots,
@@ -57,14 +56,10 @@ def reverse_closure(
     while q:
         node = q.popleft()
         metadata = cast(Dict[str, List], node.metadata)
-        reverse_edges = metadata.get("reverse_edges", [])
-        for holder_ref, idx in reverse_edges:
-            ref = holder_ref()
-            if ref is None:
-                # this reverse graph is no longer alive
-                # raise RuntimeError("Reverse graph is no longer alive")
-                continue
-            fn = ref.node
+        reverse_edges = reverse_edges_dict[node]
+        for fn in reverse_edges:
+            if fn is None:
+                raise RuntimeError("Something went wrong")
             if fn in closure or fn is None:
                 continue
             if fn in target_nodes:
@@ -75,16 +70,10 @@ def reverse_closure(
     return closure, visited_target_nodes
 
 
-# Enable weak pointer
-class Holder:
-    def __init__(self, node: Node):
-        self.node = node
-
-
-def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
+def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
     q: Deque[Node] = collections.deque()
     root_seen: Set[Node] = set()
-    reverse_graph_refs: List[Holder] = []
+    reverse_edges_dict: Dict[Node, List[Node]] = collections.defaultdict(list)
     for node in roots:
         if node is not None and node not in root_seen:
             q.append(node)
@@ -93,20 +82,13 @@ def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
         node = q.popleft()
         for fn, idx in node.next_functions:
             if fn is not None:
-                # Don't necessarily need to store on the graph
-                metadata = cast(Dict[str, List], fn.metadata)
-                reverse_edges = metadata.get("reverse_edges", [])
-                if len(reverse_edges) == 0:
-                    q.append(fn)
-                holder = Holder(node)
-                holder_ref = weakref.ref(holder)
-                reverse_graph_refs.append(holder)
-                reverse_edges.append((holder_ref, idx))
-                metadata["reverse_edges"] = reverse_edges
-    return reverse_graph_refs
+                reverse_edges_dict[fn].append(fn)
+    return reverse_edges_dict
 
 
-def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, Any]]:
+def get_param_groups(
+    inputs: List[Node], params: List[Node], reverse_edges_dict
+) -> List[Dict[str, Any]]:
     """
     Given a list of inputs and a list of parameters, return a list of parameter
     groups, where each group contains the parameters and the intermediates that
@@ -121,10 +103,12 @@ def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, A
     """
     # reverse graph that starts with inputs, and goes up to the dOutput or the loss,
     # but omits weights and any subgraphs connecting weights to this closure
-    inputs_closure, _ = reverse_closure(inputs, set())
+    inputs_closure, _ = reverse_closure(inputs, set(), reverse_edges_dict)
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
     for i, param in enumerate(params):
-        closure, intersected = reverse_closure([param], inputs_closure)
+        closure, intersected = reverse_closure(
+            [param], inputs_closure, reverse_edges_dict
+        )
         param_group: Dict[str, Set] = {
             "params": {param},
             "intermediates": intersected,
@@ -175,9 +159,10 @@ def stage_backward_input(
         filter(None, map(_get_grad_fn_or_grad_acc, weights))
     )
 
-    reverse_graph_refs = construct_reverse_graph(stage_output_grad_fns)
-    param_groups = get_param_groups(stage_input_grad_fns, weight_grad_fns)
-    del reverse_graph_refs
+    reverse_edges_dict = construct_reverse_graph(stage_output_grad_fns)
+    param_groups = get_param_groups(
+        stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
+    )
 
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
