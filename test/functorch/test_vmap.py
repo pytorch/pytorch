@@ -3850,6 +3850,58 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
 
+    def test_sdpa(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        backends = [
+            SDPBackend.MATH,
+            SDPBackend.EFFICIENT_ATTENTION,
+            # SDPBackend.FLASH_ATTENTION  # not supported yet
+        ]
+
+        def T(*args):
+            return torch.randn(
+                *args, dtype=torch.float16, requires_grad=True, device=device
+            )
+
+        for backend in backends:
+            with sdpa_kernel([backend]):
+                for batching in [
+                    (True, True, True),
+                    (True, False, False),
+                    (False, True, True),
+                ]:
+                    size = [8, 4, 128, 64]
+                    if batching[0]:
+                        query = T(3, *size)
+                    else:
+                        query = T(*size)
+                    if batching[1]:
+                        key = T(3, *size)
+                    else:
+                        key = T(*size)
+                    if batching[2]:
+                        value = T(3, *size)
+                    else:
+                        value = T(*size)
+                    in_dims = tuple(0 if b else None for b in batching)
+                    self._vmap_test(
+                        lambda query, key, value: F.scaled_dot_product_attention(
+                            query, key, value
+                        ),
+                        (query, key, value),
+                        in_dims=in_dims,
+                    )
+                    # Backwards test doesn't work yet
+                    self._batched_grad_test(
+                        lambda query, key, value: F.scaled_dot_product_attention(
+                            query, key, value
+                        ),
+                        (query, key, value),
+                    )
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
