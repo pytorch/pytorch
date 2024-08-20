@@ -561,6 +561,11 @@ void run_cudnn_SDP_fprop(
     softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
   }
 
+  // do nothing if we got 0-element tensors
+  if (!q.numel() || !k.numel() || !v.numel()) {
+    return;
+  }
+
   auto key = MHACacheKeyWrapper(
       b,
       h,
@@ -648,6 +653,12 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
+
+  // do nothing if we got 0-element tensors
+  if (!q.numel() || !k.numel() || !v.numel() || !o.numel() || !dO.numel() || !softmaxstats.numel()) {
+    return;
+  }
+
   Tensor dO_ = dO;
   if (!dO.strides()[dO.strides().size() - 1]) {
     TORCH_WARN(
