@@ -1102,6 +1102,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 not isinstance(var_vt, variables.DeletedVariable)
             )
         except ObservedAttributeError:
+            # handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
