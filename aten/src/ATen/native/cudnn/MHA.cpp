@@ -677,7 +677,6 @@ void run_cudnn_SDP_bprop(
     }
   }
   TORCH_INTERNAL_ASSERT(
-      // see also:
       (dO_.is_contiguous() && o.is_contiguous()) ||
           std::equal(
               dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
