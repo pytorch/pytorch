@@ -6,6 +6,9 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
+    _has_potential_branch_input_alias,
+    _has_potential_branch_input_mutation,
+    UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -18,6 +21,21 @@ class HintsWrapper(HigherOrderOperator):
         super().__init__("hints_wrapper")
 
     def __call__(self, body_fn, args, kwargs, hints):
+        r"""
+        Call implementation of hints_wrapper
+
+        Args:
+            body_fn (Callable): A callable function that is within the scope
+             that is being traced.
+
+            args (Tuple of torch.Tensor/int/float/bool): A tuple of inputs to
+             body_fn.
+
+            kwargs (dict): Keyword argument to the body_fn.
+
+            hints (dict): A dict of context hints which could be passed to
+             backend compiler.
+        """
         if not isinstance(args, tuple):
             raise RuntimeError(f"args must be a tuple, got {type(args)}")
 
@@ -78,6 +96,19 @@ def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
     unwrapped_hints = ctx.unwrap_tensors(hints)
     with ctx.redispatch_to_next():
         functional_body_fn = ctx.functionalize(body_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        if _has_potential_branch_input_mutation(
+                functional_body_fn, unwrapped_args, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "body_fn of hints_wrapper might be modifying the input!"
+            )
+        if _has_potential_branch_input_alias(
+                functional_body_fn, unwrapped_args, pre_dispatch=pre_dispatch
+        ):
+            raise UnsupportedAliasMutationException(
+                "body_fn of hints_wrapper might be aliasing the input!"
+            )
         outputs = hints_wrapper(
             functional_body_fn,
             unwrapped_args,
