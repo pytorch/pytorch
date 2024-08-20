@@ -3862,12 +3862,15 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         ]
 
         def T(*args):
-            return torch.randn(
-                *args, dtype=torch.float16, requires_grad=True, device=device
-            )
+            return torch.randn(*args, dtype=torch.float16, device=device)
+
+        query = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
+        key = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
+        value = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
 
         for backend in backends:
-            with sdpa_kernel([backend]):
+            backend_ctx = sdpa_kernel([backend])
+            with backend_ctx:
                 for batching in [
                     (True, True, True),
                     (True, False, False),
@@ -3887,10 +3890,10 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                     else:
                         value = T(*size)
                     in_dims = tuple(0 if b else None for b in batching)
+                    attention = F.scaled_dot_product_attention
+
                     self._vmap_test(
-                        lambda query, key, value: F.scaled_dot_product_attention(
-                            query, key, value
-                        ),
+                        attention,
                         (query, key, value),
                         in_dims=in_dims,
                     )
