@@ -3687,6 +3687,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if self.rank != 0:
                 pg.allreduce(a).wait()
             e.synchronize()
+            # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+            # adding 1 sec delay for NAVI31 GPUs
+            time.sleep(1)
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
             t = t["entries"]
             self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
@@ -3806,6 +3809,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
+
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        # adding 1 sec delay for NAVI31 GPUs
+        time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_coalesced_ops * (ops_per_coalesce + 1))
