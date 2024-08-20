@@ -106,7 +106,7 @@ def maybe_set_hip_visible_devies():
 
 
 def strtobool(s):
-    return s.lower() not in {"", "0", "false", "off", "no"}
+    return s.lower() not in {"", "0", "false", "off"}
 
 
 class TestChoices(list):
@@ -445,8 +445,6 @@ def run_test(
             unittest_args.extend(["--showlocals", "--tb=long", "--color=yes"])
         else:
             unittest_args.append("--locals")
-    if options.color and options.pytest:
-        unittest_args.append("--color=yes")
 
     # NB: These features are not available for C++ tests, but there is little incentive
     # to implement it because we have never seen a flaky C++ test before.
@@ -1282,11 +1280,6 @@ def parse_args():
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
         and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
-    )
-    parser.add_argument(
-        "--color",
-        default=not IS_CI,
-        type=lambda x: bool(strtobool(x)),
     )
     parser.add_argument(
         "--shard",
