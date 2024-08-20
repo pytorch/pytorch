@@ -17,13 +17,13 @@ function install_cusparselt_052 {
 }
 
 function install_124 {
-  echo "Installing CUDA 12.4 and cuDNN 9.1 and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
+  echo "Installing CUDA 12.4.1 and cuDNN 9.1 and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
-  # install CUDA 12.4.0 in the same container
-  wget -q https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux_sbsa.run
-  chmod +x cuda_12.4.0_550.54.14_linux_sbsa.run
-  ./cuda_12.4.0_550.54.14_linux_sbsa.run --toolkit --silent
-  rm -f cuda_12.4.0_550.54.14_linux_sbsa.run
+  # install CUDA 12.4.1 in the same container
+  wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux_sbsa.run
+  chmod +x cuda_12.4.1_550.54.15_linux_sbsa.run
+  ./cuda_12.4.1_550.54.15_linux_sbsa.run --toolkit --silent
+  rm -f cuda_12.4.1_550.54.15_linux_sbsa.run
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.4 /usr/local/cuda
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
