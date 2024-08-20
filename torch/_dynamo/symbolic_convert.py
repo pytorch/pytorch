@@ -1355,32 +1355,40 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
+    def _raise_exception_variable(self, inst):
+        val = self.pop()
+        # User can raise exception in 2 ways
+        #   1) raise exception type - raise NotImplementedError
+        #   2) raise execption instance - raise NotImplemetedError("foo")
+
+        # 1) when user raises exception type
+        if isinstance(val, variables.BuiltinVariable):
+            # Create the instance of the exception type
+            # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+            val = val.call_function(self, [], {})  # type: ignore[arg-type]
+
+        # Save the exception in a global data structure
+        self.exn_vt_stack.append(val)
+
+        # 2) when user raises exception instance
+        if isinstance(val, variables.ExceptionVariable):
+            if val.exc_type is StopIteration:
+                # StopIteration is used to find the end of iteration while tracing __next__
+                raise exc.ObservedUserStopIteration(f"raised exception {val}")
+            raise exc.ObservedException(f"raised exception {val}")
+        unimplemented(f"raise {exc}")
+
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
             unimplemented("re-raise")
         elif inst.arg == 1:
-            val = self.pop()
-            # User can raise exception in 2 ways
-            #   1) raise exception type - raise NotImplementedError
-            #   2) raise execption instance - raise NotImplemetedError("foo")
-
-            # 1) when user raises exception type
-            if isinstance(val, variables.BuiltinVariable):
-                # Create the instance of the exception type
-                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-                val = val.call_function(self, [], {})  # type: ignore[arg-type]
-
-            # Save the exception in a global data structure
-            self.exn_vt_stack.append(val)
-
-            # 2) when user raises exception instance
-            if isinstance(val, variables.ExceptionVariable):
-                if val.exc_type is StopIteration:
-                    # StopIteration is used to find the end of iteration while tracing __next__
-                    raise exc.ObservedUserStopIteration(f"raised exception {val}")
-                raise exc.ObservedException(f"raised exception {val}")
-            unimplemented(f"raise {exc}")
+            self._raise_exception_variable(inst)
         else:
+            # Support raise .. from None ... Dynamo does not track __cause__ and other attributes of exception. So we
+            # ignore `from None` part.
+            from_vt = self.pop()
+            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
+                self._raise_exception_variable(inst)
             unimplemented("raise ... from ...")
 
     def exception_handler(self, raised_exception):
@@ -1431,9 +1439,12 @@ class InstructionTranslatorBase(
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
                     if len(self.block_stack) == 0:
-                        unimplemented(
-                            "exception is raised when block stack " "is empty"
-                        )
+                        # No handler found in this frame. Bubble the exception to the parent
+                        # instruction translater.
+                        self.stack.clear()
+                        if type(self) is InstructionTranslator:
+                            raise Unsupported("Observed exception")
+                        raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
                 if block_stack_entry.inst.opname != "SETUP_FINALLY":
