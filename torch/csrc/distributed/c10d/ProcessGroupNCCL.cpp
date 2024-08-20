@@ -1742,7 +1742,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (!shouldDump_.load()) {
               LOG(ERROR)
                   << logPrefix()
-                  << "First watchdog to set the dump signal to TCPStore.";
+                  << "Broadcasting the dump signal of flight-recorder to other processes via TCPStore.";
             }
             // signal the monitor thread to start dumping
             shouldDump_.store(true);
