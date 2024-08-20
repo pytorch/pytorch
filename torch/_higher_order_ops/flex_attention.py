@@ -417,12 +417,14 @@ def flex_attention_fake_tensor_mode(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    v_head_dim = value.size(-1)
     with mode:
-        batch_size, num_heads, seq_len_q, head_dim = query.shape
+        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
         logsumexp = query.new_empty(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
-        return torch.empty_like(query), logsumexp
+        out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+        return query.new_empty(out_shape), logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
