@@ -246,7 +246,7 @@ def handle_effects(
                 token_tensor = new_token_tensor()
 
             token_proxy = proxy_tensor_mode.tracer.create_proxy(
-                "placeholder", "primals_token", (), {}, name="primals_token"
+                "placeholder", "tangents_token", (), {}, name="tangents_token"
             )
             track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
 

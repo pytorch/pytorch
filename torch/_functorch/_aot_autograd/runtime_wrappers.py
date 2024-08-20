@@ -26,7 +26,6 @@ from torch._guards import (
     TracingContext,
 )
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -658,13 +657,12 @@ class EffectTokensWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            if num_tokens > 0 or runtime_metadata.num_backward_discovered_tokens > 0:
+            if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
                 args = [
                     *([None] * num_tokens),
                     *args,
-                    *([None] * runtime_metadata.num_backward_discovered_tokens),
                 ]
                 old_args.clear()
 
@@ -1733,20 +1731,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                bw_tokens = [None] * CompiledFunction.metadata.num_backward_tokens
+
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
                 all_args = [
                     *ctx.symints,
                     *ctx.saved_tensors,
                     *flat_bw_args_with_grads,
+                    *bw_tokens,
                     *rng_args,
                 ]
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (
-                    len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
+                    len(all_args)
+                    - num_flat_bw_args_with_grads
+                    - len(rng_args)
+                    - len(bw_tokens)
                 )
-                tangents_end_idx = len(all_args) - len(rng_args)
+                tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1774,25 +1778,31 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
                 )
-                grad_output_types = [
-                    type(x) for x in all_args[-num_flat_bw_args_with_grads:]
-                ]
-                # In general, we can add more asserts/guards here for when we partitioned
-                # with incorrect assumptions about the grad_outputs.
-                # Normalize FakeTensor -> torch.Tensor
-                # - during tracing our types are FakeTensor
-                # - at runtime in the backward our types are torch.Tensor...
-                # - unless we're running compiled backward, in which case they are also FakeTensor
-                grad_output_types_ = [
-                    torch.Tensor if x is FakeTensor else x for x in grad_output_types
-                ]
-                assert (
-                    grad_output_types_ == CompiledFunction.metadata.output_types
-                ), f"""\
-    We incorrectly attempted to compile the backward with incorrect subclass metadata.
-    If you run into this error, please file an issue.
-    Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
-    Got grad_output types: {str(grad_output_types)}"""
+
+                #             roffset =  len(rng_args) + len(bw_tokens)
+                #             _r = -roffset if roffset > 0 else None
+
+                #             grad_output_types = [
+                #                 type(x) for x in all_args[-num_flat_bw_args_with_grads:_r]
+                #             ]
+                #             # In general, we can add more asserts/guards here for when we partitioned
+                #             # with incorrect assumptions about the grad_outputs.
+                #             # Normalize FakeTensor -> torch.Tensor
+                #             # - during tracing our types are FakeTensor
+                #             # - at runtime in the backward our types are torch.Tensor...
+                #             # - unless we're running compiled backward, in which case they are also FakeTensor
+                #             grad_output_types_ = [
+                #                 torch.Tensor if x is FakeTensor else x for x in grad_output_types
+                #             ]
+                #             if grad_output_types_ != CompiledFunction.metadata.output_types:
+                #                 breakpoint()
+                #             assert (
+                #                 grad_output_types_ == CompiledFunction.metadata.output_types
+                #             ), f"""\
+                # We incorrectly attempted to compile the backward with incorrect subclass metadata.
+                # If you run into this error, please file an issue.
+                # Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
+                # Got grad_output types: {str(grad_output_types)}"""
 
                 # TODO: figure out how to refactor the backward properly
                 # so I can use aot_dispatch_subclass_wrapper() here.
@@ -1973,11 +1983,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Toss out the backward output tokens
-                    num_bw_out_tokens = (
-                        CompiledFunction.metadata.num_backward_out_tokens
-                    )
-                    if num_bw_out_tokens > 0:
-                        out = out[:-num_bw_out_tokens]
+                    num_bw_tokens = CompiledFunction.metadata.num_backward_tokens
+                    if num_bw_tokens > 0:
+                        out_tokens = out[-num_bw_tokens:]
+                        for t in out_tokens:
+                            assert t.numel() == 0
+
+                        out = out[:-num_bw_tokens]
 
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                     out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
@@ -2042,6 +2054,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     assert (
                         CompiledFunction.maybe_subclass_metadata.grad_input_metas
                         is not None
+                    )
+                    print(f"XXX out={out}")
+                    for o in out:
+                        print(f"XXX {o} {o.shape} {o.stride()}")
+                    print(
+                        f"XXX subclass_metas={CompiledFunction.maybe_subclass_metadata.grad_input_metas}"
                     )
                     outs_wrapped = wrap_tensor_subclasses(
                         out,

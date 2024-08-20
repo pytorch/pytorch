@@ -271,14 +271,13 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     #
     # 3. Checks invariants of number input output tokens:
     # forward:
-    # expected_num_erased_inputs == len(fw_metadata.tokens) + fw_metadata.num_backward_discovered_tokens
-    # expected_num_erased_outputs == len(fw_metadata.tokens) + fw_metadata.num_backward_out_tokens
+    # expected_num_erased_inputs == len(fw_metadata.tokens)
+    # expected_num_erased_outputs == len(fw_metadata.tokens)
     # backward:
-    # expected_num_erased_inputs == fw_metadata.num_backward_out_tokens
-    # expected_num_erased_outputs == fw_metadata.num_backward_out_tokens
-    num_tokens = len(fw_metadata.tokens)
-    num_backward_out_tokens = fw_metadata.num_backward_out_tokens
-    num_backward_discovered_tokens = fw_metadata.num_backward_discovered_tokens
+    # expected_num_erased_inputs == fw_metadata.num_backward_tokens
+    # expected_num_erased_outputs == fw_metadata.num_backward_tokens
+    num_forward_tokens = len(fw_metadata.tokens)
+    num_backward_tokens = fw_metadata.num_backward_tokens
 
     def rewrite_with_effects_input_token(module, node):
         with module.graph.inserting_before(node):
@@ -314,7 +313,6 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         with_effect_nodes = []
         output_token_nodes = []
         other_output_nodes = []
-        outputs_to_erase = []
         for i, node in enumerate(module.graph.nodes):
             if node.op == "placeholder":
                 input_nodes.append(node)
@@ -324,10 +322,6 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     input_token_nodes.add(node.args[0])
                     rewrite_with_effects_input_token(module, node)
             elif node.op == "output":
-                if subgraph == "forward" and num_backward_discovered_tokens > 0:
-                    for inp in input_nodes[-num_backward_discovered_tokens:]:
-                        input_token_nodes.add(inp)
-
                 outs = node.args[0]
                 for out in outs:
                     if (
@@ -338,20 +332,14 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         and out.args[0] in with_effect_nodes
                     ):
                         output_token_nodes.append(out)
-                    elif out in input_token_nodes:
-                        # Remove saved in forward input token for backward
-                        outputs_to_erase.append(out)
                     else:
                         other_output_nodes.append(out)
 
                 rewrite_output(module, node, output_token_nodes, other_output_nodes)
-                num_erased_outs = len(output_token_nodes) + len(outputs_to_erase)
+                num_erased_outs = len(output_token_nodes)
 
         for input_token_node in input_token_nodes:
             module.graph.erase_node(input_token_node)
-
-        for saved_token_for_backward in outputs_to_erase:
-            module.graph.erase_node(saved_token_for_backward)
 
         num_erased_inputs = len(input_token_nodes)
 
@@ -364,7 +352,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
 
         module.recompile()
 
-    if num_tokens > 0 or num_backward_out_tokens > 0:
+    if num_forward_tokens > 0:
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
@@ -382,11 +370,11 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         do(
             fw_module,
             "forward",
-            num_tokens + num_backward_discovered_tokens,
-            num_tokens + num_backward_out_tokens,
+            num_forward_tokens,
+            num_forward_tokens,
         )
 
-    if bw_module is not None and num_backward_out_tokens > 0:
+    if bw_module is not None and num_backward_tokens > 0:
         if aot_config.enable_log:
             from torch._dynamo.utils import lazy_format_graph_code
 
@@ -401,13 +389,12 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(bw_module, "backward", num_backward_out_tokens, num_backward_out_tokens)
+        do(bw_module, "backward", num_backward_tokens, num_backward_tokens)
 
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
     fw_metadata.tokens = {}
-    fw_metadata.num_backward_out_tokens = 0
-    fw_metadata.num_backward_discovered_tokens = 0
+    fw_metadata.num_backward_tokens = 0
 
 
 def root_module_when_exporting_non_strict(flat_fn):

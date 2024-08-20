@@ -27,6 +27,8 @@ class TwoTensor(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
         assert a.shape == b.shape
+        if a.stride() != b.stride():
+            breakpoint()
         assert a.stride() == b.stride()
         assert a.storage_offset() == b.storage_offset()
         return out
