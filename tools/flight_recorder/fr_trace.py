@@ -30,7 +30,6 @@ python fr_trace.py -d <dump dir containing trace files> [-o <output file>]
 import argparse
 import ast
 import math
-import os
 import pickle
 import sys
 from enum import Enum
@@ -45,8 +44,10 @@ from typing import (  # type: ignore[attr-defined]
     Tuple,
     Type,
     TypeVar,
-    Union,
 )
+
+from tools.flight_recorder.components.config_manager import JobConfig
+from tools.flight_recorder.components.loader import read_dir
 
 
 try:
@@ -924,61 +925,7 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
     return db
 
 
-def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
-    basename = os.path.basename(filename)
-    assert (
-        basename.find(prefix) == 0
-    ), f"args.prefix ({prefix}) must match the beginning of each filename ({basename})"
-    rank = int(basename[len(prefix) :])
-    host_name = f"host_rank{rank}"
-
-    with open(filename, "rb") as infile:
-        dump = pickle.load(infile)
-
-    entries = dump["entries"]
-    version = dump["version"]
-    pg_config = dump["pg_config"]
-
-    return {
-        "host_name": host_name,
-        "rank": rank,
-        "entries": entries,
-        "version": version,
-        "pg_config": pg_config,
-    }
-
-
-def read_dir(prefix: str, folder: str) -> Dict[Any, Any]:  # TODO; fix types
-    import gc
-    import time
-
-    gc.disable()
-    details = {}
-    t0 = time.time()
-    for root, _, files in os.walk(folder):
-        for f in files:
-            ta = time.time()
-            details[f] = read_dump(prefix, os.path.join(root, f))
-            tb = time.time()
-            # print(f"read file {f} in {tb - ta}s")
-    print(f"loaded {len(files)} files in {tb - t0}s")
-    return details
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-d", "--dir", help="Directory with flight recorder dumps")
-    parser.add_argument("-o", "--output", default=None)
-    parser.add_argument(
-        "-p",
-        "--prefix",
-        help="prefix to strip such that rank can be extracted",
-        default="rank_",
-    )
-    parser.add_argument("-j", "--just_print_entries", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-
+def main(args: argparse.Namespace) -> None:
     details = read_dir(args.prefix, args.dir)
     db = build_db(details, args)
     if args.output:
@@ -987,4 +934,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    config = JobConfig()
+    main(config.parse_args())
