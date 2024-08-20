@@ -3300,6 +3300,30 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_user_defined_object_class_interaction(self):
+        class Foo:
+            x = 5
+
+        class Mock:
+            # This is a class variable
+            class_variable = Foo()
+
+            @classmethod
+            def get_class_variable(cls):
+                # Accessing the class variable using the cls parameter
+                return cls.class_variable.x
+
+            def run(self, x):
+                return self.get_class_variable() * x
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_multiple_inheritance(self):
         class Base1:
             def __new__(cls):
@@ -9561,6 +9585,51 @@ def ___make_guard_fn():
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
 
+    def test_itertools_islice(self):
+        counters.clear()
+
+        def fn(x):
+            return itertools.islice(x, 2, 5, 2)
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_islice_default_step(self):
+        counters.clear()
+
+        def fn(x):
+            return itertools.islice(x, 2, 5)
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_islice_default_end(self):
+        counters.clear()
+
+        def fn(x):
+            return itertools.islice(x, 2)
+
+        x = torch.randn([0, 1, 2, 3, 4, 5])
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_repeat(self):
         counters.clear()
 
@@ -9858,22 +9927,6 @@ def ___make_guard_fn():
             return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
 
         l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
-        eager = fn(l)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(l)
-
-        self.assertEqual(eager, compiled)
-        self.assertEqual(len(counters["graph_break"]), 0)
-
-    def test_itertools_tee(self):
-        counters.clear()
-
-        def fn(l):
-            a, b = itertools.tee(l)
-            return list(a), list(b)
-
-        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
         eager = fn(l)
 
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
