@@ -17,6 +17,7 @@ import linecache
 import logging
 import multiprocessing
 import operator
+import os
 import posixpath
 import random
 import re
@@ -32,6 +33,7 @@ import typing
 import unittest
 import weakref
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
 import torch
@@ -3151,13 +3153,16 @@ THIRDPARTY_SKIPLIST = (
 )
 
 
+def _as_posix_path(path):
+    return Path(os.path.normpath(path)).as_posix()
+
+
 def _strip_init_py(s):
     # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
     if s.endswith(suffix):
-        return s[: -len(suffix)]
-    else:
-        return s
+        s = s[: -len(suffix)]
+    return _as_posix_path(s)
 
 
 def _module_dir(m: types.ModuleType):
@@ -3258,7 +3263,7 @@ if torch.distributed.is_available():
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
     inlinelist = {
-        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
         for m in LEGACY_MOD_INLINELIST
     }
     return inlinelist
@@ -3267,7 +3272,7 @@ def get_legacy_mod_inlinelist():
 @functools.lru_cache(None)
 def get_mod_inlinelist():
     inlinelist = {
-        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
         for m in MOD_INLINELIST
     }
     return inlinelist
@@ -3278,10 +3283,10 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<frozen abc",
     "<__array_function__ internals>",
-    _config_module.__file__,
+    _as_posix_path(_config_module.__file__),
     "triton/backends",
 ]
-SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
+SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
@@ -3300,7 +3305,7 @@ FBCODE_SKIP_TORCHREC_DIRS = {
 }
 
 FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
-    f".*({'|'.join(map(re.escape, FBCODE_SKIP_TORCHREC_DIRS))})"
+    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_SKIP_TORCHREC_DIRS)})"
 )
 
 # TODO(yanboliang, anijain2305) - There are a few concerns that we should
@@ -3314,7 +3319,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
     "torchrec/distributed/types.py",
 }
 FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
-    f".*({'|'.join(map(re.escape, FBCODE_INLINE_FILES_IN_SKIPPED_DIRS))})"
+    f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_INLINE_FILES_IN_SKIPPED_DIRS)})"
 )
 
 # torch.optim is a special case,
@@ -3327,7 +3332,9 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(
+        rf"^[^\s<]*({'|'.join(re.escape(_as_posix_path(d)) for d in SKIP_DIRS)})"
+    )
 
 
 def add(import_name: str):
@@ -3356,6 +3363,7 @@ def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
+    filename = _as_posix_path(filename)
     if filename in FORCE_SKIP_FILES:
         return SkipResult(True, "FORCE_SKIP_FILES")
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
