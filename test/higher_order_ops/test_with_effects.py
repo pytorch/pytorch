@@ -450,7 +450,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             def foo2_impl(x):
                 d["bw"] = d["bw"] + 1
-                return x
+                return x.clone()
 
             def foo2_meta(a):
                 return a.clone()
@@ -572,13 +572,13 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5):
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_1, primals_4);  getitem_1 = primals_4 = None
     add_1 = torch.ops.aten.add.Tensor(getitem_3, primals_5);  getitem_3 = primals_5 = None
-    return (getitem_2, add, add_1, getitem_2)""",
+    return (getitem_2, add, add_1)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, getitem_2, tangents_1, tangents_2):
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._mylib.zoo2.default, tangents_1);  getitem_2 = None
+def forward(self, tangents_1, tangents_2, tangents_token):
+    with_effects_2 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.zoo2.default, tangents_1);  tangents_token = None
     getitem_4 = with_effects_2[0];  with_effects_2 = None
     with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._mylib.zoo2.default, tangents_2);  getitem_4 = None
     getitem_6 = with_effects_3[0];  with_effects_3 = None
@@ -754,13 +754,13 @@ def forward(self, primals_1, primals_2, primals_3):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, primals_3);  getitem_1 = primals_3 = None
-    return (getitem, add, getitem)""",
+    return (getitem, add)""",
                         )
                         self.assertExpectedInline(
                             bw_graph.code.strip(),
                             """\
-def forward(self, getitem, tangents_1):
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._mylib.foo.default, tangents_1);  getitem = None
+def forward(self, tangents_1, tangents_token):
+    with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.foo.default, tangents_1);  tangents_token = None
     getitem_2 = with_effects_1[0]
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     return (getitem_3, tangents_1, getitem_2)""",
@@ -778,13 +778,13 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(getitem_1, primals_4);  getitem_1 = None
     add_1 = torch.ops.aten.add.Tensor(getitem_3, primals_4);  getitem_3 = primals_4 = None
-    return (getitem_2, add, add_1, getitem_2)""",
+    return (getitem_2, add, add_1)""",
                         )
                         self.assertExpectedInline(
                             bw_graph.code.strip(),
                             """\
-def forward(self, getitem_2, tangents_1, tangents_2):
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._mylib.foo.default, tangents_1);  getitem_2 = None
+def forward(self, tangents_1, tangents_2, tangents_token):
+    with_effects_2 = torch.ops.higher_order.with_effects(tangents_token, torch.ops._mylib.foo.default, tangents_1);  tangents_token = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
     with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._mylib.foo.default, tangents_2);  getitem_4 = None
@@ -820,18 +820,18 @@ def forward(self, getitem_2, tangents_1, tangents_2):
             self.assertExpectedInline(
                 fw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_token):
+def forward(self, primals_1):
     sin = torch.ops.aten.sin.default(primals_1)
-    return (sin, primals_1, primals_token)""",
+    return (sin, primals_1)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_token, tangents_1):
-    with_effects = torch.ops.higher_order.with_effects(primals_token, torch.ops.aten.cos.default, primals_1);  primals_token = primals_1 = None
-    getitem_1 = with_effects[1]
+def forward(self, primals_1, tangents_1, tangents_token):
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, primals_1);  tangents_token = primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
     mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
-    getitem = with_effects[0];  with_effects = None
     return (mul, getitem)""",
             )
 
@@ -848,23 +848,23 @@ def forward(self, primals_1, primals_token, tangents_1):
             self.assertExpectedInline(
                 fw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_2, primals_token):
+def forward(self, primals_1, primals_2):
     sin = torch.ops.aten.sin.default(primals_1)
     sin_1 = torch.ops.aten.sin.default(primals_2)
-    return (sin, sin_1, primals_1, primals_2, primals_token)""",
+    return (sin, sin_1, primals_1, primals_2)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, primals_1, primals_2, primals_token, tangents_1, tangents_2):
-    with_effects = torch.ops.higher_order.with_effects(primals_token, torch.ops.aten.cos.default, primals_1);  primals_token = primals_1 = None
-    getitem_1 = with_effects[1]
-    mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
-    getitem = with_effects[0];  with_effects = None
+def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, primals_1);  tangents_token = primals_1 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten.cos.default, primals_2);  getitem = primals_2 = None
-    getitem_3 = with_effects_1[1]
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_1);  tangents_1 = getitem_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_2, getitem_3);  tangents_2 = getitem_3 = None
-    getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (mul, mul_1, getitem_2)""",
             )
         finally:
@@ -897,19 +897,19 @@ def forward(self, primals_1, primals_2):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     sin = torch.ops.aten.sin.default(getitem_1)
-    return (getitem, sin, primals_2, getitem, getitem_1)""",
+    return (getitem, sin, primals_2, getitem_1)""",
             )
             self.assertExpectedInline(
                 bw_graph.code.strip(),
                 """\
-def forward(self, primals_2, getitem, getitem_1, tangents_1):
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten.cos.default, getitem_1);  getitem = getitem_1 = None
-    getitem_3 = with_effects_1[1]
+def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
+    with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.aten.cos.default, getitem_1);  tangents_token = getitem_1 = None
+    getitem_2 = with_effects_1[0]
+    getitem_3 = with_effects_1[1];  with_effects_1 = None
     mul = torch.ops.aten.mul.Tensor(tangents_1, getitem_3);  tangents_1 = getitem_3 = None
     sin_1 = torch.ops.aten.sin.default(primals_2);  primals_2 = None
     neg = torch.ops.aten.neg.default(sin_1);  sin_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, neg);  mul = neg = None
-    getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (mul_1, getitem_2)""",
             )
         finally:

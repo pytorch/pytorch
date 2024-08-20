@@ -353,11 +353,7 @@ class ViewAndMutationMeta:
 
     # Number of tokens used in backward, appended at the end of backward outputs.
     # Filled after tracing joint function.
-    num_backward_out_tokens: int = 0
-
-    # Number of tokens discovered in backward, during tracing of joint fn.
-    # If present, joint graph will be tweaked to add additional primals_bw_tokens.
-    num_backward_discovered_tokens: int = 0
+    num_backward_tokens: int = 0
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -574,9 +570,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
-            and self.num_backward_discovered_tokens
-            == other.num_backward_discovered_tokens
-            and self.num_backward_out_tokens == other.num_backward_out_tokens
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 
