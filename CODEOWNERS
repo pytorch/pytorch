@@ -18,6 +18,7 @@
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
 
