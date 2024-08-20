@@ -250,17 +250,17 @@ def _is_backward_state(node: fx.Node) -> bool:
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
 
 
-def _hast_tag_is_backward(node: fx.Node) -> bool:
+def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
-def _hast_tag_must_be_in_backward(node: fx.Node) -> bool:
+def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _hast_tag_must_be_in_backward(node) or (
-        _hast_tag_is_backward(node) and is_with_effects(node)
+    return _has_tag_must_be_in_backward(node) or (
+        _has_tag_is_backward(node) and is_with_effects(node)
     )
 
 
