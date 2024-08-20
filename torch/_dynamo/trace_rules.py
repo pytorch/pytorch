@@ -2934,7 +2934,7 @@ class FunctionIdSet:
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self):
+    def __call__(self) -> Set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -2990,7 +2990,7 @@ def _builtin_function_ids() -> Dict[int, str]:
         }
     )
     rv.update(
-        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv.update(
         {
@@ -3200,6 +3200,7 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
+        "torch.distributed._composable.fsdp",
     }
 
 
@@ -3251,6 +3252,7 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
+    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
@@ -3513,6 +3515,7 @@ def lookup_callable(obj):
         return TorchInGraphFunctionVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
+    return None
 
 
 """
