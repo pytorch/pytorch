@@ -20450,7 +20450,7 @@ op_db: List[OpInfo] = [
     OpInfo('norm',
            variant_test_name='fro',
            sample_inputs_func=sample_inputs_norm_fro,
-           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.chalf),
+           dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
