@@ -661,10 +661,7 @@ class EffectTokensWrapper(CompilerWrapper):
             if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
-                args = [
-                    *([None] * num_tokens),
-                    *args,
-                ]
+                args = [*([None] * num_tokens), *args]
                 old_args.clear()
 
             outs = compiled_fn(args)
@@ -1542,12 +1539,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 tensors_saved_for_backwards = fw_outs[
                     CompiledFunction.metadata.tensors_saved_for_backwards_slice
                 ]
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                # Saved value can be None in case of backward discovered effects token.
-                # See Note [Side-Effectful Tokens in AOTAutograd]
                 ctx.save_for_backward(
                     *(
-                        x if x is None else x.detach() if x._is_view() else x
+                        x.detach() if x._is_view() else x
                         for x in tensors_saved_for_backwards
                     )
                 )

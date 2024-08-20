@@ -253,10 +253,8 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Logic:
     # 1. Inputs identified as input tokens:
     #    - If used as a first argument in with_effects
-    #    - Last fw_metadata.num_backward_discovered_tokens forward inputs
     #
     # 2. Outputs identified as output tokens:
-    #    - If in input_tokens.
     #    - If Produced by getitem(with_effects, 0)
     #
     # 3. Checks invariants of number input output tokens:
@@ -295,7 +293,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             )
             node.args = (other_output_args,)
 
-    def do(module, subgraph, expected_num_erased_inputs, expected_num_erased_outs):
+    def do(module, subgraph, expected_num_erased):
         num_erased_inputs = 0
         num_erased_outs = 0
         input_nodes = []
@@ -334,11 +332,11 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         num_erased_inputs = len(input_token_nodes)
 
         assert (
-            num_erased_inputs == expected_num_erased_inputs
-        ), f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased_inputs}"
+            num_erased_inputs == expected_num_erased
+        ), f"{subgraph} num_erased_inputs:{num_erased_inputs} {input_token_nodes}!=expected {expected_num_erased}"
         assert (
-            num_erased_outs == expected_num_erased_outs
-        ), f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased_outs}"
+            num_erased_outs == expected_num_erased
+        ), f"{subgraph} num_erased_outs:{num_erased_outs} {output_token_nodes}!=expected {expected_num_erased}"
 
         module.recompile()
 
@@ -361,7 +359,6 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             fw_module,
             "forward",
             num_forward_tokens,
-            num_forward_tokens,
         )
 
     if bw_module is not None and num_backward_tokens > 0:
@@ -379,7 +376,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     colored=True,
                 ),
             )
-        do(bw_module, "backward", num_backward_tokens, num_backward_tokens)
+        do(bw_module, "backward", num_backward_tokens)
 
     # This is sad, but we need to update the metadata to get rid of
     # the tokens.
