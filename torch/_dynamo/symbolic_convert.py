@@ -1391,6 +1391,12 @@ class InstructionTranslatorBase(
                 self._raise_exception_variable(inst)
             unimplemented("raise ... from ...")
 
+    def RERAISE(self, inst):
+        if sys.version_info >= (3, 11):
+            # RERAISE is currently supported in a narrow case of `raise ... from None`
+            self._raise_exception_variable(inst)
+        unimplemented("RERAISE")
+
     def exception_handler(self, raised_exception):
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
@@ -1404,10 +1410,6 @@ class InstructionTranslatorBase(
 
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
-                    # This is untested. Any test that tests this end-to-end
-                    # requires supporting more bytecodes. Therefore graph
-                    # breaking for now.
-                    unimplemented("lasti=True while exception handling")
                     self.push(
                         variables.ConstantVariable(self.current_instruction.offset)
                     )
