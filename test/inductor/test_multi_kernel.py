@@ -16,6 +16,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -53,6 +54,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     """
 
     @config.patch("cpp_wrapper", True)
+    @skipIfXpu(msg="cpp wrapper doesn't currently work on the XPU stack")
     def fn(self):
         # The same kernel may have been compiled by previous tests with
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
