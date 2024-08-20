@@ -1,12 +1,16 @@
 # Owner(s): ["module: inductor"]
 import os
-
-import triton
+import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._triton import has_triton
 
+if not has_triton():
+    unittest.skip("requires Triton")
+
+import triton
 
 try:
     from . import test_torchinductor

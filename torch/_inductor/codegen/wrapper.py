@@ -1636,88 +1636,88 @@ class WrapperCodeGen(CodeGen):
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
         """
-        if triton or cuda:
-            device_index, call_args_str = self.prepare_triton_kernel_call(
-                device_index, call_args
-            )
-            call_args_str = ", ".join(call_args_str)
-            stream_name = self.write_get_raw_stream(device_index, V.graph)
+        if not (triton or cuda):
+            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            return
 
-        if triton:
-            self.write_triton_header_once()
-            if grid is None:
-                grid_str = grid_fn
-            else:
-                grid_str = ", ".join(pexpr(item) for item in grid)
-                if grid_extra_kwargs:
-                    grid_str = f"{grid_str}, {grid_extra_kwargs}"
-                grid_str = f"{grid_fn}({grid_str})"
-            self.writeline(
-                f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-            )
-            if (
-                config.triton.autotune_at_compile_time
-                and kernel_name not in self.kernel_autotune_names
-            ):
-                # Create example args for autotune in a separate epilogue
-                assert arg_types is not None and len(call_args) == len(
-                    arg_types
-                ), "call_args and arg_types do not match"
+        device_index, call_args_str = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
+        call_args_str = ", ".join(call_args_str)
+        stream_name = self.write_get_raw_stream(device_index, V.graph)
 
-                tensor_args = {}
-                all_args = []
-                if raw_args is None:
-                    # create a dummy raw_args for uniform behavior in the following loop
-                    raw_args = [None] * len(call_args)
-                else:
-                    assert len(raw_args) == len(
-                        call_args
-                    ), "call_args and raw_args do not match"
-
-                for i, (arg, arg_type, raw_arg) in enumerate(
-                    zip(call_args, arg_types, raw_args)
-                ):
-                    key = None
-                    if isinstance(arg, str) and "=" in str(arg):
-                        # arg may be passed in a kwarg style, and then we need to extract its value
-                        key, arg = arg.split("=")
-
-                    if isinstance(arg_type, torch_dtype):
-                        if arg not in tensor_args:
-                            arg_str = self.generate_example_arg_value(
-                                arg, arg_type, raw_arg, i
-                            )
-                            tensor_args[arg] = arg_str
-                        else:
-                            arg_str = tensor_args[arg]
-                    else:
-                        arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg, i
-                        )
-                    all_args.append(arg_str if key is None else f"{key}={arg_str}")
-
-                if grid is None:
-                    grid_str = grid_fn
-                else:
-                    grid_str = ", ".join(
-                        self.generate_example_arg_value(g, type(g)) for g in grid
-                    )
-                    grid_str = f"{grid_fn}({grid_str})"
-
-                self.kernel_autotune_calls.writeline(
-                    f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
-                )
-                self.kernel_autotune_calls.writeline(
-                    f"del {', '.join(arg for arg in tensor_args.values())}\n",
-                )
-                self.kernel_autotune_names.add(kernel_name)
-        elif cuda:
+        if not triton:
             stream_ptr = f"c_void_p({stream_name})"
             self.writeline(
                 f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
             )
+            return
+
+        self.write_triton_header_once()
+        if grid is None:
+            grid_str = grid_fn
         else:
-            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            grid_str = ", ".join(pexpr(item) for item in grid)
+            if grid_extra_kwargs:
+                grid_str = f"{grid_str}, {grid_extra_kwargs}"
+            grid_str = f"{grid_fn}({grid_str})"
+        self.writeline(
+            f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+        )
+        if (
+            config.triton.autotune_at_compile_time
+            and kernel_name not in self.kernel_autotune_names
+        ):
+            # Create example args for autotune in a separate epilogue
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
+
+            tensor_args = {}
+            all_args = []
+            if raw_args is None:
+                # create a dummy raw_args for uniform behavior in the following loop
+                raw_args = [None] * len(call_args)
+            else:
+                assert len(raw_args) == len(
+                    call_args
+                ), "call_args and raw_args do not match"
+
+            for i, (arg, arg_type, raw_arg) in enumerate(
+                zip(call_args, arg_types, raw_args)
+            ):
+                key = None
+                if isinstance(arg, str) and "=" in str(arg):
+                    # arg may be passed in a kwarg style, and then we need to extract its value
+                    key, arg = arg.split("=")
+
+                if isinstance(arg_type, torch_dtype):
+                    if arg not in tensor_args:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg, i
+                        )
+                        tensor_args[arg] = arg_str
+                    else:
+                        arg_str = tensor_args[arg]
+                else:
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                all_args.append(arg_str if key is None else f"{key}={arg_str}")
+
+            if grid is None:
+                grid_str = grid_fn
+            else:
+                grid_str = ", ".join(
+                    self.generate_example_arg_value(g, type(g)) for g in grid
+                )
+                grid_str = f"{grid_fn}({grid_str})"
+
+            self.kernel_autotune_calls.writeline(
+                f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
+            )
+            self.kernel_autotune_calls.writeline(
+                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+            )
+            self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):
         self.lines.append(line)

@@ -663,8 +663,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 output_tensor,
                 *self.extra_args,
                 grid=self.grid,
-                stream=0,
                 **warmup_arg,
+                stream=0,
             )
         else:
             from torch._C import _cuda_getCurrentRawStream as get_raw_stream
@@ -812,7 +812,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
-class CppBenchmarkRequest(BenchmarkRequest, CPUDeviceBenchmarkMixin):
+class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put Tensors in here!
 
