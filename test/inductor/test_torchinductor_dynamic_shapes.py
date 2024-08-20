@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
-
 import math
 import operator
 import os
@@ -13,15 +12,18 @@ from typing import List
 import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import WrapperCodeGen
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
+    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
@@ -32,7 +34,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -53,27 +56,34 @@ from inductor.test_torchinductor import (
     TestFailure,
 )
 
+
 importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
-    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
-    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
         ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
+    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
+    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
+
+
+if os.getenv("BUILD_ENVIRONMENT", "").endswith("-debug"):
+    # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
+    test_failures["test_resize_as_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
+    test_failures["test_resize_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -98,7 +108,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -138,6 +148,51 @@ class TestInductorDynamic(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    def test_constant_fold_uniform_value_dynamic(self, device):
+        def full_add_zero(x):
+            a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
+            b = a - 1
+            return x + b
+
+        def full_mul_one(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return x * b
+
+        def full_view_op(x):
+            a = torch.ones([1], dtype=x.dtype, device=x.device)
+            a = a[:, None]
+            return x * a
+
+        def full_mul_symint(x):
+            a = torch.full(x.shape, -1, dtype=x.dtype, device=x.device)
+            b = 2 + a
+            return b * x.shape[0]
+
+        fns = (full_add_zero, full_mul_one, full_view_op)
+
+        x = torch.randn((2, 4), device=device)
+        y = torch.randn((3, 4), device=device)
+
+        for dynamic in [False, True]:
+            torch._dynamo.reset()
+            for fn in fns:
+                ref = fn(x)
+                fn_c = torch.compile(fn, dynamic=dynamic)
+
+                actual, source_codes = run_and_get_code(fn_c, x)
+
+                if fn is not full_mul_symint:
+                    # due to constant folding, fn returns x directly.
+                    if device == "cpu":
+                        FileCheck().check_not("cpp_fused").run(source_codes[0])
+                    else:
+                        FileCheck().check_not("triton.jit").run(source_codes[0])
+
+                self.assertEqual(ref, actual)
+                self.assertEqual(fn(x), fn_c(x))
+                self.assertEqual(fn(y), fn_c(y))
 
     def test_arange_dynamic(self, device):
         def fn(a):
@@ -442,7 +497,7 @@ class TestInductorDynamic(TestCase):
             return torch.ops.aten.cat.default([g, g, g2])
 
         cf = torch.compile(fullgraph=True)(f)
-        arg = torch.tensor([4, 6], device="cuda")
+        arg = torch.tensor([4, 6], device=GPU_TYPE)
         self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(
@@ -536,8 +591,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
-    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
-    @onlyCUDA
+    @onlyOn(GPU_TYPE)
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
             return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
@@ -858,12 +912,70 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5], device=device))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symint_sum_list(self, device):
+        @torch.compile()
+        def f(xt):
+            xs = xt.tolist()
+            for x in xs:
+                torch._check_is_size(x)
+            y = sum(xs)
+            return torch.zeros(y, device=device)
 
-instantiate_device_type_tests(TestInductorDynamic, globals())
+        f(torch.tensor([5] * 320))
+
+    def test_sort_dynamic_shape_with_check(self, device):
+        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, 0)
+
+        else:
+
+            def check_count(n):
+                self.assertEqual(metrics.generated_kernel_count, n)
+
+        # Test dynamic shapes with statically known small enough to generate
+        # persistent sort kernel
+        def fn(a, descending):
+            torch._check(a.shape[-1] <= 256)
+            return a.sort(dim=-1, stable=True, descending=descending)
+
+        inp = torch.rand(10, 128, dtype=torch.float32, device=device)
+        inp[:, 10:20] = 1.0
+        inp[:, 30:40] = 1.0
+        metrics.reset()
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(1)
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)
+
+        # Non-power of two
+        inp[:, :120]
+
+        expect = fn(inp, False)
+        actual = opt_fn(inp, False)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+        expect = fn(inp, True)
+        actual = opt_fn(inp, True)
+        self.assertEqual(actual, expect)
+        check_count(2)  # Reused existing kernel
+
+
+instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

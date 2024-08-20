@@ -131,21 +131,12 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find libcuda.so and lbnvrtc.so
-# For libcuda.so, we will find it under lib, lib64, and then the
-# stubs folder, in case we are building on a system that does not
-# have cuda driver installed. On windows, we also search under the
-# folder lib/x64.
-set(CUDA_CUDA_LIB "${CUDA_cuda_driver_LIBRARY}" CACHE FILEPATH "")
+# find lbnvrtc.so
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  if("${Python_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python3")
-  else()
-    set(_python_exe "${Python_EXECUTABLE}")
-  endif()
+  find_package(Python COMPONENTS Interpreter)
   execute_process(
-    COMMAND "${_python_exe}" -c
+    COMMAND Python::Interpreter -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
@@ -253,6 +244,22 @@ else()
   message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
 endif()
 
+# cufile
+if(CAFFE2_USE_CUFILE)
+  add_library(torch::cufile INTERFACE IMPORTED)
+  if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+      set_property(
+          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cuFile_static)
+  else()
+      set_property(
+          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
+          CUDA::cuFile)
+  endif()
+else()
+  message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
+endif()
+
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
@@ -281,7 +288,7 @@ endif()
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc)
+    CUDA::nvrtc caffe2::cuda)
 
 # Add onnx namepsace definition to nvcc
 if(ONNX_NAMESPACE)

@@ -11,7 +11,6 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
-    create_load_method,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -89,6 +88,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
+        # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
+        self.ca_final_callbacks_var = None
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -219,6 +221,16 @@ class SideEffects:
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
+
+        if id(item) in self.id_to_variable:
+            raise AssertionError(
+                f"{variable} is already tracked for mutation. This could be "
+                "because you are not using VariableBuilder to construct "
+                "the variable tracker. "
+                f"Source of new object: {variable.source}. "
+                f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
+            )
+
         variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -301,14 +313,28 @@ class SideEffects:
 
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
-        skip_obj = None
+
+        # use this to avoid cycles in mutable_local (though I'm not sure if that
+        # can actually happen).
+        visited: Any = set({})
 
         def visit(var: VariableTracker):
-            if (
-                isinstance(var.mutable_local, AttributeMutationNew)
-                and var.mutable_local is not skip_obj
-            ):
-                live_new_objects.add(var.mutable_local)
+            mutable_local = var.mutable_local
+            if mutable_local is None:
+                return
+            if mutable_local in visited:
+                return
+            visited.add(mutable_local)
+            # Object may have been mutated, store this mutation.
+            if isinstance(mutable_local, AttributeMutationNew):
+                live_new_objects.add(mutable_local)
+            # It's possible that we have mutated the value of this variable
+            # to be another one. The new value is in store_attr_mutations.
+            # Also recurse through the new value to detect alive AttributeMutationNew.
+            if var.mutable_local in self.store_attr_mutations:
+                VariableTracker.visit(
+                    visit, self.store_attr_mutations[var.mutable_local]
+                )
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
@@ -317,13 +343,22 @@ class SideEffects:
                 return is_live(var.mutable_local)
             return True
 
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
-        for var in self.id_to_variable.values():
-            if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.visit(visit, var)
+        pre_existing_vars = [
+            var
+            for var in self.id_to_variable.values()
+            if not isinstance(var.mutable_local, AttributeMutationNew)
+        ]
 
-        for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.visit(visit, setattrs)
+        # The only live side effects come from returns (tx.stack), any intermediates
+        # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
+        # Recursively visit Variables and see if any of them have been mutated.
+        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+
+        # NB: cell variable handling.is tricky.
+        # cell variables must stay alive if any NestedUserFunctionVariable
+        # are live. "visit"-ing the NestedUserFunctionVariable visits
+        # the .closures field, from which we will see if we need to keep
+        # any mutations to cell variables alive.
 
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
@@ -345,17 +380,21 @@ class SideEffects:
             if isinstance(
                 var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
-                cg.load_import_from(utils.__name__, "make_cell")
-                cg.extend_output(create_call_function(0, True))
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "make_cell")
+                )
+                cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.load_import_from(utils.__name__, "object_new")
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "object_new")
+                )
                 cg(var.mutable_local.cls_source)
-                cg.extend_output(create_call_function(1, True))
+                cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif var in cg.tempvars:
@@ -436,14 +475,27 @@ class SideEffects:
             #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
-            cg(tensor)
-            cg.extend_output([cg.create_load_attr(name)])
+
+            def gen_fn():
+                cg(tensor)
+                cg.extend_output([cg.create_load_attr(name)])
+
+            cg.add_push_null(gen_fn)
             cg(hook)
-            cg.extend_output(create_call_function(1, True))
+            cg.extend_output(create_call_function(1, False))
 
             # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
             # be associated with the return value of register_hook().  This consumes the top of stack.
             cg.add_cache(handle)
+
+    def get_ca_final_callbacks_var(self):
+        from .variables.base import MutableLocal
+
+        if self.ca_final_callbacks_var is None:
+            self.ca_final_callbacks_var = variables.ListVariable(
+                [], mutable_local=MutableLocal()
+            )
+        return self.ca_final_callbacks_var
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
@@ -477,7 +529,7 @@ class SideEffects:
                 )
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("clear")])
+                cg.load_method("clear")
 
                 # unfortunately can't just use DICT_MERGE due to possible custom behaviors
                 dict_update_insts = bytecode_from_template(
@@ -494,15 +546,12 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
-                cg.tx.output.update_co_names("clear")
-                cg.tx.output.update_co_names("update")
-
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("update")])
+                cg.load_method("update")
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("clear")])
+                cg.load_method("clear")
 
                 suffixes.append(
                     [
@@ -568,9 +617,11 @@ class SideEffects:
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
-                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "iter_next")
+                    )
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                    cg.call_function(1, True)
+                    cg.call_function(1, False)
                     cg.pop_top()
             else:
                 raise AssertionError(type(var))

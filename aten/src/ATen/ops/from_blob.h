@@ -110,7 +110,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = std::nullopt) {
   return for_blob(data, sizes)
       .strides(strides)
       .deleter(deleter)
@@ -126,7 +126,7 @@ inline Tensor from_blob(
     int64_t storage_offset,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = std::nullopt) {
   return for_blob(data, sizes)
       .strides(strides)
       .storage_offset(storage_offset)
@@ -141,7 +141,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     std::function<void(void*)> deleter,
     const TensorOptions& options = {},
-    const std::optional<Device> target_device = c10::nullopt) {
+    const std::optional<Device> target_device = std::nullopt) {
   return for_blob(data, sizes)
       .deleter(std::move(deleter))
       .options(options)

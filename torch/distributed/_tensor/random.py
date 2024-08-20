@@ -6,17 +6,23 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.distributed as dist
-
 from torch import Tensor
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 
 
+__all__ = [
+    "is_rng_supported_mesh",
+    "manual_seed",
+    "OffsetBasedRNGTracker",
+    "TensorParallelRNGTracker",
+]
+
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
-    """Checks if the current device of `device_mesh` supports DTensor's random APIs.
+    """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
     Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
     users call this API to test the availability before using our random APIs.
 
@@ -25,7 +31,7 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
             random ops APIs are supported.
 
     Returns:
-        A bool value. True if `device_mesh` supports DTensor Random APIs; False otherwise.
+        A bool value. True if ``device_mesh`` supports DTensor Random APIs; False otherwise.
 
     .. warning::
         Currently we only support correct RNG on cuda/cuda-like devices.
@@ -53,10 +59,10 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     .. warning::
         When calling this function, :func:`manual_seed` must be called from all ranks of the
-        default `ProcessGroup` even if some ranks may not be a part of the `device_mesh`,
-        with the same `seed` value.
+        default ``ProcessGroup`` even if some ranks may not be a part of the ``device_mesh``,
+        with the same ``seed`` value.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `manual_seed` will not set its GPU device's generator seed.
+        ``manual_seed`` will not set its GPU device's generator seed.
         Current implementation only supports a GPU device mesh.
     """
     device_handle = _get_device_handle(device_mesh.device_type)
@@ -148,7 +154,7 @@ class _RNGStateTracker:
 
 class OffsetBasedRNGTracker(_RNGStateTracker):
     """
-    This subclass of `_RNGStateTracker` defines the default policy of how RNG states
+    This subclass of ``_RNGStateTracker`` defines the default policy of how RNG states
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
     """

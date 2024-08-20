@@ -111,7 +111,7 @@ Tensor q_batch_norm1d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -212,7 +212,7 @@ Tensor q_batch_norm2d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -308,7 +308,7 @@ Tensor q_batch_norm3d_impl(
         .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -395,8 +395,8 @@ Tensor quantized_batch_norm(
   // TODO: this should arguably support 3d as well
   qy = q_batch_norm2d_impl<false>(
       qx,
-      weight.defined() ? c10::make_optional(weight) : c10::nullopt,
-      bias.defined() ? c10::make_optional(bias) : c10::nullopt,
+      weight.defined() ? std::make_optional(weight) : std::nullopt,
+      bias.defined() ? std::make_optional(bias) : std::nullopt,
       mean, var, eps, output_scale, output_zero_point);
   return qy;
 }

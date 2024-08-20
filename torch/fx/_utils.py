@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
+import sys
 from typing import Dict, Optional
 
 import torch
-
 from torch._logging import LazyString
 
 
@@ -19,6 +19,9 @@ def lazy_format_graph_code(name, gm, maybe_id=None, **kwargs):
 
     if "print_output" not in kwargs:
         kwargs["print_output"] = False
+
+    if "colored" in kwargs and not sys.stdout.isatty():
+        kwargs["colored"] = False
 
     return LazyString(
         lambda: _format_graph_code(

@@ -87,11 +87,22 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::optional<AllocationID> allocation_id_;
 };
 
+// Used during post processing.
+struct TORCH_API ProfilerStepInfo {
+  int64_t start_time_ns; // start time of the profiler step
+  int64_t end_time_ns; // end time of the profiler step
+  uint64_t out_idx; // index of the profiler step in the profiler "out" var in
+                    // getRecords
+
+  ProfilerStepInfo(int64_t start, int64_t end, uint64_t out_idx)
+      : start_time_ns(start), end_time_ns(end), out_idx(out_idx) {}
+};
+
 using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
-    c10::nullopt_t>;
+    std::nullopt_t>;
 
 // ============================================================================
 // == ExtraFields =============================================================
@@ -116,6 +127,7 @@ using jit_stack_t = std::vector<std::string>;
 using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
+using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
@@ -134,6 +146,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       extra_meta_t&& extra_meta,
+      kwinputs_t&& kwinputs,
       FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
       std::unique_ptr<perf_counters_t>&& perf_event_counters)
@@ -146,6 +159,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         extra_meta_{std::move(extra_meta)},
+        kwinputs_{std::move(kwinputs)},
         device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
         perf_event_counters_{std::move(perf_event_counters)} {}
@@ -157,6 +171,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
   extra_meta_t extra_meta_;
+  kwinputs_t kwinputs_;
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
@@ -554,6 +569,7 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
+        std::vector<ProfilerStepInfo>& step_info,
         const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);
@@ -591,6 +607,9 @@ class TORCH_API ThreadLocalSubqueue {
     // report extra metadata, i.e. collective communication meta
     AppendOnlyList<extra_meta_t, BlockSize> extra_meta_;
 
+    // report kwinputs
+    AppendOnlyList<kwinputs_t, BlockSize> kwinputs_;
+
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
@@ -623,6 +642,7 @@ class TORCH_API RecordQueue {
   bool tracePython() const;
   ThreadLocalSubqueue* getSubqueue();
   void stop();
+  void restart();
 
   // NB: This is a destructive operation.
   std::pair<

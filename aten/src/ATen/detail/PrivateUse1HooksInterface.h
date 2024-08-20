@@ -6,6 +6,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
@@ -23,7 +24,11 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const {
+  bool isPinnedPtr(const void* data) const override {
+    return false;
+  }
+
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getPinnedMemoryAllocator`.");
@@ -59,3 +64,4 @@ TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks();
 } // namespace detail
 
 } // namespace at
+C10_DIAGNOSTIC_POP()

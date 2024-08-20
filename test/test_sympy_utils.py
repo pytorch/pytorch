@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 
 import itertools
+import math
 import sys
 
 import sympy
@@ -19,6 +20,7 @@ from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.singleton_int import SingletonInt
+from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
 from sympy.core.relational import is_ge, is_le, is_gt, is_lt
 import functools
 import torch.fx as fx
@@ -122,6 +124,74 @@ def generate_range(vals):
         yield ValueRanges(a1, a2)
 
 
+class TestNumbers(TestCase):
+    def test_int_infinity(self):
+        self.assertIsInstance(int_oo, IntInfinity)
+        self.assertIsInstance(-int_oo, NegativeIntInfinity)
+        self.assertTrue(int_oo.is_integer)
+        # is tests here are for singleton-ness, don't use it for comparisons
+        # against numbers
+        self.assertIs(int_oo + int_oo, int_oo)
+        self.assertIs(int_oo + 1, int_oo)
+        self.assertIs(int_oo - 1, int_oo)
+        self.assertIs(-int_oo - 1, -int_oo)
+        self.assertIs(-int_oo + 1, -int_oo)
+        self.assertIs(-int_oo + (-int_oo), -int_oo)
+        self.assertIs(-int_oo - int_oo, -int_oo)
+        self.assertIs(1 + int_oo, int_oo)
+        self.assertIs(1 - int_oo, -int_oo)
+        self.assertIs(int_oo * int_oo, int_oo)
+        self.assertIs(2 * int_oo, int_oo)
+        self.assertIs(int_oo * 2, int_oo)
+        self.assertIs(-1 * int_oo, -int_oo)
+        self.assertIs(-int_oo * int_oo, -int_oo)
+        self.assertIs(2 * -int_oo, -int_oo)
+        self.assertIs(-int_oo * 2, -int_oo)
+        self.assertIs(-1 * -int_oo, int_oo)
+        self.assertIs(int_oo / 2, sympy.oo)
+        self.assertIs(-(-int_oo), int_oo)  # noqa: B002
+        self.assertIs(abs(int_oo), int_oo)
+        self.assertIs(abs(-int_oo), int_oo)
+        self.assertIs(int_oo ** 2, int_oo)
+        self.assertIs((-int_oo) ** 2, int_oo)
+        self.assertIs((-int_oo) ** 3, -int_oo)
+        self.assertEqual(int_oo ** -1, 0)
+        self.assertEqual((-int_oo) ** -1, 0)
+        self.assertIs(int_oo ** int_oo, int_oo)
+        self.assertTrue(int_oo == int_oo)
+        self.assertFalse(int_oo != int_oo)
+        self.assertTrue(-int_oo == -int_oo)
+        self.assertFalse(int_oo == 2)
+        self.assertTrue(int_oo != 2)
+        self.assertFalse(int_oo == sys.maxsize)
+        self.assertTrue(int_oo >= sys.maxsize)
+        self.assertTrue(int_oo >= 2)
+        self.assertTrue(int_oo >= -int_oo)
+
+    def test_relation(self):
+        self.assertIs(sympy.Add(2, int_oo), int_oo)
+        self.assertFalse(-int_oo > 2)
+
+    def test_lt_self(self):
+        self.assertFalse(int_oo < int_oo)
+        self.assertIs(min(-int_oo, -4), -int_oo)
+        self.assertIs(min(-int_oo, -int_oo), -int_oo)
+
+    def test_float_cast(self):
+        self.assertEqual(float(int_oo), math.inf)
+        self.assertEqual(float(-int_oo), -math.inf)
+
+    def test_mixed_oo_int_oo(self):
+        # Arbitrary choice
+        self.assertTrue(int_oo < sympy.oo)
+        self.assertFalse(int_oo > sympy.oo)
+        self.assertTrue(sympy.oo > int_oo)
+        self.assertFalse(sympy.oo < int_oo)
+        self.assertIs(max(int_oo, sympy.oo), sympy.oo)
+        self.assertTrue(-int_oo > -sympy.oo)
+        self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
+
+
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)
     @parametrize("dtype", ("int", "float"))
@@ -170,6 +240,10 @@ class TestValueRanges(TestCase):
         self.assertEqual(
             ValueRangeAnalysis.mul(ValueRanges.wrap(0), ValueRanges.unknown()),
             ValueRanges.wrap(0),
+        )
+        self.assertEqual(
+            ValueRangeAnalysis.mul(ValueRanges.wrap(0.0), ValueRanges.unknown()),
+            ValueRanges.wrap(0.0),
         )
 
     @parametrize("fn", UNARY_BOOL_OPS)

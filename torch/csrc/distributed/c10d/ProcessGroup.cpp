@@ -30,25 +30,6 @@ static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
   }
 }
 
-static std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
-  switch (backendType) {
-    case ProcessGroup::BackendType::UNDEFINED:
-      return "undefined";
-    case ProcessGroup::BackendType::GLOO:
-      return "gloo";
-    case ProcessGroup::BackendType::NCCL:
-      return "nccl";
-    case ProcessGroup::BackendType::UCC:
-      return "ucc";
-    case ProcessGroup::BackendType::MPI:
-      return "mpi";
-    case ProcessGroup::BackendType::CUSTOM:
-      return "custom";
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unknown backend type");
-  }
-}
-
 std::string opTypeToString(OpType opType) {
   switch (opType) {
     case OpType::BROADCAST:
@@ -161,12 +142,12 @@ void ProcessGroup::init() {
 
 const std::string& ProcessGroup::getGroupName() const {
   TORCH_CHECK(!deviceTypeToBackend_.empty(), "ProcessGroup name not set");
-  return deviceTypeToBackend_.begin()->second->getGroupName();
+  return deviceTypeToBackend_.begin()->second->getGroupUid();
 }
 
 void ProcessGroup::setGroupName(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
-    kv.second->setGroupName(name);
+    kv.second->setGroupUid(name);
   }
 }
 
