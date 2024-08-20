@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Request an ACCESS_TOKEN to be used by a GitHub APP
 # Environment variable that need to be set up:

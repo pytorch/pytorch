@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e -u
 
@@ -6,7 +6,7 @@ set -e -u
 if [ -f ./manywheel-s390x.tar ] ; then
         docker image load --input manywheel-s390x.tar
         docker image tag docker.io/pytorch/manylinuxs390x-builder:cpu-s390x docker.io/pytorch/manylinuxs390x-builder:cpu-s390x-main
-        /bin/rm manywheel-s390x.tar
+        rm -f manywheel-s390x.tar
 fi
 
 token_file=registration-token.json
@@ -35,7 +35,7 @@ registration_token=$(jq --raw-output .token "$token_file")
         --labels self-hosted,linux.s390x
 
 unset registration_token
-/bin/rm "$token_file"
+rm -f "$token_file"
 
 # enter into python virtual environment.
 # build workflows use "python -m pip install ...",
