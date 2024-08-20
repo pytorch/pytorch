@@ -149,7 +149,6 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:
@@ -282,7 +281,7 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
