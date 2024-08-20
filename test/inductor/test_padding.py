@@ -676,9 +676,9 @@ class PaddingTest(TestCaseBase):
         # Compile and run
         with config.patch(
             {
-                "align_stride_threshold": 0,
                 "comprehensive_padding": True,
                 "padding_alignment_bytes": alignment_bytes,
+                "padding_stride_threshold": 0,
                 "pad_outputs": True,
             }
         ):

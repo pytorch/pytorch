@@ -3013,7 +3013,7 @@ class Layout(IRNode):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
 
-            if stride > config.align_stride_threshold and stride % align != 0:
+            if stride > config.padding_stride_threshold and stride % align != 0:
                 stride = ceildiv(stride, align) * align
                 padded = True
             new_strides[idx] = stride

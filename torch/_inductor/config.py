@@ -587,6 +587,10 @@ comprehensive_padding = (
 )
 pad_channels_last = False
 
+# The width of comprehensive padding, in bytes.
+# CUDA max memory transaction size is 128 bytes for a warp.
+padding_alignment_bytes = 128
+
 # Threshold on the minimum size of a stride that will be padded.
 #
 # Don't align a too small stride since that causes too much memory increase.
@@ -605,11 +609,7 @@ pad_channels_last = False
 #
 # This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
 # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
-align_stride_threshold = 1024
-
-# The width of comprehensive padding, in bytes.
-# CUDA max memory transaction size is 128 bytes for a warp.
-padding_alignment_bytes = 128
+padding_stride_threshold = 1024
 
 # Enable padding outputs, even if they would not be padded in eager mode.
 # By default, we use the same strides as eager mode.
