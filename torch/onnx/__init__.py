@@ -36,8 +36,6 @@ __all__ = [
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
-    "disable_log",
-    "enable_log",
     # Base error
     "OnnxExporterError",
     # Dynamo Exporter
