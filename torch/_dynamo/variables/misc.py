@@ -174,6 +174,10 @@ class SuperVariable(VariableTracker):
             return variables.UserFunctionVariable(
                 inner_fn.__func__, source=source
             ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, classmethod):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, source=source
+            ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
