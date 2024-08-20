@@ -4,7 +4,7 @@
 import functools
 import string
 from collections import namedtuple
-from typing import Callable, Optional
+from typing import Callable, Optional, Union, Tuple
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -272,16 +272,16 @@ class TestFlexAttention(InductorTestCase):
         KV_B: int = B,
         KV_H: int = H,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -294,7 +294,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
 
         golden_out.backward(backward_grad.to(torch.float64))
         ref_out.backward(backward_grad)
@@ -326,16 +326,16 @@ class TestFlexAttention(InductorTestCase):
         KV_B: int = B,
         KV_H: int = H,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -344,7 +344,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_call(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
 
         golden_out.backward(backward_grad.to(torch.float64))
         ref_out.backward(backward_grad)
@@ -1148,6 +1148,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(bias_mod)
+
+    @supported_platform
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_non_equal_head_dims(self, dtype, score_mod):
+        self.run_test(score_mod, dtype, B, H, S, D, B, H, S, KV_D =(D, D*2))
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
