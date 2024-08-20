@@ -431,7 +431,7 @@ class _RemoteModule(nn.Module):
 
     def named_modules(
         self,
-        memo: Optional[Set[Module]] = None,
+        memo: Optional[Set[int]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):
