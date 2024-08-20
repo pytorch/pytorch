@@ -1,4 +1,4 @@
-from torch.types import _bool, _int
+from torch.types import _int
 
 # Defined in torch/csrc/instruction_counter/Module.cpp
 
