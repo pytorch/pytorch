@@ -94,6 +94,10 @@ mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
 
+# Defined in CPython's Include/object.h
+TPFLAGS_MAPPING = 1 << 6
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -3301,30 +3305,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_user_defined_object_class_interaction(self):
-        class Foo:
-            x = 5
-
-        class Mock:
-            # This is a class variable
-            class_variable = Foo()
-
-            @classmethod
-            def get_class_variable(cls):
-                # Accessing the class variable using the cls parameter
-                return cls.class_variable.x
-
-            def run(self, x):
-                return self.get_class_variable() * x
-
-        def fn(x):
-            mock = Mock()
-            return mock.run(x)
-
-        x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_multiple_inheritance(self):
         class Base1:
             def __new__(cls):
@@ -3388,9 +3368,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             pass
 
         def fn(x, mod_class):
-            # Defined in CPython's Include/object.h
-            TPFLAGS_MAPPING = 1 << 6
-
             if mod_class.__flags__ & TPFLAGS_MAPPING:
                 return x + 1
             else:
@@ -9618,51 +9595,6 @@ def ___make_guard_fn():
         a = torch.tensor([2, 3], dtype=dtype)
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
-
-    def test_itertools_islice(self):
-        counters.clear()
-
-        def fn(x):
-            return itertools.islice(x, 2, 5, 2)
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        eager = fn(x)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(x)
-
-        self.assertEqual(list(eager), list(compiled))
-        self.assertEqual(len(counters["graph_break"]), 0)
-
-    def test_itertools_islice_default_step(self):
-        counters.clear()
-
-        def fn(x):
-            return itertools.islice(x, 2, 5)
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        eager = fn(x)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(x)
-
-        self.assertEqual(list(eager), list(compiled))
-        self.assertEqual(len(counters["graph_break"]), 0)
-
-    def test_itertools_islice_default_end(self):
-        counters.clear()
-
-        def fn(x):
-            return itertools.islice(x, 2)
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        eager = fn(x)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(x)
-
-        self.assertEqual(list(eager), list(compiled))
-        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_repeat(self):
         counters.clear()
