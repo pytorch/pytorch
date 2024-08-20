@@ -2019,9 +2019,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={
-                    "args_tensor_mask": args_tensor_mask,
-                },
+                kwargs={"args_tensor_mask": args_tensor_mask},
             ),
             example_value=example_value,
         )

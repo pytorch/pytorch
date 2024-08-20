@@ -472,7 +472,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         class MulY(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                ctx.set_materialize_grads(False)
+                ctx.set_materialize_grads(True)
                 return x * 3
 
             @staticmethod
