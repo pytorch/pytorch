@@ -1706,7 +1706,7 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name in {"__bases__", "__base__"}:
+        if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
@@ -1727,6 +1727,8 @@ class BuiltinVariable(VariableTracker):
                         if source is not None:
                             return VariableBuilder(tx, source)(base)
                         return SourcelessBuilder.create(tx, base)
+                    if name == "__flags__":
+                        return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
                 pass
 
