@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900) && CUDART_VERSION >= 12010
+#define NVCC_SUPPORTS_MULTICAST 1
+#endif
+
 #include <ATen/ATen.h>
 
 namespace c10d::symmetric_memory {
@@ -174,6 +178,16 @@ __device__ __inline__ Vec<Alignment> multimem_ld_reduce_add(T* mc_ptr) {
   return functor.template operator()<Alignment>(mc_ptr);
 }
 
+#if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
+#define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type)        \
+  template <>                                                       \
+  struct MultimemLdReduce<type> {                                   \
+    template <int Alignment>                                        \
+    __device__ __inline__ Vec<Alignment> operator()(type* mc_ptr) { \
+      CUDA_KERNEL_ASSERT(false);                                    \
+    }                                                               \
+  };
+#else
 #define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type)                   \
   template <>                                                                  \
   struct MultimemLdReduce<type> {                                              \
@@ -204,12 +218,16 @@ __device__ __inline__ Vec<Alignment> multimem_ld_reduce_add(T* mc_ptr) {
       return vec;                                                              \
     }                                                                          \
   };
+#endif
 
 SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(at::BFloat16, "bf16x2");
 SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(float, "f32");
 
 template <int Alignment, typename T>
 __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
+#if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
+  CUDA_KERNEL_ASSERT(false);
+#else
   if constexpr (Alignment == 16) {
     asm("multimem.st.relaxed.sys.global.v4.f32 [%0], {%1,%2,%3,%4};"
         :
@@ -232,6 +250,7 @@ __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
   } else {
     static_assert(dependent_false<T>);
   }
+#endif
 }
 
 } // namespace c10d::symmetric_memory
