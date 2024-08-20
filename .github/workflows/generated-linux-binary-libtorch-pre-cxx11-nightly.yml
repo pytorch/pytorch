@@ -7,7 +7,6 @@ name: linux-binary-libtorch-pre-cxx11
 
 on:
   push:
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
       - nightly
     tags:
@@ -45,10 +44,14 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+
+hffelrvgnruhctuclrvugvdtnudtblej
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-cpu
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -60,6 +63,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-cpu.result == 'skipped' && pytorch/manylinux-builder:cpu-main || needs.calculate-libtorch-builder-cpu.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
@@ -113,9 +118,11 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-cuda11.8
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -128,6 +135,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-cuda11.8.result == 'skipped' && pytorch/manylinux-builder:cuda11.8-main || needs.calculate-libtorch-builder-cuda11.8.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
@@ -183,9 +192,11 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-cuda12.1
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -198,6 +209,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-cuda12.1.result == 'skipped' && pytorch/manylinux-builder:cuda12.1-main || needs.calculate-libtorch-builder-cuda12.1.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
@@ -253,9 +266,11 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda12_4-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-cuda12.4
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -268,6 +283,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-cuda12.4.result == 'skipped' && pytorch/manylinux-builder:cuda12.4-main || needs.calculate-libtorch-builder-cuda12.4.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_4-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
@@ -323,9 +340,11 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-rocm6_1-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-rocm6.1
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -338,6 +357,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-rocm6.1.result == 'skipped' && pytorch/manylinux-builder:rocm6.1-main || needs.calculate-libtorch-builder-rocm6.1.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
@@ -433,9 +454,11 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-rocm6_2-shared-with-deps-pre-cxx11-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+      , calculate-libtorch-builder-rocm6.2
+     ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -448,6 +471,8 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
+      DOCKER_IMAGE: ${{ needs.calculate-libtorch-builder-rocm6.2.result == 'skipped' && pytorch/manylinux-builder:rocm6.2-main || needs.calculate-libtorch-builder-rocm6.2.outputs.docker-image }}
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_2-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11

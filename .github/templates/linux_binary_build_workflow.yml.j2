@@ -10,9 +10,6 @@ name: !{{ build_environment }}
 
 on:
   push:
-    {%- if branches == "nightly" %}
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
-    {%- endif %}
     branches:
       - !{{ branches }}
     {%- if branches == "nightly" %}
@@ -61,12 +58,44 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+
+{%- if build_docker_images is not none %}
+  {%- for docker_image in build_docker_images.values() %}
+    calculate-!{{ docker_image }}:
+      runs-on: linux.9xlarge.ephemeral
+      outputs:
+        docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/binaries_wheel') }}
+      steps:
+        - name: Checkout PyTorch
+          uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+          with:
+            submodules: false
+        - name: Calculate docker image
+          id: calculate-docker-image
+          uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+          with:
+            docker-image-name: !{{ docker_image }}
+            docker-build-dir:  .ci/docker/!{{ package_type }}
+            always-rebuild: true
+            push: true
+  {% endfor %}
+{% endif %}
+hffelrvgnruhctuclrvugvdtnudtblej
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type
+    {%- if build_docker_images is not none %}
+      , calculate-!{{ package_type }}-builder-!{{config["gpu_arch_type"]}}!{{config["gpu_arch_version"]}}
+    {% endif %} ]
     with:!{{ upload.binary_env_as_input(config) }}
+      {%- if build_docker_images is not none %}
+      DOCKER_IMAGE: ${{ needs.calculate-!{{ package_type }}-builder-!{{config["gpu_arch_type"]}}!{{config["gpu_arch_version"]}}.result == 'skipped' && !{{ config["container_image"] }} || needs.calculate-!{{ package_type }}-builder-!{{config["gpu_arch_type"]}}!{{config["gpu_arch_version"]}}.outputs.docker-image }}
+      {% else %}
+      DOCKER_IMAGE: !{{ config["container_image"] }}
+      {% endif %}
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"

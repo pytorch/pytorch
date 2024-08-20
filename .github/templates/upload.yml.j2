@@ -23,7 +23,7 @@
 {%- if include_skip_tests %}
       SKIP_ALL_TESTS: 1
 {%- endif %}
-{%- if not is_windows %}
+{%- if not is_windows and config["package_type"] != "manywheel" %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
 {%- if config["package_type"] == "manywheel" %}

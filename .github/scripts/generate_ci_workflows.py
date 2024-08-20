@@ -58,6 +58,7 @@ class BinaryBuildWorkflow:
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ""
     branches: str = "nightly"
+    build_docker_images: Dict[str, str] = None
     # Mainly for macos
     cross_compile_arm64: bool = False
     macos_runner: str = "macos-14-xlarge"
@@ -109,6 +110,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
         ),
+        build_docker_images=generate_binary_build_matrix.WHEEL_CALCULATE_DOCKER_IMAGES,
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -120,6 +122,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
         ),
+        build_docker_images={}
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -134,6 +137,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
+        build_docker_images={}
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -148,6 +152,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
+        build_docker_images={}
     ),
 ]
 

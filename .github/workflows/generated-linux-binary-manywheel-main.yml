@@ -40,10 +40,11 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+hffelrvgnruhctuclrvugvdtnudtblej
   manywheel-py3_9-cuda11_8-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -53,8 +54,9 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
@@ -76,7 +78,6 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
@@ -86,9 +87,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -98,9 +99,10 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8-split
       build_environment: linux-binary-manywheel
@@ -122,7 +124,6 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8-split
@@ -133,9 +134,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -145,8 +146,9 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
@@ -168,7 +170,6 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
@@ -178,9 +179,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_1-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -190,9 +191,10 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1-split
       build_environment: linux-binary-manywheel
@@ -214,7 +216,6 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1-split
@@ -225,9 +226,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_4-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -237,8 +238,9 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
@@ -260,7 +262,6 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
@@ -270,9 +271,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_4-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -282,9 +283,10 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4-split
       build_environment: linux-binary-manywheel
@@ -306,7 +308,6 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
       use_split_build: True
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4-split

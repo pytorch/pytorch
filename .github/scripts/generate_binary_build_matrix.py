@@ -169,6 +169,23 @@ WHEEL_CONTAINER_IMAGES = {
     "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
 }
 
+WHEEL_CALCULATE_DOCKER_IMAGES = {
+    **{
+        gpu_arch: f"manylinux-builder-cuda{gpu_arch}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    **{
+        gpu_arch: f"manylinux-builder-rocm{gpu_arch}"
+        for gpu_arch in ROCM_ARCHES
+    },
+    "xpu": "manylinux2_28-builder-xpu",
+    "cpu": "manylinux-builder-cpu",
+    "cpu-cxx11-abi": "manylinuxcxx11-abi-builder-cpu-cxx11-abi",
+    "cpu-aarch64": "manylinuxaarch64-builder-cpu-aarch64",
+    "cpu-s390x": "manylinuxs390x-builder-cpu-s390x",
+    "cuda-aarch64": "manylinuxaarch64-builder-cuda12.4",
+}
+
 CONDA_CONTAINER_IMAGES = {
     **{
         gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-{DEFAULT_TAG}"

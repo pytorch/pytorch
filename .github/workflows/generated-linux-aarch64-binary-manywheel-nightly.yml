@@ -7,7 +7,6 @@ name: linux-aarch64-binary-manywheel
 
 on:
   push:
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
       - nightly
     tags:
@@ -45,10 +44,11 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+hffelrvgnruhctuclrvugvdtnudtblej
   manywheel-py3_9-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -57,8 +57,9 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -80,7 +81,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -102,7 +102,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
     secrets:
@@ -112,9 +111,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -123,9 +122,10 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cuda-aarch64
@@ -147,7 +147,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
@@ -158,9 +157,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -169,8 +168,9 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -192,7 +192,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -214,7 +213,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
@@ -224,9 +222,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -235,9 +233,10 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cuda-aarch64
@@ -259,7 +258,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
@@ -270,9 +268,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -281,8 +279,9 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -304,7 +303,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -326,7 +324,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
@@ -336,9 +333,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -347,9 +344,10 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cuda-aarch64
@@ -371,7 +369,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
@@ -382,9 +379,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -393,8 +390,9 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -416,7 +414,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -438,7 +435,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
@@ -448,9 +444,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+    needs: [ get-label-type ]
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -459,9 +455,10 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      
       runs_on: linux.arm64.m7g.4xlarge.ephemeral
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_12-cuda-aarch64
@@ -483,7 +480,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
