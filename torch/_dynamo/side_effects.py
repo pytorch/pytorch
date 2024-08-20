@@ -25,8 +25,10 @@ from .variables.base import (
     VariableTracker,
 )
 
+
 # Defined in CPython's Include/object.h
-TPFLAGS_IMMUTABLETYPE = (1 << 8)
+TPFLAGS_IMMUTABLETYPE = 1 << 8
+
 
 class MutableSideEffects(MutableLocalBase):
     """
