@@ -20,7 +20,12 @@ from torch._guards import TracingContext
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import ObservedException, raise_observed_exception, unimplemented
+from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
+    raise_observed_exception,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -75,6 +80,11 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
+        # TODO mlazos: Temporary to get this stack to pass
+        # remove in subsequent PR
+        from torch.overrides import BaseTorchFunctionMode
+
+        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -204,6 +214,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj)
 
+        if (
+            source
+            and not inspect.ismethoddescriptor(obj)
+            and not is_wrapper_or_member_descriptor(obj)
+        ):
+            return VariableBuilder(tx, source)(obj)
         return super().var_getattr(tx, name)
 
     def _call_cross_entropy_loss(self, tx: "InstructionTranslator", args, kwargs):
@@ -371,6 +387,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
+        elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
+            assert args[0].is_python_constant()
+            return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -428,14 +447,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            var = tx.output.side_effects.track_object_new(
-                self.source,
-                self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
-            )
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
@@ -496,6 +508,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            not self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(
+                    tx, polyfill.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -523,6 +547,21 @@ class NO_SUCH_SUBOBJ:
     pass
 
 
+def call_random_fn(tx, fn, args, kwargs):
+    from .builder import VariableBuilder
+
+    args = [x.as_python_constant() for x in args]
+    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    random_call_index = len(tx.output.random_calls)
+    example_value = fn(*args, **kwargs)
+    source = RandomValueSource(random_call_index)
+    tx.output.random_calls.append((fn, args, kwargs))
+    # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+    # (currently hypothetical), but I'm not going to poke my hand in
+    # this nest for now
+    return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -530,11 +569,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, **kwargs) -> None:
+    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
+        self.cls_source = cls_source
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -764,18 +805,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.output.random_calls)
-            example_value = self.value(*args, **kwargs)
-            source = RandomValueSource(random_call_index)
-            tx.output.random_calls.append((self.value, args, kwargs))
-            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
-            # (currently hypothetical), but I'm not going to poke my hand in
-            # this nest for now
-            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value
-            )
+            return call_random_fn(tx, self.value, args, kwargs)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -901,7 +931,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            return tx.output.side_effects.load_attr(self, name)
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            if isinstance(result, variables.DeletedVariable):
+                raise_observed_exception(AttributeError, tx, self)
+            return result
 
         if name == "__dict__":
             options = {"source": source}
@@ -911,7 +944,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # dunder attrs. inspect.getattr_static does not return correct value for
         # them.
         if name == "__class__":
-            options = {"source": source}
+            cls_source = source
+            if cls_source is None:
+                cls_source = self.cls_source
+            options = {"source": cls_source}
             return UserDefinedClassVariable(type(self.value), **options)
 
         try:
@@ -1030,7 +1066,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return trace_rules.lookup(func)(func)
 
         if (
-            source
+            torch._dynamo.config.inline_inbuilt_nn_modules
+            and source
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
             # usecase for now.
@@ -1048,6 +1085,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
+                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
+                # sourceful variable tracker.
+                if self.cls_source is not None:
+                    subobj_from_class = inspect.getattr_static(
+                        self.value.__class__, name, NO_SUCH_SUBOBJ
+                    )
+                    if subobj_from_class is subobj:
+                        src_from_class = AttrSource(self.cls_source, name)
+                        return variables.LazyVariableTracker.create(
+                            subobj_from_class, src_from_class
+                        )
+
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder.create(tx, subobj)
@@ -1056,47 +1105,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(AttributeError, tx, self)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if tx.output.side_effects.is_attribute_mutation(self):
-            try:
-                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                return variables.ConstantVariable.create(
-                    not isinstance(result, variables.DeletedVariable)
-                )
-            except KeyError:
-                pass
+        if self._check_for_getattribute():
+            unimplemented("hasattr with custom __getattribute__")
+
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute():
-            unimplemented("hasattr with custom __getattribute__")
 
         try:
-            self._getattr_static(name)
-            return variables.ConstantVariable.create(True)
-        except AttributeError:
-            # Now check in __getattr__ function
-            getattr_fn = self._check_for_getattr()
-            if isinstance(getattr_fn, types.FunctionType):
-                # Dynamo is going to trace the __getattr__ function with
-                # args=name. Set the source accordingly.
-                new_source = None
-                if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
-                try:
-                    result = variables.UserMethodVariable(
-                        getattr_fn, self, source=new_source
-                    ).call_function(tx, [variables.ConstantVariable.create(name)], {})
-
-                    return variables.ConstantVariable.create(
-                        not isinstance(result, variables.DeletedVariable)
-                    )
-                except ObservedException:
-                    return variables.ConstantVariable.create(False)
-            elif getattr_fn is None:
-                return variables.ConstantVariable.create(False)
-            else:
-                unimplemented("UserDefined with non-function __getattr__")
+            var_vt = self.var_getattr(tx, name)
+            return variables.ConstantVariable.create(
+                not isinstance(var_vt, variables.DeletedVariable)
+            )
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+            return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
         from .builder import VariableBuilder
