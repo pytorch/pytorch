@@ -211,6 +211,10 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+
   linux-focal-py3_8-clang10-test:
     name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-test.yml
