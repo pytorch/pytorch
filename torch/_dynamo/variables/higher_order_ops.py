@@ -1834,8 +1834,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tracer=fwd_tracer,
         )
 
-        materialize_grads = ctx.materialize_grads
-
         if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
             if (
                 "_materialize_non_diff_grads"
@@ -2023,7 +2021,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 args=p_args,
                 kwargs={
                     "args_tensor_mask": args_tensor_mask,
-                    "materialize_grads": materialize_grads,
                 },
             ),
             example_value=example_value,

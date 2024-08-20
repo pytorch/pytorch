@@ -468,9 +468,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_set_materialize_grads(self):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
+    def test_set_materialize_grads_no_graph_break(self):
         class MulY(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -481,7 +479,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad_out):
                 return grad_out * 3
 
-        @torch.compile(backend=cnt, fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=True)
         def f(x):
             return MulY.apply(x)
 
@@ -490,39 +488,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         result.sum().backward()
         self.assertEqual(result, MulY.apply(x))
         self.assertEqual(x.grad, 3.0)
-
-        # check Dynamo captured graph is correct!
-        actual_graph = torch._dynamo.testing.normalize_gm(
-            cnt.graphs[0].print_readable(print_output=False)
-        )
-        self.assertExpectedInline(
-            actual_graph,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[]"):
-        l_x_ = L_x_
-
-        function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
-        fwd_body_0 = self.fwd_body_0
-        bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, args_tensor_mask = [True], materialize_grads = False);  fwd_body_0 = bwd_body_0 = l_x_ = None
-        return (autograd_function_apply,)
-
-    class fwd_body_0(torch.nn.Module):
-        def forward(self, ctx, x: "f32[]"):
-            mul: "f32[]" = x * 3;  x = None
-            return (mul, [])
-
-    class bwd_body_0(torch.nn.Module):
-        def forward(self, ctx, grad_out: "f32[]"):
-            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
-
-            mul: "f32[]" = grad_out * 3;  grad_out = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return mul
-""",
-        )
 
     def test_user_defined_object_as_input(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -577,7 +542,7 @@ class GraphModule(torch.nn.Module):
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], materialize_grads = True);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):
