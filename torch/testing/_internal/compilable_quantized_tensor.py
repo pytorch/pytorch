@@ -9,23 +9,25 @@ it shows
 
 
 import functools
-from collections import defaultdict
-from typing import Any, Callable, Dict, Optional, Tuple
 from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
 
 import torch
-
 from torch.utils._python_dispatch import return_and_correct_aliasing
+
 
 aten = torch.ops.aten
 
+
 @dataclass(frozen=True)
-class LayoutType():
+class LayoutType:
     pass
+
 
 @dataclass(frozen=True)
 class PlainLayoutType(LayoutType):
     pass
+
 
 ###############################
 # Base Layout Tensor Subclass #
@@ -34,6 +36,12 @@ class MyDTypeLayout(torch.Tensor):
     """
     Base class for the layout tensor for `MyDTypeTensor`
     """
+
+    def __init__(self, int_data, scale, layout_type):  # type: ignore[no-untyped-def]
+        self.int_data = int_data
+        self.scale = scale
+        self.layout_type = layout_type
+
     # get the original unpacked Tensors
     def get_plain(self) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.int_data, self.scale
@@ -47,22 +55,24 @@ class MyDTypeLayout(torch.Tensor):
         int_data: torch.Tensor,
         scale: torch.Tensor,
         layout_type: LayoutType,
-    ):
+    ) -> torch.Tensor:
         """Construct a layout tensor from plain tensors and a layout_type, which main contain
         extra metadata for packing etc.
         """
-        pass
+        return cls(int_data, scale, layout_type)
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override, no-untyped-def]
         int_data, scale = self.get_plain()
         layout_type = self.get_layout_type()
         return f"{self.__class__.__name__}(int_data={int_data}, scale={scale}, layout_type={layout_type})"
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
+
 ##############################
 # Tensor Subclass Definition #
 ##############################
+
 
 class MyDTypeTensor(torch.Tensor):
     """We need to define __new__ for constructing a new tensor subclass instance and __init__ for initialize
@@ -71,7 +81,7 @@ class MyDTypeTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(
+    def __new__(  # type: ignore[no-untyped-def]
         cls,
         layout_tensor: MyDTypeLayout,
         shape: torch.Size,
@@ -79,13 +89,13 @@ class MyDTypeTensor(torch.Tensor):
     ):
         kwargs = {}
         kwargs["device"] = layout_tensor.device
-        kwargs["layout"] = (
-            kwargs.get("layout")
+        kwargs["layout"] = (  # type: ignore[assignment]
+            kwargs.get("layout")  # type: ignore[assignment]
             if kwargs.get("layout", False)
             else layout_tensor.layout
         )
-        kwargs["dtype"] = dtype
-        kwargs["requires_grad"] = False
+        kwargs["dtype"] = dtype  # type: ignore[assignment]
+        kwargs["requires_grad"] = False  # type: ignore[assignment]
         return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
 
     def __init__(
@@ -101,7 +111,7 @@ class MyDTypeTensor(torch.Tensor):
     a Tensor subclass for torch.compile support
     """
 
-    def __tensor_flatten__(self):
+    def __tensor_flatten__(self):  # type: ignore[no-untyped-def]
         """
         Given the class, returns the fields of the class as two lists
         The first one contains any tensor fields such as int_data and scale as keys to a dictionary
@@ -110,7 +120,7 @@ class MyDTypeTensor(torch.Tensor):
         return ["layout_tensor"], [self.shape, self.dtype]
 
     @classmethod
-    def __tensor_unflatten__(
+    def __tensor_unflatten__(  # type: ignore[no-untyped-def]
         cls, tensor_data_dict, tensor_attributes, outer_size, outer_stride
     ):
         """
@@ -134,7 +144,7 @@ class MyDTypeTensor(torch.Tensor):
         cls,
         input_float: torch.Tensor,
         layout_type: LayoutType = PlainLayoutType(),
-    ):
+    ) -> torch.Tensor:
         dtype = torch.int16
         scale = input_float.abs().max() / 255
         int_data = (input_float / scale).to(torch.int8)
@@ -146,22 +156,22 @@ class MyDTypeTensor(torch.Tensor):
 
     @property
     def layout_type(self) -> LayoutType:
-        return self.layout_tensor.layout_type
+        return self.layout_tensor.get_layout_type()
 
-    def dequantize(self, output_dtype=None):
+    def dequantize(self, output_dtype=None):  # type: ignore[no-untyped-def]
         """We can define a dequantize method to convert the quantized tensor to a floating point tensor"""
         if output_dtype is None:
             output_dtype = torch.get_default_dtype()
         int_data, scale = self.layout_tensor.get_plain()
         return int_data.to(output_dtype) * scale
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return (
             f"{self.__class__.__name__}(data={self.dequantize()}, shape={self.shape}, "
             f"device={self.device}, dtype={self.dtype}, requires_grad={self.requires_grad})"
         )
 
-    def _apply_fn_to_data(self, fn):
+    def _apply_fn_to_data(self, fn):  # type: ignore[no-untyped-def]
         """
         Used for implementing aten ops by applying them only to the relevant tensor atributes
         In this case we only want to call things like to() or view() on the layout tensor
@@ -173,19 +183,21 @@ class MyDTypeTensor(torch.Tensor):
         )
 
     @classmethod
-    def implements(cls, aten_ops_or_torch_fns):
+    def implements(cls, aten_ops_or_torch_fns):  # type: ignore[no-untyped-def]
         if not hasattr(cls, "_DISPATCH_TABLE"):
-            cls._DISPATCH_TABLE = {}
+            cls._DISPATCH_TABLE = {}  # type: ignore[attr-defined]
 
         if not isinstance(aten_ops_or_torch_fns, (list, tuple)):
             aten_ops_or_torch_fns = [aten_ops_or_torch_fns]
-        def decorator(func):
+
+        def decorator(func):  # type: ignore[no-untyped-def]
             for op in aten_ops_or_torch_fns:
+
                 @functools.wraps(op)
-                def wrapper(f, types, args, kwargs):
+                def wrapper(f, types, args, kwargs):  # type: ignore[no-untyped-def]
                     return func(f, types, args, kwargs)
 
-                cls._DISPATCH_TABLE[op] = wrapper
+                cls._DISPATCH_TABLE[op] = wrapper  # type: ignore[attr-defined]
 
             return func
 
@@ -201,8 +213,9 @@ class MyDTypeTensor(torch.Tensor):
 
     We have some helper functions that can dispatch to the functions registered with MyDTypeTensor.implements, but if the default implementation does not work for your use case, please feel free to customize it
     """
+
     @classmethod
-    def __torch_function__(cls, func, types, args, kwargs=None):
+    def __torch_function__(cls, func, types, args, kwargs=None):  # type: ignore[no-untyped-def]
         kwargs = {} if kwargs is None else kwargs
 
         if hasattr(cls, "_DISPATCH_TABLE") and func in cls._DISPATCH_TABLE:
@@ -211,24 +224,25 @@ class MyDTypeTensor(torch.Tensor):
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
 
-
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs):  # type: ignore[no-untyped-def]
         kwargs = {} if kwargs is None else kwargs
 
         if hasattr(cls, "_DISPATCH_TABLE") and func in cls._DISPATCH_TABLE:
             return cls._DISPATCH_TABLE[func](func, types, args, kwargs)
 
-        raise NotImplementedError(f"{cls.__name__} dispatch: attempting to run unimplemented operator/function: {func}")
-
+        raise NotImplementedError(
+            f"{cls.__name__} dispatch: attempting to run unimplemented operator/function: {func}"
+        )
 
 
 ######################################################
 # LayoutType and Layout Tensor Subclass Registration #
 ######################################################
 
+
 class PlainMyDTypeLayout(MyDTypeLayout):
-    def __new__(
+    def __new__(  # type: ignore[no-untyped-def]
         cls,
         int_data: torch.Tensor,
         scale: torch.Tensor,
@@ -236,11 +250,9 @@ class PlainMyDTypeLayout(MyDTypeLayout):
     ):
         kwargs = {}
         kwargs["device"] = int_data.device
-        kwargs["layout"] = (
-            kwargs.get("layout") if kwargs.get("layout", False) else int_data.layout
-        )
-        kwargs["dtype"] = int_data.dtype
-        kwargs["requires_grad"] = False
+        kwargs["layout"] = kwargs.get("layout") if kwargs.get("layout", False) else int_data.layout  # type: ignore[assignment]
+        kwargs["dtype"] = int_data.dtype  # type: ignore[assignment]
+        kwargs["requires_grad"] = False  # type: ignore[assignment]
         shape = int_data.shape
         return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
 
@@ -254,15 +266,13 @@ class PlainMyDTypeLayout(MyDTypeLayout):
         self.scale = scale
         self.layout_type = layout_type
 
-    def __tensor_flatten__(self):
+    def __tensor_flatten__(self):  # type: ignore[no-untyped-def]
         return ["int_data", "scale"], [self.layout_type]
 
     @classmethod
-    def __tensor_unflatten__(
-        cls, tensor_data_dict, tensor_attributes, outer_size, outer_stride
-    ):
+    def __tensor_unflatten__(cls, tensor_data_dict, tensor_attributes, outer_size, outer_stride):  # type: ignore[no-untyped-def]
         int_data, scale = tensor_data_dict["int_data"], tensor_data_dict["scale"]
-        layout_type, = tensor_attributes
+        (layout_type,) = tensor_attributes
         return cls(int_data, scale, layout_type)
 
     @classmethod
@@ -271,14 +281,14 @@ class PlainMyDTypeLayout(MyDTypeLayout):
         int_data: torch.Tensor,
         scale: torch.Tensor,
         layout_type: LayoutType,
-    ):
+    ) -> torch.Tensor:
         """Construct a layout tensor from plain tensors and a layout_type, which main contain
         extra metadata for packing etc.
         """
         assert isinstance(layout_type, PlainLayoutType)
         return cls(int_data, scale, layout_type)
 
-    def _apply_fn_to_data(self, fn):
+    def _apply_fn_to_data(self, fn: Callable) -> torch.Tensor:
         return self.__class__(
             fn(self.int_data),
             fn(self.scale),
@@ -286,7 +296,7 @@ class PlainMyDTypeLayout(MyDTypeLayout):
         )
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs):  # type: ignore[no-untyped-def]
         kwargs = {} if kwargs is None else kwargs
 
         if func is aten.detach.default:
@@ -298,13 +308,17 @@ class PlainMyDTypeLayout(MyDTypeLayout):
             f"MyDTypeLayout dispatch: attempting to run {func}, this is not supported"
         )
 
+
 #####################################################
 # torch functional and aten operator implementation #
 #####################################################
 
 implements = MyDTypeTensor.implements
 
-def _quantized_linear_op(input_tensor, weight_tensor, bias):
+
+def _quantized_linear_op(
+    input_tensor: torch.Tensor, weight_tensor: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
     if isinstance(input_tensor, MyDTypeTensor):
         input_tensor = input_tensor.dequantize()
     if isinstance(weight_tensor, MyDTypeTensor):
@@ -313,7 +327,7 @@ def _quantized_linear_op(input_tensor, weight_tensor, bias):
 
 
 @implements(torch.nn.functional.linear)
-def _(func, types, args, kwargs):
+def _(func, types, args, kwargs):  # type: ignore[no-untyped-def]
     input_tensor, weight_tensor, bias = (
         args[0],
         args[1],
@@ -333,7 +347,7 @@ def _(func, types, args, kwargs):
 
 
 @implements(aten.detach.default)
-def _(func, types, args, kwargs):
+def _(func, types, args, kwargs):  # type: ignore[no-untyped-def]
     # `return_and_correct_aliasing` should be used by wrapper tensor ``__torch_dispatch__`` subclasses that would like to
     # work with torch.compile. It ensures that the subclass properly implements the aliasing behavior of every op,
     # which is needed for correctness in AOTAutograd.
@@ -346,12 +360,13 @@ def _(func, types, args, kwargs):
 
 
 class M(torch.nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self) -> None:
+        super().__init__()
         self.linear = torch.nn.Linear(1024, 1024)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)
+
 
 #####################
 # Factory functions #
@@ -375,9 +390,7 @@ for _ in range(NUM_WARMUPS):
     compiled(*example_inputs)
 
 # convert weights to quantized weights
-m.linear.weight = torch.nn.Parameter(
-    to_my_dtype(m.linear.weight), requires_grad=False
-)
+m.linear.weight = torch.nn.Parameter(to_my_dtype(m.linear.weight), requires_grad=False)
 
 for _ in range(NUM_WARMUPS):
     m(*example_inputs)
