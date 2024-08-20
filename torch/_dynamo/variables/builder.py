@@ -1377,7 +1377,10 @@ class VariableBuilder:
             return self.wrap_symfloat(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
-            return ConstantVariable.create(value=value)
+            result = ConstantVariable.create(value=value, source=self.source)
+            if isinstance(value, (list, set)):
+                return self.set_source_and_track_mutable(value, result)
+            return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
