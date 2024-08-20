@@ -3856,9 +3856,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         backends = [
-            # SDPBackend.MATH,
-            # SDPBackend.EFFICIENT_ATTENTION,
-            SDPBackend.FLASH_ATTENTION  # not supported yet
+            SDPBackend.MATH,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION 
         ]
 
         def T(*args):
