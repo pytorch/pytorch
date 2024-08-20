@@ -64,6 +64,7 @@ from .common import (
 from .cpp_utils import (
     cexpr,
     cexpr_index,
+    codegen_rand,
     CppCSEVariable,
     DTYPE_TO_CPP,
     INDEX_TYPE,
@@ -970,7 +971,16 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(V.kernel, CppVecKernel)
                     new_args = [
                         V.kernel.broadcast(new_arg)
-                        if isinstance(new_arg, CppCSEVariable) and not new_arg.is_vec
+                        if (
+                            isinstance(new_arg, CppCSEVariable)
+                            and not new_arg.is_vec
+                            and func
+                            not in [
+                                CppVecOverrides.rand,
+                                CppVecOverrides.randn,
+                                CppVecOverrides.randint64,
+                            ]
+                        )
                         else new_arg
                         for new_arg in new_args
                     ]
@@ -1180,6 +1190,34 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def bitwise_right_shift(a, b):
         return f"{a} >> {b}"
+
+    @staticmethod
+    def load_seed(name, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        return f"{V.kernel.load(name, offset)}"
+
+    @staticmethod
+    def rand(seed, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        rand_function = (
+            f"result[offset_idx] = normalized_rand_cpu({seed}, offset[offset_idx]);"
+        )
+        return codegen_rand(offset, code, rand_function)
+
+    @staticmethod
+    def randn(seed, offset):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        rand_function = f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
+        return codegen_rand(offset, code, rand_function)
+
+    @staticmethod
+    def randint64(seed, offset, low, high):
+        assert isinstance(V.kernel, CppVecKernel)
+        code = BracesBuffer()
+        rand_function = f"result[offset_idx] = randint64_cpu({seed}, offset[offset_idx], {low}, {high});"
+        return codegen_rand(offset, code, rand_function, torch.int64)
 
     @staticmethod
     def tan(a):
