@@ -505,32 +505,6 @@ TORCH_API void brgemm(
     const at::BFloat16* B,
     float* C);
 
-TORCH_API void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const float* A,
-    const float* B,
-    float* C);
-
-TORCH_API void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const double* A,
-    const double* B,
-    double* C);
-
 // Release brgemm hardware context
 void brgemm_release();
 
