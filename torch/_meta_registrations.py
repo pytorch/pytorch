@@ -3144,7 +3144,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@register_meta([aten._fused_adam_.default])
+@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
 def meta__fused_adam_(
     self,
     grads,
