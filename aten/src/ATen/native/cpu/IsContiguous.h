@@ -1,6 +1,6 @@
 #pragma once
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 // n: number of function arguments (arity)
 // traits: function_traits (see FunctionTraits.h)
@@ -59,4 +59,4 @@ static inline bool is_contiguous_scalar(const int64_t* strides) {
   return IsContiguous<traits::arity, traits::arity, traits, s>::eval(strides);
 }
 
-}}}
+}}

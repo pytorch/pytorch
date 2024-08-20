@@ -799,6 +799,46 @@ graph():
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
+    @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
+    def test_hoo_inline_users_issue(self):
+        # This came from an issue where replace_with_hop passes would inline subgraphs,
+        # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
+        # below, since it's used in both set_grad_enabled HOO modules).
+        # This checks that node.users and node.args are in correspondence.
+        def check_users_for_graph(graph):
+            def _tuple_contains(_tuple, val):
+                # check nested, since output node args have format ((x, y, ...),)
+                return any(
+                    _tuple_contains(x, val) if isinstance(x, tuple) else x == val
+                    for x in _tuple
+                )
+
+            for node in graph.nodes:
+                # check node.users
+                for user in node.users.keys():
+                    assert _tuple_contains(user.args, node)
+                # check node.args
+                for arg in node.args:
+                    if isinstance(arg, torch.fx.Node):
+                        assert _tuple_contains(arg.users, node)
+
+        # check set grad enabled
+        class SetGradCase(torch.nn.Module):
+            def forward(self, x):
+                _x = x.shape[0] + 2
+                _xx = _x + 2
+                with torch.no_grad():
+                    y = _x * 4
+                return _xx, y
+
+        ep = export(
+            SetGradCase(),
+            (torch.randn(6),),
+            dynamic_shapes={"x": (Dim("dx"),)},
+            strict=False,
+        )
+        check_users_for_graph(ep.graph)
+
     def test_export_predispatch_custom_ops_warnings(self):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -2251,6 +2291,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
             fixes=[],  # nothing to fix!
         )
+
+    def test_no_suggested_fixes_for_data_dependent_errors(self):
+        # suggested fixes for data-dependent errors only work in non-strict mode
+        strict = False
+        error_type = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+
+        class cf_stacklist(torch.nn.Module):
+            def forward(self, xs, y):
+                # y.item() is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, y.item(), 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
 
     def test_if_functional(self):
         class Module(torch.nn.Module):
@@ -3964,6 +4024,21 @@ def forward(self, x):
         ):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
+
+    def test_redundant_assert_max_upper_bound(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                b = x.nonzero()
+                torch._check(b.shape[0] >= 3)
+                return b
+
+        m = M()
+        inp = (torch.tensor([1, 1, 1, 0, 1]),)
+        dim = torch.export.Dim("dim")
+        ep = export(m, inp, dynamic_shapes=((dim,),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
         class Bar(torch.nn.Module):
@@ -6793,7 +6868,7 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        if SM90OrLater:
+        if SM90OrLater and not torch.version.hip:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
