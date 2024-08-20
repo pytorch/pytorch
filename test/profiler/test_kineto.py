@@ -1,15 +1,14 @@
 # Owner(s): ["oncall: profiler"]
 import os
-from unittest.mock import patch
 import subprocess
 import sys
+from unittest.mock import patch
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class SimpleKinetoInitializationTest(TestCase):
-
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     def test_kineto_profiler_with_environment_variable(self):
         """
@@ -38,10 +37,15 @@ if torch.cuda.is_available() > 0:
         env["KINETO_USE_DAEMON"] = "1"
         if "KINETO_DAEMON_INIT_DELAY_S" in env:
             env.pop("KINETO_DAEMON_INIT_DELAY_S")
-        _, stderr = TestCase.run_process_no_exception(f"from ctypes import CDLL; CDLL('{torch._C.__file__}')")
-        self.assertNotRegex(stderr.decode('ascii'), "Registering daemon config loader",
-                            "kineto should not be initialized when the shared library is imported directly")
+        _, stderr = TestCase.run_process_no_exception(
+            f"from ctypes import CDLL; CDLL('{torch._C.__file__}')"
+        )
+        self.assertNotRegex(
+            stderr.decode("ascii"),
+            "Registering daemon config loader",
+            "kineto should not be initialized when the shared library is imported directly",
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
