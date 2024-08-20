@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
-    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -204,6 +203,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj)
 
+        if (
+            source
+            and not inspect.ismethoddescriptor(obj)
+            and not is_wrapper_or_member_descriptor(obj)
+        ):
+            return VariableBuilder(tx, source)(obj)
         return super().var_getattr(tx, name)
 
     def _call_cross_entropy_loss(self, tx: "InstructionTranslator", args, kwargs):
@@ -371,6 +376,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
+        elif self.value is torch.cuda.device and not kwargs and len(args) == 1:
+            assert args[0].is_python_constant()
+            return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -428,14 +436,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            var = tx.output.side_effects.track_object_new(
-                self.source,
-                self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
-            )
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
@@ -496,6 +497,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif (
+            not self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            return tx.inline_user_function_return(
+                SourcelessBuilder.create(
+                    tx, polyfill.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -523,6 +536,21 @@ class NO_SUCH_SUBOBJ:
     pass
 
 
+def call_random_fn(tx, fn, args, kwargs):
+    from .builder import VariableBuilder
+
+    args = [x.as_python_constant() for x in args]
+    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    random_call_index = len(tx.output.random_calls)
+    example_value = fn(*args, **kwargs)
+    source = RandomValueSource(random_call_index)
+    tx.output.random_calls.append((fn, args, kwargs))
+    # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+    # (currently hypothetical), but I'm not going to poke my hand in
+    # this nest for now
+    return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -530,11 +558,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
-    def __init__(self, value, value_type=None, **kwargs) -> None:
+    def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        # This is used with __new__, when the new object is sourceless but the user class can be sourceful.
+        self.cls_source = cls_source
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -764,18 +794,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.output.random_calls)
-            example_value = self.value(*args, **kwargs)
-            source = RandomValueSource(random_call_index)
-            tx.output.random_calls.append((self.value, args, kwargs))
-            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
-            # (currently hypothetical), but I'm not going to poke my hand in
-            # this nest for now
-            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value
-            )
+            return call_random_fn(tx, self.value, args, kwargs)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -911,7 +930,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # dunder attrs. inspect.getattr_static does not return correct value for
         # them.
         if name == "__class__":
-            options = {"source": source}
+            cls_source = source
+            if cls_source is None:
+                cls_source = self.cls_source
+            options = {"source": cls_source}
             return UserDefinedClassVariable(type(self.value), **options)
 
         try:
@@ -1029,18 +1051,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if (
-            source
-            and isinstance(self, variables.UnspecializedNNModuleVariable)
-            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
-            # usecase for now.
-            and not tx.output.export
-        ):
-            # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
-                source = UnspecializedParamBufferSource(self.source, name)
-            source = self._wrap_source(source)
-
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
                 options = {"source": source}
@@ -1048,6 +1058,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return variables.LazyVariableTracker.create(subobj, source)
             else:
+                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
+                # sourceful variable tracker.
+                if self.cls_source is not None:
+                    subobj_from_class = inspect.getattr_static(
+                        self.value.__class__, name, NO_SUCH_SUBOBJ
+                    )
+                    if subobj_from_class is subobj:
+                        src_from_class = AttrSource(self.cls_source, name)
+                        return variables.LazyVariableTracker.create(
+                            subobj_from_class, src_from_class
+                        )
+
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder.create(tx, subobj)

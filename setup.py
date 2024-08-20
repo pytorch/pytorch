@@ -38,6 +38,9 @@
 #   USE_CUSPARSELT=0
 #     disables the cuSPARSELt build
 #
+#   USE_CUFILE=0
+#     disables the cuFile build
+#
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
@@ -67,9 +70,6 @@
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
-#
-#   USE_QNNPACK=0
-#     disables QNNPACK build (quantized 8-bit operators)
 #
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
@@ -365,7 +365,6 @@ def get_submodule_folders():
             "gloo",
             "cpuinfo",
             "onnx",
-            "QNNPACK",
             "fbgemm",
             "cutlass",
         ]
@@ -1137,15 +1136,13 @@ def main():
     install_requires = [
         "filelock",
         "typing-extensions>=4.8.0",
+        'setuptools ; python_version >= "3.12"',
         'sympy==1.12.1 ; python_version == "3.8"',
-        'sympy>=1.13.0 ; python_version >= "3.9"',
+        'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
         "jinja2",
         "fsspec",
     ]
-
-    if sys.version_info >= (3, 12, 0):
-        install_requires.append("setuptools")
 
     if BUILD_PYTHON_ONLY:
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")

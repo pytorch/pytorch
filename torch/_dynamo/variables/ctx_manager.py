@@ -559,6 +559,56 @@ class InferenceModeVariable(ContextWrappingVariable):
         return "inference_mode"
 
 
+class CUDADeviceVariable(ContextWrappingVariable):
+    """represents torch.cuda.device"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", device, **kwargs):
+        var = CUDADeviceVariable(
+            target_values=[torch.cuda._get_device_index(device, optional=True)],
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values,
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.target_values = target_values
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function",
+            torch.cuda._maybe_exchange_device,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(False)
+
+    def enter(self, tx):
+        prev_idx = torch.cuda._exchange_device(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch.cuda._exchange_device,
+            (*self.target_values,),
+            {},
+        )
+
+    def module_name(self):
+        return "torch.cuda"
+
+    def fn_name(self):
+        return "device"
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
@@ -1036,6 +1086,15 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        # If we got here, this event is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
+        prefix = "_event"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class WithExitFunctionVariable(VariableTracker):
