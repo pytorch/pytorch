@@ -3387,10 +3387,10 @@ utils_device.CURRENT_DEVICE == None""".split(
         class ModuleA(torch.nn.ModuleDict, collections.abc.MutableMapping):
             pass
 
-        # Defined in CPython's Include/object.h
-        TPFLAGS_MAPPING = 1 << 6
-
         def fn(x, mod_class):
+            # Defined in CPython's Include/object.h
+            TPFLAGS_MAPPING = 1 << 6
+
             if mod_class.__flags__ & TPFLAGS_MAPPING:
                 return x + 1
             else:
