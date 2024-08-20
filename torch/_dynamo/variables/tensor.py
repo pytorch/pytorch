@@ -272,13 +272,10 @@ class TensorVariable(VariableTracker):
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
-            if is_traceable_wrapper_subclass(fake_val) and name in ["fsdp_pre_all_gather", "fsdp_post_all_gather"]:
-                pass
-            else:
-                # Callables have more nuanced handling, and we should let the existing system delegate here.
-                # Raising was past behavior and so should always be sound to fall back.
-                # Note - at a certain point we may want to handle
-                raise NotImplementedError
+            # Callables have more nuanced handling, and we should let the existing system delegate here.
+            # Raising was past behavior and so should always be sound to fall back.
+            # Note - at a certain point we may want to handle
+            raise NotImplementedError
 
         from ..guards import GuardBuilder
         from .builder import VariableBuilder
@@ -1044,9 +1041,6 @@ class TensorVariable(VariableTracker):
         if not self._is_name_set:
             self.proxy.node._rename(name)
             self._is_name_set = True
-
-    def __repr__(self):
-        return f"TensorVariable()"
 
 
 class SymNodeVariable(VariableTracker):
