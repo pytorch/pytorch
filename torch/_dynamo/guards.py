@@ -107,6 +107,7 @@ from .utils import (
     common_constant_types,
     dict_keys_repr,
     get_custom_getattr,
+    get_torch_function_mode_stack,
     guard_failures,
     istype,
     key_is_id,
@@ -2151,6 +2152,10 @@ class CheckFunctionManager:
         self.output_graph = output_graph
         w_builder = None
 
+        self.torch_function_mode_stack = (
+            output_graph.torch_function_mode_stack if output_graph else None
+        )
+
         def source_ref(source):
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
@@ -2249,17 +2254,35 @@ class CheckFunctionManager:
 
         code_parts = []
         verbose_code_parts = []
-        structured_guard_fns = []
+        structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
+
+        torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
+            self.torch_function_mode_stack
+        )
 
         if config.enable_cpp_guard_manager:
+            from .variables.torch_function import IGNORED_MODES
+
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
+
+            self.guard_manager.root.add_torch_function_mode_stack_guard(
+                self.torch_function_mode_stack,
+                list(IGNORED_MODES),
+                ["___check_torch_function_mode_stack()"],
+            )
+            # Clear references to torch_function modes held in the list
+            self.torch_function_mode_stack = None
         else:
             # Don't report this guard, it's always the same, useless!
             global_guard = "___check_global_state()"
             code_parts.append(global_guard)
             verbose_code_parts.append(global_guard)
+
+            tf_mode_stack_guard = "___check_torch_function_mode_stack()"
+            code_parts.append(tf_mode_stack_guard)
+            verbose_code_parts.append(tf_mode_stack_guard)
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
@@ -2406,6 +2429,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
@@ -2544,6 +2568,27 @@ def is_recompiles_enabled():
 
 def is_recompiles_verbose_enabled():
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
+
+
+# this will only be used if cpp guards are disabled
+def make_torch_function_mode_stack_guard(intial_stack):
+    types = [type(x) for x in intial_stack]
+    from .variables.torch_function import IGNORED_MODES
+
+    def check_torch_function_mode_stack():
+        cur_stack = get_torch_function_mode_stack()
+        if len(cur_stack) != len(types):
+            return False
+
+        for ty, mode in zip(types, cur_stack):
+            if ty in IGNORED_MODES:
+                continue
+            if ty != type(mode):
+                return False
+
+        return True
+
+    return check_torch_function_mode_stack
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
