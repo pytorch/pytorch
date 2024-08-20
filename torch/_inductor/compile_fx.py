@@ -59,6 +59,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.monitor import _WaitCounter
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
@@ -641,40 +642,41 @@ def _compile_fx_inner(
         compiled_graph.boxed_forward_device_index = boxed_forward_device_index
         return compiled_graph
 
-    if (
-        not config.force_disable_caches
-        and (config.fx_graph_cache or fx_graph_remote_cache)
-        and not aot_mode
-    ):
-        for i, input in enumerate(example_inputs):
-            if (
-                isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
-                and i in static_input_idxs
-            ):
-                input._is_inductor_static = True  # type: ignore[attr-defined]
+    with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+        if (
+            not config.force_disable_caches
+            and (config.fx_graph_cache or fx_graph_remote_cache)
+            and not aot_mode
+        ):
+            for i, input in enumerate(example_inputs):
+                if (
+                    isinstance(input, torch.Tensor)
+                    and input.device.type == "cuda"
+                    and i in static_input_idxs
+                ):
+                    input._is_inductor_static = True  # type: ignore[attr-defined]
 
-        compiled_graph = FxGraphCache.load(
-            codegen_and_compile,
-            gm,
-            example_inputs,
-            graph_kwargs,
-            inputs_to_check,
-            local=config.fx_graph_cache,
-            remote=fx_graph_remote_cache,
-        )
-    else:
-        compiled_graph = codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
-        )
-        if aot_mode:
-            # AOT mode is special because codegen_and_compile returns a string.
-            # In that case, we don't need to run all post compilation steps, we just need
-            # to return the string directly.
-            return compiled_graph
-        compiled_graph = FxGraphCache.post_compile(
-            compiled_graph, example_inputs, cudagraphs
-        )
+            compiled_graph = FxGraphCache.load(
+                codegen_and_compile,
+                gm,
+                example_inputs,
+                graph_kwargs,
+                inputs_to_check,
+                local=config.fx_graph_cache,
+                remote=fx_graph_remote_cache,
+            )
+        else:
+            compiled_graph = codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
+            )
+            if aot_mode:
+                # AOT mode is special because codegen_and_compile returns a string.
+                # In that case, we don't need to run all post compilation steps, we just need
+                # to return the string directly.
+                return compiled_graph
+            compiled_graph = FxGraphCache.post_compile(
+                compiled_graph, example_inputs, cudagraphs
+            )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
