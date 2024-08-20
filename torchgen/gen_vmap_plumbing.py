@@ -210,7 +210,10 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
     return_symint_overrides = [
         "_scaled_dot_product_flash_attention",
     ]
-    if not all(ret.type.is_tensor_like() for ret in returns) and schema.name.unambiguous_name() not in return_symint_overrides:
+    if (
+        not all(ret.type.is_tensor_like() for ret in returns)
+        and schema.name.unambiguous_name() not in return_symint_overrides
+    ):
         return None
     # in-place views need special handling
     if "inplace_view" in native_function.tags:

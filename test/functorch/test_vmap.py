@@ -3905,6 +3905,12 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                     #     (query, key, value),
                     # )
 
+        B = 4
+        query = torch.rand(32, B, 8, 128, dtype=torch.float16, device=device)
+        key = torch.rand(B, 32, 8, 128, dtype=torch.float16, device=device)
+        value = torch.rand(32, 8, 128, dtype=torch.float16, device=device)
+        self._vmap_test(F.scaled_dot_product_attention, (query, key, value), in_dims=(1, 0, None))
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
