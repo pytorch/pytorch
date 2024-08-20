@@ -23,6 +23,7 @@ class _EffectType(Enum):
 OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
+# TODO(ivankobzarev): Make SIDE_EFFECTS dictionary WeakKeyDictionary as operator can go out of scope
 SIDE_EFFECTS: Dict[OpType, _EffectType] = {
     torch.ops.aten._print.default: _EffectType.ORDERED,
     call_torchbind: _EffectType.ORDERED,

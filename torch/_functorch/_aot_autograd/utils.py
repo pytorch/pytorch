@@ -241,14 +241,8 @@ def is_with_effects(node):
     return node.op == "call_function" and node.target.__name__ == "with_effects"
 
 
-def has_with_effects_ancestors(node):
-    queue = [node]
-    while queue:
-        node = queue.pop()
-        if is_with_effects(node):
-            return True
-        queue.extend(node.all_input_nodes)
-    return False
+def is_with_effects_op(node, op):
+    return is_with_effects(node) and node.args[1] == op
 
 
 def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
