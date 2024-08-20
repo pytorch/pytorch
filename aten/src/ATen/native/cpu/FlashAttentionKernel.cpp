@@ -452,9 +452,15 @@ void cpu_flash_attention(
             dst_data,
             headSize);
       }
+
       // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < qBlockSize; ++row) {
+        // Row sums for full masked out rows are 0, we set them to 1
+        // in order to avoid NaNs in the output and instead set fully
+        // masked out rows to 0
+        qk_max_data[row] = qk_max_data[row] == -std::numeric_limits<accum_t>::infinity() ? 0 : qk_max_data[row];
+        qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
         accum_t sum_reciprocal = 1 / qk_sum_data[row];
         vec::map<scalar_t>(
           [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
