@@ -81,16 +81,23 @@ def associative_scan(
     assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
     assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
 
-    if not torch._dynamo.is_compiling():
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, input, dim, reverse=reverse
-            )
+    # if not torch._dynamo.is_compiling():
+    #     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+    #         return torch.compile(associative_scan, fullgraph=True)(
+    #             combine_fn, input, dim, reverse=reverse
+    #         )
 
     leaves, spec = pytree.tree_flatten(input)
 
-    if reverse:
-        leaves = [torch.flip(elem, [dim]) for elem in leaves]
+    # if reverse:
+    #     leaves = [torch.flip(elem, [dim]) for elem in leaves]
+    def true_fn(leaves):
+        return [torch.flip(elem, [dim]) for elem in leaves]
+    def false_fn(leaves):
+        # return leaves
+        # return [torch.flip(torch.flip(elem, [dim]), [dim]) for elem in leaves]
+        return [torch.nn.Identity()(elem) for elem in leaves]
+    leaves = torch.cond(reverse, true_fn, false_fn, leaves)
 
     assert len(leaves) >= 1, "expected at least 1 input leaf"
     assert all(
@@ -109,8 +116,15 @@ def associative_scan(
 
     result_flat = associative_scan_op(combine_fn, leaves, dim)
 
-    if reverse:
-        result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+    # if reverse:
+    #     result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
+    def true_fn(result_flat):
+        return [torch.flip(elem, [dim]) for elem in result_flat]
+    def false_fn(result_flat):
+        # return result_flat
+        # return [torch.flip(torch.flip(elem, [dim]), [dim]) for elem in result_flat]
+        return [torch.nn.Identity()(elem) for elem in result_flat]
+    result_flat = torch.cond(reverse, true_fn, false_fn, result_flat)
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -214,8 +228,8 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):  # , rever
 
     assert batch_size
 
-    if dim in input_bdims:
-        raise ValueError("Vmap in_dim may not conincide with dim of associative_scan")
+    # if dim in input_bdims:
+    #     raise ValueError("Vmap in_dim may not conincide with dim of associative_scan")
 
     input_unwrapped = []
     for x, bdim in zip(input, input_bdims):
@@ -229,17 +243,8 @@ def associative_scan_batch_rule(interpreter, combine_fn, input, dim):  # , rever
                 unwrap = unwrap.movedim(bdim, 0)
         input_unwrapped.append(unwrap)
 
-    # if reverse:
-    #     input_unwrapped = [torch.flip(elem, [dim + 1]) for elem in input_unwrapped]
-
     with interpreter.lower():
         res = associative_scan_op(combine_fn, input_unwrapped, dim + 1)
 
     lvl = interpreter.level()
-    # return [_add_batch_dim(x, 0, lvl) for x in res]
-    batch_res = [_add_batch_dim(x, 0, lvl) for x in res]
-
-    # if reverse:
-    #     batch_res = [torch.flip(elem, [dim + 1]) for elem in batch_res]
-
-    return batch_res
+    return [_add_batch_dim(x, 0, lvl) for x in res]

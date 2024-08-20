@@ -147,6 +147,23 @@ def simple_while_loop(iter_t, x):
 
     return torch._higher_order_ops.while_loop(cond_fn, body_fn, (iter_t, x))
 
+def sample_inputs_associative_scan(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    
+    def fct(x, y):
+        return x * y + x + y
+    
+    yield fct
+    yield SampleInput(
+        make_arg(2, 3, 4, low=0.1, high=2),
+        make_arg(1, dtype=torch.bool),
+        make_arg(1, dtype=torch.bool),
+    )
+    
+def simple_associative_scan(fct, x, dim, reverse):
+    return torch._higher_order_ops.associative_scan(fct, x, dim=dim, reverse=reverse)
 
 hop_db = [
     OpInfo(
@@ -261,5 +278,19 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
-    )
+    ),
+    OpInfo(
+        name="associative_scan",
+        variant_test_name="simple",
+        op=simple_cond,
+        sample_inputs_func=sample_inputs_associative_scan,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+        supports_gradgrad=False,
+    ),
 ]

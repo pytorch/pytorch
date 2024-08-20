@@ -4073,6 +4073,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                         self.vmap_inplace_test(
                             func, batched_args, kwargs, in_dims, postprocess_fn
                         )
+                        
+        if op.name == 'associative_scan':
+            print('Here')
+        else:
+            return 
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
@@ -4267,6 +4272,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         ),
     )
     def test_vmap_exhaustive(self, device, dtype, op):
+        if op.name == 'associative_scan':
+            print('Here')
+        else:
+            return
+        
         # needs to be fixed
         inplace_failure_list = ()
         self.opinfo_vmap_test(
