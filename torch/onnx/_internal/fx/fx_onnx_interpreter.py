@@ -554,7 +554,7 @@ class FxOnnxInterpreter:
                 )
 
         with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
-            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)  # type: ignore[attr-defined]
 
         return onnxscript_graph
 
@@ -655,7 +655,7 @@ class FxOnnxInterpreter:
         # function signature in OpSchema, and find the best matched overload.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
-            onnx_args=onnx_args,
+            onnx_args=onnx_args,  # type: ignore[arg-type]
             onnx_kwargs=onnx_kwargs,
             diagnostic_context=self.diagnostic_context,
         )
@@ -781,7 +781,7 @@ class FxOnnxInterpreter:
 
         outputs: onnxscript_graph_building.TorchScriptTensor | tuple[
             onnxscript_graph_building.TorchScriptTensor, ...
-        ] = parent_onnxscript_graph.add_module_call(
+        ] = parent_onnxscript_graph.add_module_call(  # type: ignore[assignment]
             unique_module_name, sub_onnxscript_graph, onnx_args
         )
 
