@@ -1671,10 +1671,10 @@ class CppKernel(Kernel):
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
-        # line = self.indirect_assert(
-        #     csevar, "0" if lower else None, size_str, self._load_mask
-        # )
-        # self.cse.generate(buffer, line, assignment=False)
+        line = self.indirect_assert(
+            csevar, "0" if lower else None, size_str, self._load_mask
+        )
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -2511,10 +2511,12 @@ class CppVecKernel(CppKernel):
     def arange(self, index: CppCSEVariable, stride: sympy.Symbol) -> CppCSEVariable:
         assert not index.is_vec
         assert index.dtype is not None
-        csevar = self.cse.generate(
-            self.compute,
-            f"{self._get_vec_type(index.dtype)}::arange({index}, {stride})",
-        )
+        vec_type = self._get_vec_type(index.dtype)
+        if self.tail_size:
+            line = f"{vec_type}::set({vec_type}(0), {vec_type}::arange({index}, {stride}), {cexpr_index(self.tail_size)})"
+        else:
+            line = f"{vec_type}::arange({index}, {stride})"
+        csevar = self.cse.generate(self.compute, line)
         assert isinstance(csevar, CppCSEVariable)
         csevar.dtype = index.dtype
         csevar.is_vec = True
