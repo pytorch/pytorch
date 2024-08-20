@@ -48,6 +48,9 @@ on:
         type: string
         default: ""
     secrets:
+      GITHUB_TOKEN:
+        required: true
+        description: Github Token
       HUGGING_FACE_HUB_TOKEN:
         required: false
         description: |
