@@ -902,14 +902,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = self.value.__getattribute__(name)
-        #     try:
-        #         subobj = self.value.__getattribute__(name)
-        #     except AttributeError:
-        #         if isinstance(self.value, torch.nn.Module):
-        #             return getattr(self.value, name)
-        #         raise
-        # if subobj is NO_SUCH_SUBOBJ:
-        #     raise AttributeError(name)
 
         return subobj
 
