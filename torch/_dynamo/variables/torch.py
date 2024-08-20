@@ -114,6 +114,7 @@ constant_fold_functions = [
     torch.nn.functional._Reduction.get_enum,  # type: ignore[attr-defined]
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
+    torch.autograd._is_checkpoint_valid,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.extend(
@@ -597,7 +598,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         if DistributedVariable.is_available():
-            from torch.distributed._tensor import DTensor
             from torch.distributed.distributed_c10d import (
                 _get_group_size_by_name,
                 _get_group_tag,
@@ -605,6 +605,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
             )
+            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,

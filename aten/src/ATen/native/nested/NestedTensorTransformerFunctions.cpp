@@ -9,8 +9,7 @@
 #include <c10/util/Exception.h>
 #include <optional>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 inline void check_nested_tensor_matrix_constraints(
@@ -257,7 +256,7 @@ Tensor _jagged_to_padded_dense_forward_cpu(
       "_jagged_to_padded_dense_forward(): only a single jagged dim is supported for now");
 
   // allocate appropriately-sized padded tensor
-  auto offsets = offsets_list[0];
+  const auto& offsets = offsets_list[0];
   TORCH_CHECK(
       offsets.dim() == 1,
       "_jagged_to_padded_dense_forward(): expected 1D offsets, but got offsets.dim() == ",
@@ -298,7 +297,7 @@ Tensor _padded_dense_to_jagged_forward_cpu(
       "_padded_dense_to_jagged_forward(): only a single jagged dim is supported for now");
 
   // allocate appropriately-sized values tensor
-  auto offsets = offsets_list[0];
+  const auto& offsets = offsets_list[0];
   TORCH_CHECK(
       offsets.dim() == 1,
       "_padded_dense_to_jagged_forward(): expected 1D offsets, but got offsets.dim() == ",
@@ -345,5 +344,4 @@ Tensor _padded_dense_to_jagged_forward_cpu(
   return values;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
