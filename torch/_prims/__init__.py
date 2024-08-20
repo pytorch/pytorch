@@ -274,6 +274,7 @@ def _make_prim(
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
     use_old_custom_ops_api: bool = False,
+    register_conj_neg_fallthrough: bool = False,
 ):
     """
     Creates a primitive operation.
@@ -324,6 +325,11 @@ def _make_prim(
             schema=schema,
         )
         prim_def.register_fake(meta)
+
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -704,6 +710,7 @@ clone = _make_prim(
     impl_aten=torch.clone,
     doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
+    register_conj_neg_fallthrough=True,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -2270,6 +2277,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    register_conj_neg_fallthrough=True,
 )
 
 

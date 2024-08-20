@@ -413,6 +413,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
 
+    def test_list_slice(self):
+        class Mock:
+            def __init__(self):
+                self.ets = []
+                self.counter = 0
+
+            @torch.compile(backend="eager")
+            def run(self, x):
+                self.ets = self.ets[-3:]
+                self.ets.append(x)
+                return torch.sin(x)
+
+        mock = Mock()
+        mock.run(torch.randn(4))
+        self.assertEqual(len(mock.ets), 1)
+
     @make_test
     def test_deque(a, b):
         d = collections.deque([a, b])
@@ -709,6 +725,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_is_checkpoint_valid(x):
+        if torch.autograd._is_checkpoint_valid():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_list_compare_polyfill(x):
         for a, b, c in [
             [(1, 2, 3), (1, 2, 3), 7.77],
@@ -991,6 +1014,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.sin(x + 1), list(
             itertools.zip_longest(list1, list2, list3, fillvalue=None)
         )
+
+    def test_torch_size_as_dict_key(self):
+        def fn(x, cached):
+            if x.shape not in cached:
+                cached[x.shape] = x
+            return x + cached[x.shape]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x1 = torch.randn(2, 3)
+        x2 = torch.randn(2, 3)
+        cached = {}
+        ref1 = fn(x1, cached)
+        ref2 = fn(x2, cached)
+        cached = {}
+        res1 = opt_fn(x1, cached)
+        res2 = opt_fn(x2, cached)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
 
     def test_dict_param_keys(self):
         a_param = torch.nn.Parameter(torch.ones([4, 4]))
@@ -2055,6 +2096,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn(t), fn(t))
+
+    def test_filter(self):
+        def fn(inputs):
+            out = inputs[0]
+            for inp in filter(lambda x: (x.requires_grad), inputs):
+                out = out * inp
+            return out
+
+        input1 = torch.arange(2, dtype=torch.bfloat16)
+        input2 = torch.arange(2, dtype=torch.bfloat16).requires_grad_(True)
+        inputs = [input1, input2]
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        self.assertEqual(opt_fn(inputs), fn(inputs))
+
+    def test_filter_fallback(self):
+        def fn(inputs):
+            out = inputs[0]
+            for inp in filter(lambda x: x[0] == 1, inputs):
+                out = out * inp
+            return out
+
+        input1 = torch.ones(2, dtype=torch.bfloat16)
+        input2 = torch.arange(2, dtype=torch.bfloat16)
+        inputs = [input1, input2]
+
+        opt_fn = torch.compile()(fn)
+        self.assertEqual(opt_fn(inputs), fn(inputs))
+
+        torch._dynamo.reset()
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn = torch.compile(fullgraph=True)(fn)
+            opt_fn(inputs)
 
     def test_pow_int(self):
         def fn(a, b):

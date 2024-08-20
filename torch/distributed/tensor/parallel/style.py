@@ -6,15 +6,15 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
-    Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_types import Placement
 
 
 __all__ = [
