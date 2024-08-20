@@ -31,6 +31,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -78,6 +79,11 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
+        # TODO mlazos: Temporary to get this stack to pass
+        # remove in subsequent PR
+        from torch.overrides import BaseTorchFunctionMode
+
+        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -540,6 +546,21 @@ class NO_SUCH_SUBOBJ:
     pass
 
 
+def call_random_fn(tx, fn, args, kwargs):
+    from .builder import VariableBuilder
+
+    args = [x.as_python_constant() for x in args]
+    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    random_call_index = len(tx.output.random_calls)
+    example_value = fn(*args, **kwargs)
+    source = RandomValueSource(random_call_index)
+    tx.output.random_calls.append((fn, args, kwargs))
+    # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+    # (currently hypothetical), but I'm not going to poke my hand in
+    # this nest for now
+    return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -783,18 +804,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.output.random_calls)
-            example_value = self.value(*args, **kwargs)
-            source = RandomValueSource(random_call_index)
-            tx.output.random_calls.append((self.value, args, kwargs))
-            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
-            # (currently hypothetical), but I'm not going to poke my hand in
-            # this nest for now
-            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value
-            )
+            return call_random_fn(tx, self.value, args, kwargs)
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -1060,6 +1070,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 else:
                     return trace_rules.lookup(func)(func)
+
+        if (
+            torch._dynamo.config.inline_inbuilt_nn_modules
+            and source
+            and isinstance(self, variables.UnspecializedNNModuleVariable)
+            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
+            # usecase for now.
+            and not tx.output.export
+        ):
+            # Recalculate source for params/buffers
+            if name in ("_buffers", "_parameters"):
+                source = UnspecializedParamBufferSource(self.source, name)
+            source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
