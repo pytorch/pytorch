@@ -356,7 +356,7 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
         benchmark_iters = max(
-            min(benchmark_iters, max_benchmark_duration // estimated_timing), 1
+            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
         )
 
         # do the memory warmup

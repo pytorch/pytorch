@@ -4,6 +4,7 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
+    CUDADeviceVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
@@ -71,6 +72,8 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
@@ -78,7 +81,11 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .nn_module import (
+    NNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -111,6 +118,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DefaultDictVariable",

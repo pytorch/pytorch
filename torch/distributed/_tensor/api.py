@@ -216,13 +216,30 @@ class _FromTorchTensor(torch.autograd.Function):
         return grad_output.to_local(), None, None, None, None, None
 
 
-class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
+class DTensor(torch.Tensor):
+    """
+    ``DTensor`` (Distributed Tensor) is a subclass of ``torch.Tensor`` that provides single-device like
+    abstraction to program with multi-device ``torch.Tensor``. It describes the distributed tensor sharding
+    layout (DTensor Layout) through the :class:`DeviceMesh` and following types of :class:`Placement`:
+
+    * :class:`Shard`: Tensor sharded on the tensor dimension ``dim`` on the devices of the ``DeviceMesh`` dimension
+    * :class:`Replicate`: Tensor replicated on the devices of the ``DeviceMesh`` dimension
+    * :class:`Partial`: Tensor is pending reduction on the devices of the ``DeviceMesh`` dimension
+
+    When calling PyTorch operators, ``DTensor`` overrides the PyTorch operators to perform sharded computation and issue
+    communications whenever necessary. Along with the operator computation, ``DTensor`` will transform or propagate the
+    placements (DTensor Layout) properly (based on the operator semantic itself) and generate new ``DTensor`` outputs.
+
+    To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
+    requires every Tensor argument of the operator be DTensor.
+
+    """
+
     _local_tensor: torch.Tensor
     _spec: DTensorSpec
     __slots__ = ["_local_tensor", "_spec"]
 
-    # class attribute that handles operator placements propagation
-    # rules, keyed by aten op name, value is propagation func
+    # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
     @staticmethod
@@ -371,8 +388,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             A :class:`DTensor` object
 
         .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
-            local tensor passed in is correct across ranks. If not, the behavior of the created
-            DTensor is undefined.
+            local tensor passed in is correct across ranks (i.e. the tensor is sharded for
+            the ``Shard(dim)`` placement or replicated for the ``Replicate()`` placement).
+            If not, the behavior of the created DTensor is undefined.
 
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
@@ -463,13 +481,27 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         to a new DeviceMesh. i.e. we can turn a Sharded DTensor to a Replicated DTensor by
         specifying a Replicate placement for each dimension of the DeviceMesh.
 
+        When redistributing from current to the new placements on one device mesh dimension, we
+        will perform the following operations including communication collective or local operation:
+
+        1. ``Shard(dim)`` -> ``Replicate()``: ``all_gather``
+        2. ``Shard(src_dim)`` -> ``Shard(dst_dim)``: ``all_to_all``
+        3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
+        4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
+        5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
+
+
+        ``redistribute`` would correctly figure out the necessary redistribute steps for DTensors
+        that are created either on 1-D or N-D DeviceMesh.
+
         Args:
             device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to place the
-                DTensor, if not specified, must be called under a DeviceMesh
-                context manager, default: None
+                DTensor. If not specified, it would use the current DTensor's DeviceMesh.
+                default: None
             placements (List[:class:`Placement`], optional): the new placements that
                 describes how to place the DTensor into the DeviceMesh, must
                 have the same number of elements as ``device_mesh.ndim``.
+                default: replicate on all mesh dimensions
 
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
@@ -478,7 +510,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         Returns:
             A :class:`DTensor` object
 
-        .. note:: ``redistribute`` is differentiable.
+        .. note:: ``redistribute`` is differentiable, which means user do not need to worry about
+            the backward formula of the redistribute operation.
+
+        .. note:: ``redistribute`` currently only supports redistributing DTensor on the same DeviceMesh,
+            Please file an issue if you need to redistribute DTensor to different DeviceMesh.
         """
         # NOTE: This redistribute API currently only supports out
         # of place redistribution, i.e. it always create a new
@@ -545,7 +581,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         return self._spec.mesh
 
     @property
-    def placements(self) -> Sequence[Placement]:
+    def placements(self) -> Tuple[Placement, ...]:
         """
         The placements attribute of this DTensor that describes the layout of this
         DTensor on the its DeviceMesh.
@@ -593,16 +629,19 @@ def distribute_tensor(
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
     """
-    Distribute a leaf torch.Tensor (i.e. nn.Parameter) to the ``device_mesh`` according
-    to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be
-    the same. If you want to construct a DTensor in the middle of the Autograd computation,
-    please use ``DTensor.from_local`` instead.
+    Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
+    to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be the
+    same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
+    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
+    the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
+    computation, please use ``DTensor.from_local`` instead.
 
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
             the number of devices in that mesh dimension, we use ``torch.chunk``
-            semantic to shard the tensor and scatter the shards.
+            semantic to shard the tensor and scatter the shards. The uneven sharding
+            behavior is experimental and subject to change.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
             manager, default: None
@@ -615,7 +654,7 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
 
-    Note:
+    .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
         return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
@@ -734,12 +773,13 @@ def distribute_module(
 ) -> nn.Module:
     """
     This function expose three functions to control the parameters/inputs/outputs of the module:
+
     1. To perform sharding on the module before runtime execution by specifying the
-        ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
-        parameters according to the `partition_fn` specified).
+    ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
+    parameters according to the `partition_fn` specified).
     2. To control the inputs or outputs of the module during runtime execution by
-        specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
-        :class:`DTensor`, convert the output back to torch.Tensor)
+    specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
+    :class:`DTensor`, convert the output back to ``torch.Tensor``)
 
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
@@ -757,10 +797,11 @@ def distribute_module(
     Returns:
         A module that contains parameters/buffers that are all ``DTensor`` s.
 
-    Note:
+    .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
         return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
+
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")

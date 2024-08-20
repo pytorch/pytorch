@@ -3283,7 +3283,9 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
+    "test_custom_op_add": fail_stack_allocation(is_skip=True)
+    if IS_FBCODE
+    else fail_minimal_arrayref_interface(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
