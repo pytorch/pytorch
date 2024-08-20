@@ -56,9 +56,6 @@ class WhileLoopOp(HigherOrderOperator):
 
 
 while_loop_op = WhileLoopOp()
-# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
-# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
-while_loop_op.__module__ = "torch.ops.higher_order"
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):
@@ -222,12 +219,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
-    if mode.enable_tracing:
-        return _trace_while_loop(
-            mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
-        )
-    else:
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return _trace_while_loop(
+        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+    )
 
 
 @while_loop_op.py_impl(FakeTensorMode)

@@ -337,6 +337,11 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)
 
+    def test_clone_complex(self):
+        with torch._dispatch.python.enable_python_dispatcher():
+            x = torch.randn(4, dtype=torch.complex64, device='meta').conj()
+            out = x + 1
+
     def test_check_deprecation_warning(self):
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')

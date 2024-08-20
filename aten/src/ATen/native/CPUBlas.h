@@ -9,6 +9,7 @@
 
 #include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED() && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#include <ATen/Context.h>
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
 #include <oneapi/dnnl/dnnl.hpp>
 #endif
@@ -347,66 +348,7 @@ struct GemmHelper {
 };
 
 struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
-  // Fetch/create GemmHelper object and execute brgemm with batch size and
-  // extern offset
-  template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
-  static inline void call(
-      int64_t M,
-      int64_t N,
-      int64_t K,
-      int64_t bs,
-      int64_t ld_a,
-      int64_t ld_b,
-      int64_t ld_c,
-      const float alpha,
-      const float beta,
-      const scalar_t_a* A,
-      const scalar_t_b* B,
-      const std::vector<std::pair<int64_t, int64_t>>& offsets,
-      scalar_t_c* C) {
-    auto&& key = BrgemmKey(
-        M,
-        N,
-        K,
-        bs,
-        ld_a,
-        ld_b,
-        ld_c,
-        c10::CppTypeToScalarType<scalar_t_a>::value,
-        c10::CppTypeToScalarType<scalar_t_b>::value,
-        c10::CppTypeToScalarType<scalar_t_c>::value,
-        alpha,
-        beta);
-    // Fetch/create GemmHelper object
-    auto&& value = fetch_or_create(key, [&]() {
-      auto&& v = std::make_shared<GemmHelper>(
-          M,
-          N,
-          K,
-          1,
-          ld_a,
-          ld_b,
-          ld_c,
-          c10::CppTypeToScalarType<scalar_t_a>::value,
-          c10::CppTypeToScalarType<scalar_t_b>::value,
-          c10::CppTypeToScalarType<scalar_t_c>::value,
-          alpha,
-          beta);
-      (*v).brg.generate();
-      return std::move(v);
-    });
-    // Set the hardware context when encountering different brgemm objects
-    if (get_current() != value) {
-      // TODO Call release_hw_context at the end when there are no calculation issues
-      dnnl::ukernel::brgemm::release_hw_context();
-      ((*value).brg).set_hw_context();
-      get_current() = value;
-    }
-    // Execute brgemm
-    ((*value).brg).execute(A, B, offsets, C, (*value).scratchpad.data());
-  }
-
-  // Fetch/create GemmHelper object and execute brgemm without batch size
+  // Fetch/create GemmHelper object and execute brgemm with batch size = 1
   template <typename scalar_t_a, typename scalar_t_b, typename scalar_t_c>
   static inline void call(
       int64_t M,
@@ -466,6 +408,9 @@ struct Brgemm : public Kernel_Cache<BrgemmKey, GemmHelper> {
   }
 
   static inline bool device_check(ScalarType dtype) {
+    if (!at::globalContext().userEnabledMkldnn()) {
+      return false;
+    }
     if (dtype == ScalarType::Half) {
       static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
       return fp16_support;
@@ -506,15 +451,18 @@ struct Pack : public Kernel_Cache<PackKey, pack_t> {
   }
 
     static inline bool need_pack(ScalarType dtype) {
-    if (dtype == ScalarType::Half) {
-      static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
-      return fp16_pack;
-    } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return bf16_pack;
-    } else {
-      return false;
-    }
+      if (!at::globalContext().userEnabledMkldnn()) {
+        return false;
+      }
+      if (dtype == ScalarType::Half) {
+        static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
+        return fp16_pack;
+      } else if (dtype == ScalarType::BFloat16) {
+        static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+        return bf16_pack;
+      } else {
+        return false;
+      }
   }
 };
 
@@ -530,38 +478,7 @@ struct Pack : public Kernel_Cache<PackKey, pack_t> {
 //     `batch_size` value passed at object construction stage.
 // C Pointer to a tensor C (accumulation buffer).
 // scratchpad Pointer to a scratchpad buffer.
-TORCH_API void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t bs,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::Half* A,
-    const at::Half* B,
-    const std::vector<std::pair<int64_t, int64_t>>& offsets,
-    float* C);
-
-void brgemm(
-    int64_t M,
-    int64_t N,
-    int64_t K,
-    int64_t bs,
-    int64_t ld_a,
-    int64_t ld_b,
-    int64_t ld_c,
-    const float alpha,
-    const float beta,
-    const at::BFloat16* A,
-    const at::BFloat16* B,
-    const std::vector<std::pair<int64_t, int64_t>>& offsets,
-    float* C);
-
-// Batch-reduce GEMM
-// Batch size is 1, which means it is equivalent to gemm
+// Currently, only brgemm with batch size = 1 will be used
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
@@ -575,7 +492,7 @@ TORCH_API void brgemm(
     const at::Half* B,
     float* C);
 
-void brgemm(
+TORCH_API void brgemm(
     int64_t M,
     int64_t N,
     int64_t K,
@@ -587,6 +504,32 @@ void brgemm(
     const at::BFloat16* A,
     const at::BFloat16* B,
     float* C);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const float* A,
+    const float* B,
+    float* C);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const float alpha,
+    const float beta,
+    const double* A,
+    const double* B,
+    double* C);
 
 // Release brgemm hardware context
 void brgemm_release();
@@ -612,10 +555,14 @@ namespace std {
 template <>
 struct hash<at::native::cpublas::BrgemmKey> {
   std::size_t operator()(const at::native::cpublas::BrgemmKey& key) const {
+    // Use beta, M, N, and K to compute hash to reduce the overhead as
+    // batch size, alpha, and data types are unlikely to change within the same kernel and
+    // leading dimensions are likely to be related to M, K, N or use fixed values.
     std::size_t h = std::hash<bool>()(key.beta + 1);
     h = std::hash<int64_t>()(key.M) ^ (h << 1);
     h = std::hash<int64_t>()(key.N) ^ (h << 1);
     h = std::hash<int64_t>()(key.K) ^ (h << 1);
+    h = std::hash<int64_t>()(key.ldc) ^ (h << 1);
     return h;
   }
 };
@@ -623,6 +570,9 @@ struct hash<at::native::cpublas::BrgemmKey> {
 template <>
 struct hash<at::native::cpublas::PackKey> {
   std::size_t operator()(const at::native::cpublas::PackKey& key) const {
+    // Use K and N to compute hash to reduce the overhead as
+    // data types are unlikely to change and
+    // ld_in/ld_out is likely to be related to K, N or use fixed values
     std::size_t h = std::hash<int64_t>()(key.K);
     h = std::hash<int64_t>()(key.N) ^ (h << 1);
     return h;
