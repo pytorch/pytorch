@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
+from torch._utils_internal import justknobs_check
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, trace_rules, variables
@@ -42,6 +43,12 @@ def run(fn=None):
     return RunOnlyContext()
 
 
+def _old_compile_disable_behavior():
+    return config.old_compile_disable_behavior or not justknobs_check(
+        "pytorch/compiler:compile_enable_disable"
+    )
+
+
 def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo.
@@ -57,11 +64,11 @@ def disable(fn=None, recursive=True):
     if recursive:
         ctx = (
             OldDisableContext()
-            if config.old_compile_disable_behavior
+            if _old_compile_disable_behavior()
             else CompileEnabledContext(False)
         )
         if fn is not None:
-            if config.old_compile_disable_behavior:
+            if _old_compile_disable_behavior():
                 fn = innermost_fn(fn)
             assert callable(fn)
             return ctx(fn)  # type: ignore[operator]
@@ -76,7 +83,7 @@ def enable(fn=None):
 
     Compilation will only occur if there was a previous `compile` call.
     """
-    if config.old_compile_disable_behavior:
+    if _old_compile_disable_behavior():
         return fn
     if fn is not None:
         assert callable(fn)
