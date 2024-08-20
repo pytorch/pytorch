@@ -465,9 +465,9 @@ def _maybe_insert_output_observer_for_node(
         ):
             if CUSTOM_KEY not in new_output.meta:
                 new_output.meta[CUSTOM_KEY] = {}
-            new_output.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[CUSTOM_KEY][
-                NUMERIC_DEBUG_HANDLE_KEY
-            ]
+            new_output.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
+                CUSTOM_KEY
+            ][NUMERIC_DEBUG_HANDLE_KEY]
         return new_output
     return None
 

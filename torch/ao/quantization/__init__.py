@@ -11,10 +11,10 @@ from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .pt2e._numeric_debugger import (  # noqa: F401
     compare_results,
+    CUSTOM_KEY,
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
-    CUSTOM_KEY,
     prepare_for_propagation_comparison,
 )
 from .pt2e.export_utils import (
