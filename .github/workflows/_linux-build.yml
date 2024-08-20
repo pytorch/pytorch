@@ -82,6 +82,10 @@ on:
         required: false
         description: |
           HF Auth token to avoid rate limits when downloading models or datasets from hub
+      SCRIBE_GRAPHQL_ACCESS_TOKEN:
+        required: false
+        description: |
+          FB app token to write to scribe endpoint
 
 
     outputs:

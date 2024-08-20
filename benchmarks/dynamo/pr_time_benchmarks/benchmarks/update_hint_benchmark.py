@@ -1,5 +1,6 @@
 import random
 import sys
+import logging
 
 from benchmark_base import BenchmarkBase
 
@@ -38,6 +39,8 @@ class Benchmark(BenchmarkBase):
 
 
 def main():
+    logging.basicConfig()
+    logging.getLogger("fbscribelogger").setLevel(logging.DEBUG)
     result_path = sys.argv[1]
     Benchmark().enable_instruction_count().collect_all().append_results(result_path)
 
