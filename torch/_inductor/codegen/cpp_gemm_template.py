@@ -663,8 +663,6 @@ class CppPackedGemmTemplate(CppTemplate):
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
                 # prepack the weight as input to the template buffer
-                # TODO(jgong5): prune the unused constants in V.graph
-                # Should we implement it with constant folding in the scheduler instead?
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
