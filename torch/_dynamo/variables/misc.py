@@ -780,6 +780,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
+        materialize_grads=True,
         **kwargs,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -787,6 +788,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
+        self.materialize_grads = materialize_grads
 
     @staticmethod
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
@@ -829,6 +831,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
+        if name == "set_materialize_grads":
+            assert len(args) == 1
+            self.materialize_grads = args[0].as_python_constant()
+            return variables.ConstantVariable.create(None)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -863,6 +869,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
                     self.value.needs_input_grad
                 )
+        if name == "set_materialize_grads":
+            return GetAttrVariable(self, name)
         return super().var_getattr(tx, name)
 
 

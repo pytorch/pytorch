@@ -719,6 +719,7 @@ class AutogradFunctionApply(HigherOrderOperator):
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        materialize_grads = fwd_kwargs["materialize_grads"]
         length_of_tensor_args = sum(args_tensor_mask)
         # Filter out the original tensor args from fwd_args,
         # lifted freevars should not be args of ApplyTemplate.apply
@@ -729,6 +730,8 @@ class AutogradFunctionApply(HigherOrderOperator):
             @staticmethod
             def forward(ctx, *args):
                 nonlocal saved_values
+                nonlocal materialize_grads
+                ctx.set_materialize_grads(materialize_grads)
                 output, saved_values = fwd(None, *fwd_args)
                 return output
 
