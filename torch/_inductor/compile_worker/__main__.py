@@ -31,11 +31,12 @@ def main():
         read_fd = os.fdopen(args.read_fd, "rb")
         write_fd = os.fdopen(args.write_fd, "wb")
 
-    pre_fork_setup()
+        pre_fork_setup()
 
-    _async_compile_initializer(args.parent)
-    SubprocMain(args.workers, read_fd, write_fd).main()
-
+        _async_compile_initializer(args.parent)
+        SubprocMain(args.workers, read_fd, write_fd).main()
+    except Exception:
+        log.exception("Uncaught exception in compile_worker subprocess")
 
 if __name__ == "__main__":
     main()
