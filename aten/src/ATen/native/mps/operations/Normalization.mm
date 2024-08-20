@@ -153,12 +153,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
     else
       channelsDim = num_input_dims - 1;
 
-    bool executeGatherOp = true;
-    if (self.is_contiguous(memory_format)) {
-      memory_format = MemoryFormat::Contiguous;
-      executeGatherOp = false;
-    }
-
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
       MPSGraphTensor* weightTensor = nil;
@@ -302,7 +296,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       newCachedGraph->runningVarInplaceUpdate_ = runningVarInplaceUpdate;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self, input_shape, executeGatherOp);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self, input_shape);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
