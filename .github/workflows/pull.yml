@@ -465,9 +465,6 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
@@ -482,9 +479,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
@@ -499,9 +493,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
@@ -516,9 +507,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
@@ -530,9 +518,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
@@ -544,9 +529,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.8-gcc11-mobile-lightweight-dispatch-build
