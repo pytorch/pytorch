@@ -1160,7 +1160,6 @@ void flash_attention_kernel_impl(
        k_seq_len >= 320) ||
       (query.scalar_type() == kHalf && at::native::cpublas::need_pack(kHalf) &&
        q_seq_len >= 128 && k_seq_len >= 128)) {
-    // printf("cpu_flash_attention_with_pack\n");
     AT_DISPATCH_REDUCED_FLOATING_TYPES(
         query.scalar_type(), "flash_attention", [&] {
           if (!attn_mask.has_value()) {
@@ -1240,7 +1239,6 @@ void flash_attention_kernel_impl(
         });
 
   } else {
-    // printf("cpu_flash_attention\n");
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
           if (!attn_mask.has_value()) {
