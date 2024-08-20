@@ -3307,14 +3307,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(z), fn_opt(z))
 
     def test_add_global_set(self):
-        # torch._dynamo.config.enable_cpp_guard_manager =False
+        # This fail with enable_cpp_guard_manager = True. 
+        torch._dynamo.config.enable_cpp_guard_manager =False
 
         ss = set()
-        # ss.add(1)
-        # ss.add(2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-
         @torch.compile(backend=cnts, fullgraph=True)
         def fn(x):
             ss.add("ji")
@@ -3329,31 +3327,23 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
 
         print(ss)
-        # This should  recompile.
+        # This should recompile.
         fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
-        # y = torch.ones(10)
+        # This should not recompile.
+        fn(x)
+        self.assertEqual(cnts.frame_count, 2)
 
-        # self.assertEqual(cnts.frame_count, 1)
+        # This should recompile.
+        ss.add("my name")
+        fn(x)
+        self.assertEqual(cnts.frame_count, 3)
 
-        # # The set is mutated, hence we should recompile.
-        # ss.add(torch.ones(11))
-        # print(fn(x))
-        # print(cnts.frame_count)
-        # self.assertEqual(cnts.frame_count, 2)
-
-        # opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
-        # self.assertEqual(cnts.frame_count, 1)
-
-        # # This should recompile due to change in ss.
-        # ss.add(torch.ones(100))
-        # self.assertEqual(cnts.frame_count, 2)
-
-        # self.assertEqual(opt_fn(param, param), fn(param, param))
-        # self.assertEqual(cnts.frame_count, 2)  # Recompiles
-
-        # self.assertEqual(fn(torch.ones(1)), torch.ones(1))
+         # This should recompile.
+        ss.discard("ji")
+        fn(x)
+        self.assertEqual(cnts.frame_count, 4)
 
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
