@@ -619,7 +619,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor, torch.SymInt, torch.SymFloat]
+        sign: Union[int, float, torch.Tensor]
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
