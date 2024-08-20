@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
-import base64
 import functools
-import json
 import os
 import pickle
 import unittest
@@ -42,10 +40,16 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._triton import has_triton
 
 
+try:
+    from .mock_cache import PatchCaches
+except ImportError:
+    from mock_cache import PatchCaches  # @manual
+
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
-    import triton
+    import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
 
@@ -106,6 +110,11 @@ class TestFxGraphCache(TestCase):
     def setUp(self):
         super().setUp()
         counters.clear()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
 
     def reset(self):
         torch._dynamo.reset()
@@ -168,56 +177,23 @@ class TestFxGraphCache(TestCase):
         a = torch.rand(25, dtype=dtype, device=device)
         b = torch.rand(5, 5, dtype=dtype, device=device)
 
-        cache = {}
-        num_get = 0
-        num_put = 0
-
-        class MyCache:
-            def __init__(self, key, is_autotune=False):
-                pass
-
-            def get(self, filename):
-                nonlocal cache
-                nonlocal num_get
-                if filename not in cache:
-                    return None
-                ret = json.loads(cache[filename])
-                num_get += 1
-                if config.is_fbcode():
-                    return base64.b64decode(ret["data"]) if ret is not None else ret
-                else:
-                    return base64.b64decode(ret) if ret is not None else ret
-
-            def put(self, filename, data):
-                nonlocal cache
-                nonlocal num_put
-                if config.is_fbcode():
-                    data["data"] = base64.b64encode(data["data"]).decode("ascii")
-                else:
-                    data = base64.b64encode(data).decode("ascii")
-                cache[filename] = json.dumps(data)
-                num_put += 1
-
-        cache_module = (
-            "torch._inductor.fb.remote_cache.FbRemoteFxGraphCacheBackend"
-            if config.is_fbcode()
-            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
-        )
-
         with config.patch(
             {
                 "fx_graph_cache": False,
                 "fx_graph_remote_cache": True,
             }
-        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
+        ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             for _ in range(4):
                 with fresh_inductor_cache():
                     compiled_fn = torch.compile(fn, dynamic=dynamic)
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
-            self.assertEqual(num_get, 3)
-            self.assertEqual(num_put, 1)
+
+        PatchCaches.report()
+        self.assertEqual(PatchCaches.num_get_hit, 3)
+        self.assertEqual(PatchCaches.num_get_miss, 1)
+        self.assertEqual(PatchCaches.num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
