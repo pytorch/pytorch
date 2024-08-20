@@ -3307,12 +3307,13 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(z), fn_opt(z))
 
     def test_add_global_set(self):
-        # This fail with enable_cpp_guard_manager = True. 
-        torch._dynamo.config.enable_cpp_guard_manager =False
+        # This fail with enable_cpp_guard_manager = True.
+        torch._dynamo.config.enable_cpp_guard_manager = False
 
         ss = set()
 
         cnts = torch._dynamo.testing.CompileCounter()
+
         @torch.compile(backend=cnts, fullgraph=True)
         def fn(x):
             ss.add("ji")
@@ -3340,7 +3341,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         fn(x)
         self.assertEqual(cnts.frame_count, 3)
 
-         # This should recompile.
+        # This should recompile.
         ss.discard("ji")
         fn(x)
         self.assertEqual(cnts.frame_count, 4)
