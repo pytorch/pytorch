@@ -1002,16 +1002,8 @@ class BuiltinVariable(VariableTracker):
         if self.fn is object and name == "__new__":
             assert len(args) == 1
             assert len(kwargs) == 0
-            user_defined_class_variable = args[0]
-            source = user_defined_class_variable.source
-            value = user_defined_class_variable.value
-            return tx.output.side_effects.track_object_new(
-                source,
-                value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                args[0]
             )
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
