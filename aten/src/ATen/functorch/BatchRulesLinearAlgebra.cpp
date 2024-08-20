@@ -486,6 +486,51 @@ pinv_batch_rule(
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
 }
 
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_flash_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  c10::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  const auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
+      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale);
+
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  const auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  const auto res2_ = reshape_dim_outof(0, batch_size, res2);
+  const auto res3_ = reshape_dim_outof(0, batch_size, res3);
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  const auto res8_ = return_debug_mask ? reshape_dim_outof(0, batch_size, res8) : res8;
+
+  return std::make_tuple(
+    res0_, 0,
+    res1_, 0,
+    res2_, 0,
+    res3_, 0,
+    res4,
+    res5,
+    res6, std::nullopt,
+    res7, std::nullopt,
+    res8_, return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
 fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   const Tensor& query, optional<int64_t> query_bdim,
   const Tensor& key, optional<int64_t> key_bdim,
@@ -496,20 +541,13 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   bool is_causal,
   c10::optional<double> scale
 ) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
   auto query_ = moveBatchDimToFront(query, query_bdim);
   auto key_ = moveBatchDimToFront(key, key_bdim);
   auto value_ = moveBatchDimToFront(value, value_bdim);
-  int64_t extra_batch_size = 1;
-  if (query_bdim.has_value()) {
-    extra_batch_size = query.size(0);
-  } else if (key_bdim.has_value()) {
-    extra_batch_size = key.size(0);
-  } else if (value_bdim.has_value()) {
-    extra_batch_size = value.size(0);
-  }
-  query_ = query_.expand({extra_batch_size, query_.size(-4), query_.size(-3), query_.size(-2), query_.size(-1)});
-  key_ = key_.expand({extra_batch_size, key_.size(-4), key_.size(-3), key_.size(-2), key_.size(-1)});
-  value_ = value_.expand({extra_batch_size, value_.size(-4), value_.size(-3), value_.size(-2), value_.size(-1)});
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
 
   query_ = query_.flatten(0, 1);
   key_ = key_.flatten(0, 1);
@@ -521,7 +559,6 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   }
   const auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
       query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, scale);
-  const auto batch_size = extra_batch_size;
   const auto res0_ = reshape_dim_outof(0, batch_size, res0);
   const auto res1_ = reshape_dim_outof(0, batch_size, res1);
   // philox seed is always non-batched
@@ -656,6 +693,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+
+  // VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
