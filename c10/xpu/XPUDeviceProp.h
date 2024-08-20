@@ -136,6 +136,22 @@ namespace c10::xpu {
   /* 64-bit atomic operation is supported on device. */ \
   _(atomic64)
 
+#define AT_FORALL_XPU_EXP_CL_ASPECT(_)                                         \
+  /* conversion between single-precision 32-bit floating-point values and      \
+   * 16-bit bfloat16 values is supported on device. */                         \
+  _(bfloat16_conversions)                                                      \
+                                                                               \
+  /* specialized hardware to compute MMA is supported on device. */            \
+  _(subgroup_matrix_multiply_accumulate)                                       \
+                                                                               \
+  /* specialized hardware to compute MMA for 32-bit floating-point is          \
+   * supported on device. */                                                   \
+  _(subgroup_matrix_multiply_accumulate_tensor_float32)                        \
+                                                                               \
+  /* block read operations for efficient matrix multiplication is supported on \
+   * device. */                                                                \
+  _(subgroup_2d_block_io)
+
 #define _DEFINE_SYCL_PROP(ns, property, member) \
   ns::property::return_type member;
 
@@ -159,6 +175,8 @@ struct C10_XPU_API DeviceProp {
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
 
   AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
+
+  AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT);
 };
 
 #undef _DEFINE_SYCL_PROP
