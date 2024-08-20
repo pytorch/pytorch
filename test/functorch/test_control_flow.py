@@ -1,7 +1,6 @@
 # Owner(s): ["module: functorch"]
 import contextlib
 import functools
-import importlib
 import unittest
 
 import torch
@@ -1209,10 +1208,8 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_simple(
-        self, reverse, combine_mode, device
-    ):
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_pointwise_associative_scan_simple(self, reverse, combine_mode, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1220,6 +1217,14 @@ def forward(self, pred_1, x_1):
             return x * y
 
         x = torch.randn(3, 10, 2, device=device)
+
+        if combine_mode == "pointwise" and device == torch.device("cpu"):
+            with self.assertRaisesRegex(Exception, r"."):
+                associative_scan(add, x, 0, reverse=reverse, combine_mode=combine_mode)
+
+            # Skipping test because combine_mode currently only suppors CUDA tensors
+            return
+
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = associative_scan(
                 op, x, 0, reverse=reverse, combine_mode=combine_mode
@@ -1247,10 +1252,8 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_dim(
-        self, reverse, combine_mode, device
-    ):
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_pointwise_associative_scan_dim(self, reverse, combine_mode, device):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1264,6 +1267,15 @@ def forward(self, pred_1, x_1):
             shapes = [random.randint(1, 10) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device)
+
+            if combine_mode == "pointwise" and device == torch.device("cpu"):
+                with self.assertRaisesRegex(Exception, r"."):
+                    associative_scan(
+                        add, x, 0, reverse=reverse, combine_mode=combine_mode
+                    )
+
+                # Skipping test because combine_mode currently only suppors CUDA tensors
+                return
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
                 result = associative_scan(
@@ -1282,8 +1294,8 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_compile(
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_pointwise_associative_scan_compile(
         self, reverse, combine_mode, compile_mode, device
     ):
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1302,6 +1314,15 @@ def forward(self, pred_1, x_1):
             associative_scan_fct = torch.compile(
                 associative_scan, fullgraph=True, dynamic=True
             )
+
+        if combine_mode == "pointwise" and device == torch.device("cpu"):
+            with self.assertRaisesRegex(Exception, r"."):
+                associative_scan_fct(
+                    add, x, 0, reverse=reverse, combine_mode=combine_mode
+                )
+
+            # Skipping test because combine_mode currently only suppors CUDA tensors
+            return
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = associative_scan_fct(
@@ -1331,17 +1352,12 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @unittest.skipIf(not importlib.util.find_spec("jax"), "Test requires JAX.")
-    @unittest.skipIf(not importlib.util.find_spec("numpy"), "Test requires NumPy.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_pointwise_associative_scan_binary_operator(
         self, reverse, combine_mode, device
     ):
-        import jax
-        import numpy as np
-
         def fct(x, y):
             A_i, Bu_i = x
             A_j, Bu_j = y
@@ -1358,7 +1374,15 @@ def forward(self, pred_1, x_1):
         )
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
-        elements_jax = tuple([el.cpu().detach().numpy() for el in elements])
+
+        if combine_mode == "pointwise" and device == torch.device("cpu"):
+            with self.assertRaisesRegex(Exception, r"."):
+                associative_scan1(
+                    fct, elements, 0, combine_mode=combine_mode, reverse=reverse
+                )
+
+            # Skipping test because combine_mode currently only suppors CUDA tensors
+            return
 
         result1 = associative_scan1(
             fct, elements, 0, combine_mode=combine_mode, reverse=reverse
@@ -1366,15 +1390,15 @@ def forward(self, pred_1, x_1):
         result2 = associative_scan2(
             fct, elements, 0, combine_mode=combine_mode, reverse=reverse
         )
-        expected_result = jax.lax.associative_scan(fct, elements_jax, reverse=reverse)
+        expected_result = _fake_associative_scan(fct, elements, 0, reverse=reverse)
         self.assertEqual(
-            [r.cpu().detach().numpy() for r in result1],
-            [np.array(r) for r in expected_result],
+            result1,
+            expected_result,
         )
         self.assertEqual([r.device.type for r in result1], [device.type] * len(result1))
         self.assertEqual(
-            [r.cpu().detach().numpy() for r in result2],
-            [np.array(r) for r in expected_result],
+            result2,
+            expected_result,
         )
         self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
 
@@ -1382,7 +1406,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_pointwise_associative_scan_tuple(self, reverse, combine_mode, device):
         def fct(x, y):
             return (x[0] + y[0], x[1] * y[1])
@@ -1390,6 +1414,15 @@ def forward(self, pred_1, x_1):
         x = torch.randn(3, 2, 2, device=device, requires_grad=True)
         y = torch.randn(3, 2, 2, device=device, requires_grad=True)
         inp = (x, y)
+
+        if combine_mode == "pointwise" and device == torch.device("cpu"):
+            with self.assertRaisesRegex(Exception, r"."):
+                associative_scan(
+                    fct, inp, 0, reverse=reverse, combine_mode=combine_mode
+                )
+
+            # Skipping test because combine_mode currently only suppors CUDA tensors
+            return
 
         result1 = associative_scan(
             fct, inp, 0, reverse=reverse, combine_mode=combine_mode
@@ -1401,7 +1434,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_pointwise_associative_scan_complex_pytree(
         self, reverse, combine_mode, device
     ):
@@ -1433,6 +1466,15 @@ def forward(self, pred_1, x_1):
         associative_scan1 = torch.compile(associative_scan, fullgraph=True)
         associative_scan2 = associative_scan
 
+        if combine_mode == "pointwise" and device == torch.device("cpu"):
+            with self.assertRaisesRegex(Exception, r"."):
+                associative_scan1(
+                    fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
+                )
+
+            # Skipping test because combine_mode currently only suppors CUDA tensors
+            return
+
         result1 = associative_scan1(
             fct_pointwise, inp, 0, combine_mode=combine_mode, reverse=reverse
         )
@@ -1446,7 +1488,7 @@ def forward(self, pred_1, x_1):
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_generic_associative_scan_generic_simple(self, reverse, device):
         def non_pointwise(x: torch.Tensor, y: torch.Tensor):
             W = torch.diag(torch.ones(2, device=device))
