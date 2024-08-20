@@ -1246,6 +1246,35 @@ int computeDeltaMS(
       .count();
 }
 
+std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutErrorMsg(
+    const std::string& extraMsg) {
+  return c10::str(
+      logPrefix(),
+      "Received a dump signal from ",
+      extraMsg,
+      " and will ",
+      "start to dump the debug info. ",
+      "Last enqueued NCCL work: ",
+      pgStatus_->lastEnqueuedSeq,
+      ", last completed NCCL work: ",
+      pgStatus_->lastCompletedSeq,
+      ".");
+}
+
+std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg(
+    const std::string& extraMsg) {
+  return c10::str(
+      "ProcessGroupNCCL's watchdog detected an exception from ",
+      extraMsg,
+      ". ",
+      "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
+      "sizes used across ranks, the order of collectives is not same for all ranks ",
+      "or the scheduled collective, for some reason, didn't run. Additionally, ",
+      "this can be caused by GIL deadlock or other reasons such as network errors or ",
+      "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
+      "dump the debug info into the storage to help you debug the issue.");
+}
+
 void ProcessGroupNCCL::heartbeatMonitor() {
   c10::setThreadName("pt_nccl_heartbt");
 
@@ -1288,29 +1317,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // TCPStore from all PGs on the same rank.
     if (checkDumpSignal) {
       // There are two scenarios where monitor thread will dump on timeout:
-      // 1. The local rank is the first to observe a timeout.shouldDump_ will be
-      // set to true.
-      // 2. other ranks detected the timeout and signal the local rank to dump
-      // In addtion, monitor threads will dump if watchdog threads has no
+      // 1. The current rank is the first to observe a timeout in watchdog.
+      // (shouldDump_ was set to true by the watchdog thread).
+      // 2. Other ranks detected the timeout and signal the current rank to
+      // dump. In addtion, monitor threads will dump if watchdog threads has no
       // heartbeat or dumpPipe is not empty.
       if (shouldDump_.load()) {
-        errorMsg = c10::str(
-            logPrefix(),
-            "Received a dump signal from this local rank and will ",
-            "start to dump the debug info. ",
-            "Last enqueued NCCL work: ",
-            pgStatus_->lastEnqueuedSeq,
-            ", last completed NCCL work: ",
-            pgStatus_->lastCompletedSeq,
-            ".");
-        exitMsg = c10::str(
-            "ProcessGroupNCCL's watchdog detected an exception from the local rank. ",
-            "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
-            "sizes used across ranks, the order of collectives is not same for all ranks ",
-            "or the scheduled collective, for some reason, didn't run. Additionally, ",
-            "this can be caused by GIL deadlock or other reasons such as network errors or ",
-            "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
-            "dump the debug info into the storage to help you debug the issue.");
+        errorMsg = getNCCLWatchdogTimeoutErrorMsg("this local rank");
+        exitMsg = getNCCLWatchdogTimeoutExitMsg("this local rank");
         break;
       }
       // We poll store to see if some ranks have flagged a timeout when
@@ -1330,7 +1344,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         } catch (const std::exception& e) {
           LOG(ERROR)
               << logPrefix()
-              << "Failed to get exception dump flag from the global store."
+              << "Failed to check the \"should dump\" flag on TCPStore, "
+              << "(maybe TCPStore server has shut down too early), with error: "
               << e.what();
           // We give up for now assuming TCPStore has been torn down.
           return;
@@ -1341,7 +1356,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           if (!shouldDump_.load()) {
             LOG(ERROR)
                 << logPrefix()
-                << "First PG on this rank detecting the dump signal through tcpstore.";
+                << "Observed flight recorder dump signal from another rank via TCPStore.";
           }
           shouldDump_.store(true);
           try {
@@ -1353,29 +1368,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             std::memcpy(&timeOutRank, vec.data(), vec.size());
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
-                       << "Failed to get timeout rank ID from the global store."
+                       << "Failed to get timeout rank ID from TCPStore."
                        << e.what();
           }
-          errorMsg = c10::str(
-              logPrefix(),
-              "Received a global dump signal from rank ",
-              timeOutRank,
-              ", and will start to dump the debug info. ",
-              "Last enqueued NCCL work: ",
-              pgStatus_->lastEnqueuedSeq,
-              ", last completed NCCL work: ",
-              pgStatus_->lastCompletedSeq,
-              ".");
-          exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a dump signal from rank ",
-              timeOutRank,
-              " and notified the current rank. ",
-              "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
-              "sizes used across ranks, the order of collectives is not same for all ranks ",
-              "or the scheduled collective, for some reason, didn't run. Additionally, ",
-              "this can be caused by GIL deadlock or other reasons such as network errors or ",
-              "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
-              "dump the debug info into the storage to help you debug the issue.");
+          auto rankMsg = c10::str(" rank ", timeOutRank);
+          errorMsg = getNCCLWatchdogTimeoutErrorMsg(rankMsg);
+          exitMsg = getNCCLWatchdogTimeoutExitMsg(rankMsg);
           break;
         }
       }
@@ -1389,18 +1387,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
-        if (!shouldDump_.load()) {
-          LOG(ERROR)
-              << logPrefix()
-              << "First PG on this rank that detected no heartbeat of its watchdog.";
-        }
         shouldDump_.store(true);
-        // No heartbeat increase detected and timeout.
+        // No watchdog heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
-            "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
-            " workMetaList_.size()=",
-            workMetaList_.size());
+            "No heartbeat detected for watchdog thread, ",
+            "which indicates the watchdog is unable to ",
+            "keep monitoring collective timeouts; likely ",
+            "because it deadlocked when calling into a CUDA api (e.g., CudaEventDestroy).");
         exitMsg = c10::str(
             "ProcessGroupNCCL's watchdog got stuck for ",
             heartbeatTimeoutInSec_,
@@ -1744,7 +1738,7 @@ void ProcessGroupNCCL::watchdogHandler() {
                   << logPrefix()
                   << "First watchdog to set the dump signal to TCPStore.";
             }
-            // signal the monitor thread to start dumping
+            // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
             // This sleep is used to give time for dumping before throwing
             // exception
