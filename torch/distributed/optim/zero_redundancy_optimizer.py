@@ -107,7 +107,7 @@ def _broadcast_object(
         )
         dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
         buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
-        obj = torch.load(buffer, map_location=device)
+        obj = torch.load(buffer, map_location=device, weights_only=False)
     return obj
 
 

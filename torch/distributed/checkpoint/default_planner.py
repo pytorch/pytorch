@@ -209,10 +209,12 @@ class DefaultLoadPlanner(LoadPlanner):
             set_element(
                 self.original_state_dict,
                 self.mappings[read_item.dest_index.fqn],
-                torch.load(value),
+                torch.load(value, weights_only=False),
             )
         else:
-            self.state_dict[read_item.dest_index.fqn] = torch.load(value)
+            self.state_dict[read_item.dest_index.fqn] = torch.load(
+                value, weights_only=False
+            )
 
     def resolve_tensor(self, read_item: ReadItem):
         tensor = self.lookup_tensor(read_item.dest_index)
