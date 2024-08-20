@@ -512,8 +512,7 @@ _scaled_dot_product_flash_attention_batch_rule(
 
   const auto res0_ = reshape_dim_outof(0, batch_size, res0);
   const auto res1_ = reshape_dim_outof(0, batch_size, res1);
-  const auto res2_ = reshape_dim_outof(0, batch_size, res2);
-  const auto res3_ = reshape_dim_outof(0, batch_size, res3);
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
   // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
   // res6 and res7 (philox seed and offset) are always non-batched
   const auto res8_ = return_debug_mask ? reshape_dim_outof(0, batch_size, res8) : res8;
@@ -521,8 +520,8 @@ _scaled_dot_product_flash_attention_batch_rule(
   return std::make_tuple(
     res0_, 0,
     res1_, 0,
-    res2_, 0,
-    res3_, 0,
+    res2, std::nullopt,
+    res3, std::nullopt,
     res4,
     res5,
     res6, std::nullopt,
@@ -694,7 +693,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
 
-  // VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 

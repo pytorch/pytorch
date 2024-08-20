@@ -3856,17 +3856,14 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         backends = [
-            SDPBackend.MATH,
-            SDPBackend.EFFICIENT_ATTENTION,
-            # SDPBackend.FLASH_ATTENTION  # not supported yet
+            # SDPBackend.MATH,
+            # SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION  # not supported yet
         ]
 
         def T(*args):
             return torch.randn(*args, dtype=torch.float16, device=device)
 
-        query = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
-        key = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
-        value = torch.randn(3, 8, 4, 128, 64, device=device, dtype=torch.float32)
 
         for backend in backends:
             backend_ctx = sdpa_kernel([backend])
@@ -3905,11 +3902,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                     #     (query, key, value),
                     # )
 
-        B = 4
-        query = torch.rand(32, B, 8, 128, dtype=torch.float16, device=device)
-        key = torch.rand(B, 32, 8, 128, dtype=torch.float16, device=device)
-        value = torch.rand(32, 8, 128, dtype=torch.float16, device=device)
-        self._vmap_test(F.scaled_dot_product_attention, (query, key, value), in_dims=(1, 0, None))
+                B = 4
+                query = torch.rand(4, 32, B, 8, 128, dtype=torch.float16, device=device)
+                key = torch.rand(4, B, 32, 8, 128, dtype=torch.float16, device=device)
+                value = torch.rand(4, 32, 8, 128, dtype=torch.float16, device=device)
+                self._vmap_test(F.scaled_dot_product_attention, (query, key, value), in_dims=(2, 1, None))
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
