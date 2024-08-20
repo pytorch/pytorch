@@ -111,15 +111,6 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                     )
                 ),
             ),
-            (
-                OrtBackendOptions(
-                    use_aot_autograd=False,
-                    export_options=ExportOptions(
-                        op_level_debug=True,
-                        dynamic_shapes=True,
-                    ),
-                ),
-            ),
         ]
     )
     def test_torch_compile_backend_caching_assert_reused(

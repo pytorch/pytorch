@@ -110,6 +110,22 @@ class TestXpu(TestCase):
         self.assertEqual(
             device_properties.has_atomic64, device_capability["has_atomic64"]
         )
+        self.assertEqual(
+            device_properties.has_bfloat16_conversions,
+            device_capability["has_bfloat16_conversions"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate,
+            device_capability["has_subgroup_matrix_multiply_accumulate"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+        )
+        self.assertEqual(
+            device_properties.has_subgroup_2d_block_io,
+            device_capability["has_subgroup_2d_block_io"],
+        )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
