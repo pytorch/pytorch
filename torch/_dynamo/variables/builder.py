@@ -11,6 +11,7 @@ import itertools
 import logging
 import math
 import operator
+import random
 import re
 import sys
 import types
@@ -162,6 +163,8 @@ from .misc import (
     NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     SavedTensorBox,
     TorchVersionVariable,
@@ -869,14 +872,20 @@ class VariableBuilder:
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
 
-            value_hint = value.node.require_hint()
             new_source = ConvertIntSource(self.source)
+            if value.node.has_hint():
+                value_hint = value.node.require_hint()
 
-            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                int(value_hint),
-                new_source,
-                dynamic_dim=DimDynamic.DYNAMIC,
-            )
+                new_symint = (
+                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                        int(value_hint),
+                        new_source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    )
+                )
+            else:
+                # We need to create an unbacked symint to replace the unbacked symbool.
+                new_symint = self.tx.output.shape_env.create_unbacked_symint()
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -892,6 +901,8 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
+            # We bind the new_symint to graph input.
+            set_example_value(sym_node_proxy.node, new_symint)
             self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
@@ -939,6 +950,16 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif value is random.Random:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return RandomClassVariable(source=self.source)
+        elif istype(value, random.Random) and RandomVariable.is_supported_random_obj(
+            value
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = RandomVariable(value, source=self.source)
+            self.tx.output.side_effects.track_mutable(value, result)
+            return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
@@ -2736,6 +2757,7 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         handlers[
