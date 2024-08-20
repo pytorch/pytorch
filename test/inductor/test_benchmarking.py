@@ -137,7 +137,7 @@ class TestBenchmarker(TestCase):
         many_devices_kwargs.update(gpu_kwargs)
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
 
-    @config.patch({"is_fbcode": lambda: False})
+    @unittest.skipIf(config.is_fbcode(), "test does not run in fbcode")
     @parametrize(
         "benchmarker_cls,feature_name", [(InductorBenchmarker, "inductor_benchmarker"), (InductorGroupedBenchmarker, "inductor_grouped_benchmarker")]
     )
