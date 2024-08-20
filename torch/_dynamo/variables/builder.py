@@ -540,7 +540,7 @@ class VariableBuilder:
             result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, set):
-            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
             result = ConstantVariable.create(value=value)
             return self.set_source_and_track_mutable(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
