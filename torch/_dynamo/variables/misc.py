@@ -170,11 +170,15 @@ class SuperVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 self.objvar
             )
-        elif isinstance(inner_fn, staticmethod):
+        elif isinstance(inner_fn, staticmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
             return variables.UserFunctionVariable(
                 inner_fn.__func__, source=source
             ).call_function(tx, args, kwargs)
-        elif isinstance(inner_fn, classmethod):
+        elif isinstance(inner_fn, classmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
             return variables.UserMethodVariable(
                 inner_fn.__func__, self.objvar, source=source
             ).call_function(tx, args, kwargs)
