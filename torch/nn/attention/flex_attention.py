@@ -849,6 +849,29 @@ def _apply_kernel_options(query, key, value, kernel_options):
     return kernel_options
 
 
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+    def _is_power_of_2(n):
+        return n != 0 and ((n & (n - 1)) == 0)
+
+    if query.size(-1) != key.size(-1):
+        raise ValueError(
+            f"Expect query and key/value to have the same embedding dimension "
+            f"but got E={query.size(-1)} and E={key.size(-1)}."
+        )
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    if not (_is_power_of_2(query.size(-1)) and _is_power_of_2(value.size(-1))):
+        raise ValueError(
+            f"NYI: Currently non power of 2 embedding dimension are not supported. "
+            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
+        )
+    if value.size(-1) > query.size(-1):
+        raise ValueError(
+            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
+            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
+        )
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -914,6 +937,7 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    _validate_embed_dim(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
