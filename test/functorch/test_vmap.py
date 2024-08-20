@@ -3858,12 +3858,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         backends = [
             SDPBackend.MATH,
             SDPBackend.EFFICIENT_ATTENTION,
-            SDPBackend.FLASH_ATTENTION 
+            SDPBackend.FLASH_ATTENTION,
         ]
 
         def T(*args):
             return torch.randn(*args, dtype=torch.float16, device=device)
-
 
         for backend in backends:
             backend_ctx = sdpa_kernel([backend])
@@ -3906,7 +3905,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 query = torch.rand(4, 32, B, 8, 128, dtype=torch.float16, device=device)
                 key = torch.rand(4, B, 32, 8, 128, dtype=torch.float16, device=device)
                 value = torch.rand(4, 32, 8, 128, dtype=torch.float16, device=device)
-                self._vmap_test(F.scaled_dot_product_attention, (query, key, value), in_dims=(2, 1, None))
+                self._vmap_test(
+                    F.scaled_dot_product_attention,
+                    (query, key, value),
+                    in_dims=(2, 1, None),
+                )
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
