@@ -972,7 +972,7 @@ class PythonSysModulesVariable(VariableTracker):
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         from .builder import VariableBuilder
 
-        k, has_key = self._contains_helper(tx, key)
+        k, _ = self._contains_helper(tx, key)
         return VariableBuilder(
             tx,
             GetItemSource(self.source, k),
