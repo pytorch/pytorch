@@ -19,7 +19,12 @@ from torch._guards import TracingContext
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import ObservedAttributeError, raise_observed_exception, unimplemented
+from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
+    raise_observed_exception,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -1102,7 +1107,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 not isinstance(var_vt, variables.DeletedVariable)
             )
         except ObservedAttributeError:
-            # handle_observed_exception(tx)
+            handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
