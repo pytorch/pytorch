@@ -509,7 +509,9 @@ flex_attention_template = TritonTemplate(
 
 def _use_flex_decoding(query):
     # Decide which kernel to use, return true if use flex decoding kernel.
-    return V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    return (not config.force_use_flex_attention) and V.graph.sizevars.evaluate_expr(
+        sympy.Lt(query.get_size()[-2], 128)
+    )
 
 
 _h100_default_config = {

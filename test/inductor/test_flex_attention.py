@@ -525,6 +525,30 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
+    @supported_platform
+    @patch.object(torch._inductor.config, "force_use_flex_attention", True)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        # _DEFAULT_SPARSE_BLOCK_SIZE is 128
+        self.run_test(score_mod, dtype, B, H, 64, D, B, H, 64, D)
+
+    @supported_platform
+    @patch.object(torch._inductor.config, "force_use_flex_attention", True)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(causal_mask, 1, 1, S, S, BLOCK_SIZE=256)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+        self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
+
     @expectedFailure  # TODO: supports block sparsity with dynamic shapes
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
