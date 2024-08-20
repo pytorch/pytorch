@@ -1346,9 +1346,11 @@ class FxGraphCache:
                     ) != 0:
                         cache_info["ephemeral_timeout_increase"] = ephemeral_increase
             compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache:
+        except BypassFxGraphCache as e:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             cache_state = "bypass"
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            cache_info["cache_bypass_reason"] = str(e)
             cache_event_time = time_ns()
             if not compiled_graph:
                 compiled_graph = compile_fx_fn(
@@ -2225,7 +2227,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
