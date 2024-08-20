@@ -11,7 +11,6 @@ import itertools
 import logging
 import math
 import operator
-import random
 import re
 import sys
 import types
@@ -163,18 +162,12 @@ from .misc import (
     NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
-    RandomClassVariable,
-    RandomVariable,
     RegexPatternVariable,
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
 )
-from .nn_module import (
-    FSDPManagedNNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
@@ -186,11 +179,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
-from .torch_function import (
-    build_torch_function_fn,
-    TensorWithTFOverrideVariable,
-    TorchFunctionModeVariable,
-)
+from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -615,10 +604,6 @@ class VariableBuilder:
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
-        elif isinstance(value, torch.overrides.TorchFunctionMode):
-            var = TorchFunctionModeVariable(value, source=self.source)
-            self.tx.output.side_effects.track_object_existing(value, var)
-            return var
         elif istype(value, frozenset) and (
             ConstantVariable.is_literal(x) for x in value
         ):
@@ -880,20 +865,14 @@ class VariableBuilder:
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
 
+            value_hint = value.node.require_hint()
             new_source = ConvertIntSource(self.source)
-            if value.node.has_hint():
-                value_hint = value.node.require_hint()
 
-                new_symint = (
-                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value_hint),
-                        new_source,
-                        dynamic_dim=DimDynamic.DYNAMIC,
-                    )
-                )
-            else:
-                # We need to create an unbacked symint to replace the unbacked symbool.
-                new_symint = self.tx.output.shape_env.create_unbacked_symint()
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                int(value_hint),
+                new_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -909,8 +888,6 @@ class VariableBuilder:
                 is_tensor=False,
                 example_strong_ref=new_symint,
             )
-            # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
             self.tx.output.bound_symbols.add(new_symint.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
@@ -958,16 +935,6 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif value is random.Random:
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return RandomClassVariable(source=self.source)
-        elif istype(value, random.Random) and RandomVariable.is_supported_random_obj(
-            value
-        ):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = RandomVariable(value, source=self.source)
-            self.tx.output.side_effects.track_mutable(value, result)
-            return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
@@ -1324,11 +1291,7 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
-            else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
-
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -1357,7 +1320,6 @@ class VariableBuilder:
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
                 or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
@@ -1398,12 +1360,7 @@ class VariableBuilder:
         if (
             config.inline_inbuilt_nn_modules
             and not is_static_input
-            and (
-                isinstance(value, torch.nn.Parameter)
-                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
-                # compatible with previous behavior.
-                or (source and source.guard_source().is_unspecialized_nn_module())
-            )
+            and isinstance(value, torch.nn.Parameter)
         ):
             self.mark_static_input(value, guard=False)
 
@@ -2596,9 +2553,7 @@ def wrap_to_fake_tensor_and_record(
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
-            e,
-            is_tensor,
-            tensor_source=source,
+            e, is_tensor, guard_source=source.guard_source()
         )
 
         if not parent_context:
@@ -2777,7 +2732,6 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
-        handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         handlers[
