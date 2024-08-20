@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
-import base64
 import functools
-import json
 import os
 import pickle
 import unittest
@@ -22,14 +20,12 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import (
-    expectedFailureXPU,
-    largeTensorTest,
-)
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -44,10 +40,16 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._triton import has_triton
 
 
+try:
+    from .mock_cache import patch_fbcode, PatchCaches
+except ImportError:
+    from mock_cache import PatchCaches  # @manual
+
+
 HAS_TRITON = has_triton()
 
 if HAS_TRITON:
-    import triton
+    import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
 
@@ -108,6 +110,11 @@ class TestFxGraphCache(TestCase):
     def setUp(self):
         super().setUp()
         counters.clear()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
 
     def reset(self):
         torch._dynamo.reset()
@@ -170,56 +177,23 @@ class TestFxGraphCache(TestCase):
         a = torch.rand(25, dtype=dtype, device=device)
         b = torch.rand(5, 5, dtype=dtype, device=device)
 
-        cache = {}
-        num_get = 0
-        num_put = 0
-
-        class MyCache:
-            def __init__(self, key, is_autotune=False):
-                pass
-
-            def get(self, filename):
-                nonlocal cache
-                nonlocal num_get
-                if filename not in cache:
-                    return None
-                ret = json.loads(cache[filename])
-                num_get += 1
-                if config.is_fbcode():
-                    return base64.b64decode(ret["data"]) if ret is not None else ret
-                else:
-                    return base64.b64decode(ret) if ret is not None else ret
-
-            def put(self, filename, data):
-                nonlocal cache
-                nonlocal num_put
-                if config.is_fbcode():
-                    data["data"] = base64.b64encode(data["data"]).decode("ascii")
-                else:
-                    data = base64.b64encode(data).decode("ascii")
-                cache[filename] = json.dumps(data)
-                num_put += 1
-
-        cache_module = (
-            "torch._inductor.fb.remote_cache.FbRemoteFxGraphCacheBackend"
-            if config.is_fbcode()
-            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
-        )
-
         with config.patch(
             {
                 "fx_graph_cache": False,
                 "fx_graph_remote_cache": True,
             }
-        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
+        ), patch.dict(os.environ), PatchCaches():
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             for _ in range(4):
                 with fresh_inductor_cache():
                     compiled_fn = torch.compile(fn, dynamic=dynamic)
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
-            self.assertEqual(num_get, 3)
-            self.assertEqual(num_put, 1)
+
+        PatchCaches.report()
+        self.assertEqual(PatchCaches.num_get_hit, 3)
+        self.assertEqual(PatchCaches.num_get_miss, 1)
+        self.assertEqual(PatchCaches.num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -443,39 +417,51 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
-    @expectedFailureXPU
-    @requires_gpu()
-    @requires_triton()
-    @config.patch({"max_autotune": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_inductor_counters(self):
         """
         Test that we bump the inductor counters on a cache hit.
         """
+        compile_to_fn = GraphLowering.compile_to_fn
 
-        def fn(a, b):
-            return torch.mm(a, b)
+        counter_name = "a_test_counter"
+        counter_incr = 7
 
-        a = torch.rand(8, 32, device=GPU_TYPE)
-        b = torch.rand(32, 8, device=GPU_TYPE)
+        def bump_counter(self):
+            # Mock that bumps some arbitrary test counter by a set amount, then calls
+            # the original GraphLowering.compile_to_fn.
+            counters["inductor"][counter_name] += counter_incr
+            return compile_to_fn(self)
 
-        compiled_fn = torch.compile(fn)
+        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
 
-        counters.clear()
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+            def fn(a, b):
+                return torch.mm(a, b)
 
-        # Verify the "miss" case.
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            a = torch.rand(8, 32, device="cpu")
+            b = torch.rand(32, 8, device="cpu")
 
-        # Verify the "hit" case
-        self.reset()
-        counters.clear()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            compiled_fn = torch.compile(fn)
+
+            # Verify the "miss" case.
+            counter_val = 2
+            counters["inductor"][counter_name] = counter_val
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(
+                counters["inductor"][counter_name], counter_val + counter_incr
+            )
+
+            # Verify the "hit" case.
+            self.reset()
+            counter_val = 5
+            counters["inductor"][counter_name] = counter_val
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(
+                counters["inductor"][counter_name], counter_val + counter_incr
+            )
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -788,6 +774,63 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+@instantiate_parametrized_tests
+class TestAutotuneCache(TestCase):
+    device_type = GPU_TYPE
+
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    def reset(self):
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": False})
+    @config.patch({"autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
+    def test_autotune_cache(self, fbcode: bool):
+        if not fbcode:
+            self.skipTest("Redis for autotune is currently broken")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, a, b):
+                return x + y, a + b
+
+        def f(x, y, a, b):
+            return Model()(x, y, a, b)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+        a = torch.randn(1000, 100).cuda()
+        b = torch.randn(1000, 100).cuda()
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        with PatchCaches(), patch_fbcode(fbcode):
+            f_compiled(x, y, a, b)
+
+            PatchCaches.update()
+            self.assertEqual(PatchCaches.num_get_hit, 0)
+            self.assertEqual(PatchCaches.num_get_miss, 2)
+            self.assertEqual(PatchCaches.num_put, 2)
+
+            self.reset()
+            f_compiled(x, y, a, b)
+
+        PatchCaches.report()
+        self.assertEqual(PatchCaches.num_get_hit, 2)
+        self.assertEqual(PatchCaches.num_get_miss, 2)
+        self.assertEqual(PatchCaches.num_put, 2)
 
 
 class TestUtils(TestCase):
