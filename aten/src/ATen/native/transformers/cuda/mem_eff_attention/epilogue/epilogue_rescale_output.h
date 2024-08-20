@@ -144,10 +144,7 @@ class MemoryEfficientAttentionNormalize {
     multiplies<ComputeFragment> mul_add_source;
     multiply_add<ComputeFragment> mul_add_accumulator;
 
-    // Row sums for full masked out rows are 0, we set them to 1
-    // In order to avoid NaNs in the output and instead sem them to 0.
-    ElementCompute denom = s_prime_[row] == 0 ? 1 : s_prime_[row];
-    ElementCompute alpha = isLast ? (1 / denom) : 1;
+    ElementCompute alpha = isLast ? (1 / s_prime_[row]) : 1;
     ElementCompute beta = alpha * m_prime_[row];
 
     intermediate = mul_add_source(beta, converted_source); // X =  beta * C
@@ -177,10 +174,7 @@ class MemoryEfficientAttentionNormalize {
     ComputeFragment intermediate;
     multiplies<ComputeFragment> mul_accumulator;
 
-    // Row sums for full masked out rows are 0, we set them to 1
-    // In order to avoid NaNs in the output and instead sem them to 0.
-    ElementCompute denom = s_prime_[row] == 0 ? 1 : s_prime_[row];
-    ElementCompute alpha = isLast ? (1 / denom) : 1;
+    ElementCompute alpha = isLast ? (1 / s_prime_[row]) : 1;
 
     intermediate = mul_accumulator(
         alpha, converted_accumulator); // X =  alpha * C + uniform

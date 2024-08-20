@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import itertools
 import os
 import unittest
 
@@ -219,6 +220,28 @@ class TestPatternMatcher(TestCase):
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(mixed_mm_choice="triton")
+    def test_mixed_mm_exhaustive_dtypes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        dtypes_left = [torch.float16, torch.float32, torch.bfloat16]
+        dtypes_right = [torch.int8, torch.uint8]
+        dtype_ranges = {torch.uint8: (0, 255), torch.int8: (-128, 127)}
+        for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
+            low, high = dtype_ranges[dtype_right]
+            args = (
+                torch.randn(256, 256, dtype=dtype_left, device="cuda"),
+                torch.randint(low, high, (256, 256), dtype=dtype_right, device="cuda"),
+            )
+            fallback_mixed_mm_expected = (
+                dtype_left == torch.bfloat16 and dtype_right == torch.uint8
+            )
+            self._test_mixed_impl(
+                fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
+            )
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
