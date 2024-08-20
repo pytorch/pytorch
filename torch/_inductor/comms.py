@@ -124,6 +124,10 @@ def _schedule_for_comm(
         scores_1[node_name] = 0
         scores_2[node_name] = idx
 
+        # Always prefer scheduling resize-to-0 op as early as possible
+        if isinstance(snode.node, ir.ResizeStorageBytes) and snode.node.constant_args[0] == 0:
+            scores_0[node_name] = 0
+
         if contains_collective(snode):
             for output in snode.get_outputs():
                 output_name_to_comm_snode[output.get_name()] = snode
@@ -244,7 +248,14 @@ def _schedule_for_comm(
             "Detected unscheduled nodes. "
             f"Nodes with unmet dependencies: {unmet_deps}"
         )
-    return scheduled
+
+    # HACK(yf225): remove resize-0 ops at beginning of graph, because they might be secret aliases
+    first_non_resize_0_node_idx = None
+    for i, snode in enumerate(scheduled):
+        if not (isinstance(snode.node, ir.ResizeStorageBytes) and snode.node.constant_args[0] == 0):
+            first_non_resize_0_node_idx = i
+            break
+    return scheduled[first_non_resize_0_node_idx:]
 
 
 def decide_global_ordering_of_comms(
@@ -723,28 +734,28 @@ def enforce_comm_ordering_for_fsdp(
         new_order.append(snode)
         scheduled.add(snode)
 
-    # # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
-    # # before next AllGather's "copy_in then AG" group node
-    # prev_ag_wait = None
-    # for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
-    #     if prev_ag_wait is not None:
-    #         mutating_buf = next(iter(ag_group_node.get_buffer_names()))
-    #         for o in prev_ag_wait.get_outputs():
-    #             ag_group_node.add_fake_dep(
-    #                 WeakDep(o.get_name(), mutating_buf=mutating_buf)
-    #             )
-    #     prev_ag_wait = wait_group_node
+    # Enforce AllGather ordering: previous AllGather's "wait then copy_out" group node must run
+    # before next AllGather's "copy_in then AG" group node
+    prev_ag_wait = None
+    for ag_group_node, wait_group_node in ag_grouped_node_to_wait_grouped_node.items():
+        if prev_ag_wait is not None:
+            mutating_buf = next(iter(ag_group_node.get_buffer_names()))
+            for o in prev_ag_wait.get_outputs():
+                ag_group_node.add_fake_dep(
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                )
+        prev_ag_wait = wait_group_node
 
-    # # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
-    # # before next ReduceScatter's "copy_in then RS" group node
-    # prev_rs_wait = None
-    # for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
-    #     if prev_rs_wait is not None:
-    #         mutating_buf = next(iter(rs_group_node.get_buffer_names()))
-    #         for o in prev_rs_wait.get_outputs():
-    #             rs_group_node.add_fake_dep(
-    #                 WeakDep(o.get_name(), mutating_buf=mutating_buf)
-    #             )
-    #     prev_rs_wait = wait_group_node
+    # Enforce ReduceScatter ordering: previous ReduceScatter's "wait" group node must run
+    # before next ReduceScatter's "copy_in then RS" group node
+    prev_rs_wait = None
+    for rs_group_node, wait_group_node in rs_grouped_node_to_wait_grouped_node.items():
+        if prev_rs_wait is not None:
+            mutating_buf = next(iter(rs_group_node.get_buffer_names()))
+            for o in prev_rs_wait.get_outputs():
+                rs_group_node.add_fake_dep(
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                )
+        prev_rs_wait = wait_group_node
 
     return new_order  # type: ignore[return-value]
