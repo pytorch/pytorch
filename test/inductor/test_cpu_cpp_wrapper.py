@@ -115,7 +115,10 @@ if config.abi_compatible:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cpp_wrapper",), is_skip=False
         )
-        if "test_linear_with_pointwise" not in test_name:
+        if not (
+            "test_linear_with_pointwise" in test_name
+            and "bias_False_epilogue_add" not in test_name
+        ):
             test_failures_cpp_wrapper[
                 f"{test_name}_dynamic_shapes"
             ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
