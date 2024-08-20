@@ -700,7 +700,7 @@ class AssociativeScanTests(TestCase):
     @requires_gpu
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("backend", ["inductor"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu"), GPU_TYPE])
     def test_associative_scan_CUDA_flip(self, combine_mode, backend, device):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
