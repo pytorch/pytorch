@@ -51,7 +51,6 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .debug_utils import DebugPrinterManager
 from .multi_kernel import MultiKernel
 
 

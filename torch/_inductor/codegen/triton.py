@@ -2814,15 +2814,9 @@ class TritonKernel(SIMDKernel):
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
-<<<<<<< HEAD
         _, call_args, arg_signatures, _ = self.args.python_argdefs()
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
-=======
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        for arg, arg_type in zip(call_args, arg_types):
-            if isinstance(arg_type, TensorArg):
->>>>>>> 5709375d565 ([AOTI][tooling][1/n] Add intermediate value debug printer (#132323))
                 if V.graph.cpp_wrapper:
                     if config.abi_compatible:
                         wrapper.writeline(

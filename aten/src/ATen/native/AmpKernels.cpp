@@ -21,7 +21,6 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_(
     const at::Tensor& inv_scale) {
     _amp_foreach_non_finite_check_and_unscale_cpu_stub(
         found_inf.device().type(), scaled_grads, found_inf, inv_scale);
-    return;
 }
 
 at::Tensor& _amp_update_scale_cpu_ (
