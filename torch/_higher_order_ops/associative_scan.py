@@ -81,16 +81,17 @@ def associative_scan(
     assert callable(combine_fn), "combine_fn must be a callable, but got {combine_fn}"
     assert isinstance(dim, int), "dim must be an int, but got {type(dim)}"
 
-    # if not torch._dynamo.is_compiling():
-    #     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-    #         return torch.compile(associative_scan, fullgraph=True)(
-    #             combine_fn, input, dim, reverse=reverse
-    #         )
+    if not torch._dynamo.is_compiling():
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(associative_scan, fullgraph=True)(
+                combine_fn, input, dim, reverse=reverse
+            )
 
     leaves, spec = pytree.tree_flatten(input)
 
     # if reverse:
     #     leaves = [torch.flip(elem, [dim]) for elem in leaves]
+    #     # leaves = [torch.flip(elem, [dim]) if is_batchedtensor(elem) else elem for elem in leaves]
     def true_fn(leaves):
         return [torch.flip(elem, [dim]) for elem in leaves]
     def false_fn(leaves):
