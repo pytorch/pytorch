@@ -58,7 +58,6 @@ int GetStrideBFromParams(const ScaledGemmParams<T>* params) {
   return 1;
 }
 
-
 template <typename T>
 int GetStrideCFromParams(const GemmParams<T>* params) {
     return 1;
@@ -144,6 +143,41 @@ const void* GetDScalePointerFromParams(const GemmStridedBatchedParams<T>* params
   return nullptr;
 }
 
+template <typename T>
+const void* GetDScalePointerFromParams(const ScaledGemmParams<T>* params) {
+  return params->c_scale_ptr;
+}
+
+template <typename T>
+const void* GetAmaxPointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetAmaxPointerFromParams(const GemmStridedBatchedParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetAmaxPointerFromParams(const ScaledGemmParams<T>* params) {
+  return params->amax_ptr;
+}
+
+template <typename T>
+int8_t GetFastAccumModeFromParams(const GemmParams<T>* params) {
+  return 0;
+}
+
+template <typename T>
+int8_t GetFastAccumModeFromParams(const GemmStridedBatchedParams<T>* params) {
+  return 0;
+}
+
+template <typename T>
+int8_t GetFastAccumModeFromParams(const ScaledGemmParams<T>* params) {
+  return params->use_fast_accum ? 1 : 0;
+}
+
 static cublasOperation_t MapLayoutToCuBlasLt(BlasOp layout) {
     if (layout == BlasOp::N) {
         return CUBLAS_OP_N;
@@ -203,31 +237,42 @@ class CublasltGemmOp : public Callable<ParamsT> {
             at::opmath_type<T> alpha = GetAlphaFromParams<T>(params);
             at::opmath_type<T> beta = GetBetaFromParams<T>(params);
 
-            cudaDataType_t abcType = CUDA_R_32F;
+            cudaDataType_t a_dtype, b_dtype, c_dtype;
             cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
             cudaDataType_t scaleType = CUDA_R_32F;
 
-            if constexpr (std::is_same_v<T, double>) {
-                abcType = CUDA_R_64F;
-                computeType = CUBLAS_COMPUTE_64F;
-                scaleType = CUDA_R_64F;
-            } else if constexpr (std::is_same_v<T, float>) {
-                if (at::globalContext().allowTF32CuBLAS()) {
-                    computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
+            if constexpr (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
+                cudaDataType_t abcType = CUDA_R_32F;
+                if constexpr (std::is_same_v<T, double>) {
+                    abcType = CUDA_R_64F;
+                    computeType = CUBLAS_COMPUTE_64F;
+                    scaleType = CUDA_R_64F;
+                } else if constexpr (std::is_same_v<T, float>) {
+                    if (at::globalContext().allowTF32CuBLAS()) {
+                        computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
+                    }
+                } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
+                    abcType = CUDA_C_64F;
+                    computeType = CUBLAS_COMPUTE_64F;
+                    scaleType = CUDA_C_64F;
+                } else if constexpr (std::is_same_v<T, c10::complex<float>>) {
+                    abcType = CUDA_C_32F;
+                    scaleType = CUDA_C_32F;
+                } else if constexpr (std::is_same_v<T, at::Half>) {
+                    abcType = CUDA_R_16F;
+                } else if constexpr (std::is_same_v<T, at::BFloat16>) {
+                    abcType = CUDA_R_16BF;
+                } else {
+                    static_assert(false && sizeof(T), "at::cuda::tunable::CublasltGemmOp: not implemented");
                 }
-            } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
-                abcType = CUDA_C_64F;
-                computeType = CUBLAS_COMPUTE_64F;
-                scaleType = CUDA_C_64F;
-            } else if constexpr (std::is_same_v<T, c10::complex<float>>) {
-                abcType = CUDA_C_32F;
-                scaleType = CUDA_C_32F;
-            } else if constexpr (std::is_same_v<T, at::Half>) {
-                abcType = CUDA_R_16F;
-            } else if constexpr (std::is_same_v<T, at::BFloat16>) {
-                abcType = CUDA_R_16BF;
-            } else {
-                static_assert(false && sizeof(T), "at::cuda::tunable::CublasltGemmOp: not implemented");
+
+                a_dtype = abcType;
+                b_dtype = abcType;
+                c_dtype = abcType;
+            } else if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
+                a_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->a_dtype);
+                b_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->b_dtype);
+                c_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->c_dtype);
             }
             globalContext().alertCuBLASConfigNotDeterministic();
             cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -251,11 +296,18 @@ class CublasltGemmOp : public Callable<ParamsT> {
             const void* mat1_scale_ptr = GetAScalePointerFromParams<T>(params);
             const void* mat2_scale_ptr = GetBScalePointerFromParams<T>(params);
             const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
+            const void* amax_ptr = GetAmaxPointerFromParams<T>(params);
+            const int8_t fast_accum_mode = GetFastAccumModeFromParams<T>(params);
             if (mat1_scale_ptr && mat2_scale_ptr && mat3_scale_ptr) {
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
                 computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
                 
+                if (amax_ptr) {
+                    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+                }
+
+                computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fast_accum_mode);
                 const void* bias_ptr = GetBiasPointerFromParams<T>(params);
                 if (bias_ptr) {
                     auto bias_datatype = GetBiasTypeFromParams<T>(params);
@@ -265,9 +317,9 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 }
             } 
             
-            at::cuda::blas::CuBlasLtMatrixLayout Adesc(abcType, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
-            at::cuda::blas::CuBlasLtMatrixLayout Bdesc(abcType, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
-            at::cuda::blas::CuBlasLtMatrixLayout Cdesc(abcType, params->m, params->n, params->ldc);
+            at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
+            at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
+            at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
 
             int batch_size = GetBatchFromParams<T>(params);
             if (batch_size > 1) {
@@ -352,8 +404,14 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 params->ldb,
                 " ldc ",
                 params->ldc,
-                " abcType ",
-                abcType,
+                " aType ",
+                a_dtype,
+                " bType ",
+                b_dtype,
+                " cType ",
+                c_dtype,
+                " dType ",
+                c_dtype,
                 " computeType ",
                 computeType,
                 " scaleType ",
@@ -367,32 +425,45 @@ class CublasltGemmOp : public Callable<ParamsT> {
 
 template <typename T, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
-    cudaDataType_t abcType = CUDA_R_32F;
+    cudaDataType_t a_dtype, b_dtype, c_dtype;
     cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
     cudaDataType_t scaleType = CUDA_R_32F;
 
-    if constexpr (std::is_same_v<T, double>) {
-        abcType = CUDA_R_64F;
-        computeType = CUBLAS_COMPUTE_64F;
-        scaleType = CUDA_R_64F;
-    } else if constexpr (std::is_same_v<T, float>) {
-        if (at::globalContext().allowTF32CuBLAS()) {
-            computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
+
+    if (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
+        cudaDataType_t abcType = CUDA_R_32F;
+        if constexpr (std::is_same_v<T, double>) {
+            abcType = CUDA_R_64F;
+            computeType = CUBLAS_COMPUTE_64F;
+            scaleType = CUDA_R_64F;
+        } else if constexpr (std::is_same_v<T, float>) {
+            if (at::globalContext().allowTF32CuBLAS()) {
+                computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
+            }
+        } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
+            abcType = CUDA_C_64F;
+            computeType = CUBLAS_COMPUTE_64F;
+            scaleType = CUDA_C_64F;
+        } else if constexpr (std::is_same_v<T, c10::complex<float>>) {
+            abcType = CUDA_C_32F;
+            scaleType = CUDA_C_32F;
+        } else if constexpr (std::is_same_v<T, at::Half>) {
+            abcType = CUDA_R_16F;
+        } else if constexpr (std::is_same_v<T, at::BFloat16>) {
+            abcType = CUDA_R_16BF;
+        } else {
+            static_assert(false && sizeof(T), "at::cuda::tunable::CublasltGemmOp: not implemented");
         }
-    } else if constexpr (std::is_same_v<T, c10::complex<double>>) {
-        abcType = CUDA_C_64F;
-        computeType = CUBLAS_COMPUTE_64F;
-        scaleType = CUDA_C_64F;
-    } else if constexpr (std::is_same_v<T, c10::complex<float>>) {
-        abcType = CUDA_C_32F;
-        scaleType = CUDA_C_32F;
-    } else if constexpr (std::is_same_v<T, at::Half>) {
-        abcType = CUDA_R_16F;
-    } else if constexpr (std::is_same_v<T, at::BFloat16>) {
-        abcType = CUDA_R_16BF;
-    } else {
-        static_assert(false && sizeof(T), "at::cuda::tunable::CublasltGemmOp: not implemented");
+
+        a_dtype = abcType;
+        b_dtype = abcType;
+        c_dtype = abcType;
+    } else if (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
+        a_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->a_dtype);
+        b_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->b_dtype);
+        c_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->c_dtype);
     }
+    
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
     
@@ -415,11 +486,18 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     const void* mat1_scale_ptr = GetAScalePointerFromParams<T>(params);
     const void* mat2_scale_ptr = GetBScalePointerFromParams<T>(params);
     const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
+    const void* amax_ptr = GetAmaxPointerFromParams<T>(params);
+    const int8_t fast_accum_mode = GetFastAccumModeFromParams<T>(params);
     if (mat1_scale_ptr && mat2_scale_ptr && mat3_scale_ptr) {
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, mat3_scale_ptr);
         
+        if (amax_ptr) {
+            computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+        }
+
+        computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fast_accum_mode);
         const void* bias_ptr = GetBiasPointerFromParams<T>(params);
         if (bias_ptr) {
             auto bias_datatype = GetBiasTypeFromParams<T>(params);
@@ -429,9 +507,9 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         }
     } 
     
-    at::cuda::blas::CuBlasLtMatrixLayout Adesc(abcType, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
-    at::cuda::blas::CuBlasLtMatrixLayout Bdesc(abcType, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
-    at::cuda::blas::CuBlasLtMatrixLayout Cdesc(abcType, params->m, params->n, params->ldc);
+    at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
+    at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
+    at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
 
     int batch_size = GetBatchFromParams<T>(params);
     if (batch_size > 1) {
@@ -502,6 +580,10 @@ auto GetCublasLtGemmTypeStringAndOps(const GemmParams<T>* params) {
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 auto GetCublasLtStridedBatchedGemmTypeStringAndOps(const GemmStridedBatchedParams<T>* params) {
     return GetCublasLtTypeStringAndOps<T, ALayout, BLayout, GemmStridedBatchedParams<T>>(params);
+}
+template <typename T, BlasOp ALayout, BlasOp BLayout>
+auto GetCublasLtScaledGemmTypeStringAndOps(const ScaledGemmParams<T>* params) {
+    return GetCublasLtTypeStringAndOps<T, ALayout, BLayout, ScaledGemmParams<T>>(params);
 }
 
 }  // namespace at::cuda::tunable

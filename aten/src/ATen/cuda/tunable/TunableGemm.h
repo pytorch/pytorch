@@ -384,10 +384,28 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout>
 class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> {
  public:
-  ScaledGemmTunableOp() {
+  ScaledGemmTunableOp(const ScaledGemmParams<CT>* params) {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
 
-#ifdef USE_ROCM
+    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
+
+#ifdef USE_CUDA
+    bool cuda_validators = false;
+
+    static const char *env_cublaslt = std::getenv("PYTORCH_TUNABLEOP_CUBLASLT_ENABLED");
+    if (env_cublaslt == nullptr || strcmp(env_cublaslt, "1") == 0) {
+      cuda_validators = true;
+      for (auto&& [name, op] : GetCublasLtScaledGemmTypeStringAndOps<CT, ALayout, BLayout>(params)) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
+    }
+
+    if (cuda_validators) {
+      AddCudaValidator();
+    }
+#endif
+
+#if defined(USE_ROCM)
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
     }

@@ -1079,13 +1079,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
             static at::cuda::tunable::ScaledGemmTunableOp<              \
                 at::Float8_e4m3fnuz, at::Float8_e4m3fnuz, scalar_t,     \
-                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
           else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
             static at::cuda::tunable::ScaledGemmTunableOp<              \
                 at::Float8_e4m3fnuz, at::Float8_e5m2fnuz, scalar_t,     \
-                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
         }                                                               \
@@ -1093,13 +1093,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
             static at::cuda::tunable::ScaledGemmTunableOp<              \
                 at::Float8_e5m2fnuz, at::Float8_e4m3fnuz, scalar_t,     \
-                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
           else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
             static at::cuda::tunable::ScaledGemmTunableOp<              \
                 at::Float8_e5m2fnuz, at::Float8_e5m2fnuz, scalar_t,     \
-                BLASOP_A, BLASOP_B> scaledgemm{};                       \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                       \
             scaledgemm(&params);                                        \
           }                                                             \
         }
