@@ -258,18 +258,6 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
-def get_new_stride_with_stride_order(
-    stride: Sequence[Union[int, torch.SymInt, Expr]],
-    stride_order: Sequence[int],
-) -> Sequence[Union[int, torch.SymInt, Expr]]:
-    """
-    Get new strides following stride_order
-    """
-    new_stride = [stride[0] for _ in range(len(stride))]
-    for i, elem in enumerate(stride_order):
-        new_stride[stride_order[i]] = stride[elem]
-    return new_stride
-
 
 @overload
 def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
@@ -4717,6 +4705,23 @@ class ExternKernel(InputsKernel):
                     return x
         return cls.copy_input(x)
 
+    @classmethod 
+    def is_stride_ascending(cls, strides, sizes):
+        # ignore dimensions of size 1, they dont affect layout
+        non_1_indices = [
+            i
+            for i, dim in enumerate(sizes)
+            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+        ]
+
+        tmp_stride = [strides[i] for i in non_1_indices]
+        stride_size_hint = [V.graph.sizevars.size_hint(x) for x in tmp_stride]
+        # check if it is in ascending order
+        for i in range(len(tmp_stride) - 1):
+            if stride_size_hint[i] > stride_size_hint[i + 1]:
+                return False
+        return True
+
     @classmethod
     def require_strides(cls, x, order=None, exact_strides=None, allow_padding=False):
         assert order is not None or exact_strides is not None
@@ -4776,7 +4781,7 @@ class ExternKernel(InputsKernel):
                             list(x.get_layout().stride) == exact_strides
                             and not isinstance(x.data, ReinterpretView)
                         )
-                    )
+                    ) 
                 )
             ):
                 return x
@@ -4844,6 +4849,7 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_stride_order(cls, x, order, allow_padding=False):
         return cls.require_strides(x, order=order, allow_padding=allow_padding)
+    
 
     @classmethod
     def require_channels_last(cls, x):

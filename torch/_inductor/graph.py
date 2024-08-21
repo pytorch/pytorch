@@ -1343,10 +1343,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
                     ):
-                        strides = ir.get_new_stride_with_stride_order(
-                            strides, ir.NHWC_STRIDE_ORDER
-                        )
-
+                        strides = stride_ordered_for_memory_format(result.get_size(), torch.channels_last)
                     if not unbacked_symbols_in_strides and len(strides):
                         result = ir.ExternKernel.require_exact_strides(
                             result, strides, allow_padding=allow_padding
