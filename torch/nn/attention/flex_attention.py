@@ -21,7 +21,7 @@ from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _validate_sdpa_input
+from torch.nn.attention._utils import _validate_sdpa_input, _is_power_of_2_jank
 from torch.utils._pytree import tree_map_only
 
 
@@ -849,11 +849,6 @@ def _apply_kernel_options(query, key, value, kernel_options):
 
 
 def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
-    def _is_power_of_2_jank(n):
-        # Symints dont support bitwise and, forgive me for my sins
-        powers_of_2 = [2**i for i in range(1, 10)]
-        return n in powers_of_2
-
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
