@@ -946,6 +946,9 @@ class GetAttrVariable(VariableTracker):
     def as_proxy(self):
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
+    def as_python_constant(self):
+        return getattr(self.obj.as_python_constant(), self.name)
+
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
             raise NotImplementedError

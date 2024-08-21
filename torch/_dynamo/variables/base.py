@@ -210,7 +210,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
-            raise NotImplementedError(f"{self} has no type")
+            raise NotImplementedError(f"{self} has no type") from None
 
     def as_python_constant(self):
         """For constants"""
