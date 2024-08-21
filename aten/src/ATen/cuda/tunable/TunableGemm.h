@@ -229,14 +229,9 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   GemmAndBiasTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
-    auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
-
-#if defined(USE_ROCM)
-    bool rocm_validators = false;
-
+#ifdef USE_ROCM
     static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
     if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
-      rocm_validators = true;
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -245,11 +240,6 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
           this->RegisterOp(std::move(name), std::move(op));
         }
       }
-      AddHipblasltValidator();
-    }
-
-    if (rocm_validators) {
-      AddRocmValidator();
     }
 #endif
   }
@@ -298,7 +288,7 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   ScaledGemmTunableOp() {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultScaledGemmOp<CT>>());
 
-#if defined(USE_ROCM)
+#ifdef USE_ROCM
     for (auto&& [name, op] : GetHipBlasLtScaledGemmTypeStringAndOps<AT, BT, CT, ALayout, BLayout>()) {
       this->RegisterOp(std::move(name), std::move(op));
     }
