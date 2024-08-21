@@ -490,6 +490,17 @@ def linear_backward_default(func, *args, **kwargs):
     return (ds, dw, db)
 
 
+@register_jagged_func(torch.ops.aten.to.dtype, "input: jt_all, dtype: any")
+def to_dtype(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
     from .nested_tensor import _tensor_symint_registry
