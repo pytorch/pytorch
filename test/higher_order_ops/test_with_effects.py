@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -673,7 +674,7 @@ def forward(self, arg0_1, arg1_1):
     return (getitem, mul, mul)""",
         )
 
-    @skipIfNoDynamoSupport
+    @skipIfTorchDynamo()
     def test_effectful_op_in_backward(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
