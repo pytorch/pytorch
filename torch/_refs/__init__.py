@@ -5928,20 +5928,16 @@ def bucketize(
         lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
-    if isinstance(a, int) or isinstance(a, float):
-        c = torch.tensor(a, device=boundaries.device)
-    else:
-        c = a
-
+    a = a if isinstance(a, torch.Tensor) else torch.tensor(a)
     out_dtype = torch.int32 if out_int32 else torch.int64
     n_boundaries = boundaries.shape[-1]
     if n_boundaries == 0:
-        return torch.zeros_like(c)
+        return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
     # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
-    start = torch.zeros(c.shape, device=c.device, dtype=torch.int64)
+    start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)
     end = start + n_boundaries
     # Max depth of the binary search
     # Since we can't break out of the loop at different points for different elements of a,
@@ -5952,13 +5948,13 @@ def bucketize(
     mid = start + (end - start) // 2
     mid_val = boundaries[mid]
     if right:
-        cond_mid = mid_val > c
+        cond_mid = mid_val > a
     else:
-        cond_mid = mid_val >= c
+        cond_mid = mid_val >= a
     start = torch.where(cond_mid, start, mid + 1)
 
     if n_boundaries > 1:
-        cond_update = torch.ones_like(c, dtype=torch.bool)
+        cond_update = torch.ones_like(a, dtype=torch.bool)
         niters = int(math.log2(n_boundaries))
         for _ in range(niters):
             end = torch.where(cond_mid & cond_update, mid, end)
@@ -5970,9 +5966,9 @@ def bucketize(
             # (i.e., we are doing the equivalent of std::upper_bound in C++)
             # Otherwise they are closed on the right (std::lower_bound)
             if right:
-                cond_mid = mid_val > c
+                cond_mid = mid_val > a
             else:
-                cond_mid = mid_val >= c
+                cond_mid = mid_val >= a
             start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
