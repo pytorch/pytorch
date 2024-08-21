@@ -155,8 +155,56 @@ def export_api_rollout_check() -> bool:
     return False
 
 
+class JustKnobsConfig:
+    """Represents a lazily loaded config
+
+    This is designed to be used to specify a value in a config.
+
+    i.e. foo.bar = JustknobsConfig(name="//foo:bar", env_name="FORCE_FOO_BAR")
+
+    Call .get() in order to access the value
+    i.e. if foo.bar.get():
+
+    Note that the value is fetched once, and then not allowed to change. This
+    means less suprises, at the downside that you may have to restart a job
+    to pick up an update.
+
+    It can also be set explicitly via set - i.e.
+    foo.bar = JustknobsConfig(name="//foo:bar")
+    foo.bar.set(True)
+
+    Note that this does allow for no JK name (so that you can use this to replace old configurations).
+    """
+
+    def __init__(
+        self, *, name: Optional[str] = None, env_name=None, default: bool = True
+    ):
+        self.name = name
+        self.env_name = env_name
+        self.default = default
+        self.value: Optional[bool] = None
+        self.executed_value = None
+
+    def set(self, value: bool):
+        self.value = value
+
+    def get(self):
+        if self.executed_value is None:
+            self.executed_value = justknobs_feature(
+                self.name,
+                config_value=self.value,
+                env_name=self.env_name,
+                default=self.default,
+            )
+        return self.executed_value
+
+    def __str__(self):
+        v = bool(self)
+        return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
+
+
 def justknobs_feature(
-    name: str, config_value=None, env_name=None, default: bool = True
+    name: Optional[str], config_value=None, env_name=None, default: bool = True
 ):
     """Returns whether or not a specific justknob feature is enabled.
 
@@ -165,8 +213,8 @@ def justknobs_feature(
     the other way during sevs.
 
     The preference order (i.e. who wins first) in OSS (and FB) is
+    - Config if specified
     - Environment Variable if specified
-    - Config is specified
     - JK (FB), or default (OSS)
 
 
@@ -189,6 +237,8 @@ def justknobs_feature(
     Requirements:
         Don't use this at import time - Simply pass in the existing config
     """
+    if config_value is not None:
+        return config_value
     if env_name is not None and ((env := os.getenv(env_name)) is not None):
         env = env.upper()
         if env in ("1", "TRUE"):
@@ -203,8 +253,8 @@ def justknobs_feature(
         )
         # We could return default here, but that was confusing to log.
         return True
-    if config_value is not None:
-        return config_value
+    if name is None:
+        return True
     if not default:
         return not justknobs_check(name)
     return justknobs_check(name)
