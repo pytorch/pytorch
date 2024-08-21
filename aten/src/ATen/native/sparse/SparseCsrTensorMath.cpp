@@ -864,6 +864,8 @@ static void add_out_dense_sparse_compressed_cpu(
     return;
   }
 
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
+
   auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
   Tensor src_compressed_indices;
