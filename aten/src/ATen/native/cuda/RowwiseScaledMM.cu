@@ -305,7 +305,9 @@ void f8f8bf16_rowwise_impl(
   size_t workspace_size = Gemm::get_workspace_size(arguments);
 
   // Allocate workspace memory
-  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+  auto workspace = XQ.new_empty(
+      {static_cast<int64_t>(workspace_size)},
+      at::TensorOptions().dtype(at::kByte));
 
   // Check the problem size is supported or not
   cutlass::Status status = gemm.can_implement(arguments);
@@ -314,7 +316,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.get());
+  status = gemm.initialize(arguments, workspace.data_ptr());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
