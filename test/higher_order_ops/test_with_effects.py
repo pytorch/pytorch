@@ -723,7 +723,7 @@ def forward(self, arg0_1, arg1_1):
                     ref_out = fn(*ref_ins)
                     ref_out.sum().backward()
 
-                    compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+                    compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
                     ins = ins_fn()
                     out = compiled_fn(*ins)
                     self.assertEqual(ref_out, out)
