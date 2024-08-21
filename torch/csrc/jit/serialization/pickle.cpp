@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 
 #include <ATen/core/ivalue.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/serialize/inline_container.h>
 
 namespace torch::jit {
 
@@ -79,7 +79,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   std::vector<char> container_data;
   container_data.reserve(pickle_data.size());
 
-  caffe2::serialize::PyTorchStreamWriter writer(
+  torch::serialize::PyTorchStreamWriter writer(
       [&](const void* void_bytes, size_t len) {
         const char* bytes = reinterpret_cast<const char*>(void_bytes);
         container_data.insert(container_data.end(), bytes, bytes + len);
@@ -124,7 +124,7 @@ size_t StringViewReader::read(
 IValue pickle_load(const std::vector<char>& data) {
   // Read in the pickle data
 #ifndef C10_MOBILE
-  caffe2::serialize::PyTorchStreamReader reader(
+  torch::serialize::PyTorchStreamReader reader(
       std::make_unique<VectorReader>(data));
 
   return readArchiveAndTensors(
@@ -145,7 +145,7 @@ IValue pickle_load(const std::vector<char>& data) {
 // A specialized version of pickle_load that can load custom objects.
 c10::IValue pickle_load_obj(std::string_view data) {
 #ifndef C10_MOBILE
-  caffe2::serialize::PyTorchStreamReader reader(
+  torch::serialize::PyTorchStreamReader reader(
       std::make_unique<torch::jit::StringViewReader>(data));
   return torch::jit::readArchiveAndTensors(
       "data",

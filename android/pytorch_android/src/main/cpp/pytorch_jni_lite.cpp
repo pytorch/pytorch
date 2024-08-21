@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/script.h>
-#include "caffe2/serialize/read_adapter_interface.h"
 
 #include "pytorch_jni_common.h"
 

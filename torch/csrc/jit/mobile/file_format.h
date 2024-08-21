@@ -10,7 +10,7 @@
 
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/impl/alloc_cpu.h>
-#include <caffe2/serialize/read_adapter_interface.h>
+#include <torch/csrc/api/include/torch/serialize/read_adapter_interface.h>
 
 #if defined(HAVE_MMAP)
 #include <fcntl.h>
@@ -182,7 +182,7 @@ static inline std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
 
 // NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)
 static inline std::tuple<std::shared_ptr<char>, size_t> get_rai_content(
-    caffe2::serialize::ReadAdapterInterface* rai) {
+    torch::serialize::ReadAdapterInterface* rai) {
   size_t buffer_size = (rai->size() / kMaxAlignment + 1) * kMaxAlignment;
   std::shared_ptr<char> data(
       static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);

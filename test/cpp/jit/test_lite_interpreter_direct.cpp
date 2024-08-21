@@ -19,9 +19,8 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
+#include <torch/serialize/versions.h>
 #include <torch/torch.h>
-
-#include <unordered_set>
 
 // Tests go in torch::jit
 namespace torch {
@@ -389,16 +388,16 @@ TEST(LiteInterpreterDirectTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
       runtime_bytecode_version ==
-      caffe2::serialize::kMaxSupportedBytecodeVersion);
+      torch::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterDirectTest, GetRuntimeOperatorsVersion) {
   auto runtime_operators_version = _get_runtime_operators_min_max_versions();
   AT_ASSERT(
       runtime_operators_version.first ==
-          caffe2::serialize::kMinSupportedFileFormatVersion &&
+          torch::serialize::kMinSupportedFileFormatVersion &&
       runtime_operators_version.second ==
-          caffe2::serialize::kMaxSupportedFileFormatVersion);
+          torch::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /**

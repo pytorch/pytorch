@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/util/flat_hash_map.h>
-#include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/api/include/torch/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -21,7 +21,7 @@ class MobileDebugTable {
  public:
   MobileDebugTable() = default;
   MobileDebugTable(
-      std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader,
+      std::unique_ptr<torch::serialize::PyTorchStreamReader>& reader,
       const std::shared_ptr<CompilationUnit>& cu);
 
   template <typename It>

@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
 #include <ATen/core/ivalue.h>
-#include <caffe2/serialize/versions.h>
+#include <torch/csrc/api/include/torch/serialize/versions.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 
 namespace c10 {
@@ -387,7 +387,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
             op.name,
             op.overload_name,
             op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            torch::serialize::kMaxSupportedFileFormatVersion);
       }
     }
     return upgrader_function_list;

@@ -1,4 +1,3 @@
-#include <caffe2/serialize/versions.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>

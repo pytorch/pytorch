@@ -1,6 +1,5 @@
 #pragma once
 
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
@@ -10,6 +9,7 @@
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <torch/serialize/inline_container.h>
 #include <ostream>
 
 namespace ONNX_NAMESPACE {
@@ -70,7 +70,7 @@ TORCH_API void check_onnx_proto(const std::string& proto_string);
 class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
-      caffe2::serialize::PyTorchStreamWriter& export_writer)
+      torch::serialize::PyTorchStreamWriter& export_writer)
       : writer_(export_writer) {}
 
   void writeFiles(const std::string& code_dir);
@@ -98,7 +98,7 @@ class TORCH_API ScriptModuleSerializer {
       bool skip_tensor_data = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
-  caffe2::serialize::PyTorchStreamWriter& writer_;
+  torch::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
 
   std::unordered_set<c10::NamedTypePtr> converted_types_;
@@ -184,7 +184,7 @@ TORCH_API void writeArchiveAndTensors(
     const char* pickle_bytes,
     size_t size,
     const std::vector<at::Tensor>& tensors,
-    caffe2::serialize::PyTorchStreamWriter& out);
+    torch::serialize::PyTorchStreamWriter& out);
 
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.

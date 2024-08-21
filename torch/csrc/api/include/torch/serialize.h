@@ -3,6 +3,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/Export.h>
 #include <torch/serialize/archive.h>
+#include <torch/serialize/file_adapter.h>
+#include <torch/serialize/in_memory_adapter.h>
+#include <torch/serialize/istream_adapter.h>
 #include <torch/serialize/tensor.h>
 
 #include <utility>

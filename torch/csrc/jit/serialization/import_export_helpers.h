@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-namespace caffe2::serialize {
+namespace torch::serialize {
 class PyTorchStreamReader;
 }
 
@@ -21,7 +21,7 @@ std::string qualifierToArchivePath(
     const std::string& export_prefix);
 
 std::shared_ptr<Source> findSourceInArchiveFromQualifier(
-    caffe2::serialize::PyTorchStreamReader& reader,
+    torch::serialize::PyTorchStreamReader& reader,
     const std::string& export_prefix,
     const std::string& qualifier);
 

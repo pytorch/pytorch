@@ -2,8 +2,8 @@
 
 #include <c10/util/FunctionRef.h>
 #include <fbjni/fbjni.h>
+#include <torch/csrc/api/include/torch/serialize/read_adapter_interface.h>
 #include <torch/csrc/api/include/torch/types.h>
-#include "caffe2/serialize/read_adapter_interface.h"
 
 #include "cmake_macros.h"
 
@@ -71,7 +71,7 @@ class Trace {
   static bool is_initialized_;
 };
 
-class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
+class MemoryReadAdapter final : public torch::serialize::ReadAdapterInterface {
  public:
   explicit MemoryReadAdapter(const void* data, off_t size)
       : data_(data), size_(size){};

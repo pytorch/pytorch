@@ -7,10 +7,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/in_memory_adapter.h>
-#include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/istream_adapter.h>
-#include <caffe2/serialize/versions.h>
+#include <torch/csrc/api/include/torch/serialize/in_memory_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/inline_container.h>
+#include <torch/csrc/api/include/torch/serialize/read_adapter_interface.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -28,7 +27,7 @@
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-// (4,  # model version number (caffe2::serialize::kProducedBytecodeVersion)
+// (4,  # model version number (torch::serialize::kProducedBytecodeVersion)
 //  # first method
 //  (
 //   # function name
@@ -82,9 +81,9 @@
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
 
 namespace torch::jit {
-using caffe2::serialize::MemoryReadAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::MemoryReadAdapter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
@@ -159,7 +158,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
 }
 
 bool isTensorInBytecodeArchive(
-    caffe2::serialize::PyTorchStreamReader& stream_reader) {
+    torch::serialize::PyTorchStreamReader& stream_reader) {
   auto records = stream_reader.getAllRecords();
   for (const auto& record : records) {
     if (record.find("bytecode/") != std::string::npos) {
@@ -318,13 +317,13 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
-      caffe2::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
-          bytecode_version_ <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+      torch::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
+          bytecode_version_ <= torch::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter version number does not match. ",
       "The model version must be between ",
-      caffe2::serialize::kMinSupportedBytecodeVersion,
+      torch::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      torch::serialize::kMaxSupportedBytecodeVersion,
       " but the model version is ",
       bytecode_version_);
 
@@ -385,7 +384,7 @@ void BytecodeDeserializer::parseMethods(
 
     // 2. Decides if upgrader is needed
     bool use_upgrader =
-        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
+        (operator_version_ < torch::serialize::kProducedFileFormatVersion);
 
     parseInstructions(
         function_name,
@@ -628,7 +627,7 @@ mobile::Module _load_for_mobile(
     return _load_mobile_from_bytes(
         data, size, device, extra_files, module_load_options);
   }
-  auto rai = std::make_unique<caffe2::serialize::IStreamAdapter>(&in);
+  auto rai = std::make_unique<torch::serialize::IStreamAdapter>(&in);
   auto module = _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
   return module;
@@ -659,7 +658,7 @@ mobile::Module _load_for_mobile(
         data, size, device, extra_files, module_load_options);
   }
 
-  auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
+  auto rai = std::make_unique<torch::serialize::FileAdapter>(filename);
   return _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
 }
@@ -689,7 +688,7 @@ void _load_extra_only_for_mobile(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::ZipFileFormat: {
-      auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
+      auto rai = std::make_unique<torch::serialize::FileAdapter>(filename);
       auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);

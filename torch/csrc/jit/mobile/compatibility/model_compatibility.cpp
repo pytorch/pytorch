@@ -1,6 +1,4 @@
 #include <ATen/core/ivalue.h>
-#include <caffe2/serialize/file_adapter.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -9,8 +7,10 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/serialize/file_adapter.h>
+#include <torch/serialize/inline_container.h>
 
-#include <caffe2/serialize/in_memory_adapter.h>
+#include <torch/serialize/in_memory_adapter.h>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -22,10 +22,10 @@ TypePtr parseType(const std::string& pythonStr);
 
 namespace torch::jit {
 
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::FileAdapter;
+using torch::serialize::IStreamAdapter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::ReadAdapterInterface;
 
 c10::IValue readArchive(
     const std::string& archive_name,
@@ -112,7 +112,7 @@ uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
     }
     case FileFormat::ZipFileFormat: {
       auto rai =
-          std::make_unique<caffe2::serialize::MemoryReadAdapter>(data, size);
+          std::make_unique<torch::serialize::MemoryReadAdapter>(data, size);
       auto version = _get_model_bytecode_version_zip(std::move(rai));
       return version;
     }
@@ -325,7 +325,7 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
 }
 
 ModelCompatibilityInfo ModelCompatibilityInfo::get(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai) {
+    std::shared_ptr<torch::serialize::ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
     TORCH_CHECK(
         false, "Failed to open zip file for model compatibility information");

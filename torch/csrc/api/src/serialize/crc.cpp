@@ -1,7 +1,6 @@
-#include "miniz.h"
-#include <iostream>
+#include <miniz.h>
 
-#include "caffe2/serialize/crc_alt.h"
+#include <torch/serialize/crc_alt.h>
 
 extern "C" {
 // See: miniz.h

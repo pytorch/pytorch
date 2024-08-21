@@ -8,9 +8,9 @@ namespace c10 {
 struct IValue;
 }
 
-namespace caffe2::serialize {
+namespace torch::serialize {
 class PyTorchStreamWriter;
-} // namespace caffe2::serialize
+} // namespace torch::serialize
 
 namespace torch::jit {
 
@@ -29,7 +29,7 @@ class BackportManager final {
 
   bool backport(
       std::istream& oss,
-      caffe2::serialize::PyTorchStreamWriter& final_writer,
+      torch::serialize::PyTorchStreamWriter& final_writer,
       int64_t from_version,
       int64_t to_version) const;
 

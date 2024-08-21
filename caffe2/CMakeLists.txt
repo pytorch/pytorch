@@ -98,7 +98,6 @@ if(NOT MSVC AND USE_XNNPACK)
 endif()
 
 add_subdirectory(core)
-add_subdirectory(serialize)
 add_subdirectory(utils)
 if(NOT USE_FBGEMM)
   add_subdirectory(perfkernels)
@@ -677,6 +676,13 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/xpu.cpp
   )
 endif()
+list(APPEND TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/api/src/serialize/crc.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/serialize/file_adapter.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/serialize/inline_container.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/serialize/istream_adapter.cpp
+  ${PROJECT_SOURCE_DIR}/third_party/miniz-2.1.0/miniz.c
+)
 
 list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 
@@ -1140,6 +1146,9 @@ if(NOT NO_API)
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
+else()
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_SRC_DIR}/csrc/api/include)
 endif()
 
 if(USE_CUDA AND MSVC)
@@ -1283,11 +1292,9 @@ set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
 # END formerly-libtorch flags
 # ==========================================================
 
-if(NOT NO_API)
-  target_include_directories(torch_cpu PUBLIC
-    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api>
-    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
-endif()
+target_include_directories(torch_cpu PUBLIC
+  $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api>
+  $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
 
 if(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE

@@ -5,10 +5,10 @@
 #include <istream>
 #include <memory>
 
-#include <caffe2/serialize/file_adapter.h>
+#include <torch/csrc/api/include/torch/serialize/file_adapter.h>
 
 namespace torch::jit {
-using caffe2::serialize::ReadAdapterInterface;
+using torch::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 constexpr const char* kArchiveNameBytecode = "bytecode";
@@ -86,7 +86,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
 // Given a reader, which has access to a model file,
 // return true if there exists tensors in `bytecode` archive
 bool isTensorInBytecodeArchive(
-    caffe2::serialize::PyTorchStreamReader& stream_reader);
+    torch::serialize::PyTorchStreamReader& stream_reader);
 
 namespace mobile {
 

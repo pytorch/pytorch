@@ -1,7 +1,5 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
-#include <caffe2/serialize/file_adapter.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
@@ -9,13 +7,15 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/serialize/file_adapter.h>
+#include <torch/serialize/inline_container.h>
 #include <cstddef>
 #include <sstream>
 
 namespace torch::jit {
 
-using caffe2::serialize::PyTorchStreamReader;
-using caffe2::serialize::PyTorchStreamWriter;
+using torch::serialize::PyTorchStreamReader;
+using torch::serialize::PyTorchStreamWriter;
 
 // Current support bytecode version
 namespace {
@@ -386,7 +386,7 @@ number of specified arguments.
 */
 std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+      std::make_shared<torch::serialize::IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
 
   // If there are debug info files in the original model file, it should also
@@ -451,7 +451,7 @@ contains all the arguments as before.
 */
 std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+      std::make_shared<torch::serialize::IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
   auto constants_values =
       std::move(*readArchive(kArchiveNameConstants, *reader).toTuple())
@@ -524,7 +524,7 @@ std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
 
 std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
   auto rai =
-      std::make_shared<caffe2::serialize::IStreamAdapter>(&input_model_stream);
+      std::make_shared<torch::serialize::IStreamAdapter>(&input_model_stream);
   auto reader = std::make_shared<PyTorchStreamReader>(rai);
   // extra_files are kept
   auto records = reader->getAllRecords();

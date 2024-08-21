@@ -1,16 +1,16 @@
 #include <ATen/core/ivalue.h>
-#include <caffe2/serialize/file_adapter.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/compatibility/backport.h>
 #include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/serialize/file_adapter.h>
+#include <torch/serialize/inline_container.h>
 
 #include <string>
 
 namespace torch::jit {
 
-using caffe2::serialize::IStreamAdapter;
-using caffe2::serialize::PyTorchStreamWriter;
+using torch::serialize::IStreamAdapter;
+using torch::serialize::PyTorchStreamWriter;
 
 const static BackportManager backportManager;
 

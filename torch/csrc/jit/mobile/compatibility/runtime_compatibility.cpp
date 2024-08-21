@@ -1,10 +1,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/type_factory.h>
-#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/custom_class.h>
+#include <torch/serialize/inline_container.h>
+#include <torch/serialize/versions.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -14,19 +15,19 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch::jit {
 
 uint64_t _get_runtime_bytecode_version() {
-  return caffe2::serialize::kMaxSupportedBytecodeVersion;
+  return torch::serialize::kMaxSupportedBytecodeVersion;
 }
 
 std::pair<uint64_t, uint64_t> _get_runtime_bytecode_min_max_versions() {
   return std::pair<uint64_t, uint64_t>(
-      caffe2::serialize::kMinSupportedBytecodeVersion,
-      caffe2::serialize::kMaxSupportedBytecodeVersion);
+      torch::serialize::kMinSupportedBytecodeVersion,
+      torch::serialize::kMaxSupportedBytecodeVersion);
 }
 
 std::pair<uint64_t, uint64_t> _get_runtime_operators_min_max_versions() {
   return std::pair<uint64_t, uint64_t>(
-      caffe2::serialize::kMinSupportedFileFormatVersion,
-      caffe2::serialize::kMaxSupportedFileFormatVersion);
+      torch::serialize::kMinSupportedFileFormatVersion,
+      torch::serialize::kMaxSupportedFileFormatVersion);
 }
 
 /*
