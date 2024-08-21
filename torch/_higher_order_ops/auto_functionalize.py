@@ -162,8 +162,8 @@ def auto_functionalized_dense(
             return input._cdata
 
     _arg_to_base_address = {
-        arg: [transform(t) for t in entries]
-        for (arg, entries) in _arg_to_base.items()
+        arg: transform(v)
+        for (arg, v) in _arg_to_base.items()
     }
 
     def observe_mutation(alias, mutation_source):
