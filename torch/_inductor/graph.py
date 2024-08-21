@@ -1338,7 +1338,6 @@ class GraphLowering(torch.fx.Interpreter):
                     if (
                         not unbacked_symbols_in_strides
                         and dense
-                        and len(strides)
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
                         and n.name not in self.user_visible_outputs

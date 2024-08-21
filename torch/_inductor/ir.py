@@ -263,11 +263,11 @@ def get_new_stride_with_stride_order(
     stride_order: Sequence[int],
 ) -> Sequence[Union[int, torch.SymInt, Expr]]:
     """
-    Convert strides order to new stride
+    Get new strides following stride_order
     """
     new_stride = [stride[0] for _ in range(len(stride))]
     for i, elem in enumerate(stride_order):
-        new_stride[i] = stride[elem]
+        new_stride[stride_order[i]] = stride[elem]
     return new_stride
 
 
