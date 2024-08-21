@@ -12,6 +12,7 @@ import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
 from torch._C import FileCheck
+from torch._inductor.inductor_utils import HAS_GPU
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -356,7 +357,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -432,7 +435,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     def test_dtensor_different_gradient_placement(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -564,7 +569,9 @@ def forward(self, primals_1):
     return (sin_1, primals_1, wait_tensor)""",
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     def test_dtensor_partial_placement_graph_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -582,7 +589,9 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_lt_x_gpu(1)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
