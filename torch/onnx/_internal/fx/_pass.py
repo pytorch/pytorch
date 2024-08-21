@@ -12,7 +12,7 @@ from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
 
@@ -220,7 +220,7 @@ class Transform(abc.ABC):
         Scan through all nodes in graph and their meta['val'] to detect fake mode.
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
-        with maybe_disable_fake_tensor_mode():
+        with unset_fake_temporarily():
             return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     def _maybe_fakefy_args(

@@ -403,14 +403,14 @@ class CppWrapperCuda(CppWrapperCpu):
         self.writeline(
             DeferredCudaKernelLine(
                 kernel_name,
-                "launchKernel({}, {}, {}, {},".format(
+                r"launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
                     kernel_var_name,
-                    f"{grid_var}.grid_x",
-                    f"{grid_var}.grid_y",
-                    f"{grid_var}.grid_z",
-                )
-                + "%s, %s,"
-                + f"{kernel_args_var}, {stream});",
+                    f"{grid_name}.grid_x",
+                    f"{grid_name}.grid_y",
+                    f"{grid_name}.grid_z",
+                    kernel_args_var,
+                    stream,
+                ),
                 ("num_warps", "shared_mem"),
             ),
         )

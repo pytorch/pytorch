@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import functools
 import inspect
 import warnings
-from typing import Any, Dict, List, Optional, Union
+from collections.abc import MutableMapping
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch.nn
 
@@ -267,6 +269,30 @@ class SideEffects:
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
+
+    def track_object_new_from_user_defined_class(
+        self,
+        cls_variable: "variables.UserDefinedClassVariable",
+    ):
+        cls_source = cls_variable.source
+        user_cls = cls_variable.value
+
+        # Find the variable class
+        variable_cls: Type[
+            variables.UserDefinedObjectVariable
+        ] = variables.UserDefinedObjectVariable
+        if issubclass(user_cls, torch.nn.Module):
+            variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, MutableMapping):
+            variable_cls = variables.MutableMappingVariable
+        else:
+            variable_cls = variables.UserDefinedObjectVariable
+
+        assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+
+        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+
+        return self.track_object_new(cls_source, user_cls, variable_cls, {})
 
     def track_cell_new(
         self,
@@ -561,6 +587,20 @@ class SideEffects:
                         create_instruction("POP_TOP"),
                     ]
                 )
+            elif isinstance(
+                var, variables.torch_function.TorchFunctionModeStackVariable
+            ):
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "set_torch_function_mode_stack"
+                    )
+                )
+                cg.foreach(var.symbolic_stack)
+                cg.append_output(
+                    create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
+                )
+                cg.call_function(1, False)
+                cg.append_output(create_instruction("POP_TOP"))
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -623,6 +663,21 @@ class SideEffects:
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
                     cg.call_function(1, False)
                     cg.pop_top()
+            elif isinstance(var, variables.RandomVariable):
+                # set correct random seed state
+                def gen_fn():
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_attr("setstate")
+
+                cg.add_push_null(gen_fn)
+                cg(var.wrap_state(var.random.getstate()))
+
+                suffixes.append(
+                    [
+                        *create_call_function(1, False),  # setstate
+                        create_instruction("POP_TOP"),
+                    ]
+                )
             else:
                 raise AssertionError(type(var))
 
