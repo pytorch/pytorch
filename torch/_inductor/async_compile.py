@@ -217,7 +217,7 @@ class AsyncCompile:
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
 
         def task():
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+            return CUDACodeCache.load(source_code, dst_file_ext, myflag=True)[0]
 
         return self.submit(task)
 

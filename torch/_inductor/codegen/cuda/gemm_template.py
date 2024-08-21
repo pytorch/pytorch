@@ -31,8 +31,9 @@ GEMM_TEMPLATE = r"""
 {{instance_definition}}
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
-extern "C" {
-{{kernel_call_signature}} {
+
+
+extern "C" PT_EXPORT int {{kernel_call_formal_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
@@ -47,7 +48,7 @@ extern "C" {
   }
   {{instance_type}}::Arguments arguments;
   {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
-                                    X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
+                                    X, W, Bias, Y, A_type, B_type, C_type, D_type, alpha, beta, kernel, epilogue_args)}}
   {{instance_type}} gemm_op;
   if (workspace_size) {
     *workspace_size = gemm_op.get_workspace_size(arguments);
@@ -91,7 +92,6 @@ extern "C" {
   }
   return 0;
 }
-}
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
@@ -106,13 +106,13 @@ GEMM_ARGS_CUTLASS_3X = r"""
       static_cast<coord_t>(B)
     }, // ProblemShape problem_shape
     {
-      {{template.cutlass_type_cast(X, kernel.ptr(X))}},  // ElementA const* ptr_A
+      {{template.new_cutlass_type_cast(A_type, kernel.ptr(X))}},  // ElementA const* ptr_A
       {
         {{template.cute_int(kernel.stride(X, -2), "stride_x0")}},
         {{template.cute_int(kernel.stride(X, -1), "stride_x1")}},
         {{template.cute_int(kernel.stride(X, -3), "batch_stride_x")}}
       },  // StrideA dA
-      {{template.cutlass_type_cast(W, kernel.ptr(W))}},  // ElementB const* ptr_B
+      {{template.new_cutlass_type_cast(B_type, kernel.ptr(W))}},  // ElementB const* ptr_B
       {
         {{template.cute_int(kernel.stride(W, -1), "stride_w1")}},
         {{template.cute_int(kernel.stride(W, -2), "stride_w0")}},
@@ -130,13 +130,13 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
     // see https://tinyurl.com/4rk89z48
     {
       {{epilogue_args}},  // thread, typename FusionCallbacks::Arguments ( EVT ) or ThreadEpilogueOp::Params (non-EVT )
-      {{template.cutlass_type_cast(Bias, kernel.ptr(Bias))}},  // ElementC const* ptr_C
+      {{template.new_cutlass_type_cast(C_type, kernel.ptr(Bias))}},  // ElementC const* ptr_C
       {
         {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
         {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}},
         {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}
       },  // StrideC dC
-      {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // ElementD const* ptr_D
+      {{template.new_cutlass_type_cast(D_type, kernel.ptr(Y))}},  // ElementD const* ptr_D
       {
         {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}},
         {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}},
@@ -180,18 +180,18 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     size_t workspace_size = 0;
     size_t* workspace_size_ptr = &workspace_size;
 
-    using ElementA = {{kernel.cutlass_dtype(X)}};
-    using ElementB = {{kernel.cutlass_dtype(W)}};
-    using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
-    using ElementD = {{kernel.cutlass_dtype(Y)}};
+    using ElementA = {{kernel.new_cutlass_dtype(A_type)}};
+    using ElementB = {{kernel.new_cutlass_dtype(B_type)}};
+    using ElementC = {{kernel.new_cutlass_dtype(C_type, default_dtype='uint8_t')}}; // may not be void
+    using ElementD = {{kernel.new_cutlass_dtype(D_type)}};
 
-    cutlass::DeviceAllocation<ElementA> X_data({{kernel.max_valid_index(X)+1}});
-    initialize_block(X_data, seed++);
-    cutlass::DeviceAllocation<ElementB> W_data({{kernel.max_valid_index(W)+1}});
-    initialize_block(W_data, seed++);
+    cutlass::DeviceAllocation<ElementA> X({{kernel.max_valid_index(X)+1}});
+    initialize_block(X, seed++);
+    cutlass::DeviceAllocation<ElementB> W({{kernel.max_valid_index(W)+1}});
+    initialize_block(W, seed++);
     cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
-    initialize_block(Bias_data, seed++);
-    cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
+    initialize_block(Bia, seed++);
+    cutlass::DeviceAllocation<ElementD> Y({{kernel.max_valid_index(Y)+1}});
 
     cutlass::DeviceAllocation<uint8_t> workspace_data;
     // Call once with workspace_size_ptr set to get workspace size
@@ -783,6 +783,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         W: IRNode,
         Bias: IRNode,
         Y: IRNode,
+        A_type: str,
+        B_type: str,
+        C_type: str,
+        D_type: str,
         alpha: float,
         beta: float,
         kernel: CUDATemplateKernel,
@@ -818,6 +822,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             X=X,
             W=W,
             Y=Y,
+            A_type=A_type,
+            B_type=B_type,
+            C_type=C_type,
+            D_type=D_type,
             Bias=Bias,
             template=self,
             kernel=kernel,
@@ -929,7 +937,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder  # type: ignore[arg-type]
         )
+        kernel_c_call_signature = kernel.def_kernel(
+            inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder
+        )
+        # kernel_call_partial_signature = kernel.declare_kernel(
+        #     inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder  # type: ignore[arg-type]
+        # )
+        A_type, B_type, C_type, D_type = op.A.element.name, op.B.element.name, op.C.element.name, op.D.element.name
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
+        cpp_call_statement = self.cpp_call_statement(kernel, inputs, names_str)
+        # breakpoint()
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
 
@@ -956,7 +973,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             X=X,
             W=W,
             Y=Y,
-            kernel_call_signature=kernel_call_signature,
+            A_type=A_type,
+            B_type=B_type,
+            C_type=C_type,
+            D_type=D_type,
+            # kernel_call_partial_signature=kernel_call_partial_signature,
+            kernel_c_call_signature=kernel_c_call_signature,
+            kernel_call_formal_signature=kernel_call_signature,
             Bias=Bias,
             epilogue_template=epilogue_template,
             argument_template=argument_template,
@@ -968,6 +991,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
             test_call_statement=test_call_statement,
+            cpp_call_statement=cpp_call_statement,
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         if inductor_cuda_config.generate_test_runner:
@@ -995,7 +1019,30 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if input_nodes[2] is None:
             del arg_names[2]
         arguments = [
-            f"(({arg_type}){arg_name}_data.get())"
+            f"(({arg_type}){arg_name}.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"
+        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size, (uint8_t*)workspace.get(), 0);"
+
+    def cpp_call_statement(
+        self,
+        kernel,
+        input_nodes,
+        names_str: str = "",
+    ) -> str:
+        """
+        Helper method to render the Cutlass CUDA C++ code required for calling the GEMM operation in the standalone
+        test runner that might also be generated along with the rest of the code, if the corresponding config is
+        enabled.
+
+        Returns a C++ statement that calls the GEMM operation with the correct arguments.
+        """
+        _, __, arg_types = kernel.args.cpp_argdefs()
+        arg_names = [name.strip() for name in names_str.strip().split(",")]
+        if input_nodes[2] is None:
+            del arg_names[2]
+        arguments = [
+            f"(({arg_type}){arg_name})"
+            for arg_type, arg_name in zip(arg_types, arg_names)
+        ]
+        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size, (uint8_t*)workspace, 0);"

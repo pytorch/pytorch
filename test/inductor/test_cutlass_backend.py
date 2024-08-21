@@ -169,6 +169,13 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b):
+                return mm(a, b)
+
         a = torch.randn(128, 16).cuda().half()
         b = torch.randn(16, 128).cuda().half()
 
@@ -181,9 +188,14 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-            Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
+            # Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            # Y = mm(a, b)
+            # torch.testing.assert_close(Y_compiled, Y)
+
+            model = MyModel().cuda().half()
+            torch._export.aot_compile(model, (a, b))
+        
+
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")

@@ -1567,7 +1567,7 @@ def deprecated_cpp_compile_command(
         r"[ \n]+",
         " ",
         f"""
-            {get_cpp_compiler()} {inp_name_str} {get_shared(shared, compile_only)}
+            {get_cpp_compiler()} {inp_name_str} {other_obj_paths} {get_shared(shared, compile_only)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
@@ -1969,9 +1969,11 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+            other_obj_paths = " ".join(torch._inductor.config.standalone_obj_paths)
+            print('Colin:', other_obj_paths)
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o],
+                sources=[output_o, consts_o, other_obj_paths],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -3221,6 +3223,16 @@ class CUDACodeCache:
     cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
+    # @classmethod
+    # def set(cls, key: str, value: str) -> None:
+    #     cls.another_cache[key] = value
+
+    # @classmethod
+    # def get(cls, key: str) -> None:
+    #     source_code = cls.another_cache[key]
+    #     k, _ = cls.write(source_code, dst_file_ext='o')
+    #     return cls.cache[k]
+
     @classmethod
     def write(cls, source_code: str, dst_file_ext: str) -> Tuple[str, str]:
         """
@@ -3246,6 +3258,9 @@ class CUDACodeCache:
         """
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
+            if dst_file_ext == 'so':
+                pass
+                # breakpoint()
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
@@ -3253,6 +3268,7 @@ class CUDACodeCache:
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
+                    # COLIN here we do the compilation command.
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
@@ -3278,20 +3294,28 @@ class CUDACodeCache:
         return (cls.cache[key].output_path, key, input_path)
 
     @classmethod
-    def load(cls, source_code: str, dst_file_ext: str) -> Tuple[DLLWrapper, str, str]:
+    def load(cls, source_code: str, dst_file_ext: str, myflag: bool = False) -> Tuple[DLLWrapper, str, str]:
         """
         Compiles source code and loads the generated .so file.
         Returns a tuple of DLLWrapper, hash_key, source_code_path
         """
 
-        if dst_file_ext != "so":
-            raise RuntimeError(
-                f"Only support loading a .so file for now. "
-                f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
-            )
+        # if dst_file_ext != "so":
+        #     raise RuntimeError(
+        #         f"Only support loading a .so file for now. "
+        #         f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
+        #     )
         dst_file_path, hash_key, source_code_path = cls.compile(
             source_code, dst_file_ext
         )
+        if myflag:
+            o_file_path, hash_key2, source_code_path2 = cls.compile(
+                source_code, "o", extra_args=["-D CUTLASS_COLIN"]
+            )
+            if o_file_path not in config.standalone_obj_paths:
+                config.standalone_obj_paths.append(o_file_path)
+        # Colin: we need to do this during lookup on the winner.
+
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 

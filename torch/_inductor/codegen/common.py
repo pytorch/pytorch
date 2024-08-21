@@ -2139,10 +2139,7 @@ class KernelTemplate:
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
         """
 
-        try:
-            choices.append(self.generate(**kwargs))
-        except NotImplementedError as e:
-            pass
+        choices.append(self.generate(**kwargs))
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """

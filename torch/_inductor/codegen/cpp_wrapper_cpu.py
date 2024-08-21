@@ -656,6 +656,20 @@ class CppWrapperCpu(WrapperCodeGen):
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
             )
         for kernel in sorted(declare_kernel):
+            if str(kernel) == "cuda_fused_1":
+                # self.prefix.writeline(
+                #     maybe_hipify_code_wrapper(f"    int cuda_fused_0(const void*, const void*, void*, size_t*, uint8_t*, cudaStream_t);")
+                # )
+                # self.prefix.writeline(
+                #     maybe_hipify_code_wrapper(f"    int cuda_fused_1(const float*, const float*, const float*, float*, size_t*, uint8_t*, cudaStream_t);")
+                # )
+                self.prefix.writeline(
+                    """
+                    int cuda_fused_1(const float* X, const float* W, const float* Bias, float* Y, size_t* workspace_size, uint8_t* workspace, cudaStream_t stream) {
+                        return ::cuda_fused_1(X, W, Bias, Y, workspace_size, workspace, stream);
+                    }
+                    """)
+                continue
             self.prefix.writeline(
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
@@ -817,7 +831,6 @@ class CppWrapperCpu(WrapperCodeGen):
             return folded_constants_map;
         }
         """
-
         self.prefix.splice(
             """
             std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(

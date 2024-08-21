@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import os
-from itertools import chain, count
+from itertools import chain, count, zip_longest
 from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import sympy
@@ -225,9 +225,6 @@ class CppWrapperCuda(CppWrapperCpu):
         triton_meta=None,
         grid_extra_kwargs="",
     ):
-        assert arg_types is not None and len(call_args) == len(
-            arg_types
-        ), "call_args and arg_types do not match"
 
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
@@ -238,70 +235,87 @@ class CppWrapperCuda(CppWrapperCpu):
         device_index, call_args = self.prepare_triton_kernel_call(
             device_index, call_args
         )
-        params = CudaKernelParamCache.get(name)
-        assert (
-            params is not None
-        ), f"cuda kernel parameters for {name} should already exist at this moment"
-        mangled_name = params.get("mangled_name", None)
-        assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
-        assert cubin_path is not None and os.path.exists(
-            cubin_path
-        ), f"cubin file should already exist at this moment: {cubin_path}"
-        shared_mem = params.get("shared_mem", 0)
+        if triton:
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
 
-        self.generate_load_kernel_once(
-            name, mangled_name, cubin_path, shared_mem, V.graph
-        )
+            params = CudaKernelParamCache.get(name)
+            assert (
+                params is not None
+            ), f"cuda kernel parameters for {name} should already exist at this moment"
+            mangled_name = params.get("mangled_name", None)
+            assert mangled_name is not None, "missing mangled_name"
+            cubin_path = params.get(get_cpp_wrapper_cubin_path_name(), None)
+            assert cubin_path is not None and os.path.exists(
+                cubin_path
+            ), f"cubin file should already exist at this moment: {cubin_path}"
+            shared_mem = params.get("shared_mem", 0)
 
-        # args with value 1 are added into equal_to_1 and constants
-        # in triton_meta (in the Python codegen) which makes them
-        # inlined in the PTX and compiled CUBIN
-        if (
-            triton_meta is not None
-            and "configs" in triton_meta
-            and triton_meta["configs"]
-        ):
-            equal_to_1 = triton_meta["configs"][0].equal_to_1
-            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
-            arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+            self.generate_load_kernel_once(
+                name, mangled_name, cubin_path, shared_mem, V.graph
+            )
 
-        call_args = self.generate_args_decl(call_args, arg_types)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
-        stream = (
-            "stream"
-            if V.graph.aot_mode
-            else self.write_get_raw_stream(device_index, V.graph)
-        )
-        grid_name = f"{name}_grid_{next(self.grid_id)}"
-        assert isinstance(
-            grid, (list, tuple)
-        ), f"expected grid to be a list or tuple but got: {grid=}"
+            # args with value 1 are added into equal_to_1 and constants
+            # in triton_meta (in the Python codegen) which makes them
+            # inlined in the PTX and compiled CUBIN
+            if (
+                triton_meta is not None
+                and "configs" in triton_meta
+                and triton_meta["configs"]
+            ):
+                equal_to_1 = triton_meta["configs"][0].equal_to_1
+                call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
+                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
 
-        grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.expr_printer(item) for item in grid]
-        grid_args_str = ", ".join(grid_args)
-        self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
+            call_args = self.generate_args_decl(call_args, arg_types)
+            kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+            stream = (
+                "stream"
+                if V.graph.aot_mode
+                else self.write_get_raw_stream(device_index, V.graph)
+            )
+            grid_name = f"{name}_grid_{next(self.grid_id)}"
+            assert isinstance(
+                grid, (list, tuple)
+            ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        if grid_uses_symbolic_shapes:
-            self.writeline(f"if ({grid_name}.is_non_zero()) {{")
-        kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
-        launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
-            kernel_var_name,
-            f"{grid_name}.grid_x",
-            f"{grid_name}.grid_y",
-            f"{grid_name}.grid_z",
-            params["num_warps"],
-            params["shared_mem"],
-            kernel_args_var,
-            stream,
-        )
-        if grid_uses_symbolic_shapes:
-            # TODO: Use codegen `do_indent()` to properly generate the indentation.
-            # This works in this case as there's only one `if` condition.
-            self.writeline("    " + launch_kernel_call)
-            self.writeline("}")
+            grid = [V.graph.sizevars.simplify(item) for item in grid]
+            grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
+            grid_args = [self.expr_printer(item) for item in grid]
+            grid_args_str = ", ".join(grid_args)
+            self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
+
+            if grid_uses_symbolic_shapes:
+                self.writeline(f"if ({grid_name}.is_non_zero()) {{")
+            kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name
+            launch_kernel_call = """launchKernel({}, {}, {}, {}, {}, {}, {}, {});""".format(
+                kernel_var_name,
+                f"{grid_name}.grid_x",
+                f"{grid_name}.grid_y",
+                f"{grid_name}.grid_z",
+                params["num_warps"],
+                params["shared_mem"],
+                kernel_args_var,
+                stream,
+            )
+            if grid_uses_symbolic_shapes:
+                # TODO: Use codegen `do_indent()` to properly generate the indentation.
+                # This works in this case as there's only one `if` condition.
+                self.writeline("    " + launch_kernel_call)
+                self.writeline("}")
+            else:
+                self.writeline(launch_kernel_call)
         else:
-            self.writeline(launch_kernel_call)
+            casted_call_args = []
+            for arg_type, arg in zip_longest(arg_types, call_args, fillvalue=None):
+                x = f"({arg_type}){arg}" if arg_type else f"{arg}"
+                casted_call_args.append(x)
+            call_args_str = ", ".join(casted_call_args)
+            stream = (
+                "stream"
+                if V.graph.aot_mode
+                else self.write_get_raw_stream(device_index, V.graph)
+            )
+            self.writeline(f"kernels.{name}({call_args_str}, {stream});")

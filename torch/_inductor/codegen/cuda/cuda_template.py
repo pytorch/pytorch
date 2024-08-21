@@ -237,7 +237,27 @@ class CUTLASSTemplate(CUDATemplate):
         torch.bfloat16: "cutlass::bfloat16_t",
     }
 
+    def new_cutlass_type_cast(self, dtype: Optional[str], ptr: str) -> str:
+        # COLIN: should we be passing the op's argument's dtype instead?
+        if dtype is None:
+            return ptr
+        else:
+            TO_CUTLASS = {
+                "b1": "bool",
+                "s8": "int8_t",
+                "s32": "int",
+                "u8": "uint8_t",
+                "f16": "cutlass::half_t",
+                "f32": "float",
+                "f64": "double",
+                "tf32": "cutlass::tfloat32_t",
+                "bf16": "cutlass:bfloat16_t",
+            }
+            cutlass_dtype = TO_CUTLASS[dtype]
+            return f"({cutlass_dtype}*)({ptr})"
+
     def cutlass_type_cast(self, node: IRNode, ptr: str) -> str:
+        # COLIN: should we be passing the op's argument's dtype instead?
         if node is None:
             return ptr
         else:

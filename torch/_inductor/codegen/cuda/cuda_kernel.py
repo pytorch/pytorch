@@ -44,6 +44,7 @@ class CUDATemplateKernel(CUDAKernel):
     """
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
+    _EXTRA_CPP_ARG_TYPES = "size_t*, uint8_t*, cudaStream_t"
 
     def __init__(self, kernel_name):
         """
@@ -95,6 +96,40 @@ class CUDATemplateKernel(CUDAKernel):
             """
         )
         return res.getvalue()
+    
+    def declare_kernel(
+        self,
+        inputs: List[IRNode],
+        outputs: List[IRNode],
+        names_str: str = "",
+        input_reorder: Optional[List[int]] = None,
+    ) -> str:
+        names = [x.strip() for x in names_str.strip().split(",")]
+        if len(inputs) + len(outputs) != len(names):
+            raise RuntimeError(
+                f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
+            )
+
+        if input_reorder is not None:
+            assert len(inputs) == len(input_reorder)
+        else:
+            input_reorder = list(range(len(inputs)))
+
+        for idx in input_reorder:
+            name = names[idx]
+            node = inputs[idx]
+            if node is not None:
+                self.named_nodes[name] = node
+                self.args.input_buffers[node.get_name()] = name
+
+        for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
+            if node is not None:
+                self.named_nodes[name] = node
+                self.args.output_buffers[node.get_name()] = name
+
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_types)}, {self._EXTRA_CPP_ARG_TYPES})"
+
 
     def def_kernel(
         self,
@@ -102,6 +137,7 @@ class CUDATemplateKernel(CUDAKernel):
         outputs: List[IRNode],
         names_str: str = "",
         input_reorder: Optional[List[int]] = None,
+        suffix = ""
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -141,7 +177,8 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        # return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+        return f"{self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
         self,
@@ -157,17 +194,23 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        if V.graph.cpp_wrapper:
+            _, call_args, arg_types = self.args.cpp_argdefs()
+        else:
+            _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
             else:
-                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
+                if V.graph.cpp_wrapper:
+                    call_args[i] = f"{call_args[i]}.data_ptr()"
+                else:
+                    call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        call_args.append("None")
+        call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
 
         if node.get_workspace_size() > 0:
             wrapper.generate_workspace_allocation(
@@ -175,7 +218,7 @@ class CUDATemplateKernel(CUDAKernel):
             )
             call_args.append("c_void_p(workspace.data_ptr())")
         else:
-            call_args.append("None")
+            call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
 
         wrapper.generate_kernel_call(
             name,
@@ -195,7 +238,7 @@ class CUDATemplateKernel(CUDAKernel):
         if node is None:
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
-
+    
     def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
@@ -203,6 +246,23 @@ class CUDATemplateKernel(CUDAKernel):
         from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
 
         return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def new_cutlass_dtype(self, dtype: Optional[str], default_dtype="void") -> str:
+        # Helper method, called into from CUTLASSGemmTemplate
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+        TO_CUTLASS = {
+            "b1": "bool",
+            "s8": "int8_t",
+            "s32": "int",
+            "u8": "uint8_t",
+            "f16": "cutlass::half_t",
+            "f32": "float",
+            "f64": "double",
+            "tf32": "cutlass::tfloat32_t",
+            "bf16": "cutlass:bfloat16_t",
+        }
+
+        return TO_CUTLASS[dtype] or default_dtype
 
     def max_valid_index(self, node: IRNode, default=-1):
         # Helper method, called into from CUTLASSGemmTemplate
@@ -386,6 +446,7 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
+        # COLIN: For option A, we can add an option to compile the .o here.
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

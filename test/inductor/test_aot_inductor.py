@@ -571,7 +571,18 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-        self.check_model(model, example_inputs)
+        max_autotune_gemm_backends = "CUTLASS"
+        _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            self.check_model(model, example_inputs)
 
     def test_aliased_buffer_reuse(self):
         class Model(torch.nn.Module):

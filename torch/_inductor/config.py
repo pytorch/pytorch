@@ -17,6 +17,8 @@ def fx_graph_remote_cache_default() -> Optional[bool]:
     return None
 
 
+standalone_obj_paths = []
+
 # add some debug printouts
 debug = False
 

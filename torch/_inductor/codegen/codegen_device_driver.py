@@ -72,6 +72,9 @@ def cuda_kernel_driver() -> str:
                     func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                 ));
             }
+
+            extern \"C\" int cuda_fused_1(const float*, const float*, const float*, float*, size_t*, uint8_t*, cudaStream_t);
+
     """
     if torch.version.hip is not None:
         # Adjusting the warp size to GPU supported wavefront size on AMD GPU

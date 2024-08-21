@@ -1527,6 +1527,7 @@ class WrapperCodeGen(CodeGen):
         return grid
 
     def prepare_triton_kernel_call(self, device_index, call_args):
+        # COLIN: Add nullptr handling using self.none_str
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
