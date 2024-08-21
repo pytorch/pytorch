@@ -1301,7 +1301,8 @@ class VariableBuilder:
             # structure of fsdp_managed modules, by using FSDPNNModuleSource as
             # the guard source.  This behavior is gated on
             # config.skip_fsdp_guards.
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+
+            # NB - Dont insert TYPE_MATCH guard. FSDP monkeypatches the class by creating a dynamic type.
             result = FSDPManagedNNModuleVariable(value, source=self.get_source())
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
