@@ -1076,6 +1076,30 @@ class GraphModule(torch.nn.Module):
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_mark_non_differentiable(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, input):
+                output = input > 0
+                ctx.mark_non_differentiable(output)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return (grad_output * 0).to(torch.double)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.randn(5, 5, requires_grad=True)
+        mask = fn(x)
+        self.assertFalse(mask.requires_grad)
+        y = x.masked_fill(mask, 0)
+        y.sum().backward()
+
     def test_default_values(self):
         from torch.autograd import Function
 
