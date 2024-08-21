@@ -581,6 +581,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch._foreach_lerp_)
+        def handle_inplace_foreach_lerp_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+                # decompose foreach lerp into constituent ops, prevents a graph break due to
+                # converting a value to a scalar when arg[2] is a single tensor
+                result = TorchInGraphFunctionVariable(torch._foreach_sub).call_function(
+                    tx, [args[1], args[0]], {}
+                )
+                result = TorchInGraphFunctionVariable(torch._foreach_mul).call_function(
+                    tx, [result, args[2]], {}
+                )
+                return TorchInGraphFunctionVariable(torch._foreach_add_).call_function(
+                    tx, [args[0], result], {}
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
