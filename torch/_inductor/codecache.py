@@ -458,12 +458,8 @@ def write_atomic(
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    if encode_utf_8:
-        with tmp_path.open(write_mode, encoding="utf-8") as f:
-            f.write(content)
-    else:
-        with tmp_path.open(write_mode) as f:
-            f.write(content)
+    with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
+        f.write(content)
     tmp_path.rename(path)
 
 
