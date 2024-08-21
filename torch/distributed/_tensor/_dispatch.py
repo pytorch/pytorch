@@ -170,7 +170,13 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
+                if op_call == aten.unsqueeze.default or op_call == aten.cat.default:
+                    print(f"output_shard={output_sharding}; {local_tensor_args}")
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                if op_call == aten.unsqueeze.default:
+                    print(f"unsqueeze result={local_results}")
+                if op_call == aten.cat.default:
+                    print(f"cat result={local_results}")
 
         else:
             # For a non-participating device (happens on rank that does not belong to
