@@ -27,7 +27,7 @@ from typing import (
     Type,
     Union,
 )
-from typing_extensions import TypeAlias, TypeIs
+from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -549,7 +549,7 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer) -> TypeIs[Union[str, os.PathLike]]:
+def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
