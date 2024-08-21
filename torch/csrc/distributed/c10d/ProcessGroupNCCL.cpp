@@ -763,6 +763,10 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
 
 ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() {}
 
+// CUDA event is used to record the start/end of one Work.
+// Instead of let the CUDA event gets destroyed, we now reuse it after the Work
+// has been erased from workMetaList_.
+// This is to avoid the potential deadlock caused by CudaEventDestroy.
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
