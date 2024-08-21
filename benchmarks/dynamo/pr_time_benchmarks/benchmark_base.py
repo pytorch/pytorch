@@ -1,5 +1,6 @@
 import csv
 from abc import ABC, abstractmethod
+
 from fbscribelogger import make_scribe_logger
 
 import torch._C._instruction_counter as i_counter
@@ -129,9 +130,7 @@ class BenchmarkBase(ABC):
         self.results = []
         if self._instruction_count:
             r = self.count_instructions()
-            self.results.append(
-                (self.name(), "instruction_count", r)
-            )
+            self.results.append((self.name(), "instruction_count", r))
             scribe_log_torch_benchmark_compile_time(
                 name=self.name(),
                 instruction_count=r,
