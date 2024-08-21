@@ -128,13 +128,13 @@ def associative_scan(
             "For combine_mode='pointwise', all input tensors need to be on CUDA"
         )
 
-    if reverse:
-        leaves = [torch.flip(elem, [dim]) for elem in leaves]
-
     assert len(leaves) >= 1, "expected at least 1 input leaf"
     assert all(
         isinstance(x, torch.Tensor) for x in leaves
     ), "input leaves must be a Tensor"
+
+    if reverse:
+        leaves = [torch.flip(elem, [dim]) for elem in leaves]
 
     shape = leaves[0].shape
     ndim = len(shape)
@@ -172,8 +172,55 @@ def associative_scan(
 
 
 def generic_associative_scan(operator, elems_flat, dim=0):
+    r"""
+    This function performs the associative_scan operation.
+    The algorithm works by recursively collecting neighbours of ``elems_flat`` and subsequently
+    applying the ``operator`` on all pairs in parallel along ``dim``.
+    The results of the recursive calls are later combined.
+
+    Args:
+        operator (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
+            or if input is a pytree ``(pytree, pytree) -> pytree``.
+            This function must be pure, pointwise, and satisfy the associative property.
+        elems_flat (torch.Tensor): A list of torch.Tensors converted from the pytree of
+            ``input`` provided to ``associative_scan``.
+            All inputs are expected to have the same shape.
+        dim (int): the dimension to scan over
+
+
+    Example::
+
+        def add(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        elems_flat = torch.tensor([0.0, 1.0, 2.0, 3.0])
+
+        First iteration of _scan ->
+            # odd_elems -> apply operator on all neighbours
+            # odd_elems = operator([torch.tensor([0.0, 2.0])],
+            #                      [torch.tensor([1.0, 3.0])])
+            odd_elems = torch.tensor([1.0, 5.0])
+            Second iteration of _scan ->
+                # odd_elems = operator([torch.tensor([1.0])],
+                #                      [torch.tensor([5.0])])
+                odd_elems = torch.tensor([6.0])
+                # even_elems -> apply operator on all odd_elems and
+                # every second element of ``elems``, starting from the second element.
+                # even_elems is expanded with the first element of ``elems``
+                even_elems = [1.0]
+                # Merges odd_elems and even_elems
+                res = torch.tensor([1.0, 6.0])
+            # even_elems -> apply operator on all odd_elems and
+            # every second element of ``elems``, starting from the second element.
+            # even_elems is expanded with the first element of ``elems``
+            even_elems = [0.0, 3.0]
+            # Merges odd_elems and even_elems
+            res = torch.tensor([0.0, 1.0, 3.0, 6.0])
+
+    """
+
     def _scan(elems):
-        """Perform scan on `elems`."""
+        """Perform the actual recursive scan on ``elems``."""
         num_elems = elems[0].shape[dim]
 
         if num_elems < 2:
