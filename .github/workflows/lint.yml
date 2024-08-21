@@ -24,7 +24,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   lintrunner-clang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@gh/ezyang/1/head
     needs: get-label-type
     with:
       timeout: 120
