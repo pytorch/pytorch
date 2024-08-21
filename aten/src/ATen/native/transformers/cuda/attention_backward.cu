@@ -435,8 +435,9 @@ _efficient_attention_backward(
                  mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
-                 rng_engine_inputs.seed_.val,
-                 rng_engine_inputs.offset_.val,
+                 mk_aoscalartensor(philox_seed),
+                 mk_aoscalartensor(philox_offset),
+                 0,
                  is_causal,
                  stream);
 #else

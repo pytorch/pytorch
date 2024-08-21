@@ -186,11 +186,11 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     }
   } else {
     if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-      seed_t = at::empty({}, at::dtype(at::kLong));
-      offset_t = at::empty({}, at::dtype(at::kLong));
+      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     } else {
-      seed_t = at::empty({}, at::dtype(at::kLong));
-      offset_t = at::empty({}, at::dtype(at::kLong));
+      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
   }
 
@@ -230,7 +230,10 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
-  auto offset = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+  auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+  auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
+  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
@@ -240,7 +243,10 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                  mk_aotensor(output_t, "Out"),
                  p_dropout,
                  seed,
-                 offset,
+                 offset1,
+                 offset2,
+                 seed_output,
+                 offset_output,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
@@ -445,8 +451,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
                    p_dropout,
-                   philox_args.seed_.val,
-                   philox_args.offset_.val,
+                   mk_aoscalartensor(philox_seed),
+                   mk_aoscalartensor(philox_offset),
+                   0,
                    is_causal,
                    stream);
   }
