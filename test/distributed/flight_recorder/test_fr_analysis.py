@@ -7,7 +7,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 sys.path.insert(0, str(REPO_ROOT))
-from tools.flight_recorder.fr_trace import match_one_event, MatchState
+from tools.flight_recorder.components.processor import match_one_event, MatchState
 
 
 # Make sure to remove REPO_ROOT after import is done
