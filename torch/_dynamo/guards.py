@@ -2848,10 +2848,19 @@ def install_guard(*guards, skip=0):
     """
     from torch._guards import TracingContext
 
-    collect_debug_stack = guards_log.isEnabledFor(
-        logging.DEBUG
-    ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
-    add = TracingContext.get().guards_context.dynamo_guards.add
-    for guard in guards:
-        assert isinstance(guard, Guard)
-        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+    if not config.unsafe_skip_all_guards:
+        collect_debug_stack = guards_log.isEnabledFor(
+            logging.DEBUG
+        ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
+        add = TracingContext.get().guards_context.dynamo_guards.add
+        for guard in guards:
+            assert isinstance(guard, Guard)
+            add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+    else:
+        torch._dynamo.utils.warn_once(
+            "torch._dynamo.config.unsafe_skip_all_guards is set to True. This will skip "
+            "adding any guard on the Dynamo graphs. This is unsafe and should only be used "
+            "for debugging purposes. Or when the user is sure that there is only one graph "
+            "and there are no more recompilations possible. Using it incorrectly can lead "
+            "to crashes or silent bugs."
+        )

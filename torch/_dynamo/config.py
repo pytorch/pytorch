@@ -374,6 +374,11 @@ enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Skips all guards, thereby removing the guard eval overhead. This should be used for debugging purposes or when the
+# user is completely sure that there will not be any recompilations for the compiled objects. Using it incorrectly can
+# lead to crashes or worse silent incorrectness bugs.
+unsafe_skip_all_guards = True
+
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]
