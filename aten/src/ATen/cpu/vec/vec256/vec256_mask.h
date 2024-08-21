@@ -88,66 +88,96 @@ struct VecMaskLoad<
 
 // TODO: add specialization of VecMaskLoad for bfloat16/half and int8/uint8
 
-template <>
-struct VecMaskCast<float, 1, int, 1> {
-  static inline VecMask<float, 1> apply(const VecMask<int, 1>& vec_mask) {
-    return Vectorized<float>(_mm256_castsi256_ps(vec_mask[0]));
+template <int N>
+struct VecMaskCast<float, N, int, N> {
+  static inline VecMask<float, N> apply(const VecMask<int, N>& vec_mask) {
+    VectorizedN<float, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = _mm256_castsi256_ps(vec_mask[i]);
+    }
+    return result;
   }
 };
 
-template <>
-struct VecMaskCast<int, 1, float, 1> {
-  static inline VecMask<int, 1> apply(const VecMask<float, 1>& vec_mask) {
-    return Vectorized<int>(_mm256_castps_si256(vec_mask[0]));
-  }
-};
-template <>
-struct VecMaskCast<float, 2, int, 2> {
-  static inline VecMask<float, 2> apply(const VecMask<int, 2>& vec_mask) {
-    return VectorizedN<float, 2>(_mm256_castsi256_ps(vec_mask[0]), _mm256_castsi256_ps(vec_mask[1]));
-  }
-};
-template <>
-struct VecMaskCast<int, 2, float, 2> {
-  static inline VecMask<int, 2> apply(const VecMask<float, 2>& vec_mask) {
-    return VectorizedN<int, 2>(_mm256_castps_si256(vec_mask[0]), _mm256_castps_si256(vec_mask[1]));
+template <int N>
+struct VecMaskCast<int, N, float, N> {
+  static inline VecMask<int, N> apply(const VecMask<float, N>& vec_mask) {
+    VectorizedN<int, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = _mm256_castps_si256(vec_mask[i]);
+    }
+    return result;
   }
 };
 
-template <>
-struct VecMaskCast<int64_t, 2, double, 2> {
+template <int N>
+struct VecMaskCast<int64_t, N, double, N> {
   static inline VecMask<int64_t, 2> apply(const VecMask<double, 2>& vec_mask) {
-    VectorizedN<int64_t, 2> result;
-    result[0] = _mm256_castpd_si256(vec_mask[0]);
-    result[1] = _mm256_castpd_si256(vec_mask[1]);
+    VectorizedN<int64_t, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = _mm256_castpd_si256(vec_mask[i]);
+    }
     return result;
   }
 };
 
-template <>
-struct VecMaskCast<double, 2, int64_t, 2> {
+template <int N>
+struct VecMaskCast<double, N, int64_t, N> {
   static inline VecMask<double, 2> apply(const VecMask<int64_t, 2>& vec_mask) {
-    VectorizedN<double, 2> result;
-    result[0] = _mm256_castsi256_pd(vec_mask[0]);
-    result[1] = _mm256_castsi256_pd(vec_mask[1]);
+    VectorizedN<double, N> result;
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      result[i] = _mm256_castsi256_pd(vec_mask[i]);
+    }
     return result;
   }
 };
-template <typename dst_t>
-struct VecMaskCast<dst_t, 1, int64_t, 2> {
-  static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
-    auto int_vec = convert<int, 1, int64_t, 2>(VectorizedN<int64_t, 2>(vec_mask));
-    return VecMask<int, 1>(int_vec).cast<dst_t, 1>();
+
+template <typename mask_t, int N>
+struct VecMaskCast<int64_t, 2 * N, mask_t, N> {
+  static inline VecMask<int64_t, 2 * N> apply(const VecMask<mask_t, N>& vec_mask) {
+    auto result = at::vec::VectorizedN<int64_t, 2 * N>();
+    auto int_mask = vec_mask.template cast<int, N>();
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < 2 * N; i += 2) {
+      auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[i]));
+      result[i] = int64_vec[0];
+      result[i + 1] = int64_vec[1];
+    }
+    return result;
   }
 };
-template <typename mask_t>
-struct VecMaskCast<int64_t, 2, mask_t, 1> {
-  static inline VecMask<int64_t, 2> apply(const VecMask<mask_t, 1>& vec_mask) {
-    auto int_mask = vec_mask.template cast<int, 1>();
-    auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[0]));
-    return int64_vec;
+
+template <typename dst_t, int N>
+struct VecMaskCast<dst_t, N, int64_t, 2 * N> {
+  static inline VecMask<dst_t, N> apply(const VecMask<int64_t, 2 * N>& vec_mask) {
+    auto result = VecMask<int, N>();
+    auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
+#ifndef _MSC_VER
+#pragma unroll
+#endif
+    for (int i = 0; i < N; ++i) {
+      int64_vec[0] = vec_mask[2 * i];
+      int64_vec[1] = vec_mask[2 * i + 1];
+      result[i] = convert<int, 1, int64_t, 2>(int64_vec);
+    }
+    return VecMask<int, N>(result).cast<dst_t, N>();
   }
 };
+
 template <>
 struct VecMaskCast<double, 2, float, 1> {
   static inline VecMask<double, 2> apply(const VecMask<float, 1>& vec_mask) {
@@ -160,36 +190,6 @@ struct VecMaskCast<float, 1, double, 2> {
   static inline VecMask<float, 1> apply(const VecMask<double, 2>& vec_mask) {
     auto int64_mask = VecMaskCast<int64_t, 2, double, 2>::apply(vec_mask);
     return VecMaskCast<float, 1, int64_t, 2>::apply(int64_mask);
-  }
-};
-
-template <typename mask_t>
-struct VecMaskCast<int64_t, 4, mask_t, 2> {
-  static inline VecMask<int64_t, 4> apply(const VecMask<mask_t, 2>& vec_mask) {
-    auto result = at::vec::VectorizedN<int64_t, 4>();
-    auto int_mask = vec_mask.template cast<int, 2>();
-    auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[0]));
-    result[0] = int64_vec[0];
-    result[1] = int64_vec[1];
-    int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[1]));
-    result[2] = int64_vec[0];
-    result[3] = int64_vec[1];
-    return VecMask<int64_t, 4>(result);
-  }
-};
-
-template <typename dst_t>
-struct VecMaskCast<dst_t, 2, int64_t, 4> {
-  static inline VecMask<dst_t, 2> apply(const VecMask<int64_t, 4>& vec_mask) {
-    auto result = VecMask<int, 2>();
-    auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
-    int64_vec[0] = vec_mask[0];
-    int64_vec[1] = vec_mask[1];
-    result[0] = convert<int, 1, int64_t, 2>(int64_vec);
-    int64_vec[0] = vec_mask[2];
-    int64_vec[1] = vec_mask[3];
-    result[1] = convert<int, 1, int64_t, 2>(int64_vec);
-    return VecMask<int, 2>(result).cast<dst_t, 2>();
   }
 };
 
@@ -209,34 +209,37 @@ inline bool VecMask<int, 1>::all_masked() const {
   return mask == 0xff;
 }
 
-template <>
-inline bool VecMask<int64_t, 4>::all_zero() const {
-  return _mm256_testz_si256(mask_[0], mask_[0]) &&
-         _mm256_testz_si256(mask_[1], mask_[1]) &&
-         _mm256_testz_si256(mask_[2], mask_[2]) &&
-         _mm256_testz_si256(mask_[3], mask_[3]);
+template <typename N>
+inline bool VecMask<int64_t, N>::all_zero() const {
+  bool all_zero = true;
+  for (int i = 0; i < N; ++i) {
+    all_zero = all_zero && (_mm256_testz_si256(mask_[i], mask_[i]) == 0);
+    if (!all_zero) {
+      return all_zero;
+    }
+  }
+  return all_zero;
 }
 
-template <>
-inline bool VecMask<int64_t, 4>::is_masked(int i) const {
-  if (i < 4) {
-    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << i);
-  } else if (i < 8) {
-    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 4));
-  } else if (i < 12) {
-    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 8));
-  } else {
-    return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0])) & (1 << (i - 12));
+template <typename N>
+inline bool VecMask<int64_t, N>::is_masked(int i) const {
+  for (int j = 0; j < N; ++j) {
+    if (i < (j + 1) * 4) {
+      return _mm256_movemask_pd(_mm256_castsi256_pd(mask_[j])) & (1 << (i - j * 4));
+    }
   }
 }
 
-template <>
-inline bool VecMask<int64_t, 4>::all_masked() const {
-  int mask0 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[0]));
-  int mask1 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[1]));
-  int mask2 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[2]));
-  int mask3 = _mm256_movemask_pd(_mm256_castsi256_pd(mask_[3]));
-  return mask0 == 0x0f && mask1 == 0x0f && mask2 == 0x0f && mask3 == 0x0f;
+template <typename N>
+inline bool VecMask<int64_t, N>::all_masked() const {
+  bool all_masked = true;
+  for (int i = 0; i < N; ++i) {
+    all_masked = all_masked && (_mm256_movemask_pd(_mm256_castsi256_pd(mask_[i])) == 0x0f);
+    if (!all_masked) {
+      return all_masked;
+    }
+  }
+  return all_masked;
 }
 
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \
