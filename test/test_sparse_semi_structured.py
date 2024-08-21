@@ -229,7 +229,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
 
-    
+
     @unittest.skipIf("cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cutlass not supported on this machine")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_mlp_contiguous_relu_compile_cutlass(self):
@@ -566,7 +566,7 @@ class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest("SparseSemiStructuredTensor training only supported on SM8x (Ampere)")
-            
+
         if IS_WINDOWS:
             self.skipTest('CUTLASS not supported on windows')
 
@@ -1051,8 +1051,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @training_dtypes
-    @unittest.skipIf(torch.backends.cusparselt.version() > 520, "cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
     def test_cslt_sparse_mm_alpha(self, dtype, device):
+        cslt_version = torch.backends.cusparselt.version()
+        if cslt_version and cslt_version > 520:
+            self.skipTest("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
@@ -1126,7 +1128,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         elif version == (12, 1):
             assert torch.backends.cusparselt.version() == 502
         elif version == (12, 4):
-            assert torch.backends.cusparselt.version() == 602 
+            assert torch.backends.cusparselt.version() == 602
         else:
             assert torch.backends.cusparselt.version() is None
 
