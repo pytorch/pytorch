@@ -451,7 +451,9 @@ def repro_run(options, mod, load_args):
             run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
 
             args = run_load_args(options, mod, load_args)
-            run_fwd_maybe_bwd(opt_mod, args, only_fwd=options.only_fwd, disable_clone=True)
+            run_fwd_maybe_bwd(
+                opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
+            )
 
 
 def run_repro(

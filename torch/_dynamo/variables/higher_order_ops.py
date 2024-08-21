@@ -2030,7 +2030,6 @@ def maybe_positional_arg_names(func):
         sig = inspect.signature(func.get_function())
     except (Unsupported, NotImplementedError, ValueError):
         return None
-    try:
 
     for name, param in sig.parameters.items():
         if param.kind is inspect.Parameter.VAR_POSITIONAL:
