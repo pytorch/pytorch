@@ -972,7 +972,7 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
         - None or non-empty str for 'call_function', 'get_attr'
         - None for 'placeholder', 'output'
     """
-    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+    for mod in [graph_module, *graph_module.modules()]:
         if not isinstance(mod, torch.fx.GraphModule):
             continue
         for node in graph_module.graph.nodes:
@@ -1515,10 +1515,10 @@ def _export_to_aten_ir_make_fx(
         params_buffers_args.extend(params_and_buffers_flat)
         params_buffers_args.extend(args)
 
-        flat_fn, out_spec = create_tree_flattened_fn(
+        flat_fn, _ = create_tree_flattened_fn(
             functional_call, params_buffers_args, kwargs
         )
-        flat_args, in_spec = pytree.tree_flatten((params_buffers_args, kwargs))
+        flat_args, _ = pytree.tree_flatten((params_buffers_args, kwargs))
 
         @functools.wraps(flat_fn)
         def wrapped_fn(*args):
@@ -1550,11 +1550,11 @@ def _export_to_aten_ir_make_fx(
         buffer_len = len(named_buffers)
 
         params_and_buffers = {**named_parameters, **named_buffers}
-        params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+        params_and_buffers_flat, _ = pytree.tree_flatten(params_and_buffers)
         params_and_buffers_flat = tuple(params_and_buffers_flat)
         params_len = len(params_and_buffers)
 
-        gm, sig = transform(_make_fx_helper)(
+        gm, _ = transform(_make_fx_helper)(
             mod,
             fake_args,
             trace_joint=False,

@@ -222,7 +222,6 @@ def maybe_to_fresh_input(idx, t, meta):
         return t
     if idx in meta.mutated_inp_runtime_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
@@ -271,7 +270,7 @@ def unlift_tokens(fw_module, fw_metadata):
                     and output_token_node.args[1] == 0
                 )
             with fw_module.graph.inserting_before(node):
-                sink_token_node = fw_module.graph.call_function(
+                fw_module.graph.call_function(
                     torch.ops.prims._sink_tokens.default,
                     (output_token_nodes,),
                 )

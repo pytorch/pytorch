@@ -127,7 +127,7 @@ def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...]
             try:
                 candidate_signature.bind(*args, **kwargs)
                 matched_schemas.append((candidate_signature, schema))
-            except TypeError as e:
+            except TypeError:
                 continue
 
         def throw_if_mutable(schema):
@@ -215,7 +215,7 @@ def create_type_hint(x):
                 else:
                     return ret_type(Any)
             return ret_type(base_type)
-    except Exception as e:
+    except Exception:
         # We tried to create a type hint for list but failed.
         warnings.warn(f"We were not able to successfully create type hint from the type {x}")
     return x
@@ -329,7 +329,7 @@ def normalize_function(
                 try:
                     candidate_signature.bind(*args, **kwargs)
                     matched_schemas.append(candidate_signature)
-                except TypeError as e:
+                except TypeError:
                     continue
 
             if len(matched_schemas) == 0:
