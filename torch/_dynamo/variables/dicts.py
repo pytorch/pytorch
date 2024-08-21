@@ -336,7 +336,8 @@ class ConstDictVariable(VariableTracker):
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
         elif name == "setdefault" and arg_hashable and self.mutable_local:
-            assert not kwargs and len(args) <= 2
+            assert not kwargs
+            assert len(args) <= 2
             value = self.maybe_getitem_const(args[0])
             if value is not None:
                 return value
