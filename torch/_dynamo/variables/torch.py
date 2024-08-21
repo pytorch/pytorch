@@ -598,6 +598,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [args[0], result], {}
                 )
 
+        @register(torch._foreach_pow)
+        def handle_foreach_pow_scalar(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # In eager it's more performant to call item() from within the C op implementation
+            # in compile, it's more performant to not graph break.
+            if len(args) == 2 and isinstance(args[0], TensorVariable) and not kwargs:
+                scalar_device = args[0].device
+                broadcast_arg_0 = ListVariable([args[0] for _ in args[1].items])
+                return TorchInGraphFunctionVariable(torch._foreach_pow).call_function(
+                    tx, [broadcast_arg_0, args[1]], {}
+                )
+
         @register(torch._assert)
         def handle_assert(self, tx: "InstructionTranslator", condition, message):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
