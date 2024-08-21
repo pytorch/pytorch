@@ -1,4 +1,5 @@
 """Utility to lazily import modules."""
+
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
