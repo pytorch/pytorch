@@ -68,6 +68,30 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 
 namespace {
+
+template <bool PingPong, bool FastAccum>
+struct Schedule;
+
+template <>
+struct Schedule</*PingPong=*/false, /*FastAccum=*/false> {
+  using type = cutlass::gemm::KernelTmaWarpSpecialized;
+};
+
+template <>
+struct Schedule</*PingPong=*/true, /*FastAccum=*/false> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
+};
+
+template <>
+struct Schedule</*PingPong=*/false, /*FastAccum=*/true> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
+};
+
+template <>
+struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
+};
+
 // Cutlass rowwise kernel
 template <
     int TB_M,
@@ -205,18 +229,6 @@ void f8f8bf16_rowwise_impl(
           cutlass::epilogue::TmaWarpSpecialized,
           EpilogueEVT>::CollectiveOp;
 
-  using DefaultSchedule = cutlass::gemm::KernelTmaWarpSpecialized;
-  using PongSchedule = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
-  using FastDefaultSchedule =
-      cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
-  using FastPongSchedule =
-      cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
-  using SlowAccum = cute::conditional_t<PONG, PongSchedule, DefaultSchedule>;
-  using FastAccum =
-      cute::conditional_t<PONG, FastPongSchedule, FastDefaultSchedule>;
-  using MainLoopSchedule =
-      cute::conditional_t<FAST_ACCUM, FastAccum, SlowAccum>;
-
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
@@ -232,7 +244,7 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          MainLoopSchedule>::CollectiveOp;
+          typename Schedule<PONG, FAST_ACCUM>::type>::CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       cute::Shape<int, int, int>,
