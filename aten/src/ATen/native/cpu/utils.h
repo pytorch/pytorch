@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Parallel.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/llvmMathExtras.h>
 
@@ -8,8 +9,7 @@
 #include <fbgemm/Fbgemm.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename T>
 inline void _store(T* dst, at::vec::Vectorized<T> src) {
@@ -53,7 +53,7 @@ inline bool data_index_step(T& x, const T& X, Args&&... args) {
   return false;
 }
 
-// Helper struct for bfloat16 vectorization
+// Helper struct for bfloat16/float16 vectorization
 // Useful when you need float as immediate dtype or accumulate dtype
 using namespace vec;
 struct Vec2 {
@@ -64,11 +64,19 @@ struct Vec2 {
     auto [v0, v1] = convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
     return {v0, v1};
   }
+  static Vec2 loadu(const Half* ptr) {
+    auto [v0, v1] = convert_half_float(Vectorized<Half>::loadu(ptr));
+    return {v0, v1};
+  }
   static Vec2 loadu(const float* ptr) {
     return {Vectorized<float>::loadu(ptr), Vectorized<float>::loadu(ptr + Vectorized<float>::size())};
   }
   void store(BFloat16* ptr) const {
     Vectorized<BFloat16> val = convert_float_bfloat16(val0, val1);
+    val.store(ptr);
+  }
+  void store(Half* ptr) const {
+    Vectorized<Half> val = convert_float_half(val0, val1);
     val.store(ptr);
   }
   void store(float* ptr) const {
@@ -85,6 +93,7 @@ inline Vec2 minimum(const Vec2& a, const Vec2& b) { return {vec::minimum(a.val0,
 
 template <typename scalar_t> struct VectorizedType { using type = Vectorized<scalar_t>; };
 template <> struct VectorizedType<BFloat16> { using type = Vec2; };
+template <> struct VectorizedType<Half> { using type = Vec2; };
 template <typename scalar_t> using VecType = typename VectorizedType<scalar_t>::type;
 
 // Helper for mixed data type parameter Vec::load
@@ -194,5 +203,4 @@ inline void parallel_sparse_csr(
 
 } // namespace utils
 
-} // namespace native
-} // namespace at
+} // namespace at::native
