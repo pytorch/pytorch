@@ -587,6 +587,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d[4] = x + 2
         return len(values)
 
+    @make_test
+    def test_dict_setdefault1(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("a", 10)
+        if d["a"] == 1:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_dict_setdefault2(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("c", 10)
+        if d["c"] == 10:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_dict_setdefault3(x):
+        d = {"a": 1, "b": 2}
+        d.setdefault("c")
+        if d["c"] is None:
+            return x + 1
+        else:
+            return x - 1
+
     def test_dict_id_guard(self):
         d1 = collections.OrderedDict({"a": 2})
         d2 = d1
