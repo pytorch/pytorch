@@ -213,11 +213,6 @@ static PyObject* THPModule_initExtension(
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
-  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
-  // becomes latency sensitive. If the thread is named, we can debug performance
-  // issues easier.
-  c10::setThreadName("pt_main_thread");
-
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
     throw python_error();
