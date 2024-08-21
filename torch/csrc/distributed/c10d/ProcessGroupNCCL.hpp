@@ -74,14 +74,6 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
     "TORCH_NCCL_ENABLE_TIMING",
     "NCCL_ENABLE_TIMING"};
 
-// Enable monitoring thread which aborts the process when the ProcessGroupNCCL
-// Watchdog thread gets stuck and no heartbeat is detected after
-// TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL
-// APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged
-// time than necessary tying up cluster resources.
-static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
-    "TORCH_NCCL_ENABLE_MONITORING"};
-
 // Control the watchdog heartbeat timeout period after which the monitoring
 // thread will abort the process.
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
@@ -986,9 +978,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
-
-  // We gate the heartbeat monitor thread so that we can roll it out gradually.
-  std::atomic<bool> monitorThreadEnabled_;
 
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_;

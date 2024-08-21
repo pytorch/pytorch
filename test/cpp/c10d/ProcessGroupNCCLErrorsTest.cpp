@@ -381,8 +381,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
           c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC[0].c_str(),
           timeInterval.c_str(),
           1) == 0);
-  ASSERT_TRUE(
-      setenv(c10d::TORCH_NCCL_ENABLE_MONITORING[0].c_str(), "1", 1) == 0);
   auto tempFilename = c10::str(
       std::filesystem::temp_directory_path().string(), "/nccl_trace_rank_");
   ASSERT_TRUE(
@@ -443,8 +441,6 @@ class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
             c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC[0].c_str(),
             timeInterval.c_str(),
             1) == 0);
-    ASSERT_TRUE(
-        setenv(c10d::TORCH_NCCL_ENABLE_MONITORING[0].c_str(), "1", 1) == 0);
     ASSERT_TRUE(setenv(c10d::TORCH_NCCL_DESYNC_DEBUG[0].c_str(), "1", 1) == 0);
     // We cannot capture the exception thrown in watchdog thread without making
     // lots of changes to the code. So we don't let the watchdog throw
