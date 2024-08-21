@@ -1490,11 +1490,11 @@ def valid_vec_isa_list() -> List[VecISA]:
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
                             break
-    elif arch == "aarch64":
+    elif platform.machine() == "aarch64":
         isa_list.append(VecNEON())
-    elif arch in ["x86_64", "AMD64"]:
+    elif platform.machine() in ["x86_64", "AMD64"]:
         """
-        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+        platform.machine() value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
         _cpu_supported_x86_isa = x86_isa_checker()
         for isa in supported_vec_isa_list:
