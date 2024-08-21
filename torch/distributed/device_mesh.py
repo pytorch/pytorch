@@ -67,6 +67,10 @@ else:
                 int, Tuple[str, Optional[ProcessGroup.Options]]
             ] = {}
             self.root_to_flatten_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+            # Record flatten mesh name to its mesh dim index in root mesh.
+            self.flatten_name_to_root_dims: Dict[
+                DeviceMesh, Dict[str, Tuple[int, ...]]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -123,7 +127,7 @@ else:
                 not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
                 for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
-            flatten_mesh_dim_names = "_".join(
+            flatten_mesh_dim_name = "_".join(
                 [
                     not_none(root_mesh.mesh_dim_names)[dim]
                     for dim in flatten_dims_in_root
@@ -132,9 +136,9 @@ else:
             # Quick return if the flatten mesh has been created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
-                and flatten_mesh_dim_names in self.root_to_flatten_mapping[root_mesh]
+                and flatten_mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
             ):
-                return self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_names]
+                return self.root_to_flatten_mapping[root_mesh][flatten_mesh_dim_name]
 
             flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
 
@@ -152,12 +156,13 @@ else:
                 flattened_mesh = DeviceMesh(
                     root_mesh.device_type,
                     mesh_nd,
-                    mesh_dim_names=(flatten_mesh_dim_names,),
+                    mesh_dim_names=(flatten_mesh_dim_name,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
             self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[flatten_mesh_dim_names] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            self.root_to_flatten_mapping.setdefault(root_mesh, {})[flatten_mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            self.flatten_name_to_root_dims.setdefault(root_mesh, {})[flatten_mesh_dim_name] = tuple(flatten_dims_in_root)  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
 
@@ -709,7 +714,10 @@ else:
 
         def _flatten(self) -> "DeviceMesh":
             """
-            Returns a 1D DeviceMesh by flattening the current DeviceMesh.
+            Returns a 1D DeviceMesh by flattening the current DeviceMesh. The mesh_dim_names
+            of the flattened mesh will be the concatenation of the current mesh_dim_names.
+            For example, flattening a 2D DeviceMesh with mesh_dim_names=("dp", "cp") will create
+            a 1D DeviceMesh with mesh_dim_names=("dp_cp").
             """
             if not self.mesh_dim_names:
                 raise RuntimeError(
