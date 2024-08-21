@@ -16,11 +16,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/OpMathType.h>
 
-namespace {
+namespace at::cuda::blas {
 
-static cublasOperation_t _cublasOpFromChar(char op);
-static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda);
-static void _cublasAdjustLdLevel3(
+cublasOperation_t _cublasOpFromChar(char op);
+void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda);
+void _cublasAdjustLdLevel3(
     char transa,
     char transb,
     int64_t m,
@@ -30,12 +30,8 @@ static void _cublasAdjustLdLevel3(
     int64_t* ldb,
     int64_t* ldc);
 uint32_t _getAlignment(uintptr_t address);
-static size_t _parseChosenWorkspaceSize();
-static size_t _getWorkspaceSize();
-
-} // anonymous namespace
-
-namespace at::cuda::blas {
+size_t _parseChosenWorkspaceSize();
+size_t _getWorkspaceSize();
 
 namespace {
 // Following the pattern of CuSparseDescriptor

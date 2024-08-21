@@ -1071,7 +1071,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // Some scaled_gemms require an amax to populate lets create one here
   Tensor amax = at::empty({0}, mat1.options().dtype(ScalarType::Float));
 
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
@@ -1148,7 +1147,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #undef TUNABLE_DISPATCH
   }
   else
-#endif
   {
 #if defined(USE_ROCM) && ROCM_VERSION >= 60200
   // hipBlasLT requires scaleD to be set to something in order to use AMAX

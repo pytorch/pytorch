@@ -274,20 +274,21 @@ class CublasltGemmOp : public Callable<ParamsT> {
                 b_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->b_dtype);
                 c_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->c_dtype);
             }
+
             globalContext().alertCuBLASConfigNotDeterministic();
             cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
             
             cublasOperation_t transa_outer = MapLayoutToCuBlasLt(ALayout);
             cublasOperation_t transb_outer = MapLayoutToCuBlasLt(BLayout);
-            cublasOperation_t opa = _cublasOpFromChar(params->transa);
-            cublasOperation_t opb = _cublasOpFromChar(params->transb);
+            cublasOperation_t opa = at::cuda::blas::_cublasOpFromChar(params->transa);
+            cublasOperation_t opb = at::cuda::blas::_cublasOpFromChar(params->transb);
             TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
             
             int64_t lda, ldb, ldc;
             lda = params->lda;
             ldb = params->ldb;
             ldc = params->ldc;
-            _cublasAdjustLdLevel3(params->transa, params->transb, params->m, params->n, params->k, &lda, &ldb, &ldc);
+            at::cuda::blas::_cublasAdjustLdLevel3(params->transa, params->transb, params->m, params->n, params->k, &lda, &ldb, &ldc);
 
             at::cuda::blas::CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
@@ -337,12 +338,12 @@ class CublasltGemmOp : public Callable<ParamsT> {
             at::cuda::blas::CuBlasLtMatmulPreference preference;
             // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
             // setting this to 1M.
-            size_t workspaceSize = _getWorkspaceSize();
+            size_t workspaceSize = at::cuda::blas::_getWorkspaceSize();
             preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
-            uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->a));
-            uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->b));
-            uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->c));
+            uint32_t a_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->a));
+            uint32_t b_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->b));
+            uint32_t c_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->c));
             preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
             preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
             preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
@@ -430,7 +431,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     cudaDataType_t scaleType = CUDA_R_32F;
 
 
-    if (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
+    if constexpr (std::is_same_v<ParamsT, GemmParams<T>> || std::is_same_v<ParamsT, GemmStridedBatchedParams<T>>) {
         cudaDataType_t abcType = CUDA_R_32F;
         if constexpr (std::is_same_v<T, double>) {
             abcType = CUDA_R_64F;
@@ -458,26 +459,26 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         a_dtype = abcType;
         b_dtype = abcType;
         c_dtype = abcType;
-    } else if (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
+    } else if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
         a_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->a_dtype);
         b_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->b_dtype);
         c_dtype = ScalarTypeToCudaDataType(((ScaledGemmParams<T>*)params)->c_dtype);
     }
-    
+
     globalContext().alertCuBLASConfigNotDeterministic();
     cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
     
     cublasOperation_t transa_outer = MapLayoutToCuBlasLt(ALayout);
     cublasOperation_t transb_outer = MapLayoutToCuBlasLt(BLayout);
-    cublasOperation_t opa = _cublasOpFromChar(params->transa);
-    cublasOperation_t opb = _cublasOpFromChar(params->transb);
+    cublasOperation_t opa = at::cuda::blas::_cublasOpFromChar(params->transa);
+    cublasOperation_t opb = at::cuda::blas::_cublasOpFromChar(params->transb);
     TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
     
     int64_t lda, ldb, ldc;
     lda = params->lda;
     ldb = params->ldb;
     ldc = params->ldc;
-    _cublasAdjustLdLevel3(params->transa, params->transb, params->m, params->n, params->k, &lda, &ldb, &ldc);
+    at::cuda::blas::_cublasAdjustLdLevel3(params->transa, params->transb, params->m, params->n, params->k, &lda, &ldb, &ldc);
 
     at::cuda::blas::CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
@@ -527,12 +528,12 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     at::cuda::blas::CuBlasLtMatmulPreference preference;
     // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
     // setting this to 1M.
-    size_t workspaceSize = _getWorkspaceSize();
+    size_t workspaceSize = at::cuda::blas::_getWorkspaceSize();
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
-    uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->a));
-    uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->b));
-    uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(params->c));
+    uint32_t a_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->a));
+    uint32_t b_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->b));
+    uint32_t c_alignment = at::cuda::blas::_getAlignment(reinterpret_cast<uintptr_t>(params->c));
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
     preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
