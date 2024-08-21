@@ -407,6 +407,8 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     ]
     if hasattr(torch.ops.fsdp, "set_"):
         allowed_mutation_ops.append(torch.ops.fsdp.set_.default)
+    if hasattr(torch.ops.fsdp, "copy_"):
+        allowed_mutation_ops.append(torch.ops.fsdp.copy_.default)
 
     placeholders = set()
     mutation_count = 0

@@ -6099,6 +6099,13 @@ if hasattr(torch.ops.fsdp, "set_"):
         ir.SetSourceTensorKernel(self, source_tensor)
 
 
+if hasattr(torch.ops.fsdp, "copy_"):
+
+    @register_lowering(torch.ops.fsdp.copy_.default)
+    def fsdp_copy_(dst, src):
+        ir.FallbackKernel.create(aten.copy_.default, dst, src)
+
+
 @register_lowering(torch.ops.aten.resize)
 def resize(x, size, *, memory_format=None):
     assert isinstance(x, TensorBox)

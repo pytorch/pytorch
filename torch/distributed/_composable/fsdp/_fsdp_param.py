@@ -79,6 +79,16 @@ def set_(tensor, data):
     tensor.set_(data)
 
 
+lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
+
+
+@torch.library.impl(lib, "copy_", "Meta")
+@torch.library.impl(lib, "copy_", "CUDA")
+@torch.library.impl(lib, "copy_", "CPU")
+def copy_(tensor, data):
+    tensor.copy_(data)
+
+
 """
 [Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_(0)]
 
@@ -136,6 +146,21 @@ def set__functionalize(tensor, data):
 
 
 torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
+
+
+@torch.library.impl(lib, "copy_", "Functionalize")
+def copy__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):
@@ -479,7 +504,11 @@ class FSDPParam:
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
-                torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
+                # torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
+                size = self._unsharded_param.numel() * self._unsharded_param.itemsize
+                if (storage := self._unsharded_param.untyped_storage()).size() != size:
+                    storage.resize_(size)
+                torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad

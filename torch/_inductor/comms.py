@@ -515,6 +515,7 @@ def enforce_comm_ordering_for_fsdp(
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops.fsdp.split_with_sizes_copy.default,
                 torch.ops.aten.set_.source_Tensor,
+                torch.ops.aten.copy_.default,
             }
             find_recursive_users_of_node(
                 ag_snode,
