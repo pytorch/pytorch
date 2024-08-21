@@ -36,7 +36,8 @@ $ git clone https://github.com/pytorch/pytorch
 $ cd pytorch
 $ git submodule update --init --recursive
 $ GPU_ARCH_TYPE=cpu-s390x "$(pwd)/.ci/docker/manywheel/build.sh" manylinuxs390x-builder
-$ docker image save -o ~/manywheel-s390x.tar localhost/pytorch/manylinuxs390x-builder
+$ docker image tag localhost/pytorch/manylinuxs390x-builder docker.io/pytorch/manylinuxs390x-builder:cpu-s390x
+$ docker image save -o ~/manywheel-s390x.tar docker.io/pytorch/manylinuxs390x-builder:cpu-s390x
 ```
 
 Next step is to build `actions-runner` image using:
