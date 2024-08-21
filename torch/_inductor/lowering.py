@@ -1999,20 +1999,13 @@ def inductor_randint(
 
 @register_lowering(aten.bucketize, type_promotion_kind=None)
 def bucketize(
-    input: Union[TensorBox, float, int],
+    input: TensorBox,
     boundaries: TensorBox,
     *,
     out_int32: bool = False,
     right: bool = False,
 ):
     assert len(boundaries.get_size()) == 1
-
-    # First check if input is not a tensor in which case fallback to
-    # aten.bucketize.Scalar
-    if isinstance(input, Number):
-        return fallback_handler(aten.bucketize.Scalar, add_to_fallback_set=False)(
-            input, boundaries, out_int32=out_int32, right=right
-            )
 
     if not (
         V.graph.has_feature(input, BackendFeature.BUCKETIZE)
