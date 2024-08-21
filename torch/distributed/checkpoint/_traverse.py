@@ -78,6 +78,41 @@ def traverse_state_dict(
         _traverse_obj((str(key),), value)
 
 
+def traverse_state_dict_v_2_3(
+    state_dict: STATE_DICT_TYPE,
+    visitor: Callable[[OBJ_PATH, STATE_DICT_ITEM], None],
+    keep_traversing: Callable[[STATE_DICT_ITEM], bool] = _keep_visiting_tensors,
+) -> None:
+    def _is_terminal(value: STATE_DICT_ITEM) -> bool:
+        values: Collection[STATE_DICT_ITEM]
+        if isinstance(value, Mapping):
+            values = value.values()
+        elif isinstance(value, list):
+            values = value
+        else:
+            return True
+
+        for entry in values:
+            if isinstance(entry, (Mapping, list)) and not _is_terminal(entry):
+                return False
+            if keep_traversing is not None and keep_traversing(entry):
+                return False
+        return True
+
+    def _traverse_obj(path: OBJ_PATH, value: STATE_DICT_ITEM) -> None:
+        if _is_terminal(value):
+            visitor(path, value)
+        elif isinstance(value, Mapping):
+            for k, v in value.items():
+                _traverse_obj(path + (str(k),), v)
+        elif isinstance(value, list):
+            for i, v in enumerate(value):
+                _traverse_obj(path + (i,), v)
+
+    for key, value in state_dict.items():
+        _traverse_obj((str(key),), value)
+
+
 def set_element(
     root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: STATE_DICT_ITEM
 ) -> None:

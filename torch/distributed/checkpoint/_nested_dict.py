@@ -3,7 +3,14 @@ from typing import Dict, Tuple
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
-from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
+from . import _version
+from ._traverse import (
+    OBJ_PATH,
+    set_element,
+    STATE_DICT_ITEM,
+    traverse_state_dict,
+    traverse_state_dict_v_2_3,
+)
 
 
 """
@@ -40,7 +47,13 @@ def flatten_state_dict(
         flattened[new_fqn] = value
         mappings[new_fqn] = path
 
-    traverse_state_dict(state_dict, flat_copy)
+    use_v_2_3 = (
+        _version._act_like_version is not None and _version._act_like_version == "2_3"
+    )
+    if use_v_2_3:
+        traverse_state_dict_v_2_3(state_dict, flat_copy)
+    else:
+        traverse_state_dict(state_dict, flat_copy)
     return flattened, mappings
 
 

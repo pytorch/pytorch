@@ -46,6 +46,8 @@ from torch.distributed.checkpoint.planner_helpers import (
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
+from . import _version
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -195,6 +197,20 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def create_local_plan(self) -> LoadPlan:
         assert self.metadata is not None
+        if self.flatten_state_dict:
+            current_keys = set(self.state_dict.keys())
+            load_keys = set(self.metadata.state_dict_metadata.keys())
+            missing_keys = load_keys - current_keys
+            if missing_keys:
+                _version._act_like_version = "2_3"
+                old_state_dict, old_mappings = flatten_state_dict(
+                    self.original_state_dict
+                )
+                old_keys = set(old_state_dict.keys())
+                if old_keys & missing_keys:
+                    self.state_dict, self.mappings = old_state_dict, old_mappings
+                _version._act_like_version = None
+
         return create_default_local_load_plan(
             self.state_dict, self.metadata, not self.allow_partial_load
         )
