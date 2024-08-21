@@ -218,15 +218,20 @@ struct VecMaskCast<double, N, int64_t, N> {
   }
 };
 
-template <typename mask_t, int N>
-struct VecMaskCast<int64_t, 2 * N, mask_t, N> {
-  static inline VecMask<int64_t, 2 * N> apply(const VecMask<mask_t, N>& vec_mask) {
-    auto result = at::vec::VectorizedN<int64_t, 2 * N>();
-    auto int_mask = vec_mask.template cast<int, N>();
+template <int dst_n, typename mask_t, int mask_n>
+struct VecMaskCast<
+    int64_t,
+    dst_n,
+    mask_t,
+    mask_n,
+    typename std::enable_if_t<dst_n == 2 * mask_n, void>> {
+  static inline VecMask<int64_t, dst_n> apply(const VecMask<mask_t, mask_n>& vec_mask) {
+    auto result = at::vec::VectorizedN<int64_t, 2 * mask_n>();
+    auto int_mask = vec_mask.template cast<int, mask_n>();
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < 2 * N; i += 2) {
+    for (int i = 0; i < dst_n; i += 2) {
       auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[i]));
       result[i] = int64_vec[0];
       result[i + 1] = int64_vec[1];
@@ -235,20 +240,25 @@ struct VecMaskCast<int64_t, 2 * N, mask_t, N> {
   }
 };
 
-template <typename dst_t, int N>
-struct VecMaskCast<dst_t, N, int64_t, 2 * N> {
-  static inline VecMask<dst_t, N> apply(const VecMask<int64_t, 2 * N>& vec_mask) {
-    auto result = VecMask<int, N>();
+template <typename dst_t, int dst_n, int mask_n>
+struct VecMaskCast<
+    dst_t,
+    dst_n,
+    int64_t,
+    mask_n,
+    typename std::enable_if_t<mask_n == 2 * dst_n, void>> {
+  static inline VecMask<dst_t, dst_n> apply(const VecMask<int64_t, mask_n>& vec_mask) {
+    auto result = VecMask<int, dst_n>();
     auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < N; ++i) {
+    for (int i = 0; i < dst_n; ++i) {
       int64_vec[0] = vec_mask[2 * i];
       int64_vec[1] = vec_mask[2 * i + 1];
       result[i] = convert<int, 1, int64_t, 2>(int64_vec);
     }
-    return VecMask<int, N>(result).cast<dst_t, N>();
+    return VecMask<int, dst_n>(result).template cast<dst_t, dst_n>();
   }
 };
 
@@ -285,38 +295,39 @@ inline bool VecMask<int, 1>::all_masked() const {
   return mask == 0xffff;
 }
 
-template <typename N>
-inline bool VecMask<int64_t, N>::all_zero() const {
-  bool all_zero = true;
-  for (int i = 0; i < N; ++i) {
-    all_zero = all_zero && (_mm512_test_epi64_mask(mask_[i], mask_[i]) == 0);
-    if (!all_zero) {
-      return all_zero;
+template <int N>
+struct VecMaskCheck<int64_t, N> {
+  static inline bool all_zero(const VectorizedN<int64_t, N>& vec_mask) {
+    bool all_zero = true;
+    for (int i = 0; i < N; ++i) {
+      all_zero = all_zero && (_mm512_test_epi64_mask(vec_mask[i], vec_mask[i]) == 0);
+      if (!all_zero) {
+        return all_zero;
+      }
     }
+    return all_zero;
   }
-  return all_zero;
-}
 
-template <typename N>
-inline bool VecMask<int64_t, N>::is_masked(int i) const {
-  for (int j = 0; j < N; ++j) {
-    if (i < (j + 1) * 8) {
-      return _mm512_movepi64_mask(mask_[j]) & (1 << (i - j * 8));
+  static inline bool is_masked(const VectorizedN<int64_t, N>& vec_mask, int i) {
+    for (int j = 0; j < N; ++j) {
+      if (i < (j + 1) * 8) {
+        return _mm512_movepi64_mask(vec_mask[j]) & (1 << (i - j * 8));
+      }
     }
+    return false;
   }
-}
 
-template <typename N>
-inline bool VecMask<int64_t, N>::all_masked() const {
-  bool all_masked = true;
-  for (int i = 0; i < N; ++i) {
-    all_masked = all_masked && (_mm512_movepi64_mask(mask_[i]) == 0xff);
-    if (!all_masked) {
-      return all_masked;
+  static inline bool all_masked(const VectorizedN<int64_t, N>& vec_mask) {
+    bool all_masked = true;
+    for (int i = 0; i < N; ++i) {
+      all_masked = all_masked && (_mm512_movepi64_mask(vec_mask[i]) == 0xff);
+      if (!all_masked) {
+        return all_masked;
+      }
     }
+    return all_masked;
   }
-  return all_masked;
-}
+};
 
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \
     T, N, return_type, method, args_def, args)              \
