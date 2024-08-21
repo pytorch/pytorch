@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import unittest
+from collections import defaultdict
 from unittest import mock
 
 import torch
@@ -85,6 +86,27 @@ class TestFullyShardCompileCompute(FSDPTest):
             self.assertEqual(trace_rules_check_count, 0)
         else:
             self.assertTrue(trace_rules_check_count > 0)
+
+
+def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
+    storage_id_to_graph_inputs = defaultdict(list)
+    for node in graph.nodes:
+        if node.op == "placeholder" and isinstance(
+            node.meta.get("val", None), torch.Tensor
+        ):
+            storage_id_to_graph_inputs[id(node.meta["val"].untyped_storage())].append(
+                node
+            )
+    for storage_id, aliased_graph_inputs in storage_id_to_graph_inputs.items():
+        assert (
+            len(aliased_graph_inputs) == 1
+        ), f"""
+Found aliased graph inputs: {aliased_graph_inputs},
+type(val): {[type(node.meta['val']) for node in aliased_graph_inputs]},
+val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
+id(val): {[id(node.meta['val']) for node in aliased_graph_inputs]},
+sid: {storage_id}
+"""
 
 
 class TestFullyShardCompile(FSDPTest):
@@ -303,20 +325,6 @@ class TestFullyShardCompile(FSDPTest):
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @torch._dynamo.config.patch(
-        inline_inbuilt_nn_modules=True,
-        skip_fsdp_hooks=False,
-    )
-    @torch._functorch.config.patch(recompute_views=True)
-    @torch._functorch.config.patch(cse=False)
-    @torch._inductor.config.patch(
-        reorder_for_compute_comm_overlap=True,
-        reorder_for_compute_comm_overlap_passes=[
-            "sink_waits",
-            "raise_comms",
-            "reorder_compute_for_overlap",
-        ],
-    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -367,7 +375,23 @@ class TestFullyShardCompile(FSDPTest):
             res = run_iters(model, optim)
             return res
 
-        losses_compiled = test_compiled()
+        with torch._dynamo.config.patch(
+            inline_inbuilt_nn_modules=True,
+            skip_fsdp_hooks=False,
+        ), torch._functorch.config.patch(
+            recompute_views=True, cse=False
+        ), torch._inductor.config.patch(
+            reorder_for_compute_comm_overlap=True,
+            reorder_for_compute_comm_overlap_passes=[
+                "sink_waits",
+                "raise_comms",
+                "reorder_compute_for_overlap",
+            ],
+            post_grad_custom_pre_pass=assert_no_aliased_graph_inputs
+            if fullgraph
+            else None,
+        ):
+            losses_compiled = test_compiled()
         losses_eager = test_eager()
         if not self.fake_pg:
             for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
