@@ -695,11 +695,9 @@ def jagged_scaled_dot_product_attention(
             scale=og_scale,
         )
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = nested_view_from_values_offsets(
+        attention = ViewNestedFromBuffer.apply(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
-            output_nt_info["offsets"],
-            min_seqlen=output_nt_info["_min_seqlen"],
-            max_seqlen=output_nt_info["_max_seqlen"],
+            output_nt_info["offsets"]
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
