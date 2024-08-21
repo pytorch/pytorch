@@ -5950,6 +5950,22 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertFalse(clone.is_contiguous())
         check_nt_equality(detached, transposed)
 
+    def test_to_dtype(self, device):
+        nt = random_nt_from_dims(
+            [2, None, 3], device, torch.float32, layout=torch.jagged
+        )
+        nt_after = nt.to(torch.float64)
+        self.assertEqual(torch.float32, nt.dtype)
+        self.assertEqual(torch.float64, nt_after.dtype)
+        self.assertEqual(torch.float64, nt_after.values().dtype)
+        self.assertEqual(torch.int64, nt_after.offsets().dtype)
+
+        noncontiguous_nt = nt.transpose(1, 2)
+        noncontiguous_nt_after = noncontiguous_nt.to(torch.bfloat16)
+        self.assertEqual(torch.bfloat16, noncontiguous_nt_after.dtype)
+        self.assertEqual(torch.bfloat16, noncontiguous_nt_after.values().dtype)
+        self.assertEqual(torch.int64, noncontiguous_nt_after.offsets().dtype)
+
     def test_to_copy(self, device):
         nt = torch.nested.nested_tensor(
             [
