@@ -71,7 +71,7 @@ jobs:
   # NOTE: manylinux_2_28 are still experimental, see https://github.com/pytorch/pytorch/issues/123649
   build-docker-cuda-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: am2.linux.9xlarge.ephemeral
+    runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["12.4", "12.1", "11.8"]
@@ -205,7 +205,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux-builder:cpu
   build-docker-cpu-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: am2.linux.9xlarge.ephemeral
+    runs-on: linux.9xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: cpu-manylinux_2_28
     steps:
