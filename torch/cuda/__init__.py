@@ -54,8 +54,10 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        if not torch.version.hip:
+        if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
             import amdsmi  # type: ignore[import]
@@ -63,6 +65,8 @@ try:
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
