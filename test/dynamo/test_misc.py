@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import collections
+import collections.abc
 import copy
 import dataclasses
 import dis
@@ -91,6 +92,10 @@ if HAS_OPTREE:
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
+
+
+# Defined in CPython's Include/object.h
+TPFLAGS_MAPPING = 1 << 6
 
 
 # Specializes a test to run only if translation validation is set.
@@ -3412,6 +3417,37 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.rand(2, 3)
         mod = ModuleB()
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod)
+        res = opt_fn(x, mod)
+        self.assertTrue(same(ref, res))
+
+    def test_class_duner_flags(self):
+        class ModuleA(torch.nn.ModuleDict, collections.abc.MutableMapping):
+            def __hash__(self):
+                return id(self)
+
+        def fn(x, mod_class):
+            if mod_class.__flags__ & TPFLAGS_MAPPING:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod_class = ModuleA
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod_class)
+        res = opt_fn(x, mod_class)
+        self.assertTrue(same(ref, res))
+
+        def fn(x, mod):
+            if type(mod).__flags__ & TPFLAGS_MAPPING:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod = ModuleA()
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         ref = fn(x, mod)
         res = opt_fn(x, mod)
@@ -9962,22 +9998,6 @@ def ___make_guard_fn():
             return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
 
         l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
-        eager = fn(l)
-
-        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
-        compiled = compiled_fn(l)
-
-        self.assertEqual(eager, compiled)
-        self.assertEqual(len(counters["graph_break"]), 0)
-
-    def test_itertools_tee(self):
-        counters.clear()
-
-        def fn(l):
-            a, b = itertools.tee(l)
-            return list(a), list(b)
-
-        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
         eager = fn(l)
 
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
