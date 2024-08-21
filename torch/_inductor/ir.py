@@ -4718,34 +4718,59 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
-        assert exact_strides is not None
-        unbacked_symbols_in_strides = len(free_unbacked_symbols(exact_strides)) > 0
-        if not unbacked_symbols_in_strides:
-            order = get_stride_order(V.graph.sizevars.size_hints(exact_strides))
-        else:
-            order = None
-        exact_strides = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
-        ]
+    def require_strides(cls, x, order=None, exact_strides=None, allow_padding=False):
+        assert order is not None or exact_strides is not None
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
+        if exact_strides:
+            exact_strides = [
+                s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+            ]
+        # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
-                as_storage_and_layout(
-                    x,
-                    freeze=True,
-                    want_contiguous=False,
-                    stride_order=None,
-                    allow_padding=allow_padding,
-                    exact_strides=exact_strides,
-                )
-                return x
+                if order:
+                    # If the the FlexibleLayout already has the size and stride in the required order,
+                    # freeze it to a FixedLayout by using its current size and stride.
+                    # The behavior of using its current size and stride or the given order can be different
+                    # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                    # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                    # the current size and stride already satisfies this order.
+                    # However by freezing it to the required order, the layout will be changed to:
+                    # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
+
+                    # fix flexiblelayout to be FixedLayout with stride_order
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=get_stride_order(
+                            V.graph.sizevars.size_hints(x.get_layout().stride)
+                        )
+                        if is_stride_order_storage_and_layout(x, order)
+                        else order,
+                        allow_padding=allow_padding,
+                    )
+                    return x
+                else:
+                    # If the exact_strides is given, freeze the FlexibleLayout to a FixedLayout with the exact_strides.
+                    as_storage_and_layout(
+                        x,
+                        freeze=True,
+                        want_contiguous=False,
+                        stride_order=None,
+                        allow_padding=allow_padding,
+                        exact_strides=exact_strides,
+                    )
+                    return x
             elif isinstance(x.get_layout(), FixedLayout) and (
-                list(x.get_layout().stride) == list(exact_strides)
-                or (order and x.get_layout().is_stride_ordered(order))
+                order
+                and x.get_layout().is_stride_ordered(order)
+                or (
+                    exact_strides and list(x.get_layout().stride) == list(exact_strides)
+                )
             ):
                 return x
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
@@ -4753,9 +4778,18 @@ class ExternKernel(InputsKernel):
                     raise AssertionError(
                         "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
                     )
-                elif isinstance(x.get_layout().real_layout(), FixedLayout):
+                elif isinstance(x.get_layout().real_layout(), FixedLayout) and (
+                    (order and x.get_layout().real_layout().is_stride_ordered(order))
+                    or (
+                        exact_strides
+                        and list(x.get_layout().real_layout().stride)
+                        == list(exact_strides)
+                    )
+                ):
                     return x
+
         # TODO - Storage to InputBuffer
+        # TODO - how about exact_strides?
         if (
             isinstance(x, InputBuffer)
             and order
@@ -4780,7 +4814,7 @@ class ExternKernel(InputsKernel):
             x,
             freeze=True,
             want_contiguous=False,
-            stride_order=None,
+            stride_order=order,
             allow_padding=allow_padding,
             exact_strides=exact_strides,
         )
@@ -4789,76 +4823,14 @@ class ExternKernel(InputsKernel):
         return x
 
     @classmethod
-    def require_stride_order(cls, x, order, allow_padding=False):
-        if x.get_numel() == 0:  # Layout doesn't matter
-            return x
-
-        # require x to have the layout as strided_ordered as order
-        if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), NonOwningLayout):
-                x = x.get_layout().view
-            if isinstance(x.get_layout(), FlexibleLayout):
-                # If the the FlexibleLayout already has the size and stride in the required order,
-                # freeze it to a FixedLayout by using its current size and stride.
-                # The behavior of using its current size and stride or the given order can be different
-                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
-                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
-                # the current size and stride already satisfies this order.
-                # However by freezing it to the required order, the layout will be changed to:
-                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-
-                # fix flexiblelayout to be FixedLayout with stride_order
-                as_storage_and_layout(
-                    x,
-                    freeze=True,
-                    want_contiguous=False,
-                    stride_order=get_stride_order(
-                        V.graph.sizevars.size_hints(x.get_layout().stride)
-                    )
-                    if is_stride_order_storage_and_layout(x, order)
-                    else order,
-                    allow_padding=allow_padding,
-                )
-                return x
-            elif isinstance(
-                x.get_layout(), FixedLayout
-            ) and x.get_layout().is_stride_ordered(order):
-                return x
-            elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
-                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
-                    raise AssertionError(
-                        "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
-                    )
-                elif isinstance(
-                    x.get_layout().real_layout(), FixedLayout
-                ) and x.get_layout().real_layout().is_stride_ordered(order):
-                    return x
-
-        # TODO - Storage to InputBuffer
-        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
-            return x
-        if (
-            isinstance(x, TensorBox)
-            and isinstance(x.data, BaseView)
-            and not isinstance(x.data, ReinterpretView)
-            and is_storage_and_layout(x.unwrap_view())
-            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
-        ):
-            try:
-                x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order, allow_padding=allow_padding)
-            except NotImplementedError:
-                pass
-        x = cls.copy_input(x)
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
+    def require_exact_strides(cls, x, exact_strides, allow_padding=False):
+        return cls.require_strides(
+            x, exact_strides=exact_strides, allow_padding=allow_padding
         )
-        assert is_stride_order_storage_and_layout(x, order)
-        return x
+
+    @classmethod
+    def require_stride_order(cls, x, order, allow_padding=False):
+        return cls.require_strides(x, order=order, allow_padding=allow_padding)
 
     @classmethod
     def require_channels_last(cls, x):

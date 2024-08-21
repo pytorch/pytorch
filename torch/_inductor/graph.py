@@ -1349,9 +1349,8 @@ class GraphLowering(torch.fx.Interpreter):
                         )
 
                     if not unbacked_symbols_in_strides and len(strides):
-                        stride_order = ir.get_stride_order(strides)
                         result = ir.ExternKernel.require_exact_strides(
-                            result, stride_order, allow_padding=allow_padding
+                            result, strides, allow_padding=allow_padding
                         )
 
             # Realize if (1) any user need inputs realized, or (2) there is
