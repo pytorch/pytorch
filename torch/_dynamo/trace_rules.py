@@ -2996,6 +2996,7 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {
             id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
@@ -3215,7 +3216,6 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
-    "torch._dynamo.polyfills",
     "torch._functorch.vmap",
     "torch._functorch.autograd_function",
     "torch._library.custom_ops",
