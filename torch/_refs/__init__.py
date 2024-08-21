@@ -4994,13 +4994,12 @@ def arange(
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    if integer_args:
-        if dtype == torch.int64:
-            # Uses floordiv to avoid ceil in inductor.
-            sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
-            length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
-        else:
-            length = (end - start + step - (1 if step > 0 else -1))
+    if dtype == torch.int64:
+        # Uses floordiv to avoid ceil in inductor.
+        sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
+        length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
+    elif integer_args:
+        length = (end - start + step - (1 if step > 0 else -1))
     else:
         length = math.ceil((end - start) / step)
 
