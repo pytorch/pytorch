@@ -121,9 +121,9 @@ class TestBenchmarker(TestCase):
     @parametrize(
         "config_name,config_val,expected_should_fallback",
         [
-            ("env_var", "1", False),
-            ("env_var", "0", True),
-            ("env_var", "", None),
+            ("env_val", "1", False),
+            ("env_val", "0", True),
+            ("env_val", "", None),
             ("oss_default", True, False),
             ("oss_default", False, True),
         ],
