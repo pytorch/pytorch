@@ -62,6 +62,7 @@ from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
+fake_id_to_stack = {}
 
 
 if TYPE_CHECKING:
@@ -715,6 +716,8 @@ class FakeTensor(Tensor):
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
+        # log.warn(f"id(FakeTensor) created in __new__: {id(self)}")
+        fake_id_to_stack[id(self)] = ''.join(traceback.format_stack())
         return self
 
     # In some circumstances, a conventional Tensor constructor

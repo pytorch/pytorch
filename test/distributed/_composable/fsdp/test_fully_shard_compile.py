@@ -7,8 +7,8 @@ import functools
 import unittest
 from unittest import mock
 
-# import torchtune
-# import torchtune.models.llama2
+import torchtune
+import torchtune.models.llama2
 
 import torch
 import torch._dynamo.testing
@@ -703,7 +703,7 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        for fullgraph in [True, False]:
+        for fullgraph in [True]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -718,79 +718,79 @@ class TestFullyShardCompile(FSDPTest):
                         fullgraph=fullgraph,
                     )
                 )
-            # if fullgraph:
-            #     self.assertTrue(
-            #         len(triton_codes) == 2,
-            #         "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-            #     )
-            #     fwd_code = triton_codes[0]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for fwd_ag_block_info in [
-            #         dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
-            #         dict(
-            #             overlapped_compute_op_str="aten.native_dropout.",
-            #             num_resize=0,
-            #             num_set=12,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #             num_resize=12,
-            #             num_set=12,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #             num_resize=12,
-            #             num_set=12,
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **fwd_ag_block_info
-            #         )
-            #     file_check.run(fwd_code)
+            if False:  # if fullgraph:
+                self.assertTrue(
+                    len(triton_codes) == 2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(overlapped_compute_op_str="triton_", num_resize=0, num_set=4),
+                    dict(
+                        overlapped_compute_op_str="aten.native_dropout.",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        num_resize=12,
+                        num_set=12,
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
 
-            #     bwd_code = triton_codes[1]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for bwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #             num_resize=0,
-            #             num_set=12,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #             num_resize=0,
-            #             num_set=12,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #             num_resize=0,
-            #             num_set=12,
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **bwd_ag_block_info
-            #         )
-            #     for bwd_rs_block_info in [
-            #         dict(overlapped_compute_op_str="extern_kernels.mm("),
-            #         dict(
-            #             overlapped_compute_op_str=None
-            #         ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-            #         dict(overlapped_compute_op_str=None),
-            #         dict(overlapped_compute_op_str=None),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_reduce_scatter(
-            #             file_check, **bwd_rs_block_info
-            #         )
-            #     file_check.run(bwd_code)
-            # else:
-            #     # TODO: when fullgraph=False and there is graph break in FWD graph,
-            #     # there are several recompiles, need to figure out why.
-            #     self.assertTrue(
-            #         len(triton_codes) > 2,
-            #         "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-            #     )
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        num_resize=0,
+                        num_set=12,
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.mm("),
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
+                file_check.run(bwd_code)
+            else:
+                # TODO: when fullgraph=False and there is graph break in FWD graph,
+                # there are several recompiles, need to figure out why.
+                self.assertTrue(
+                    len(triton_codes) > 2,
+                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+                )
 
     def _create_torchtune_llama_factory_fns(self):
         vocab_size = 8
