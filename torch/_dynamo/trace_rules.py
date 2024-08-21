@@ -1470,6 +1470,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functionalize_is_multi_output_view",
         "torch._functionalize_mark_mutation_hidden_from_autograd",
         "torch._functionalize_replace",
+        "torch._functionalize_replace_functional_storage_base", 
+        "torch._functionalize_regenerate_from_base",
         "torch._functionalize_sync",
         "torch._functionalize_was_storage_changed",
         "torch._fused_adam_",

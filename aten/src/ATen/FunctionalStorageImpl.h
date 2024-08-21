@@ -156,6 +156,10 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return inductor_storage_resized_;
   }
 
+  void set_base(at::Tensor new_base){
+    base_ = std::move(new_base);
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.

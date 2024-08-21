@@ -237,6 +237,12 @@ class FunctionalTensor(torch.Tensor):
     def replace_(self, output) -> None:
         torch._functionalize_replace(self.elem, output)
 
+    def replace_functional_storage_base(self, output) -> None:
+        torch._functionalize_replace_functional_storage_base(self.elem, output)
+   
+    def regenerate_from_base(self) -> None:
+        torch._functionalize_regenerate_from_base(self.elem)
+
     def commit_update(self) -> None:
         torch._functionalize_commit_update(self.elem)
 
@@ -673,6 +679,15 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         assert not isinstance(output_tensor, FunctionalTensor)
         input_tensor.replace_(output_tensor)
 
+    def replace_functional_storage_base(self, input_tensor, output_tensor) -> None:
+        assert isinstance(input_tensor, FunctionalTensor)
+        assert not isinstance(output_tensor, FunctionalTensor)
+        input_tensor.replace_functional_storage_base(output_tensor)
+
+    def regenerate_from_base(self, input_tensor) -> None:
+        assert isinstance(input_tensor, FunctionalTensor)
+        input_tensor.regenerate_from_base()
+
     def commit_update(self, tensor) -> None:
         assert isinstance(tensor, FunctionalTensor)
         tensor.commit_update()
@@ -757,6 +772,13 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def replace(self, input_tensor, output_tensor) -> None:
         torch._functionalize_replace(input_tensor, output_tensor)
+
+    # Swap the storage of changed_tensor with the storage of source_tensor.
+    def replace_functional_storage_base(changed_tensor, source_tensor) -> None:
+        torch._functionalize_replace_functional_storage_base(changed_tensor, source_tensor)
+
+    def regenerate_from_base(tensor) -> None:
+        torch._functionalize_regenerate_from_base(tensor)
 
     def commit_update(self, tensor) -> None:
         torch._functionalize_commit_update(tensor)

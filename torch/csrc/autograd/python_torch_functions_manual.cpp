@@ -665,6 +665,20 @@ void initTorchFunctions(PyObject* module) {
             !at::functionalization::impl::isFunctionalTensor(o));
         at::functionalization::impl::replace_(t, o);
       });
+  py_module.def(
+      "_functionalize_replace_functional_storage_base", [](const at::Tensor& t, const at::Tensor& o) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        TORCH_INTERNAL_ASSERT(
+            !at::functionalization::impl::isFunctionalTensor(o));
+        at::functionalization::impl::replace_functional_storage_base(t, o);
+      });
+  py_module.def(
+      "_functionalize_regenerate_from_base", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        at::functionalization::impl::regenerate_from_base(t);
+      });
   py_module.def("_functionalize_is_multi_output_view", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);

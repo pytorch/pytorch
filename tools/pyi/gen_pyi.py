@@ -790,6 +790,12 @@ def gen_pyi(
             "_functionalize_replace": [
                 "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
             ],
+            "_functionalize_replace_functional_storage_base": [
+                "def _functionalize_replace_functional_storage_base(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_regenerate_from_base": [
+                "def _functionalize_regenerate_from_base(self_: Tensor) -> None: ..."
+            ],
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
