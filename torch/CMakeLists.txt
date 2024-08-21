@@ -147,7 +147,6 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
       endif()
     endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
 endif()
 
 if(USE_ROCM)
