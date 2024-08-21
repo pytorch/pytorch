@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -80,7 +81,7 @@ def _fake_while_loop(cond_fn, body_fn, operands):
     return operands
 
 
-def _fake_associative_scan(combine_fn, input, dim, reverse=False):
+def _fake_scan(combine_fn, input, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(input)
     result_flat = []
     num_leaves = len(inp_leaves)
@@ -1206,9 +1207,10 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_simple(self, reverse, device):
+    def test_pointwise_scan_reverse_simple(self, scan_op, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1217,8 +1219,8 @@ def forward(self, pred_1, x_1):
 
         x = torch.randn(3, 10, 2, device=device)
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = associative_scan(op, x, 0, reverse=reverse)
-            result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+            result = scan_op(op, x, 0, reverse=reverse)
+            result_exp = _fake_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
@@ -1226,8 +1228,8 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = associative_scan(add, x, 0, reverse=reverse)
-        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        cumsum1 = scan_op(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_scan(add, x, 0, reverse=reverse)
         if not reverse:
             self.assertEqual(
                 cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)
@@ -1237,12 +1239,29 @@ def forward(self, pred_1, x_1):
                 cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
             )
         self.assertEqual(cumsum1, cumsum_exp)
+        
+        # Check graph
+        if scan_op == scan:
+            from torch._dynamo.testing import EagerAndRecordGraphs
+            
+            def f():
+                return scan_op(add, x, 0, reverse=reverse)
+
+            backend = EagerAndRecordGraphs()
+            torch.compile(f, backend=backend)()
+            gm = backend.graphs[0]
+
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """""",
+            )
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_dim(self, reverse, device):
+    def test_pointwise_scan_reverse_dim(self, scan_op, reverse, device):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1258,8 +1277,8 @@ def forward(self, pred_1, x_1):
             x = torch.randn(*shapes, device=device)
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-                result = associative_scan(op, x, rnd_scan_dim, reverse=reverse)
-                result_exp = _fake_associative_scan(
+                result = scan_op(op, x, rnd_scan_dim, reverse=reverse)
+                result_exp = _fake_scan(
                     op, x, rnd_scan_dim, reverse=reverse
                 )
                 self.assertEqual(result, result_exp)
@@ -1269,11 +1288,12 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_associative_scan_reverse_compile(
-        self, reverse, compile_mode, device
+    def test_pointwise_scan_reverse_compile(
+        self, scan_op, reverse, compile_mode, device
     ):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
@@ -1284,17 +1304,17 @@ def forward(self, pred_1, x_1):
         x = torch.randn(3, 10, 2, device=device)
         torch.compiler.reset()
         if compile_mode == "compile":
-            associative_scan_fct = torch.compile(
-                associative_scan, fullgraph=True, dynamic=False
+            scan_fct = torch.compile(
+                scan_op, fullgraph=True, dynamic=False
             )
         else:
-            associative_scan_fct = torch.compile(
-                associative_scan, fullgraph=True, dynamic=True
+            scan_fct = torch.compile(
+                scan_op, fullgraph=True, dynamic=True
             )
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
-            result = associative_scan_fct(op, x, 0, reverse=reverse)
-            result_exp = _fake_associative_scan(op, x, 0, reverse=reverse)
+            result = scan_fct(op, x, 0, reverse=reverse)
+            result_exp = _fake_scan(op, x, 0, reverse=reverse)
             self.assertEqual(result, result_exp)
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
@@ -1302,8 +1322,8 @@ def forward(self, pred_1, x_1):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        cumsum1 = associative_scan_fct(add, x, 0, reverse=reverse)
-        cumsum_exp = _fake_associative_scan(add, x, 0, reverse=reverse)
+        cumsum1 = scan_fct(add, x, 0, reverse=reverse)
+        cumsum_exp = _fake_scan(add, x, 0, reverse=reverse)
         if not reverse:
             self.assertEqual(
                 cumsum1, torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.int64)

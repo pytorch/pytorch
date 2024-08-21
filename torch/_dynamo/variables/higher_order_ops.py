@@ -595,6 +595,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return RunWithRNGStateHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "associative_scan":
             return AssociativeScanHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "scan":
+            return ScanHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "call_torchbind":
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         else:
@@ -1092,6 +1094,105 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function", torch.ops.higher_order.associative_scan, p_args, {}
+            ),
+            example_value=out_meta,
+        )
+        
+class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="associative_scan must be captured completely with torch.compile."
+    )
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder, wrap_fx_proxy
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        def arg_extractor(combine_fn, input, dim):
+            return combine_fn, input, dim
+
+        combine_fn, input, dim = arg_extractor(*args, **kwargs)
+
+        if input.python_type() != list:
+            unimplemented(
+                f"Expected input to be a list of tensors but got {input.python_type()}",
+            )
+        assert isinstance(input, torch._dynamo.variables.lists.BaseListVariable)
+
+        # Trace the subgraph
+        # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
+        null_shape = SourcelessBuilder.create(tx, ())
+        sub_args = [
+            leaf.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            for leaf in itertools.chain(input.items, input.items)
+        ]
+        (
+            (combine_result, combine_treespec),
+            combine_graph,
+            combine_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            combine_fn,
+            sub_args,
+            sub_kwargs={},
+            description="scan_combine",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+
+        if combine_lifted_freevars:
+            unimplemented(
+                f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
+            )
+
+        if combine_result.python_type() != list:
+            unimplemented(
+                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
+            )
+
+        input_proxy = input.as_proxy()
+        combine_result_proxy = combine_result.as_proxy()
+        for result, inp_proxy in zip(combine_result_proxy, input_proxy):
+            inp_meta = inp_proxy.node.meta["example_value"]
+            combine_result_meta = result.node.meta["example_value"]
+            if combine_result_meta.device != inp_meta.device:
+                unimplemented(
+                    f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
+                    + f"got {combine_result_meta.device}"
+                )
+            if combine_result_meta.dtype != inp_meta.dtype:
+                unimplemented(
+                    f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
+                    + f"got {combine_result_meta.dtype}"
+                )
+
+            if combine_result_meta.shape != ():
+                unimplemented(
+                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
+                )
+
+        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
+
+        p_args = (
+            make_attr(tx, combine_fn_name),
+            input_proxy,
+            dim.as_proxy(),
+        )
+
+        with tx.fake_mode:
+            out_meta = tuple(
+                inp_proxy.node.meta["example_value"].clone()
+                for inp_proxy in input_proxy
+            )
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function", torch.ops.higher_order.scan, p_args, {}
             ),
             example_value=out_meta,
         )
