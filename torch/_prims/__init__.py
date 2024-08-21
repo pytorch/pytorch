@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._higher_order_ops.effects import new_token_tensor
 from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
@@ -3086,7 +3087,7 @@ frexp = _make_prim(
 
 
 def _make_token_aten() -> TensorLikeType:
-    return torch.empty(0)
+    return new_token_tensor()
 
 
 _make_token = _make_prim(
