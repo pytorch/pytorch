@@ -502,6 +502,7 @@ def aot_dispatch_autograd(
                     and fw_metadata.input_info[i].mutates_storage_metadata
                 )
                 if bw_out is None and not metadata_mutation_in_graph:
+                    continue
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
