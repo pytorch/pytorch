@@ -84,7 +84,6 @@ from .utils import (
 
 
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
-    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
