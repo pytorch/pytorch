@@ -92,7 +92,7 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
       mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
   auto opt2 = mat2_ptr->get_nested_sizes().options();
 
-  int64_t N = self_sizes.size();
+  int64_t N = static_cast<int64_t>(self_sizes.size());
   int64_t n_heads = self_sizes[0][0];
 
   // viewed metadata for self
