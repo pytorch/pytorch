@@ -6715,8 +6715,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 return attn_output, key._max_seqlen, value._max_seqlen
 
         query = torch.rand(bs, d1, d3, device=device)
-        value = torch.rand(6, d2, requires_grad=True, device=device)
-        offsets = torch.tensor([0, 2, 3, 6], device=device)
+        value = torch.rand(30, d2, requires_grad=True, device=device)
+        # total_length must > than max_length otherwise flash_attn backwark will fail
+        offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
         symbolic_traced: torch.fx.GraphModule = torch.fx.symbolic_trace(m)
