@@ -15,7 +15,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 POLYFILL_SUPPORTED_PYTHON_MODULE_METHODS = {
-    os.fspath: polyfill.fspath,
+    os.fspath: polyfills.fspath,
 }
 
 
