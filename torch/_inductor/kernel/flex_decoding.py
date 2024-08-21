@@ -343,13 +343,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
         raise ValueError(
             "Number of shared query heads sharing the same KV head must be power of 2. "
         )
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if (
-        full_kv_num_blocks is None
-    ):  # Create a plackeholder full block list in case it is empty
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
+        # Create a plackeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
@@ -376,9 +376,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
         ]
     # TODO: fix autotuning.
 
-    kernel_options["SM_SCALE"] = scale
-    kernel_options["SPLIT_KV"] = get_split_k(
-        key.get_size()[0], key.get_size()[1], key.get_size()[2]
+    kernel_options.setdefault("SM_SCALE", scale)
+    kernel_options.setdefault(
+        "SPLIT_KV", get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
     assert kernel_options["SPLIT_KV"] <= MAX_SPLIT_KV
@@ -408,22 +408,25 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+    kernel_options.setdefault("BLOCK_DMODEL", query.get_size()[-1])
 
     m = query.get_size()[-2]
-    kernel_options["BLOCK_M"] = (
-        # m
-        # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
-        # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-        max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
-                )
-                * gqa_shared_heads
-            ),
-            16,
-        )
+    kernel_options.setdefault(
+        "BLOCK_M",
+        (
+            # m
+            # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
+            # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
+            max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                    )
+                    * gqa_shared_heads
+                ),
+                16,
+            )
+        ),
     )
 
     query = ir.ExternKernel.realize_input(query)
@@ -444,10 +447,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         m * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
     )
 
-    kernel_options["SAFE_M_BOUNDARY"] = (
-        (m * gqa_shared_heads) % kernel_options["BLOCK_M"]
-    ) == 0
-    kernel_options["SAFE_N_BOUNDARY"] = True
+    kernel_options.setdefault(
+        "SAFE_M_BOUNDARY", ((m * gqa_shared_heads) % kernel_options["BLOCK_M"]) == 0
+    )
+    kernel_options.setdefault("SAFE_N_BOUNDARY", True)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -457,8 +460,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options["BLOCK_N"] = BLOCK_N
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:

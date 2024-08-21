@@ -717,20 +717,21 @@ def flex_attention(
         dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
-    kernel_options["SM_SCALE"] = scale
+    kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is None if partial blocks are not computed
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if full_kv_num_blocks is None:
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+    kernel_options.setdefault("BLOCK_DMODEL", query.get_size()[-1])
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -756,11 +757,11 @@ def flex_attention(
             continue
 
         # Performance tuning
-        kernel_options["BLOCK_M"] = BLOCK_M
-        kernel_options["BLOCK_N"] = BLOCK_N
+        kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -1605,20 +1606,21 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options = dict(kernel_options)
-    kernel_options["SM_SCALE"] = scale
+    kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA factor
     gqa_shared_heads = query.get_size()[1] // key.get_size()[1]
-    kernel_options["GQA_SHARED_HEADS"] = gqa_shared_heads
+    kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
     # full_kv_num_blocks is torch.zeros([1, 1, 1]) if partial blocks are not computed.
-    kernel_options["HAS_FULL_BLOCKS"] = full_kv_num_blocks is not None
-    if full_kv_num_blocks is None:
+    has_full_blocks = full_kv_num_blocks is not None
+    kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+    if not has_full_blocks:
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options["BLOCK_DMODEL"] = query.get_size()[-1]
+    kernel_options.setdefault("BLOCK_DMODEL", query.get_size()[-1])
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1645,13 +1647,13 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options["BLOCK_M1"] = BLOCK1
-        kernel_options["BLOCK_N1"] = BLOCK2
-        kernel_options["BLOCK_M2"] = BLOCK2
-        kernel_options["BLOCK_N2"] = BLOCK1
+        kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options["SPARSE_Q_BLOCK_SIZE"] = SPARSE_Q_BLOCK_SIZE
-        kernel_options["SPARSE_KV_BLOCK_SIZE"] = SPARSE_KV_BLOCK_SIZE
+        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
