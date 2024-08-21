@@ -209,6 +209,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str | None:
         return gen_vmap_plumbing_no_returns(native_function)
     return_symint_overrides = [
         "_scaled_dot_product_flash_attention",
+        "_scaled_dot_product_cudnn_attention",
     ]
     if (
         not all(ret.type.is_tensor_like() for ret in returns)
