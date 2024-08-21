@@ -438,6 +438,8 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
         ranking: bool = False,
+        pruning: bool = False,
+        pruning_k: int = 5,
         **kwargs: Any,
     ) -> List[float]:
         """Benchmark many GPU callables using a custom benchmarking implementation.
@@ -464,11 +466,17 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         used when benchmarking results will be cross-compared (i.e. in the case of
         GEMM-Epilogue fusion benchmarking). Ranking is significantly (an order of
         magnitude or more) faster than non-ranking.
+        - pruning: Optionally, halt benchmarking of all but the top-`pruning_k`
+        callables immediately after the runtime estimation. The top-`pruning_k`
+        callables are benchmarked for the full duration.
+        - pruning_k: Optionally, the number of "best" callables to fully benchmark.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
         - The minimum runtime of each callable in `callables`, in milliseconds.
         """
+        saved_callables = callables
+
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
@@ -512,6 +520,18 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
             else:
                 counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
                 logger.debug("Feature %s is disabled, proceeding with full benchmarking cycle.", feature_name)
+        
+        callable_to_timing = {
+            _callable: estimated_timing for _callable, estimated_timing in zip(callables, estimated_timings)
+        }
+        if pruning:
+            feature_name = "inductor_grouped_benchmarker_pruning"
+            if is_feature_enabled(feature_name):
+                callables = sorted(callables, key=callables.__getitem__)[:pruning_k]
+                estimated_timings = sorted(callables.values())[:pruning_k]
+            else:
+                counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
+                logger.debug("Feature %s is disabled, will not prune callables.", feature_name)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration, we're
         # alloted `max_benchmark_duration` per-callable, so we can just take the average
@@ -546,7 +566,10 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
 
         # return the minimum of estimated_timing and benchmarked_timing, since
         # we just want the minimum timing overall we might check both
-        return [min(estimated_timing, benchmarked_timing) for estimated_timing, benchmarked_timing in zip(estimated_timings, benchmarked_timings)]
+        for _callable, benchmarked_timing in zip(_callable, benchmarked_timings):
+            callable_to_timing[_callable] = min(callable_to_timing[_callable], benchmarked_timing)
+
+        return [callable_to_timing[_callable] for _callable in saved_callables]
 
 
 benchmarker = InductorGroupedBenchmarker()
