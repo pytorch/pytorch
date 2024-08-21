@@ -136,7 +136,7 @@ Dtype Intrinsics::IntrinsicsDtype(
   return params[0]->dtype();
 }
 
-int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
+size_t Intrinsics::OpArgCount(IntrinsicsOp op_type) {
   switch (op_type) {
     case kSin:
     case kCos:

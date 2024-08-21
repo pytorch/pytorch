@@ -4,6 +4,7 @@ from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
+    CUDADeviceVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
@@ -29,6 +30,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -41,12 +43,9 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
-    EnumerateVariable,
     IteratorVariable,
     ItertoolsVariable,
-    MapVariable,
     RepeatIteratorVariable,
-    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -74,6 +73,8 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
@@ -81,11 +82,7 @@ from .misc import (
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import (
-    NNModuleVariable,
-    UnspecializedBuiltinNNModuleVariable,
-    UnspecializedNNModuleVariable,
-)
+from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
@@ -98,6 +95,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
@@ -117,6 +115,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DefaultDictVariable",
@@ -142,6 +141,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",

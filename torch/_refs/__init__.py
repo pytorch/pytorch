@@ -2780,7 +2780,17 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             assert tensor.ndim == 1  # we've already checked this above
             # Don't suggest the legacy behavior in the error message
             torch._check(
-                tensor.shape[0] == 0,
+                # NB: it is not enough to simply assert that tensor.shape[0] == 0;
+                # this MUST be true even under guard size oblivious.
+                # Effectively, we must actually know that the shape is zero,
+                # passing an unbacked SymInt which we will defer a runtime
+                # assert on won't cut it.  This is a policy decision (size
+                # oblivious semantics say that u0 tensors never are inferred
+                # to be zero size, even if they must be that for the cat to go
+                # through), and is load bearing for our Inductor lowerings
+                # (which assume that size oblivious tests are OK to determine
+                # if a shape is permissibly zero.)
+                guard_size_oblivious(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
@@ -2872,8 +2882,16 @@ def constant_pad_nd(
         if pad[pad_idx + 1] < 0:
             c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
-    # if none of the pads are positive we can just return the result
-    if builtins.all(p <= 0 for p in pad):
+    # If all the pads are negative we can return the result.
+    # Avoid early exiting if all pads = 0 to prevent specialization on export.
+    # During export, raw if statements are specialized on the input, meaning
+    # that we lose a branch depending on the example input used to export.
+    # Here, this is either the case where all pads = 0, or the case where at
+    # least one pad > 0 and the rest are >= 0.
+    # Avoiding the early exit when all pads = 0 ensures we can export
+    # constant_pad_nd for cases when all pads >= 0.
+    # Note: if any pads are negative, this code specializes due to the if statements above.
+    if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
@@ -2906,11 +2924,11 @@ def constant_pad_nd(
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] > 0:
+        if pad[pad_idx] >= 0:
             c_output = c_output.narrow(
                 i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
-        if pad[pad_idx + 1] > 0:
+        if pad[pad_idx + 1] >= 0:
             c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)

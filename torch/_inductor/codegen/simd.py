@@ -397,7 +397,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
@@ -1394,7 +1393,26 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
 
         self.codegen_comment(node_schedule)
-        final_kernel.call_kernel(final_kernel.kernel_name)
+
+        # debug printing values of intermediate tensors
+        # Note: MultiKernel debug printing is not supported for now
+        enable_debug_printer = (
+            config.aot_inductor.debug_intermediate_value_printer
+            and not isinstance(final_kernel, MultiKernel)
+        )
+        _, call_args, arg_signatures, _ = (
+            final_kernel.args.python_argdefs()
+            if not isinstance(final_kernel, MultiKernel)
+            else [None, [], None, None]
+        )
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.enable_debug_printer = enable_debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, final_kernel
+        )
+        with debug_printer_manager:
+            final_kernel.call_kernel(final_kernel.kernel_name)
+
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
@@ -1516,7 +1534,16 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+
+        # debug printing values of intermediate tensors
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
+            kernel.call_kernel(kernel_name, template_node.node)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
@@ -1525,43 +1552,95 @@ class SIMDScheduling(BaseScheduling):
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
-    def codegen_foreach(self, foreach_node):
-        from .triton_foreach import ForeachKernel
+    def generate_combo_kernel_code(
+        self,
+        subkernel_nodes: List[BaseSchedulerNode],
+        custom_part_algorithm: bool,
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        only_gen_src_code: bool = False,
+    ) -> List[Tuple[str, Any, Any]]:
+        from .triton_combo_kernel import ComboKernel
 
-        for partitions_with_metadata in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes(), self
-        ):
-            kernel = ForeachKernel()
-            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
-                node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-                (
-                    reduction_hint_val,
-                    mutations,
-                    index_dtype,
-                ) = self.get_kernel_args(node_schedule, numel, rnumel)
+        fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
+        subkernel_map, node_schedule_map = {}, {}
+        for pn, nodes in zip(subkernel_nodes, fused_node_lists):
+            _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+            node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
+            (
+                reduction_hint_val,
+                mutations,
+                index_dtype,
+            ) = self.get_kernel_args(node_schedule, numel, rnumel)
+            subkernel_map[pn] = ComboKernel.create_triton_kernel(
+                *tiled_groups,
+                reduction_hint=reduction_hint_val,
+                mutations=mutations,
+                index_dtype=index_dtype,
+                optimize_mask=not mixed_sizes,
+            )
 
-                subkernel = kernel.create_sub_kernel(
-                    *tiled_groups,
-                    reduction_hint=reduction_hint_val,
-                    mutations=mutations,
-                    index_dtype=index_dtype,
-                )
+        partitions = ComboKernel.horizontal_partition(
+            nodes=subkernel_nodes,
+            triton_scheduling=self,
+            custom_algorithm=custom_part_algorithm,
+            kernel_map=subkernel_map,
+            node_info_map=node_schedule_map,
+        )
+        log.debug(
+            "ComboKernels: %d nodes partitioned into %s groups",
+            len(subkernel_nodes),
+            [len(p) for p in partitions],
+        )
+        kernel_code_list = []
+        for node_group in partitions:
+            fused_node_lists = [node.get_nodes() for node in node_group]
+            kernel = ComboKernel(
+                enable_autotune=enable_autotune,
+                mixed_sizes=mixed_sizes,
+            )
 
+            for pn, nodes in zip(node_group, fused_node_lists):
+                if only_gen_src_code:
+                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+                    for n in nodes:
+                        n.last_usage = OrderedSet()
                 self.codegen_node_schedule_with_kernel(
-                    node_schedule,
-                    subkernel,
+                    node_schedule_map[pn][0],
+                    kernel.create_sub_kernel(subkernel_map[pn]),
                 )
-
-                with V.set_kernel_handler(subkernel):
-                    for node in node_schedule:
-                        if node not in (EnableReduction, DisableReduction):
-                            node.mark_run()
+                subkernel = subkernel_map[pn]
+                node_schedule = node_schedule_map[pn][0]
+                if not only_gen_src_code:
+                    with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                        for node in node_schedule:
+                            if node not in (EnableReduction, DisableReduction):
+                                node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
                 V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
-            kernel_name = self.define_kernel(src_code, [foreach_node], kernel)
-            self.codegen_comment([foreach_node])
+            kernel_code_list.append((src_code, kernel, node_group))
+        return kernel_code_list
+
+    def codegen_combo_kernel(self, combo_kernel_node):
+        subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
+        custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
+        enable_autotune = combo_kernel_node.enable_autotune
+        mixed_sizes = config.combo_kernel_allow_mixed_sizes > 1 or (
+            config.combo_kernel_allow_mixed_sizes == 1 and custom_part_algorithm
+        )
+
+        kernel_code_list = self.generate_combo_kernel_code(
+            subkernel_nodes, custom_part_algorithm, enable_autotune, mixed_sizes
+        )
+
+        for src_code, kernel, _ in kernel_code_list:
+            kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
+            self.codegen_comment([combo_kernel_node])
+            log.debug("ComboKernels: generated kernel %s.", kernel_name)
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
@@ -1691,6 +1770,28 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+
+        # Optionally, prefer tiling into as many dimensions as possible.
+        if config.triton.prefer_nd_tiling:
+            # Get candidate tilings from the node ranges.
+            node_ranges = [
+                node.get_ranges()[0]
+                for node in EnableReduction.filter(node_schedule)
+                if isinstance(node, scheduler.SchedulerNode)
+            ]
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            for node_range in node_ranges:
+                # Collapse leading dims, to fit in the maximum dimensionality.
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
+                new_tilings.add(tuple(tiling))
+
+            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+            # Since this is a stable sort, ties are broken by schedule order.
+            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
+            ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

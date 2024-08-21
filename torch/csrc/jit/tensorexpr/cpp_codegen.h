@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class CppVarNameRewriter;
 
@@ -97,6 +95,4 @@ class TORCH_API CppCodeGen : public CodeGen {
   std::unique_ptr<CppVarNameRewriter> var_name_rewriter_;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

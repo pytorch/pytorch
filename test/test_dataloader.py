@@ -98,9 +98,6 @@ TEST_CUDA_IPC = (
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
-if TEST_CUDA_IPC:
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
     # data loader terminiates gracefully. To prevent hanging in the testing
@@ -3032,9 +3029,7 @@ class DictDataset(Dataset):
     def __getitem__(self, ndx):
         return {
             "a_tensor": torch.empty(4, 2).fill_(ndx),
-            "another_dict": {
-                "a_number": ndx,
-            },
+            "another_dict": {"a_number": ndx},
         }
 
 

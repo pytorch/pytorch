@@ -100,7 +100,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
@@ -218,7 +218,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
@@ -336,7 +336,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
@@ -454,7 +454,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5

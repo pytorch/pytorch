@@ -3,9 +3,7 @@
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 // Initialize Python bindings for Tensor Expressions
 void initTensorExprBindings(PyObject* module);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

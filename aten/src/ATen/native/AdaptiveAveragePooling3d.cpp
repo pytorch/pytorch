@@ -42,19 +42,19 @@ static void adaptive_avg_pool3d_out_frame(
     for (const auto d : c10::irange(start, end)) {
       /* loop over output */
       for (const auto ot : c10::irange(osizeT)) {
-        int istartT = start_index(ot, osizeT, isizeT);
-        int iendT = end_index(ot, osizeT, isizeT);
-        int kT = iendT - istartT;
+        auto istartT = start_index(ot, osizeT, isizeT);
+        auto iendT = end_index(ot, osizeT, isizeT);
+        auto kT = iendT - istartT;
 
         for (const auto oh : c10::irange(osizeH)) {
-          int istartH = start_index(oh, osizeH, isizeH);
-          int iendH = end_index(oh, osizeH, isizeH);
-          int kH = iendH - istartH;
+          auto istartH = start_index(oh, osizeH, isizeH);
+          auto iendH = end_index(oh, osizeH, isizeH);
+          auto kH = iendH - istartH;
 
           for (const auto ow : c10::irange(osizeW)) {
-            int istartW = start_index(ow, osizeW, isizeW);
-            int iendW = end_index(ow, osizeW, isizeW);
-            int kW = iendW - istartW;
+            auto istartW = start_index(ow, osizeW, isizeW);
+            auto iendW = end_index(ow, osizeW, isizeW);
+            auto kW = iendW - istartW;
 
             /* local pointers */
             const scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
@@ -193,19 +193,19 @@ static void adaptive_avg_pool3d_backward_out_frame(
 
       /* calculate average */
       for (const auto ot : c10::irange(osizeT)) {
-        int istartT = start_index(ot, osizeT, isizeT);
-        int iendT = end_index(ot, osizeT, isizeT);
-        int kT = iendT - istartT;
+        auto istartT = start_index(ot, osizeT, isizeT);
+        auto iendT = end_index(ot, osizeT, isizeT);
+        auto kT = iendT - istartT;
 
         for (const auto oh : c10::irange(osizeH)) {
-          int istartH = start_index(oh, osizeH, isizeH);
-          int iendH = end_index(oh, osizeH, isizeH);
-          int kH = iendH - istartH;
+          auto istartH = start_index(oh, osizeH, isizeH);
+          auto iendH = end_index(oh, osizeH, isizeH);
+          auto kH = iendH - istartH;
 
           for (const auto ow : c10::irange(osizeW)) {
-            int istartW = start_index(ow, osizeW, isizeW);
-            int iendW = end_index(ow, osizeW, isizeW);
-            int kW = iendW - istartW;
+            auto istartW = start_index(ow, osizeW, isizeW);
+            auto iendW = end_index(ow, osizeW, isizeW);
+            auto kW = iendW - istartW;
 
             scalar_t grad_delta =
                 gradOutput_p_d[ot * osizeH * osizeW + oh * osizeW + ow] / kT /
