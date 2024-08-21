@@ -68,6 +68,30 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 
 namespace {
+
+template <bool PingPong, bool FastAccum>
+struct Schedule;
+
+template <>
+struct Schedule</*PingPong=*/false, /*FastAccum=*/false> {
+  using type = cutlass::gemm::KernelTmaWarpSpecialized;
+};
+
+template <>
+struct Schedule</*PingPong=*/true, /*FastAccum=*/false> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
+};
+
+template <>
+struct Schedule</*PingPong=*/false, /*FastAccum=*/true> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
+};
+
+template <>
+struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
+  using type = cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
+};
+
 // Cutlass rowwise kernel
 template <
     int TB_M,
@@ -78,7 +102,6 @@ template <
     int TBS_K,
     bool PONG,
     bool FAST_ACCUM,
-    bool USE_BIAS,
     typename INPUT_DTYPE,
     typename BIAS_DTYPE>
 void f8f8bf16_rowwise_impl(
@@ -165,10 +188,7 @@ void f8f8bf16_rowwise_impl(
 
   using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
       cutlass::multiplies,
-      cute::conditional_t< // Second stage output type.
-          USE_BIAS,
-          ElementBias,
-          ElementOutput>,
+      ElementComputeEpilogue, // Second stage output type.
       ElementComputeEpilogue, // Second stage input types.
       cutlass::FloatRoundStyle::round_to_nearest>;
 
@@ -178,14 +198,13 @@ void f8f8bf16_rowwise_impl(
   using ComputeBias = cutlass::epilogue::fusion::Sm90Compute<
       cutlass::plus,
       ElementOutput, // Final (optional) stage output type.
-      ElementBias, // Final stage input types.
+      ElementComputeEpilogue, // Final stage input types.
       cutlass::FloatRoundStyle::round_to_nearest>;
 
   using EVTComputeBias =
       cutlass::epilogue::fusion::Sm90EVT<ComputeBias, Bias, EVTCompute1>;
 
-  using EpilogueEVT =
-      cute::conditional_t<USE_BIAS, EVTComputeBias, EVTCompute1>;
+  using EpilogueEVT = EVTComputeBias;
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -205,18 +224,6 @@ void f8f8bf16_rowwise_impl(
           cutlass::epilogue::TmaWarpSpecialized,
           EpilogueEVT>::CollectiveOp;
 
-  using DefaultSchedule = cutlass::gemm::KernelTmaWarpSpecialized;
-  using PongSchedule = cutlass::gemm::KernelTmaWarpSpecializedPingpong;
-  using FastDefaultSchedule =
-      cutlass::gemm::KernelTmaWarpSpecializedFP8FastAccum;
-  using FastPongSchedule =
-      cutlass::gemm::KernelTmaWarpSpecializedPingpongFP8FastAccum;
-  using SlowAccum = cute::conditional_t<PONG, PongSchedule, DefaultSchedule>;
-  using FastAccum =
-      cute::conditional_t<PONG, FastPongSchedule, FastDefaultSchedule>;
-  using MainLoopSchedule =
-      cute::conditional_t<FAST_ACCUM, FastAccum, SlowAccum>;
-
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
@@ -232,7 +239,7 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          MainLoopSchedule>::CollectiveOp;
+          typename Schedule<PONG, FAST_ACCUM>::type>::CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       cute::Shape<int, int, int>,
@@ -259,44 +266,14 @@ void f8f8bf16_rowwise_impl(
        stride_a,
        reinterpret_cast<ElementInputB*>(WQ.data_ptr()),
        stride_b},
-      {{}, // Epilogue thread we populate below.
+      {{{bias.has_value() ? reinterpret_cast<ElementBias*>(bias->data_ptr())
+                          : nullptr},
+        {{reinterpret_cast<ElementComputeEpilogue*>(x_scale.data_ptr())},
+         {{reinterpret_cast<ElementComputeEpilogue*>(w_scale.data_ptr())}}}},
        (ElementOutput*)out.data_ptr<at::BFloat16>(),
        stride_output,
        (ElementOutput*)out.data_ptr<at::BFloat16>(),
        stride_output}};
-
-  if constexpr (USE_BIAS) {
-    arguments.epilogue.thread = {
-        {reinterpret_cast<ElementBias*>(bias.value().data_ptr())}, // bias
-        // compute_1
-        {
-            {reinterpret_cast<ElementComputeEpilogue*>(
-                x_scale.data_ptr())}, // x_scale
-            // compute_0
-            {
-                {reinterpret_cast<ElementComputeEpilogue*>(
-                    w_scale.data_ptr())}, // w_scale
-                {}, // Accumulator
-                {} // Multiplies
-            },
-            {}, // Multiplies
-        },
-        {}, // Plus
-    };
-  } else {
-    arguments.epilogue.thread = {
-        {reinterpret_cast<ElementComputeEpilogue*>(
-            x_scale.data_ptr())}, // x_scale
-        // compute_0
-        {
-            {reinterpret_cast<ElementComputeEpilogue*>(
-                w_scale.data_ptr())}, // w_scale
-            {}, // Accumulator
-            {} // Multiplies
-        },
-        {}, // Multiplies
-    };
-  }
 
   Gemm gemm;
 
@@ -305,7 +282,9 @@ void f8f8bf16_rowwise_impl(
   size_t workspace_size = Gemm::get_workspace_size(arguments);
 
   // Allocate workspace memory
-  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+  auto workspace = XQ.new_empty(
+      {static_cast<int64_t>(workspace_size)},
+      at::TensorOptions().dtype(at::kByte));
 
   // Check the problem size is supported or not
   cutlass::Status status = gemm.can_implement(arguments);
@@ -314,7 +293,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.get());
+  status = gemm.initialize(arguments, workspace.data_ptr());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -348,7 +327,7 @@ KernelMode get_kernel_mode(at::Tensor XQ, at::Tensor WQ) {
   }
 }
 
-template <typename InputDType, bool FastAccum, bool UseBias, typename BiasDType>
+template <typename InputDType, bool FastAccum, typename BiasDType>
 void dispatch_fp8_rowwise_kernel(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -367,7 +346,6 @@ void dispatch_fp8_rowwise_kernel(
         1,
         false,
         FastAccum,
-        UseBias,
         InputDType,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   } else if (kernel == KernelMode::Large) {
@@ -380,7 +358,6 @@ void dispatch_fp8_rowwise_kernel(
         1,
         true,
         FastAccum,
-        UseBias,
         InputDType,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
@@ -393,7 +370,6 @@ void dispatch_fp8_rowwise_kernel(
         1,
         false,
         FastAccum,
-        UseBias,
         InputDType,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   }
@@ -428,103 +404,54 @@ void f8f8bf16_rowwise(
   int N = WQ.size(1);
   int K = XQ.size(1);
 
-  bool use_bias = bias.has_value();
-  bool bf16_bias = use_bias && bias.value().dtype() == at::kBFloat16;
+  bool bf16_bias = bias.has_value() && bias->dtype() == at::kBFloat16;
 
   // Templatize based on input dtype.
   bool use_e5m2 = XQ.dtype() == at::kFloat8_e5m2;
   TORCH_CHECK(WQ.dtype() == at::kFloat8_e4m3fn, "For RowWise scaling the second input is required to be a float8_e4m3fn dtype.");
 
-  if (use_bias) {
-    if (bf16_bias) {
-      if (use_fast_accum) {
-        if (use_e5m2) {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e5m2_t,
-              true,
-              true,
-              cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-        } else {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e4m3_t,
-              true,
-              true,
-              cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-        }
-      } else {
-        if (use_e5m2) {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e5m2_t,
-              false,
-              true,
-              cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-        } else {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e4m3_t,
-              false,
-              true,
-              cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-        }
-      }
-    } else {
-      if (use_fast_accum) {
-        if (use_e5m2) {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e5m2_t,
-              true,
-              true,
-              float>(XQ, WQ, x_scale, w_scale, bias, out);
-        } else {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e4m3_t,
-              true,
-              true,
-              float>(XQ, WQ, x_scale, w_scale, bias, out);
-        }
-      } else {
-        if (use_e5m2) {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e5m2_t,
-              false,
-              true,
-              float>(XQ, WQ, x_scale, w_scale, bias, out);
-        } else {
-          return dispatch_fp8_rowwise_kernel<
-              cutlass::float_e4m3_t,
-              false,
-              true,
-              float>(XQ, WQ, x_scale, w_scale, bias, out);
-        }
-      }
-    }
-  } else {
+  if (bf16_bias) {
     if (use_fast_accum) {
       if (use_e5m2) {
         return dispatch_fp8_rowwise_kernel<
             cutlass::float_e5m2_t,
             true,
-            false,
-            float>(XQ, WQ, x_scale, w_scale, bias, out);
+            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
       } else {
         return dispatch_fp8_rowwise_kernel<
             cutlass::float_e4m3_t,
             true,
-            false,
-            float>(XQ, WQ, x_scale, w_scale, bias, out);
+            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
       }
     } else {
       if (use_e5m2) {
         return dispatch_fp8_rowwise_kernel<
             cutlass::float_e5m2_t,
             false,
-            false,
-            float>(XQ, WQ, x_scale, w_scale, bias, out);
+            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
       } else {
         return dispatch_fp8_rowwise_kernel<
             cutlass::float_e4m3_t,
             false,
-            false,
-            float>(XQ, WQ, x_scale, w_scale, bias, out);
+            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
+      }
+    }
+  } else {
+    if (use_fast_accum) {
+      if (use_e5m2) {
+        return dispatch_fp8_rowwise_kernel<cutlass::float_e5m2_t, true, float>(
+            XQ, WQ, x_scale, w_scale, bias, out);
+      } else {
+        return dispatch_fp8_rowwise_kernel<cutlass::float_e4m3_t, true, float>(
+            XQ, WQ, x_scale, w_scale, bias, out);
+      }
+    } else {
+      if (use_e5m2) {
+        return dispatch_fp8_rowwise_kernel<cutlass::float_e5m2_t, false, float>(
+            XQ, WQ, x_scale, w_scale, bias, out);
+      } else {
+        return dispatch_fp8_rowwise_kernel<cutlass::float_e4m3_t, false, float>(
+            XQ, WQ, x_scale, w_scale, bias, out);
       }
     }
   }
