@@ -8,9 +8,14 @@ import sys
 import time
 import unittest
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    run_tests,
+    TestCase,
+)
 
 def _test_success_func(i):
     pass
@@ -87,7 +92,7 @@ def _test_nested(i, pids_queue, nested_child_sleep, start_method):
     # Kill self. This should take down the child processes as well.
     os.kill(os.getpid(), signal.SIGTERM)
 
-class _TestMultiProcessing:
+class _TestMultiProcessing(TestCase):
     start_method = None
 
     def test_success(self):
@@ -189,10 +194,11 @@ class _TestMultiProcessing:
             self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
 
+
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
-class SpawnTest(TestCase, _TestMultiProcessing):
+class SpawnTest(_TestMultiProcessing):
     start_method = 'spawn'
 
     def test_exception_raises(self):
@@ -216,8 +222,101 @@ class SpawnTest(TestCase, _TestMultiProcessing):
     IS_WINDOWS,
     "Fork is only available on Unix",
 )
-class ForkTest(TestCase, _TestMultiProcessing):
+class ForkTest(_TestMultiProcessing):
     start_method = 'fork'
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ForkServerTest(_TestMultiProcessing):
+    start_method = 'forkserver'
+
+
+class _ParallelTest:
+    orig_paralell_env_val = None
+
+    def setUp(self):
+        super().setUp()
+        self.orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "1"
+
+    def tearDown(self):
+        super().tearDown()
+        if self.orig_paralell_env_val is None:
+            del os.environ[mp.ENV_VAR_PARALLEL_START]
+        else:
+            os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
+
+
+@unittest.skipIf(
+    NO_MULTIPROCESSING_SPAWN,
+    "Disabled for environments that don't support the spawn start method")
+class ParallelSpawnShouldFallbackAndWorkTest(SpawnTest, _ParallelTest):
+    pass
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ParallelForkShouldFallbackAndWorkTest(ForkTest, _ParallelTest):
+    pass
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ParallelForkServerShouldWorkTest(ForkServerTest, _ParallelTest):
+    pass
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ParallelForkServerPerfTest(TestCase):
+    def test_forkserver_perf(self):
+        start_method = 'forkserver'
+        expensive = Expensive()
+        nprocs = 6
+        orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
+
+        # test the non parallel case
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "0"
+        start = time.perf_counter()
+        mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
+        elapsed = time.perf_counter() - start
+        # the time should be at least 6x the sleep time
+        self.assertGreaterEqual(elapsed, Expensive.SLEEP_SECS * nprocs)
+
+        # test the parallel case
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "1"
+        start = time.perf_counter()
+        mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
+        elapsed = time.perf_counter() - start
+
+        # the time should be at most 1x the sleep time + small overhead
+        self.assertLess(elapsed, Expensive.SLEEP_SECS + 10)
+
+        if orig_paralell_env_val is None:
+            del os.environ[mp.ENV_VAR_PARALLEL_START]
+        else:
+            os.environ[mp.ENV_VAR_PARALLEL_START] = orig_paralell_env_val
+
+
+class Expensive:
+    SLEEP_SECS = 10
+    # Simulate startup overhead such as large imports
+    time.sleep(SLEEP_SECS)
+
+    def __init__(self):
+        self.config: str = "*" * 1000000
+
+    def my_call(self, *args):
+        pass
 
 
 class ErrorTest(TestCase):
