@@ -489,7 +489,7 @@ class DistMathOpsTest(DTensorTestBase):
                     ),
                 }
 
-                model = LnTpBlock().to(device=self.device_type)
+                model = LnTpBlock()
                 model_local = copy.deepcopy(model).to(device=self.device_type)
                 model_dist = parallelize_module(model, device_mesh, parallel_plan)
                 req_grad_map = {
@@ -503,7 +503,9 @@ class DistMathOpsTest(DTensorTestBase):
                     for n, p in target_model.named_parameters():
                         if not req_grad_map.get(n.rpartition(".")[0], False):
                             p.requires_grad_(False)
-
+                            assert not p.requires_grad
+                        else:
+                            assert p.requires_grad
                 # forward step for both local and distributed models
                 x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
 

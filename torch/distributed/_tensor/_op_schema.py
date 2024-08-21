@@ -402,7 +402,7 @@ class OpSchema:
         )
 
     def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
-        suggestion_args_spec, suggestion_args_schema = self.args_spec, self.args_schema
+        suggestion_args_spec = self.args_spec
         new_arg_schema: List[object] = []
         idx_of_args_spec = 0
         if (
@@ -413,10 +413,7 @@ class OpSchema:
         else:
             args_schema = origin_schema.args_schema
         for arg in args_schema:
-            if (
-                isinstance(arg, DTensorSpec)
-                and suggestion_args_schema[idx_of_args_spec] is not None
-            ):
+            if isinstance(arg, DTensorSpec):
                 new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
                 idx_of_args_spec += 1
             else:
