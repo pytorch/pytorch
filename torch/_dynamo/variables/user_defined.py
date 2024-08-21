@@ -932,7 +932,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .. import trace_rules
         from . import ConstantVariable
 
-        value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
 

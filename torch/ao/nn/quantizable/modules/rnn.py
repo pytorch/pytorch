@@ -353,7 +353,6 @@ class LSTM(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # Default to eval mode. If we want to train, we will explicitly set to training.
-        num_directions = 2 if bidirectional else 1
 
         if (
             not isinstance(dropout, numbers.Number)
@@ -389,7 +388,7 @@ class LSTM(torch.nn.Module):
                 **factory_kwargs,
             )
         ]
-        for layer in range(1, num_layers):
+        for _ in range(1, num_layers):
             layers.append(
                 _LSTMLayer(
                     self.hidden_size,
