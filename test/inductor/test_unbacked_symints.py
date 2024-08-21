@@ -9,9 +9,13 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCPUIf,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import IS_LINUX, parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, skipCUDAIf
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -189,6 +193,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipCPUIf(True, "test requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests

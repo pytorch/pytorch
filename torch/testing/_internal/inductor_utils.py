@@ -72,6 +72,10 @@ def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
             def inner(self, *args, **kwargs):
+                assert hasattr(self, "device"), (
+                    "Expect the test class to have attribute device but not found. "
+                    "Consider using the skip device decorators in common_device_type.py" if hasattr(self, "device_type") else ""
+                )
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
