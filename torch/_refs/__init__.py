@@ -4997,7 +4997,7 @@ def arange(
     # For integer aguments we truncate to int before calculating length to handle
     # floating point precision issues. See https://github.com/pytorch/pytorch/issues/133338
     # for more context.
-    if is_integer
+    if is_integer:
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
