@@ -244,7 +244,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
@@ -252,7 +255,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                (
+                    dtype == torch.half
+                    or (
+                        dtype == torch.bfloat16
+                        and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                    )
+                )
+                and epilogue == "add"
+                and not bias
+            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
@@ -807,6 +820,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(16)
     @parametrize("batch_size", (2,))
     @parametrize("in_features", (1000,))
     @parametrize("out_features", (2,))
@@ -928,6 +942,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
     )
+    test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
