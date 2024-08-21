@@ -5928,8 +5928,10 @@ def bucketize(
         lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
-    if isinstance(a, NumberType):
+    if isinstance(a, int) or isinstance(a, float):
         c = torch.tensor(a, device=boundaries.device)
+    else:
+        c = a
 
     out_dtype = torch.int32 if out_int32 else torch.int64
     n_boundaries = boundaries.shape[-1]
