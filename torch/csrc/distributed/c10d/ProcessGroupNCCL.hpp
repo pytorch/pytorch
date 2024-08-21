@@ -864,7 +864,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::string getNCCLWatchdogTimeoutErrorMsg(const std::string& extraMsg);
 
-  std::string getNCCLWatchdogTimeoutExitMsg(const std::string& extraMsg);
+  std::string getNCCLWatchdogTimeoutExitMsg();
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -998,7 +998,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   //
   // 1: watchdog thread of any PG detects a collective timeout.
   // 2: timeout signal is received from other ranks through tcpstore.
-  // 3: no heartbeat detected of the watchdog of the current PG.
+  // 3: current PG's watchdog heartbeat timeout occurs.
   //
   // Note that only the monitor thread from PG0 will dump the debug info for
   // case one and two so that the debug info is only dumped once.
@@ -1089,7 +1089,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
-  bool dumpOnException_;
+  bool dumpOnTimeoutOrEx_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
