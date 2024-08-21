@@ -350,6 +350,7 @@ class CppWrapperCuda(CppWrapperCpu):
         assert arg_types is not None and len(call_args) == len(
             arg_types
         ), "call_args and arg_types do not match"
+
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
@@ -405,9 +406,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 kernel_name,
                 r"launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
                     kernel_var_name,
-                    f"{grid_name}.grid_x",
-                    f"{grid_name}.grid_y",
-                    f"{grid_name}.grid_z",
+                    f"{grid_var}.grid_x",
+                    f"{grid_var}.grid_y",
+                    f"{grid_var}.grid_z",
                     kernel_args_var,
                     stream,
                 ),
