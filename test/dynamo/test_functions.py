@@ -1517,6 +1517,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_constant_set(self):
+        s = set([1, 2])
+
+        def fn(x):
+            return torch.cos(x) * len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # This should cause recompilation
+        s.add(3)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_set_add(self):
+        s = set([1, 2])
+
+        def fn(x):
+            s.add(3)
+            return torch.cos(x) * len(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(s), 3)
+
     @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
