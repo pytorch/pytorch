@@ -8518,7 +8518,7 @@ def ___make_guard_fn():
         compiled_out = compiled_fn(x)
         self.assertTrue(fn_out.data == compiled_out.data)
 
-    def test_list_hasattr2(self):
+    def test_tensorvariable_hasattr2(self):
         def fn():
             x = torch.zeros(3)
             if hasattr(x, "shape"):
