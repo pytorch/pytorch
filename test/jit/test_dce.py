@@ -2,6 +2,7 @@
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -44,3 +45,7 @@ class TestDCE(JitTestCase):
         # freezing inlines t1.__init__(), after which DCE can occur.
         t2 = torch.jit.freeze(t2)
         FileCheck().check_not("prim::SetAttr").run(t2.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

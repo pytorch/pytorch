@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
 )
 
@@ -964,3 +965,4 @@ if __name__ == "__main__":
             nprocs=world_size,
             args=(world_size, rdvz_file),
         )
+    run_tests()

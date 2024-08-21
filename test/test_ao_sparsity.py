@@ -51,6 +51,9 @@ from ao.sparsity.test_data_sparsifier import (  # noqa: F401
     TestQuantizationUtils,
 )
 
+# Qlinear Packed params
+from ao.sparsity.test_qlinear_packed_params import TestQlinearPackedParams  # noqa: F401
+
 # Utilities
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
 

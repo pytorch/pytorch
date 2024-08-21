@@ -2,16 +2,11 @@
 
 import torch
 from torch._C import parse_ir
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    TemporaryFileName,
+)
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestAliasAnalysis(JitTestCase):
@@ -154,3 +149,7 @@ class TestAliasAnalysis(JitTestCase):
             mod = ModuleWrapper(module_list)
             mod = torch.jit.script(mod)
             mod(torch.zeros((2, 2)))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

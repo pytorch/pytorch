@@ -84,3 +84,10 @@ class LaunchTest(unittest.TestCase):
         self.assertSetEqual(
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

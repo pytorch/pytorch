@@ -12,6 +12,7 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class TestShapeInference(unittest.TestCase):
@@ -108,3 +109,7 @@ class TestShapeInference(unittest.TestCase):
         gm = generate_graph_module(m)
         input_tensors = [torch.randn(1, 1)]
         infer_shape(gm, input_tensors)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

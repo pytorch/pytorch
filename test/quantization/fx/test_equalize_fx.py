@@ -18,6 +18,7 @@ from torch.ao.quantization.fx._equalize import (
     get_equalization_qconfig_dict,
 )
 
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -51,6 +52,7 @@ import numpy as np
 # Testing utils
 from hypothesis import given
 from hypothesis import strategies as st
+
 
 
 default_qconfig_dict = {"": default_qconfig}
@@ -103,7 +105,6 @@ class TestEqualizeFx(QuantizationTestCase):
         sizes = []
         for _ in range((ndim - 1) * 2):
             sizes.append(np.random.randint(2, 10))
-
         channel = np.random.randint(1, 10)
         if ndim == 2:
             x = np.random.random(size=(sizes[0], channel))
@@ -894,3 +895,5 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the order of nodes in the graph
         self.checkGraphModuleNodes(equalized_model, expected_node_list=node_list)
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

@@ -3,6 +3,7 @@
 
 import torch
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -193,8 +194,4 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_quantization.py TESTNAME\n\n"
-        "instead."
-    )
+    raise_on_run_directly("test/test_quantization.py")

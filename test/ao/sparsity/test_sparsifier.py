@@ -18,7 +18,7 @@ from torch.testing._internal.common_pruning import (
     MockSparseLinear,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 logging.basicConfig(
@@ -484,3 +484,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
                         assert mask[row, col] == 1
                     else:
                         assert mask[row, col] == 0
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

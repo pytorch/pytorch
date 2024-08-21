@@ -225,5 +225,7 @@ class TestQuantizer(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             APoTQuantizer.q_apot_alpha(self)
 
-if __name__ == '__main__':
-    unittest.main()
+
+if __name__ == "__main__":
+    raise RuntimeError("This test is not currently used and should be "
+                       "enabled in tesrt_quantize.py if required.")
