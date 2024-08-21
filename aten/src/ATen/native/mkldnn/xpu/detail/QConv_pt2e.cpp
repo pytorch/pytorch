@@ -12,6 +12,19 @@
 
 namespace at::native::onednn {
 
+static void construct_attr_by_post_op(
+    const c10::string_view& binary_post_op,
+    double binary_alpha,
+    double input1_scale,
+    int64_t input1_zero_point,
+    // input1_desc,
+    const c10::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const c10::string_view& unary_post_op_algorithm
+){
+    
+}
+
 static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qconv_get_md(
     const at::Tensor& src,
     const at::Tensor& wgh,
@@ -77,7 +90,7 @@ at::Tensor quantized_convolution_pt2(
 
   auto ndim = act.ndimension();
   if(bias.has_value()){
-    attr.append_bias(bias.value(), ndim);
+    attr.append_bias(bias.value(), ndim-2);
   }
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -90,8 +103,7 @@ at::Tensor quantized_convolution_pt2(
   auto stream = GpuStreamManager::Instance().get_stream();
 
   // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_usr_md, weight_usr_md, output_usr_md, src_md, weight_md,
-      output_md;
+  dnnl::memory::desc src_md, weight_md, output_md;
   bool is_channels_last_suggested = use_channels_last_for_conv(act, weight);
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
@@ -117,28 +129,15 @@ at::Tensor quantized_convolution_pt2(
   // is not supported. In addition, src, output should still be per-tensor
   // quant, aka mask=0. Per-channel quantization on activation is not
   // supported in conv.
-  mask_weight = (weight.qscheme() == kPerTensorAffine) ? 0 : 1;
+  mask_weight = weight_zero_points.numel() > 1 ? 1 : 0;
   dnnl::primitive_attr pattr;
 
-  // [Note: Use symmetric quant implementation when zp is 0]
-  // (JIRA: https://jira.devtools.intel.com/browse/MFDNN-9633)
-  // Due to asymmetric quant has perf gap compared to symm quant, we need to
-  // avoid dnn kernel goes into asymm path if tensor zp is 0. We expect
-  // following behaviour:
-  // 1. IF IPEX is Symmetric only: Alwasy refuse to use runtime zp. Use
-  // symmetric kernel.
-  // 2. IF IPEX is Asymmetric supported:
-  //      a. Check src&dzp&weight zp, if all are zero, we go into symmetric path
-  //      for perf. With this WA, operate like conv_relu fusion would maintin
-  //      high perf even the overall config is asymm.
-  //      b. If zp is not zero, using asymmetric kernel. Perf regression
-  //      should then happen
   bool src_need_zp = (act_scale != 0);
   bool weight_is_per_channel = (weight_scales.numel() > 0);
 
   dnnl::convolution_forward conv_forward;
 
-  std::tie(src_usr_md, weight_usr_md, output_usr_md) =
+  std::tie(src_md, weight_md, output_md) =
       qconv_get_md(act, weight, output, groups, is_channels_last_suggested);
 
   // get tensor md
@@ -155,9 +154,7 @@ at::Tensor quantized_convolution_pt2(
   // See: [Note: Use symmetric quant implementation when zp is 0]
   if (src_need_zp)
     pattr.set_zero_points_mask(DNNL_ARG_SRC, mask_ac);
-#ifdef USE_SCRATCHPAD_MODE
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-#endif
 
   // create primitive
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -179,20 +176,9 @@ at::Tensor quantized_convolution_pt2(
   dnnl::memory src_m, weight_m, output_m;
   Tensor src_blocked, weight_blocked, output_blocked = output;
 
-  src_m = make_onednn_memory(src_usr_md, engine, act.data_ptr());
-  output_m = make_onednn_memory(output_usr_md, engine, output.data_ptr());
-  weight_m = make_onednn_memory(weight_usr_md, engine, weight.data_ptr());
-  // if (memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast) {
-  //   // TODO: Should remove after oneDNN fix the accuracy issue
-  //   auto expected_weight_md = conv_fwd_pd.weights_desc();
-  //   // TODO: Check wheter pure cl is supported
-  //   // weight_m = qconv_get_expected_wgh_memory(
-  //   //     weight,
-  //   //     weight_blocked,
-  //   //     weight_usr_md,
-  //   //     expected_weight_md,
-  //   //     engine);
-  // }
+  src_m = make_onednn_memory(src_md, engine, act.data_ptr());
+  output_m = make_onednn_memory(output_md, engine, output.data_ptr());
+  weight_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
 
   std::unordered_map<int, dnnl::memory> args;
   if (attr.with_binary())
@@ -224,7 +210,6 @@ at::Tensor quantized_convolution_pt2(
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
-
 
   // Weight scale is now tensor in nature, directly create dnnl::memory from it
   dnnl::memory::desc weight_sc_md = dnnl::memory::desc(
