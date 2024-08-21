@@ -365,7 +365,7 @@ def snapshot_fake(val: Tensor) -> Optional[Tensor]:
         ret = fast_detach(val.fake_mode, val)
     else:
         ret = val.detach()
-    log.warn(f"detached {id(val)} to created detached tensor {id(ret)}. sid: {id(ret.untyped_storage())}")
+    log.warn(f"detaching {id(val)} to created detached tensor {id(ret)}. sid: {id(ret.untyped_storage())}")
     return ret
 
 
