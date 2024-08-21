@@ -4769,7 +4769,14 @@ class ExternKernel(InputsKernel):
                 order
                 and x.get_layout().is_stride_ordered(order)
                 or (
-                    exact_strides and list(x.get_layout().stride) == list(exact_strides)
+                    exact_strides
+                    and (
+                        isinstance(x.data, ReinterpretView)
+                        or (
+                            list(x.get_layout().stride) == exact_strides
+                            and not isinstance(x.data, ReinterpretView)
+                        )
+                    )
                 )
             ):
                 return x
