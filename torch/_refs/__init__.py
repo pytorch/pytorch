@@ -4988,15 +4988,16 @@ def arange(
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
-    is_integer = utils.is_integer_dtype(dtype)
+    is_integer = builtins.all(float(v).is_integer() for v in [start, end, step])
     if is_integer:
         xstart = sym_int(start)
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or builtins.all(float(v).is_integer() for v in [start, end, step]):
+    # For integer aguments we truncate to int before calculating length to handle
+    # floating point precision issues. See https://github.com/pytorch/pytorch/issues/133338
+    # for more context.
+    if is_integer
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
