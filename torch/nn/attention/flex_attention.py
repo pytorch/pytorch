@@ -849,8 +849,11 @@ def _apply_kernel_options(query, key, value, kernel_options):
 
 
 def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
-    def _is_power_of_2(n):
-        return n != 0 and ((n & (n - 1)) == 0)
+    def _is_power_of_2_jank(n):
+        # Symints dont support bitwise and, forgive me for my sins
+        powers_of_2 = [2**i for i in range(1, 10)]
+        return n in powers_of_2
+
 
     if query.size(-1) != key.size(-1):
         raise ValueError(
@@ -859,7 +862,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
     # TODO this config segfaults with Triton without:
     # https://github.com/triton-lang/triton/pull/4540
-    if not (_is_power_of_2(query.size(-1)) and _is_power_of_2(value.size(-1))):
+    if not (_is_power_of_2_jank(query.size(-1)) and _is_power_of_2_jank(value.size(-1))):
         raise ValueError(
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
             f"Got E={query.size(-1)} and Ev={value.size(-1)}."
