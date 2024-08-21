@@ -150,7 +150,7 @@ def auto_functionalized_dense(
                     else None
                 )
             )
-        result.append(new_kwargs[name])
+        # result.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
 
@@ -162,8 +162,8 @@ def auto_functionalized_dense(
             return input._cdata
 
     _arg_to_base_address = {
-        arg: transform(v)
-        for (arg, v) in _arg_to_base.items()
+        arg: transform(t) 
+        for (arg, t) in _arg_to_base.items()
     }
 
     def observe_mutation(alias, mutation_source):
@@ -308,7 +308,6 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
 
-    # arg_to_aliased: Dict[str, Any] = {}
     all_basis = set()
     all_basis_addresses = set()
     basis = {}
@@ -325,23 +324,19 @@ def do_auto_functionalize(
                     basis[arg_name].append(None)
                     continue
 
-                base = tensor._base
+                base = tensor if tensor._base is None else tensor._base  
+                
                 basis[arg_name].append(base)
-                if base is not None:
-                    if not all_basis_addresses.__contains__(base._cdata):
-                        all_basis_addresses.add(base._cdata)
-                        all_basis.add(base)
-
-        else:
-            base = arg._base
-            basis[arg_name] = base
-
-            if base is not None:
                 if not all_basis_addresses.__contains__(base._cdata):
                     all_basis_addresses.add(base._cdata)
                     all_basis.add(base)
 
-    # TODO Laith remove any base that is also a mutated argument (I think this not allowed)
+        else:
+            base = arg  if arg._base is None else arg._base  
+            basis[arg_name] =base
+            if not all_basis_addresses.__contains__(base._cdata):
+                all_basis_addresses.add(base._cdata)
+                all_basis.add(base)
 
     all_basis_list = list(all_basis)
     all_basis_unwrapped = ctx.unwrap_tensors(all_basis_list)
@@ -358,13 +353,13 @@ def do_auto_functionalize(
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
-        : -len(mutable_args_names)
+        : -len(all_basis_list)
     ]
 
     unwrapped_mutable_out = unwrapped_outs[
-        -(len(mutable_args_names) + len(all_basis_list)) :
+        - len(all_basis_list) :
     ]
-
+   
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
         unwrapped_actual_out = None
@@ -374,14 +369,9 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    original_args = [
-        normalized_kwargs[name] for name in mutable_args_names
-    ] 
-    
-    #run replace/commit_update/sync on (z2, z).
-    
-    
-    for orig_arg, unwrapped_out in zip(original_args, unwrapped_mutable_out):
+
+    # the only outputs are the base_list outputs
+    for orig_arg, unwrapped_out in zip(all_basis_list, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
@@ -405,23 +395,8 @@ def do_auto_functionalize(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    # Replace the base (inside of x’s FunctionalTensorWrapper’s storage) with x2. 
-    start= len(mutable_args_names)
-    end = start +len(all_basis_list)
-    while start<end:
-        print("called once")
-        ctx.replace_functional_storage_base(all_basis_list[start-len(mutable_args_names)], unwrapped_mutable_out[start])
-        start = start+1
-
-    # Regenerate z2_new by regenerating again from the base
-    start = 0
-    end =  len(mutable_args_names)
-    while start<end:
-        # if its a list we need to call it on each item in the list and if its 333
-        print("called once again")
-        ctx.regenerate_from_base(original_args[start])
-        start = start+1
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+
 
 
 @auto_functionalized.py_functionalize_impl

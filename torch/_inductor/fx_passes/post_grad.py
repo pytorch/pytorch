@@ -139,7 +139,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
-
     decompose_auto_functionalized(gm.graph)
 
     comms.reinplace_fsdp_all_gather(gm.graph)

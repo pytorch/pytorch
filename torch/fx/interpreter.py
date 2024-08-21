@@ -133,7 +133,7 @@ class Interpreter:
         pbar = tqdm(total=len(self.graph.nodes),
                     desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
                     initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
-        # print(self.graph)
+
         for node in self.graph.nodes:
             pbar.update(1)
             if node in self.env:
