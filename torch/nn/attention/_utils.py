@@ -35,7 +35,7 @@ _POWERS_OF_2 = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 
 
 def _is_power_of_2_jank(n: Union[int, torch.SymInt]) -> bool:
-    """ SymInts dont support bitwise and, forgive me for my sins
+    """SymInts dont support bitwise and, forgive me for my sins
     These powers of 2 are realistically larger than what can fit in shared memory
     """
     return n in _POWERS_OF_2

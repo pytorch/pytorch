@@ -21,7 +21,7 @@ from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _validate_sdpa_input, _is_power_of_2_jank
+from torch.nn.attention._utils import _is_power_of_2_jank, _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
