@@ -6299,11 +6299,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x)
 
     def test_override_fallthrough_dispatch_key(self):
-        class _FallthroughTestOnly(torch._ops.HigherOrderOperator):
-            def __init__(self):
-                super().__init__("_fallthrough_test_only")
-
-        test_op = _FallthroughTestOnly()
+        test_op = torch._ops.HigherOrderOperator("_fallthrough_test_only")
         default_keys = torch._ops._HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS
         self.assertTrue(
             not any(test_op.non_fallthrough_keys.has(key) for key in default_keys)
