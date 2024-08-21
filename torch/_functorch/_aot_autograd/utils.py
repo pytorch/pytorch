@@ -238,7 +238,10 @@ def maybe_to_fresh_input(idx, t, meta):
 
 
 def is_with_effects(node):
-    return node.op == "call_function" and node.target.__name__ == "with_effects"
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops.higher_order.with_effects
+    )
 
 
 def is_with_effects_op(node, op):

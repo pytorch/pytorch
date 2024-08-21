@@ -497,14 +497,14 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
                 + num_backward_tokens
             )
-            bw_outs_no_rng = bw_outs
+            bw_outs_no_rng_no_tokens = bw_outs
             if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
-                bw_outs_no_rng = bw_outs[
+                bw_outs_no_rng_no_tokens = bw_outs[
                     : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
                 ]
-            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+            assert len(bw_outs_no_rng_no_tokens) == len(fw_metadata.input_info)
 
-            for i, (bw_out) in enumerate(bw_outs_no_rng):
+            for i, (bw_out) in enumerate(bw_outs_no_rng_no_tokens):
                 # If our input experiences a metadata mutation inside the graph (e.g. set_()),
                 # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
                 metadata_mutation_in_graph = (
