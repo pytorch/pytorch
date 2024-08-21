@@ -273,8 +273,9 @@ def out_wrapper(
                     isinstance(result, Tuple)  # type: ignore[arg-type]
                     and len(result) == len(out_names)  # type: ignore[arg-type]
                 )
-                or (fn.__name__ == "unbind" and isinstance(result, (list, tuple)))
+                or fn.__name__ == "unbind"
             )
+            # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
             if out is not None:
                 # Naively you might expect this assert to be true, but
                 # it's not:

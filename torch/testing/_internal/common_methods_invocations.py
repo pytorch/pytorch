@@ -19505,12 +19505,15 @@ op_db: List[OpInfo] = [
            ref=reference_unbind,
            sample_inputs_func=sample_inputs_unbind,
            error_inputs_func=error_inputs_unbind,
-           supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_gradgrad=True,
            supports_out=True,
-           ),
+           check_batched_grad=False,
+           skips=(
+               # grad actually does work with out=
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error'),
+           )),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
