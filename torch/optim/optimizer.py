@@ -68,6 +68,16 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
+def _maybe_copy_beta(beta, device, dtype):
+    """Get copy of beta on cuda if beta is a tensor"""
+    if isinstance(beta, torch.Tensor):
+        beta_cuda = beta.to(device=device, dtype=dtype)
+    else:
+        beta_cuda = beta
+
+    return beta, beta_cuda
+
+
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         import torch._dynamo

@@ -17,6 +17,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
+    _maybe_copy_beta,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -375,7 +376,9 @@ def _single_tensor_adam(
             param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - beta1)
+        beta1, device_beta1 = _maybe_copy_beta(beta1, grad.device, grad.dtype)
+        exp_avg.lerp_(grad, 1 - device_beta1)
+
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -483,6 +486,7 @@ def _multi_tensor_adam(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
+
     for (
         device_params_,
         device_grads_,
@@ -496,6 +500,9 @@ def _multi_tensor_adam(
         device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(List[Tensor], device_state_steps_)
+        beta1, device_beta1 = _maybe_copy_beta(
+            beta1, device=device_params[0].device, dtype=device_params[0].dtype
+        )
 
         # Handle complex parameters
         if has_complex:
@@ -537,15 +544,29 @@ def _multi_tensor_adam(
                 )
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
+        # Use device beta1 if beta1 is a tensor to ensure all
+        # tensors are on the same device
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
+
+        # Due to the strictness of the _foreach_addcmul API, we can't have a single
+        # tensor scalar as the scalar arg (only python number is supported there)
+        # as a result, separate out the value mul
+        if isinstance(beta2, torch.Tensor):
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)
+            value = 1.0
+        else:
+            scaled_device_grads = device_grads
+            value = 1 - beta2
+
         torch._foreach_addcmul_(
-            device_exp_avg_sqs, device_grads, device_grads, 1 - beta2
+            device_exp_avg_sqs, scaled_device_grads, device_grads, value
         )
 
-        # Delete the local intermediate since it won't be used anymore to save on peak memory
+        # Delete the local intermediate(s) since they won't be used anymore to save on peak memory
         del device_grads
+        del scaled_device_grads
 
         bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
