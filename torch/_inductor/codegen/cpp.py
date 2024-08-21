@@ -1571,11 +1571,14 @@ class CppKernel(Kernel):
             "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
         )
         acc_per_thread = f"{acc}_arr[{num_threads}]"
+        acc_per_thread_decl = (
+            f"std::unique_ptr<{acc_type}[]> {acc}_arr(new {acc_type}[{num_threads}])"
+        )
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
         self.local_reduction_init.writeline(
             f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
         )
-        self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread};")
+        self.parallel_reduction_prefix.writeline(f"{acc_per_thread_decl};")
         self.parallel_reduction_prefix.writelines(
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
