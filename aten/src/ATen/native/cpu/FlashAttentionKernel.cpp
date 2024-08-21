@@ -600,7 +600,7 @@ void cpu_flash_attention(
       }
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-        int64_t ekvBlockSize = kvBlockSize % 2 == 0 ? kvBlockSize : kvBlockSize + 1;
+        int64_t ekvBlockSize = (need_pack && kvBlockSize % 2 != 0) ? kvBlockSize + 1 : kvBlockSize;
         int64_t rkvBlockSize = kvBlockSize == kvSplitSize ? rkvSplitSize : rkvTail;
         // Calculate scale * q @ k.T
         if (need_pack) {
@@ -666,19 +666,19 @@ void cpu_flash_attention(
 #else
               if (mStrideN == 0) {
                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
-                  qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                  qk_data + row * rkvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM,
                   kvBlockSize,
-                  qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                  qk_data + row * rkvBlockSize,
                   scaling_factor);
               } else {
                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
-                  qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                  qk_data + row * rkvBlockSize,
                   mask_data + i * mStrideB + j * mStrideH +
                       (m + row) * mStrideM + n,
                   kvBlockSize,
-                  qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                  qk_data + row * rkvBlockSize,
                   scaling_factor);
               }
 #endif
@@ -691,28 +691,28 @@ void cpu_flash_attention(
             // max per row
             tmp_max = at::vec::reduce_all<accum_t>(
                 [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
-                qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                qk_data + row * rkvBlockSize,
                 kvBlockSize);
           } else {
             // apply scaling factor and max per row in fusion
             _mul_reduce_max_fusion_kernel(
-                qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                qk_data + row * rkvBlockSize,
                 scaling_factor,
                 kvBlockSize,
-                qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize),
+                qk_data + row * rkvBlockSize,
                 tmp_max);
           }
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
           if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
             // to avoid `nan = exp2f(-inf - (-inf))`
-            fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * (need_pack ? ekvBlockSize : kvBlockSize),
+            fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
               static_cast<scalar_t>(0), kvBlockSize);
           } else {
             tmp_sum = tmp_max;
             // qk <- exp(qk - max) and sum per row
             _exp_reduce_sum_fusion_kernel(
-                qk_data + row * (need_pack ? rkvBlockSize : kvBlockSize), kvBlockSize,
-                conditional_data_ptr(qk_data, qk_reduced_data) + row * (need_pack ? ekvBlockSize : kvBlockSize),
+                qk_data + row * rkvBlockSize, kvBlockSize,
+                conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
                 tmp_sum);
             // exp_tmp <- exp(max[row] - max)
             exp_tmp = std::exp(qk_max_data[row] - tmp_max);
@@ -724,8 +724,8 @@ void cpu_flash_attention(
             if (n > 0) {
               vec::map<accum_t>(
                 [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-                dst_data + row * (need_pack ? rHeadSize : headSize),
-                dst_data + row * (need_pack ? rHeadSize : headSize),
+                dst_data + row * rHeadSize,
+                dst_data + row * rHeadSize,
                 headSize);
             }
             if (need_pack && kvBlockSize % 2 != 0) {
@@ -772,14 +772,20 @@ void cpu_flash_attention(
             headSize);
         }
       }
+
       // dst <- dst / sum[row]
       // reorder MHA output with strides
       for (int64_t row = 0; row < qBlockSize; ++row) {
+        // Row sums for full masked out rows are 0, we set them to 1
+        // in order to avoid NaNs in the output and instead set fully
+        // masked out rows to 0
+        qk_max_data[row] = qk_max_data[row] == -std::numeric_limits<accum_t>::infinity() ? 0 : qk_max_data[row];
+        qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
         accum_t sum_reciprocal = 1 / qk_sum_data[row];
         vec::map<scalar_t>(
           [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
           out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
-          dst_data + row * (need_pack ? rHeadSize : headSize),
+          dst_data + row * rHeadSize,
           headSize);
       }
       // Store logsumexp for backward
@@ -1152,14 +1158,16 @@ void flash_attention_kernel_impl(
     std::optional<double> scale) {
   auto q_seq_len = query.size(2);
   auto k_seq_len = key.size(2);
+  auto headSize = query.size(3);
+  auto nhead = query.size(1);
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention_with_pack has better performance.
   if ((query.scalar_type() == kBFloat16 &&
        at::native::cpublas::need_pack(kBFloat16) && q_seq_len >= 320 &&
-       k_seq_len >= 320) ||
+       k_seq_len >= 320 && nhead >= 4 && headSize >= 128) ||
       (query.scalar_type() == kHalf && at::native::cpublas::need_pack(kHalf) &&
-       q_seq_len >= 128 && k_seq_len >= 128)) {
+       q_seq_len >= 64 && k_seq_len >= 64 && headSize >= 64)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(
         query.scalar_type(), "flash_attention", [&] {
           if (!attn_mask.has_value()) {
