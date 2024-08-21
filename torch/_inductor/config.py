@@ -1189,7 +1189,6 @@ class benchmarking:
         local_version: Optional[int] = get_feature_local_version("inductor_benchmarker")
 
     class inductor_grouped_benchmarker:
-        # Flags to control enablement of experimental inductor benchmarker feature
         env_val: Optional[str] = os.environ.get(
             "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_GROUPED_BENCHMARKER"
         )
