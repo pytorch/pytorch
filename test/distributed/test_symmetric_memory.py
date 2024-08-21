@@ -2,6 +2,7 @@
 
 import torch
 import torch.distributed as dist
+from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -41,6 +42,17 @@ def requires_cuda_p2p_access():
     return skip_but_pass_in_sandcastle_if(
         not cuda_p2p_access_available,
         "cuda p2p access is not available",
+    )
+
+
+def requires_multicast_support():
+    has_multicast_support = (
+        torch.cuda.is_available()
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not has_multicast_support,
+        "multicast support is not available",
     )
 
 
@@ -95,7 +107,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_cuda_nvlink_connectivity_detection(self) -> None:
-        from torch._C._autograd import DeviceType
         from torch._C._distributed_c10d import _detect_dma_connectivity
 
         connectivity = _detect_dma_connectivity(DeviceType.CUDA, "nvlink")
@@ -420,6 +431,73 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             raise AssertionError(f"Unexpected reduce_op: {reduce_op}")
         self.assertTrue(res.eq(expect).all())
 
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_multimem_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(16384,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(1)
+
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
+
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        x = t[shift : shift + numel]
+
+        torch.ops.symm_mem.multimem_all_reduce_(x, "sum", group_name)
+        self.assertTrue(x.eq(self.world_size).all().item())
+
+        # Head and tail should not be written
+        self.assertTrue(t[:shift].eq(1).all().item())
+        self.assertTrue(t[shift + numel :].eq(1).all().item())
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_multimem_one_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(16384,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(0)
+
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
+
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        x = t[shift : shift + numel]
+        x.fill_(1)
+
+        res = torch.ops.symm_mem.multimem_one_shot_all_reduce(x, "sum", group_name)
+        self.assertTrue(res.eq(self.world_size).all().item())
         dist.destroy_process_group()
 
 
