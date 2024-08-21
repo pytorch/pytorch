@@ -69,6 +69,11 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 namespace {
 
+using DtypeScale = float;
+using DtypeAccum = float;
+using DtypeEpilogue = float;
+using DtypeOutput = cutlass::bfloat16_t;
+
 template <bool PingPong, bool FastAccum>
 struct Schedule;
 
@@ -102,8 +107,9 @@ template <
     int TBS_K,
     bool PONG,
     bool FAST_ACCUM,
-    typename INPUT_DTYPE,
-    typename BIAS_DTYPE>
+    typename DtypeA,
+    typename DtypeB,
+    typename DtypeBias>
 void f8f8bf16_rowwise_impl(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -122,22 +128,15 @@ void f8f8bf16_rowwise_impl(
 
   // auto Y = at::empty({M, N}, XQ.options().dtype(at::kBFloat16));
 
-  using ElementInputA = INPUT_DTYPE;
   using LayoutInputA = cutlass::layout::RowMajor;
-  constexpr int AlignmentInputA = 16 / sizeof(ElementInputA);
+  constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
 
-  using ElementInputB = cutlass::float_e4m3_t;
   using LayoutInputB = cutlass::layout::ColumnMajor;
-  constexpr int AlignmentInputB = 16 / sizeof(ElementInputB);
+  constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
 
-  using ElementBias = BIAS_DTYPE;
-
-  using ElementOutput = cutlass::bfloat16_t;
   using LayoutOutput = cutlass::layout::RowMajor;
-  constexpr int AlignmentOutput = 16 / sizeof(ElementOutput);
+  constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  using ElementAccumulator = float;
-  using ElementComputeEpilogue = float;
   using ArchTag = cutlass::arch::Sm90; // Tag indicating the minimum SM that
                                        // supports the intended feature
   using OperatorClass = cutlass::arch::OpClassTensorOp;
@@ -160,27 +159,27 @@ void f8f8bf16_rowwise_impl(
   using XScale = cutlass::epilogue::fusion::Sm90ColBroadcast<
       0,
       TileShape,
-      ElementComputeEpilogue,
+      DtypeScale,
       cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>>;
 
   using WScale = cutlass::epilogue::fusion::Sm90RowBroadcast<
       PONG ? 2 : 1,
       TileShape,
-      ElementComputeEpilogue,
+      DtypeScale,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
 
   using Bias = cutlass::epilogue::fusion::Sm90RowBroadcast<
       PONG ? 2 : 1,
       TileShape,
-      ElementBias,
+      DtypeBias,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
   using Compute0 = cutlass::epilogue::fusion::Sm90Compute<
       cutlass::multiplies,
-      ElementComputeEpilogue, // First stage output type.
-      ElementComputeEpilogue, // First stage input types.
+      DtypeEpilogue, // First stage output type.
+      DtypeEpilogue, // First stage input types.
       cutlass::FloatRoundStyle::round_to_nearest>;
 
   using EVTCompute0 =
@@ -188,8 +187,8 @@ void f8f8bf16_rowwise_impl(
 
   using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
       cutlass::multiplies,
-      ElementComputeEpilogue, // Second stage output type.
-      ElementComputeEpilogue, // Second stage input types.
+      DtypeEpilogue, // Second stage output type.
+      DtypeEpilogue, // Second stage input types.
       cutlass::FloatRoundStyle::round_to_nearest>;
 
   using EVTCompute1 =
@@ -197,8 +196,8 @@ void f8f8bf16_rowwise_impl(
 
   using ComputeBias = cutlass::epilogue::fusion::Sm90Compute<
       cutlass::plus,
-      ElementOutput, // Final (optional) stage output type.
-      ElementComputeEpilogue, // Final stage input types.
+      DtypeOutput, // Final (optional) stage output type.
+      DtypeEpilogue, // Final stage input types.
       cutlass::FloatRoundStyle::round_to_nearest>;
 
   using EVTComputeBias =
@@ -213,12 +212,12 @@ void f8f8bf16_rowwise_impl(
           TileShape,
           ClusterShape,
           cutlass::epilogue::collective::EpilogueTileAuto,
-          ElementAccumulator,
-          ElementComputeEpilogue,
-          ElementOutput,
+          DtypeAccum,
+          DtypeEpilogue,
+          DtypeOutput,
           LayoutOutput,
           AlignmentOutput,
-          ElementOutput,
+          DtypeOutput,
           LayoutOutput,
           AlignmentOutput,
           cutlass::epilogue::TmaWarpSpecialized,
@@ -228,13 +227,13 @@ void f8f8bf16_rowwise_impl(
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
           OperatorClass,
-          ElementInputA,
+          DtypeA,
           LayoutInputA,
           AlignmentInputA,
-          ElementInputB,
+          DtypeB,
           LayoutInputB,
           AlignmentInputB,
-          ElementAccumulator,
+          DtypeAccum,
           TileShape,
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
@@ -262,17 +261,17 @@ void f8f8bf16_rowwise_impl(
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
-      {reinterpret_cast<ElementInputA*>(XQ.data_ptr()),
+      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
        stride_a,
-       reinterpret_cast<ElementInputB*>(WQ.data_ptr()),
+       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
        stride_b},
-      {{{bias.has_value() ? reinterpret_cast<ElementBias*>(bias->data_ptr())
+      {{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
                           : nullptr},
-        {{reinterpret_cast<ElementComputeEpilogue*>(x_scale.data_ptr())},
-         {{reinterpret_cast<ElementComputeEpilogue*>(w_scale.data_ptr())}}}},
-       (ElementOutput*)out.data_ptr<at::BFloat16>(),
+        {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}}}},
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
-       (ElementOutput*)out.data_ptr<at::BFloat16>(),
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
 
   Gemm gemm;
@@ -327,7 +326,7 @@ KernelMode get_kernel_mode(at::Tensor XQ, at::Tensor WQ) {
   }
 }
 
-template <typename InputDType, bool FastAccum, typename BiasDType>
+template <typename DtypeA, bool FastAccum, typename BiasDType>
 void dispatch_fp8_rowwise_kernel(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -346,7 +345,8 @@ void dispatch_fp8_rowwise_kernel(
         1,
         false,
         FastAccum,
-        InputDType,
+        DtypeA,
+        /*DtypeB=*/cutlass::float_e4m3_t,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   } else if (kernel == KernelMode::Large) {
     return f8f8bf16_rowwise_impl<
@@ -358,7 +358,8 @@ void dispatch_fp8_rowwise_kernel(
         1,
         true,
         FastAccum,
-        InputDType,
+        DtypeA,
+        /*DtypeB=*/cutlass::float_e4m3_t,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return f8f8bf16_rowwise_impl<
@@ -370,7 +371,8 @@ void dispatch_fp8_rowwise_kernel(
         1,
         false,
         FastAccum,
-        InputDType,
+        DtypeA,
+        /*DtypeB=*/cutlass::float_e4m3_t,
         BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
   }
 }
