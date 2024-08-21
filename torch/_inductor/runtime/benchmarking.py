@@ -303,6 +303,24 @@ class InductorBenchmarker(TritonBenchmarker):
                 for start_event, end_event in event_pairs
             ]
         )
+    
+    @cached_property
+    def gpu_t_per_clock_cycle(self: Self) -> float:
+        """Estimate the duration of a GPU clock cycle, in milliseconds. We do
+        this estimation by measuring the duration of a GPU sleep for a specified
+        number of clock cycles.
+        """
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # one million clock cycles provides a good balance between accuracy 
+        # and overhead for the measurement
+        num_clock_cycles = 1000000
+        torch.cuda._sleep(num_clock_cycles)
+        end_event.record()
+        torch.cuda.synchronize()
+        return start_event.elapsed_time(end_event) / num_clock_cycles
 
     @maybe_fallback
     @maybe_time
@@ -351,11 +369,13 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters)
+        start_t = time.perf_counter()
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
             _callable()
             end_event.record()
+        cpu_t_per_iter = ((time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND) / estimation_iters
         torch.cuda.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
@@ -370,6 +390,9 @@ class InductorBenchmarker(TritonBenchmarker):
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters)
+        # this sleep duration should be a close enough approximation to more or less overlap
+        # the time spent on the CPU queueing up all the L2 cache flushes and kernel calls
+        torch.cuda._sleep(int((cpu_t_per_iter * benchmark_iters) / self.gpu_t_per_clock_cycle))
         for start_event, end_event in event_pairs:
             buffer.zero_()
             start_event.record()
@@ -452,12 +475,20 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
 
         # estimate the runtime of `_callable`
         interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        # we want to sleep here and not in `benchmark_gpu` because we may return these estimated
+        # timings if we are ranking. 100us per iteration is good enough for most cases, this is
+        # really a "best effort" type of thing since we have no way of knowing how long to actually
+        # sleep at this point
+        sleep_t_per_iter = 0.10
+        torch.cuda._sleep(int((sleep_t_per_iter * len(callables) * estimation_iters) / self.gpu_t_per_clock_cycle))
+        start_t = time.perf_counter()
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
                 start_event.record()
                 _callable()
                 end_event.record()
+        cpu_t_per_iter = (time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND
         torch.cuda.synchronize()
         estimated_timings = self.get_interleaved_min_timings_ms(
             interleaved_event_pairs
@@ -476,6 +507,9 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
 
         # benchmark `_callable`
         interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        # this sleep duration should be a close enough approximation to more or less overlap
+        # the time spent on the CPU queueing up all the L2 cache flushes and kernel calls
+        torch.cuda._sleep(int((cpu_t_per_iter * len(callables) * benchmark_iters) / self.gpu_t_per_clock_cycle))
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
