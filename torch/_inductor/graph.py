@@ -80,13 +80,12 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
-    layout_constraints,
     lowerings,
     make_fallback,
+    maybe_layout_constraints,
     needs_realized_inputs,
     unsupported_output_tensor,
 )
@@ -1221,6 +1220,14 @@ class GraphLowering(torch.fx.Interpreter):
         new_args: Tuple[Any],
         new_kwargs: Dict[str, Any],
     ) -> None:
+        """Propagate mutations on new_args/new_kwargs back to old_args/old_kwargs.
+
+        Assumes we may have cloned old_args/old_kwargs into new_args/new_kwargs
+        and then called fx_node(*new_args, **new_kwargs).
+
+        If fx_node mutates any of new_args/new_kwargs, and they are different from
+        old_args/old_kwargs, then we need to update the original tensor.
+        """
         assert isinstance(fx_node.target, torch._ops.OpOverload)
         assert len(old_args) == len(new_args)
         assert len(old_kwargs) == len(new_kwargs)
@@ -1248,18 +1255,6 @@ class GraphLowering(torch.fx.Interpreter):
             schema_arg = schema_kwargs[key]
             maybe_propagate(schema_arg, old_arg, new_arg)
 
-    def maybe_add_custom_op_layout_constraints(self, op: Callable[..., Any]) -> None:
-        if not isinstance(op, torch._ops.OpOverload):
-            return
-        # needs_fixed_stride_order only applies to ops that are FallbackKernel.
-        # Those do not have lowerings pre-registered.
-        if op in lowerings:
-            return
-        # lowering an op that is FallbackKernel for the first time will automatically
-        # generate the lowering so that the following isn't called multiple times.
-        if torch._C.Tag.needs_fixed_stride_order in op.tags:
-            torch._inductor.lowering.add_layout_constraint(op, constrain_to_fx_strides)
-
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
@@ -1277,11 +1272,8 @@ class GraphLowering(torch.fx.Interpreter):
         ), V.set_current_node(
             n
         ):
-            if is_call_function:
-                self.maybe_add_custom_op_layout_constraints(n.target)  # type: ignore[arg-type]
-
             if (
-                is_call_function
+                n.op == "call_function"
                 and n.target is not operator.getitem
                 and fallback_node_due_to_unsupported_type(n)
             ):
@@ -1289,11 +1281,13 @@ class GraphLowering(torch.fx.Interpreter):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs  # type: ignore[possibly-undefined]
                 )
-            elif is_call_function and n.target in layout_constraints:
+            elif n.op == "call_function" and (
+                layout_constraints := maybe_layout_constraints(n.target)  # type: ignore[arg-type]
+            ):
                 debug("layout_constraints")
                 old_args = args  # type: ignore[possibly-undefined]
                 old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
+                args, kwargs = layout_constraints(n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
                 # layout_constraints are allowed to make new copies of the inputs.
                 # if they do, and if the target is mutable, then we need to
