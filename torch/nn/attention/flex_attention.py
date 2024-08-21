@@ -854,7 +854,6 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         powers_of_2 = [2**i for i in range(1, 10)]
         return n in powers_of_2
 
-
     if query.size(-1) != key.size(-1):
         raise ValueError(
             f"Expect query and key/value to have the same embedding dimension "
@@ -862,7 +861,9 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
     # TODO this config segfaults with Triton without:
     # https://github.com/triton-lang/triton/pull/4540
-    if not (_is_power_of_2_jank(query.size(-1)) and _is_power_of_2_jank(value.size(-1))):
+    if not (
+        _is_power_of_2_jank(query.size(-1)) and _is_power_of_2_jank(value.size(-1))
+    ):
         raise ValueError(
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
             f"Got E={query.size(-1)} and Ev={value.size(-1)}."
