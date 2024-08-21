@@ -1575,13 +1575,13 @@ class CppKernel(Kernel):
         MSVC don't support dynamic array. Please use std::vector to instead of it.
         Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
         """
-        acc_per_thread_vec = f"{acc}_arr({num_threads})"
+        acc_per_thread_vec_decl = f"{acc}_arr({num_threads})"
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
         self.local_reduction_init.writeline(
             f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
         )
         self.parallel_reduction_prefix.writeline(
-            f"std::vector<{acc_type}>{acc_per_thread_vec};"
+            f"std::vector<{acc_type}>{acc_per_thread_vec_decl};"
         )
         self.parallel_reduction_prefix.writelines(
             [
