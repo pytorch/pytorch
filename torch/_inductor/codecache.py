@@ -2227,7 +2227,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
