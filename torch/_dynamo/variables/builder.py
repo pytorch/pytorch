@@ -2570,9 +2570,12 @@ def wrap_to_fake_tensor_and_record(
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
 
-        log.debug(
-            "wrap_to_fake %s %s %s %s",
+        log.warn(
+            "wrap_to_fake %s type: %s, tid: %s, sid: %s, %s %s %s",
             source.name(),
+            type(e),
+            id(e),
+            id(e.untyped_storage()),
             tuple(e.shape),
             symbolic_context,
             type(e),
@@ -2584,6 +2587,7 @@ def wrap_to_fake_tensor_and_record(
                 symbolic_context=symbolic_context,
             )
         )
+        log.warn("id(fake_e): %s, sid: %s", id(fake_e), id(fake_e.untyped_storage()))
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)

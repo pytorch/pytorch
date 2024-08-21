@@ -1,3 +1,6 @@
+from collections import defaultdict
+import torch
+
 def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
     """
     Assert that there is no aliased graph inputs that share the same storage.
