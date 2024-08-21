@@ -58,7 +58,7 @@ struct VecConvert<float, 2, BFloat16, 1> {
   static inline VectorizedN<float, 2> apply(
       const VectorizedN<BFloat16, 1>& src) {
     VectorizedN<float, 2> result;
-    auto [result[0], result[1]] = convert_bfloat16_float(src[0]);
+    std::tie(result[0], result[1]) = convert_bfloat16_float(src[0]);
     return result;
   }
 };
@@ -85,7 +85,7 @@ template <>
 struct VecConvert<float, 2, Half, 1> {
   static inline VectorizedN<float, 2> apply(const VectorizedN<Half, 1>& src) {
     VectorizedN<float, 2> result;
-    auto [result[0], result[1]] = convert_half_float(src[0]);
+    std::tie(result[0], result[1]) = convert_half_float(src[0]);
     return result;
   }
 };
