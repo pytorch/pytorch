@@ -4058,6 +4058,21 @@ class CPUReproTests(TestCase):
             exactly=True,
         ).run(code)
 
+    def test_load_half(self):
+        def fn(arg0_1, arg0_2):
+            return arg0_1.copy_(arg0_2)
+
+        with config.patch({"cpp.simdlen": 0}):
+            x1 = torch.randn(2, 10).to(torch.half)
+            x2 = torch.randn(2, 10).to(torch.half)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            _, code = run_and_get_cpp_code(opt_fn, x1, x2)
+            FileCheck().check_count(
+                "static_cast<float>",
+                0,
+                exactly=True,
+            ).run(code)
+
     def test_repeated_exp(self):
         def fn(x):
             y = x.sigmoid()
@@ -4105,23 +4120,34 @@ class CPUReproTests(TestCase):
                 exactly=True,
             ).run(code)
 
-    def test_any_bool_vec(self):
-        def fn(x, y):
-            return torch.any(x), torch.any(y)
+    @requires_vectorization
+    def test_bool_reduction_vec(self):
+        for op in (
+            torch.masked.mean,
+            torch.any,
+            torch.min,
+            torch.max,
+        ):
 
-        c = [False] * 64
-        input1 = torch.Tensor(c)
-        c[0] = True
-        input2 = torch.Tensor(c)
-        metrics.reset()
-        self.common(
-            fn,
-            (
-                input1,
-                input2,
-            ),
-        )
-        check_metrics_vec_kernel_count(2)
+            def fn(x1, x2, x3):
+                return op(x1), op(x2), op(x3)
+
+            c = [False] * 63
+            input1 = torch.Tensor(c).to(torch.bool)
+            c[10] = True
+            input2 = torch.Tensor(c).to(torch.bool)
+            input3 = torch.Tensor([True] * 63).to(torch.bool)
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    input1,
+                    input2,
+                    input3,
+                ),
+            )
+            n_veckernel = 6 if op is torch.masked.mean else 3
+            check_metrics_vec_kernel_count(n_veckernel)
 
 
 if __name__ == "__main__":

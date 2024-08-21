@@ -1,14 +1,14 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
+    _device_dtype_check_for_fused,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
@@ -85,16 +85,6 @@ class Adam(Optimizer):
             # Support AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
-            if not all(
-                p.device.type in fused_supported_devices and torch.is_floating_point(p)
-                for pg in self.param_groups
-                for p in pg["params"]
-            ):
-                raise RuntimeError(
-                    "`fused=True` requires all the params to be floating point Tensors of "
-                    f"supported devices: {fused_supported_devices}."
-                )
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -145,6 +135,8 @@ class Adam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
+                    if group["fused"]:
+                        _device_dtype_check_for_fused(p)
                     # note(crcrpar): [special device hosting for step]
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.
@@ -489,19 +481,26 @@ def _multi_tensor_adam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_exp_avgs,
-        device_exp_avg_sqs,
-        device_max_exp_avg_sqs,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_exp_avgs_,
+        device_exp_avg_sqs_,
+        device_max_exp_avg_sqs_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
+        device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         # Handle complex parameters
         if has_complex:
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 _view_as_real(
                     device_params,
                     device_grads,
@@ -551,6 +550,7 @@ def _multi_tensor_adam(
         bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
+
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
             bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
@@ -573,6 +573,7 @@ def _multi_tensor_adam(
             bias_correction2_sqrt = bias_correction2
 
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
 
@@ -600,6 +601,7 @@ def _multi_tensor_adam(
             bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]  # type: ignore[arg-type]
 
             if amsgrad:
+                device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
@@ -654,19 +656,25 @@ def _fused_adam(
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
-            device_params,
-            device_grads,
-            device_exp_avgs,
-            device_exp_avg_sqs,
+            device_params_,
+            device_grads_,
+            device_exp_avgs_,
+            device_exp_avg_sqs_,
             device_max_exp_avg_sqs,
-            device_state_steps,
+            device_state_steps_,
         ),
         _,
     ) in grouped_tensors.items():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
+        device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
+
         if device.type == "mps":  # type: ignore[union-attr]
             assert found_inf is None and grad_scale is None
 
@@ -688,10 +696,10 @@ def _fused_adam(
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
-            device_max_exp_avg_sqs,
+            device_max_exp_avg_sqs,  # type: ignore[arg-type]
             device_state_steps,
             amsgrad=amsgrad,
-            lr=lr,
+            lr=lr,  # type: ignore[arg-type]
             beta1=beta1,
             beta2=beta2,
             weight_decay=weight_decay,

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import atexit
 import collections
 import contextlib
@@ -51,7 +53,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeGuard
+from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -59,6 +61,12 @@ import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._C import (
+    _get_function_stack_at,
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
@@ -252,7 +260,13 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
+            ChromiumEventLogger.log_event_start(key, time.time_ns())
+            if phase_name:
+                ChromiumEventLogger.log_event_start(phase_name, time.time_ns())
             yield
+            if phase_name:
+                ChromiumEventLogger.log_event_end(phase_name, time.time_ns())
+            ChromiumEventLogger.log_event_end(key, time.time_ns())
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
     except Exception as e:
@@ -518,14 +532,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeGuard[T]:
+) -> TypeIs[T]:
     ...
 
 
@@ -799,6 +813,105 @@ def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMe
     return list(_compilation_metrics)
 
 
+class ChromiumEventLogger:
+    """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
+
+    See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
+    a specification of the Chromium Event JSON format.
+    """
+
+    @staticmethod
+    def log_event_start(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the start of a single event.
+        :param str event_name Name of event to appear in trace
+        :param time_ns Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "B",
+            metadata,
+        )
+
+    @staticmethod
+    def log_event_end(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs the end of a single event. This function should only be
+        called after log_event_start with the same event_name.
+        :param event_name: Name of event to appear in trace
+        :param time_ns: Timestamp in nanoseconds
+        :param metadata: Any extra metadata associated with this event
+        """
+        ChromiumEventLogger._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            metadata,
+        )
+
+    @staticmethod
+    def _log_timed_event(
+        event_name: str,
+        time_ns: int,
+        phase: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,  # Chromium events are in ms
+            "args": metadata,
+            "ph": phase,
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=False,  # Not every chromium event will have a trace_id
+        )
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str,
+        time_ns: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Log an instant event with no associated duration.
+        :param str event_name: Name of event to appear in trace
+        :param int time_ns Timestamp in nanoseconds
+        :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
+        :param str cname optional color for the arrow in the trace
+        """
+        event = {
+            "name": event_name,
+            "ts": time_ns / 1000,
+            "args": metadata,
+            "ph": "i",
+            "pid": 0,  # pid should be specified on all logs, we don't personally care about the actual process id
+            "s": "p",  # We use "process" level instant events so they all appear on the same row in the trace.
+        }
+        torch._logging.trace_structured(
+            "chromium_event",
+            payload_fn=lambda: event,
+            suppress_context=False,
+            expect_trace_id=True,
+        )
+
+
 @dataclasses.dataclass
 class CleanupHook:
     """Remove a global variable when hook is called"""
@@ -822,7 +935,7 @@ class CleanupHook:
 
 class CleanupManager(ExactWeakKeyDictionary):
     count = 0
-    instance: ClassVar["CleanupManager"]
+    instance: ClassVar[CleanupManager]
 
     def _remove_id(self, idx):
         for hook in self.values[idx]:
@@ -1119,11 +1232,18 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+"""
+    Difference between is_safe_constant and common_constant_types.
+    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
+                             as ConstantVariable.
+    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
+"""
+
 
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type)) or istype(
+    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
         v,
         common_constant_types | {slice},
     )
@@ -1349,6 +1469,16 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
+def get_safe_global_name(tx, root, obj):
+    # The global_mangled_class_name should be different for different
+    # invocations of torch.compile. Otherwise, we can run into a situation
+    # where multiple torch.compile invocations re-use the same global name,
+    # but the global's lifetime is tied to the first invocation (and
+    # may be deleted when the first torch.compile invocation is deleted)
+    # We mangle it based off of the output_graph's id.
+    return f"{root}_{id(obj)}_c{tx.output.compile_id}"
+
+
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -1405,6 +1535,7 @@ def same(
                 relax_numpy_equality,
                 ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -1423,6 +1554,7 @@ def same(
             relax_numpy_equality,
             ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -1442,6 +1574,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                     ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
+                    use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -1553,15 +1686,16 @@ def same(
                     passes_test = True
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f"
+                        ", use_larger_multiplier_for_smaller_tensor: %d",
                         res_error,
                         ref_error,
                         res.size(),
                         res.dtype,
                         multiplier,
                         tol,
+                        use_larger_multiplier_for_smaller_tensor,
                     )
-                    # import pdb; pdb.set_trace()
                 return passes_test
 
             if ignore_non_fp:
@@ -1597,6 +1731,7 @@ def same(
             relax_numpy_equality=relax_numpy_equality,
             ignore_non_fp=ignore_non_fp,
             log_error=log_error,
+            use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
         )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -1624,6 +1759,7 @@ def same(
                 relax_numpy_equality=relax_numpy_equality,
                 ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
+                use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
             for key in ref.__dict__.keys()
         )
@@ -1657,7 +1793,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
+graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -2706,7 +2842,7 @@ def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
     from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -2899,6 +3035,29 @@ def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
+def get_torch_function_mode_stack(filter_ignored=True):
+    from .variables.torch_function import IGNORED_MODES
+
+    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+    if filter_ignored:
+        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
+
+    return stack
+
+
+def get_torch_function_mode_stack_at(ind):
+    assert ind < _len_torch_function_stack() and ind >= 0
+    return torch._C._get_function_stack_at(ind)
+
+
+def set_torch_function_mode_stack(stack):
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
+
+    for mode in stack:
+        _push_on_torch_function_stack(mode)
+
+
 def verify_guard_fn_signature(value):
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
@@ -2938,3 +3097,20 @@ def _extract_tensor_dict(t):
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[object]] = {}
+
+
+def get_user_object_from_id(obj_id):
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object_weakref(obj):
+    obj_id = id(obj)
+    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
