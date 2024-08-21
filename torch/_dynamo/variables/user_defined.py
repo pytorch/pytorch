@@ -31,6 +31,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -1087,6 +1088,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 else:
                     return trace_rules.lookup(func)(func)
+
+        if (
+            # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
+            # keep Dynamo behavior compatible with no inlining, as there will be some delay to turn on the flag in
+            # fbcode.
+            (
+                torch._dynamo.config.inline_inbuilt_nn_modules
+                or isinstance(self, variables.FSDPManagedNNModuleVariable)
+            )
+            and source
+            and isinstance(self, variables.UnspecializedNNModuleVariable)
+            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
+            # usecase for now.
+            and not tx.output.export
+        ):
+            # Recalculate source for params/buffers
+            if name in ("_buffers", "_parameters"):
+                source = UnspecializedParamBufferSource(self.source, name)
+            source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
