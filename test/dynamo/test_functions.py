@@ -180,6 +180,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inps)
         self.assertTrue(same(actual, expected))
 
+    def test_addcmul_(self):
+        from torch._dynamo.utils import same
+
+        def fn(x, y, z, s):
+            return x.addcmul_(y, z, value=s)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (
+            torch.ones(2, 2),
+            torch.zeros(2, 2),
+            torch.rand(2, 2),
+            torch.tensor(0.3),
+        )
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertTrue(same(actual, expected))
+
     @make_test
     def test_functools_partial(a, b):
         return clip01(a + b)
