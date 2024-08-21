@@ -31,14 +31,12 @@ def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
     return 1.0 / math.sqrt(head_dim_size)
 
 
-_POWERS_OF_2 = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+_SUPPORTED_HEAD_DIMS = [8, 16, 32, 64, 128, 256, 512, 1024]
 
 
-def _is_power_of_2_jank(n: Union[int, torch.SymInt]) -> bool:
-    """SymInts dont support bitwise and, forgive me for my sins
-    These powers of 2 are realistically larger than what can fit in shared memory
-    """
-    return n in _POWERS_OF_2
+def _supported_head_dim(n: Union[int, torch.SymInt]) -> bool:
+    """Returns true if the head dim is supported by FlexAttention"""
+    return n in _SUPPORTED_HEAD_DIMS
 
 
 def _validate_sdpa_input(

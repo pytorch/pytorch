@@ -21,7 +21,7 @@ from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _is_power_of_2_jank, _validate_sdpa_input
+from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -857,7 +857,7 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
     # TODO this config segfaults with Triton without:
     # https://github.com/triton-lang/triton/pull/4540
     if not (
-        _is_power_of_2_jank(query.size(-1)) and _is_power_of_2_jank(value.size(-1))
+        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
     ):
         raise ValueError(
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
