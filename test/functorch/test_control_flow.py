@@ -1210,7 +1210,7 @@ def forward(self, pred_1, x_1):
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_scan_reverse_simple(self, scan_op, reverse, device):
+    def test_pointwise_scan_simple(self, scan_op, reverse, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1239,11 +1239,11 @@ def forward(self, pred_1, x_1):
                 cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
             )
         self.assertEqual(cumsum1, cumsum_exp)
-        
+
         # Check graph
         if scan_op == scan:
             from torch._dynamo.testing import EagerAndRecordGraphs
-            
+
             def f():
                 return scan_op(add, x, 0, reverse=reverse)
 
@@ -1261,7 +1261,7 @@ def forward(self, pred_1, x_1):
     @parametrize("scan_op", [associative_scan, scan])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_scan_reverse_dim(self, scan_op, reverse, device):
+    def test_pointwise_scan_dim(self, scan_op, reverse, device):
         import random
 
         def add(x: torch.Tensor, y: torch.Tensor):
@@ -1278,9 +1278,7 @@ def forward(self, pred_1, x_1):
 
             for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
                 result = scan_op(op, x, rnd_scan_dim, reverse=reverse)
-                result_exp = _fake_scan(
-                    op, x, rnd_scan_dim, reverse=reverse
-                )
+                result_exp = _fake_scan(op, x, rnd_scan_dim, reverse=reverse)
                 self.assertEqual(result, result_exp)
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
@@ -1292,9 +1290,7 @@ def forward(self, pred_1, x_1):
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cuda")])
-    def test_pointwise_scan_reverse_compile(
-        self, scan_op, reverse, compile_mode, device
-    ):
+    def test_pointwise_scan_compile(self, scan_op, reverse, compile_mode, device):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
@@ -1304,13 +1300,9 @@ def forward(self, pred_1, x_1):
         x = torch.randn(3, 10, 2, device=device)
         torch.compiler.reset()
         if compile_mode == "compile":
-            scan_fct = torch.compile(
-                scan_op, fullgraph=True, dynamic=False
-            )
+            scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=False)
         else:
-            scan_fct = torch.compile(
-                scan_op, fullgraph=True, dynamic=True
-            )
+            scan_fct = torch.compile(scan_op, fullgraph=True, dynamic=True)
 
         for op, op_pt in [(add, torch.cumsum), (mul, torch.cumprod)]:
             result = scan_fct(op, x, 0, reverse=reverse)
@@ -1333,6 +1325,33 @@ def forward(self, pred_1, x_1):
                 cumsum1, torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.int64)
             )
         self.assertEqual(cumsum1, cumsum_exp)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_pointwise_scan_RNN(self, device):
+        dim = 1
+
+        rnn = torch.nn.RNN(input_size=1, hidden_size=1, batch_first=True, device=device)
+        x = torch.randn(1, 2, 1, device=device)
+        h = torch.randn(1, 2, 1, device=device)
+
+        def RNN(x: torch.Tensor, y: torch.Tensor):
+            c_new = y[0] @ rnn.weight_ih_l0.T + rnn.bias_ih_l0
+            h_new = torch.tanh(c_new + x[1] @ rnn.weight_hh_l0.T + rnn.bias_hh_l0)
+            return (c_new, h_new)
+
+        inp = (
+            torch.concat([torch.zeros_like(x[:, 0:1, :]), x], dim),
+            torch.concat([torch.clone(h[:, 0:1, :]), h], dim),
+        )
+
+        result = scan(RNN, inp, dim)
+        result_out = result[1][:, 1:, :]
+        expected_result = rnn(x, torch.unsqueeze(h[:, 0, :], 0))
+        expected_result_out = expected_result[0]
+
+        self.assertEqual(result_out, expected_result_out)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")

@@ -8,10 +8,8 @@ import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._C._functorch import _add_batch_dim, get_unwrapped, maybe_get_bdim
 from torch._higher_order_ops.utils import (
     _set_compilation_env,
-    autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
 )
@@ -35,6 +33,7 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
     combined_leaves = pytree.tree_leaves(combined)
     assert num_leaves == len(combined_leaves)
     return combined_leaves
+
 
 def _interleave(a, b, dim):
     # https://stackoverflow.com/questions/60869537/how-can-i-interleave-5-pytorch-tensors
@@ -146,20 +145,20 @@ scan_op = HigherOrderOperator("scan")
 def generic_scan(operator, elems_flat, dim=0):
     def combine(a, b, dim):
         return torch.concatenate([a, b], dim=dim)
-    
+
     cmb = functools.partial(combine, dim=dim)
-    
+
     def _scan(elems):
         """Perform scan on `elems`."""
         num_elems = elems[0].shape[dim]
-        
+
         ind = 1
         xs = [aten.slice(elem, dim, 0, 1, 1) for elem in elems]
         outs = xs
         while ind < num_elems:
             xs = operator(
                 *xs,
-                *[aten.slice(elem, dim, ind, ind+1, 1) for elem in elems],
+                *[aten.slice(elem, dim, ind, ind + 1, 1) for elem in elems],
             )
             ind += 1
 
@@ -234,6 +233,8 @@ def scan_op_dense(combine_fn, input, dim):
 #     autograd_not_implemented(scan_op, deferred_error=True)
 # )
 scan_op.py_impl(DispatchKey.Autograd)
+
+
 def scan_autograd(combine_fn, input, dim):
     return generic_scan(combine_fn, input, dim)
 
@@ -256,4 +257,3 @@ def scan_functionalize(ctx, combine_fn, input, dim):
         functional_combine_fn = ctx.functionalize(combine_fn)
         ret = scan_op(functional_combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
-

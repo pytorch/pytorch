@@ -1097,7 +1097,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=out_meta,
         )
-        
+
+
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="associative_scan must be captured completely with torch.compile."
