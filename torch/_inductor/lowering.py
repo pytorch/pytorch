@@ -99,6 +99,10 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         return None
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
+    # OpOverload with custom lowerings override tag-based layout constraints
+    if fn in lowerings:
+        _maybe_layout_constraints[fn] = None
+        return None
     # We lazily register tag-based layout constraints.
     if torch._C.Tag.needs_fixed_stride_order in fn.tags:
         _maybe_layout_constraints[fn] = constrain_to_fx_strides
