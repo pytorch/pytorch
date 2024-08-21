@@ -14,8 +14,6 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
 namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
@@ -316,6 +314,15 @@ Tensor gt_scalar_nested(const Tensor& self, const Scalar& other) {
 Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
   return NestedTensor_elementwise_Tensor(
       self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
+Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!other.is_nested(), "eq does not support nested tensor as other value.");
+  return NestedTensor_elementwise_Tensor(
+      self, other, "eq", false /*supports_striding*/,
       [](const Tensor& b1, const Tensor& b2) {
         return b1.eq(b2);
       });

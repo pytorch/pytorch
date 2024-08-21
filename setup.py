@@ -164,9 +164,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
-#
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
 #
@@ -1135,7 +1132,7 @@ def main():
         )
     install_requires = [
         "filelock",
-        "typing-extensions>=4.8.0",
+        "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
         'sympy==1.12.1 ; python_version == "3.8"',
         'sympy==1.13.1 ; python_version >= "3.9"',
