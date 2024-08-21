@@ -99,7 +99,7 @@ function install_121 {
     cd ..
     rm -rf nccl
 
-    install_cusparselt_062
+    install_cusparselt_052
 
     ldconfig
 }
