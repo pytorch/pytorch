@@ -4996,7 +4996,7 @@ def arange(
 
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or all(float(v).is_integer() for v in [start, end, step]):
+    if dtype == torch.int64 or builtins.all(float(v).is_integer() for v in [start, end, step]):
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]

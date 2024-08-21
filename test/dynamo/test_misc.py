@@ -9729,6 +9729,26 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_throwaway(self):
+        torch._dynamo.config.capture_scalar_outputs = True
+
+        @torch.compile()
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            r = torch.arange(y, dtype=torch.float32)
+            torch._check(r.size(0) == y)
+            return r
+
+        result = f(torch.tensor([300]))
+
+        # Check that the resulting tensor has the correct size
+        self.assertEqual(result.size(0), 300)
+
+        # Check that the resulting tensor has the correct values
+        expected_tensor = torch.arange(300, dtype=torch.float32)
+        self.assertTrue(torch.equal(result, expected_tensor))
+
     def test_itertools_infinite_count(self):
         for args in ([], [10], [5, -1]):
             counters.clear()
