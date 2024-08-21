@@ -4561,11 +4561,14 @@ class LoopLevel:
             else ""
         )
         # TODO: parallel dynamic tail loop
-        if self.parallel and (
-            self.offset == sympy.Integer(0)
-            or self.steps == sympy.Integer(1)
-            or not (isinstance(self.size, sympy.Expr) and not self.size.is_number)
+        if (
+            self.offset != sympy.Integer(0)
+            and self.steps != sympy.Integer(1)
+            and isinstance(self.size, sympy.Expr)
+            and not self.size.is_number
         ):
+            line1 = ""
+        elif self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = "#pragma omp for"
             if self.parallel > 1:
