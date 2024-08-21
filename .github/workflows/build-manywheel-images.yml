@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build-docker-cuda:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["12.4", "12.1", "11.8"]
@@ -71,7 +71,7 @@ jobs:
   # NOTE: manylinux_2_28 are still experimental, see https://github.com/pytorch/pytorch/issues/123649
   build-docker-cuda-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["12.4", "12.1", "11.8"]
@@ -141,7 +141,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinuxaarch64-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     strategy:
       matrix:
         rocm_version: ["6.1", "6.2"]
@@ -176,7 +176,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -205,7 +205,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux-builder:cpu
   build-docker-cpu-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: cpu-manylinux_2_28
     steps:
@@ -301,7 +301,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinux2_28_aarch64-builder:cpu-aarch64
   build-docker-cpu-cxx11-abi:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: cpu-cxx11-abi
     steps:
@@ -332,7 +332,7 @@ jobs:
           .ci/docker/manywheel/build.sh manylinuxcxx11-abi-builder:cpu-cxx11-abi
   build-docker-xpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     env:
       GPU_ARCH_TYPE: xpu
     steps:
