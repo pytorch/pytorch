@@ -1106,7 +1106,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
-  bool dumpOnException_;
+  bool dumpOnTimeoutOrEx_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;

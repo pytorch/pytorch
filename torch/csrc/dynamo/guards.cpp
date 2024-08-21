@@ -1108,7 +1108,7 @@ class EQUALS_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Fast path - pointer equality check. Pointer equality checks are ok
     // because objects guarded with EQUALS_MATCH are immutable.
-    if (value != _value.ptr() && value != _first_passing_value.ptr()) {
+    if (value != _value.ptr()) {
       // Check type
       if (Py_TYPE(value) != _value_type) {
         return false;
@@ -1118,11 +1118,6 @@ class EQUALS_MATCH : public LeafGuard {
       if (result == -1) {
         PyErr_Clear();
         return false;
-      }
-
-      // Cache the value here.
-      if (!_first_passing_value && result) {
-        _first_passing_value = py::cast<py::object>(value);
       }
       return result;
     }
@@ -1135,11 +1130,6 @@ class EQUALS_MATCH : public LeafGuard {
   // selected objects which do not have high memory footprint, so holding on to
   // these objects is ok.
   py::object _value;
-
-  // Cache the first value whose pointer is not equal to value.ptr(). This is
-  // useful in nn module guards where getattr name is a string, which is same as
-  // a key in the __dict__ but the pointer is different.
-  py::object _first_passing_value;
 
   // Type of the value
   PyTypeObject* _value_type;

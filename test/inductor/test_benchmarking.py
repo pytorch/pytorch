@@ -6,6 +6,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.runtime.benchmarking import (
+    is_feature_enabled,
     Benchmarker,
     InductorBenchmarker,
     InductorGroupedBenchmarker,
@@ -130,20 +131,17 @@ class TestBenchmarker(TestCase):
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
     def test_benchmark_safely_infers_device_many_devices(self, benchmarker_cls):
         benchmarker = benchmarker_cls()
-        (fn, cpu_args, cpu_kwargs), _ = self.make_sum("cpu")
-        (_, gpu_args, gpu_kwargs), _ = self.make_sum(GPU_TYPE)
+        (fn, cpu_args, cpu_kwargs), _ = self.make_params("cpu")
+        (_, gpu_args, gpu_kwargs), _ = self.make_params(GPU_TYPE)
         many_devices_args = cpu_args + gpu_args
         many_devices_kwargs = cpu_kwargs
         many_devices_kwargs.update(gpu_kwargs)
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
 
     @unittest.skipIf(config.is_fbcode(), "test does not run in fbcode")
+    @parametrize("feature_name", ("inductor_benchmarker", "inductor_grouped_benchmarker"))
     @parametrize(
-        "benchmarker_cls,feature_name", [(InductorBenchmarker, "inductor_benchmarker"), (InductorGroupedBenchmarker, "inductor_grouped_benchmarker")]
-    )
-    @parametrize(
-        "config_name,config_val,expected_should_fallback",
-        [
+        "config_name,config_val,expected",        [
             ("env_val", "1", False),
             ("env_val", "0", True),
             ("env_val", "", None),
@@ -151,23 +149,22 @@ class TestBenchmarker(TestCase):
             ("oss_default", False, True),
         ],
     )
-    def test_should_fallback(
+    def test_is_feature_enabled(
         self,
-        benchmarker_cls,
         feature_name,
         config_name,
         config_val,
-        expected_should_fallback,
+        expected,
     ):
         @config.patch({f"benchmarking.{feature_name}.{config_name}": config_val})
         def inner():
-            return benchmarker_cls().should_fallback()
+            return is_feature_enabled(feature_name)
 
-        if expected_should_fallback is not None:
-            self.assertEqual(expected_should_fallback, inner())
+        if expected is not None:
+            self.assertEqual(inner(), expected)
         else:
             self.assertEqual(
-                expected_should_fallback,
+                inner(),
                 getattr(config.benchmarking, self.feature_name).oss_default,
             )
 
@@ -178,7 +175,7 @@ class TestBenchmarker(TestCase):
         self, benchmarker_cls, should_fallback, device=GPU_TYPE
     ):
         benchmarker = benchmarker_cls()
-        _, _callable = self.make_sum(device)
+        _, _callable = self.make_params(device)
         if should_fallback:
             benchmarker.should_fallback = lambda: True
             _ = benchmarker.benchmark_gpu(_callable)

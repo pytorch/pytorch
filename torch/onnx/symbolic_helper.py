@@ -234,7 +234,7 @@ def parse_args(
     """
 
     def decorator(
-        fn: Callable[_Concatenate[_U, _P], _T]
+        fn: Callable[_Concatenate[_U, _P], _T],
     ) -> Callable[_Concatenate[_U, _P], _T]:
         fn._arg_descriptors = arg_descriptors  # type: ignore[attr-defined]
 
