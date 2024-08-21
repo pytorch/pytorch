@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 
@@ -215,21 +216,27 @@ class ReplicateTest(MultiProcessInductorTestCase):
         ]
         self._test_compile(use_gpu=False, no_sync=True)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu_ac(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
@@ -243,7 +250,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
 
         self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
@@ -260,7 +269,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
             use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
@@ -383,7 +394,9 @@ class DDP_TP_Test(MultiProcessInductorTestCase):
         except OSError:
             pass
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
+    )
     @skip_if_rocm
     @skip_if_lt_x_gpu(4)
     def test_ddp_tp(self):

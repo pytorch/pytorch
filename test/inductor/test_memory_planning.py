@@ -25,7 +25,7 @@ from torch.export import Dim
 from torch.utils._triton import has_triton
 
 
-@unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+@unittest.skipIf(not (has_triton() and HAS_CUDA), "Inductor+gpu needs triton and CUDA")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
