@@ -31,7 +31,7 @@ def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
     return 1.0 / math.sqrt(head_dim_size)
 
 
-_SUPPORTED_HEAD_DIMS = [8, 16, 32, 64, 128, 256, 512, 1024]
+_SUPPORTED_HEAD_DIMS = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 
 
 def _supported_head_dim(n: Union[int, torch.SymInt]) -> bool:
