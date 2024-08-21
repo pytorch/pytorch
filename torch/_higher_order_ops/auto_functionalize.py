@@ -155,18 +155,25 @@ def auto_functionalized_dense(
 
     # Map every argument to the addresses of its aliases.
     def transform(input):
+        if input is None:
+            return None
+
         if isinstance(input, list):
-            return [item._cdata for item in input]
+            return [transform(item) for item in input]
         else:
             return input._cdata
 
-    _arg_to_base_address = {
-        arg: transform(t) 
-        for (arg, t) in _arg_to_base.items()
-    }
+    _arg_to_base_address = {arg: transform(t) for (arg, t) in _arg_to_base.items()}
 
-    def observe_mutation(alias, mutation_source):
-        return alias.as_strided_scatter(
+    def observe_mutation(base, mutation_source):
+        if (
+            mutation_source.size() == base.size()
+            and mutation_source.stride() == base.stride()
+            and mutation_source.storage_offset() == base.storage_offset()
+        ):
+            return mutation_source
+
+        return base.as_strided_scatter(
             mutation_source,
             mutation_source.size(),
             mutation_source.stride(),
@@ -174,6 +181,10 @@ def auto_functionalized_dense(
         )
 
     for base in _all_bases:
+        # an argument is passed as none
+        if base is None:
+            result.append(None)
+
         base_with_effects = base
         for name in _mutable_args_names:
             arg = kwargs[name]
@@ -202,9 +213,7 @@ def auto_functionalized_dense(
                 if base._cdata != base_address:
                     continue
                 mutation_source = new_kwargs[name]
-                base_with_effects = observe_mutation(
-                    base_with_effects, mutation_source
-                )
+                base_with_effects = observe_mutation(base_with_effects, mutation_source)
 
         result.append(base_with_effects)
 
@@ -323,16 +332,16 @@ def do_auto_functionalize(
                     basis[arg_name].append(None)
                     continue
 
-                base = tensor if tensor._base is None else tensor._base  
-                
+                base = tensor if tensor._base is None else tensor._base
+
                 basis[arg_name].append(base)
                 if not all_basis_addresses.__contains__(base._cdata):
                     all_basis_addresses.add(base._cdata)
                     all_basis.add(base)
 
         else:
-            base = arg  if arg._base is None else arg._base  
-            basis[arg_name] =base
+            base = arg if arg._base is None else arg._base
+            basis[arg_name] = base
             if not all_basis_addresses.__contains__(base._cdata):
                 all_basis_addresses.add(base._cdata)
                 all_basis.add(base)
@@ -345,20 +354,22 @@ def do_auto_functionalize(
             # mypy errors:
             # No overload variant of "__setitem__" of "list" matches argument types "str", "Any"
             # Invalid index type "str".
-            unwrapped_kwargs[f"_{arg}_base"] =  ctx.unwrap_tensors(basis.get(arg, None))  # type: ignore[call-overload,index]
+            unwrapped_kwargs[f"_{arg}_base"] = ctx.unwrap_tensors(basis.get(arg, None))  # type: ignore[call-overload,index]
 
         unwrapped_outs = auto_functionalized(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
-        : -len(all_basis_list)
-    ]
+    unwrapped_actual_out: Union[Any, Tuple[Any]] = (
+        unwrapped_outs
+        if len(all_basis_list) == 0
+        else unwrapped_outs[: -len(all_basis_list)]
+    )
 
-    unwrapped_mutable_out = unwrapped_outs[
-        - len(all_basis_list) :
-    ]
-   
+    unwrapped_mutable_out = (
+        [] if len(all_basis_list) == 0 else unwrapped_outs[-len(all_basis_list) :]
+    )
+
     if len(op._schema.returns) == 0:
         assert unwrapped_actual_out[0] is None
         unwrapped_actual_out = None
@@ -367,7 +378,6 @@ def do_auto_functionalize(
         unwrapped_actual_out = unwrapped_actual_out[0]
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
-
 
     # the only outputs are the base_list outputs
     for orig_arg, unwrapped_out in zip(all_basis_list, unwrapped_mutable_out):
@@ -395,7 +405,6 @@ def do_auto_functionalize(
             )
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
-
 
 
 @auto_functionalized.py_functionalize_impl
