@@ -20,5 +20,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 id(val): {[id(node.meta['val']) for node in aliased_graph_inputs]},
 sid: {storage_id}
 """)
-
-# stacks: {"\n\n".join([fake_id_to_stack[id(node.meta['val'])] for node in aliased_graph_inputs])}"""
+            # for node in aliased_graph_inputs:
+            #     if node.meta['val'].shape == torch.Size([32000, 4096]):
+            #         print(f"""stacks: {"\n\n".join([fake_id_to_stack[id(node.meta['val'])] for node in aliased_graph_inputs])}""")

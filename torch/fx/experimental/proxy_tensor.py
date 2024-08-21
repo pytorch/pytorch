@@ -362,9 +362,11 @@ def snapshot_fake(val: Tensor) -> Optional[Tensor]:
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if isinstance(val, FakeTensor):
-        return fast_detach(val.fake_mode, val)
+        ret = fast_detach(val.fake_mode, val)
     else:
-        return val.detach()
+        ret = val.detach()
+    log.warn(f"detached {id(val)} to created detached tensor {id(ret)}. sid: {id(ret.untyped_storage())}")
+    return ret
 
 
 _ExtractValType = Optional[
