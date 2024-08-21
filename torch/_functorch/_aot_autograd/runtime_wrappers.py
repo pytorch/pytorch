@@ -1741,15 +1741,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *bw_tokens,
                     *rng_args,
                 ]
-                del flat_bw_args_with_grads
-
-                tangents_start_idx = (
-                    len(all_args)
-                    - num_flat_bw_args_with_grads
-                    - len(rng_args)
-                    - len(bw_tokens)
-                )
-                tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1778,14 +1769,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     == num_flat_bw_args_with_grads
                 )
 
-                _l = -num_flat_bw_args_with_grads
-                _r = None
-                roffset = len(rng_args) + len(bw_tokens)
-                if roffset > 0:
-                    _l -= roffset
-                    _r = -roffset
-
-                grad_output_types = [type(x) for x in all_args[_l:_r]]
+                grad_output_types = [type(x) for x in flat_bw_args_with_grads]
                 # In general, we can add more asserts/guards here for when we partitioned
                 # with incorrect assumptions about the grad_outputs.
                 # Normalize FakeTensor -> torch.Tensor
@@ -1802,6 +1786,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
     If you run into this error, please file an issue.
     Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
     Got grad_output types: {str(grad_output_types)}"""
+
+                del flat_bw_args_with_grads
+
+                tangents_start_idx = (
+                    len(all_args)
+                    - num_flat_bw_args_with_grads
+                    - len(rng_args)
+                    - len(bw_tokens)
+                )
+                assert tangents_start_idx == len(ctx.symints) + len(ctx.saved_tensors)
+                tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # TODO: figure out how to refactor the backward properly
                 # so I can use aot_dispatch_subclass_wrapper() here.
@@ -1986,10 +1981,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Toss out the backward output tokens
                     num_bw_tokens = CompiledFunction.metadata.num_backward_tokens
                     if num_bw_tokens > 0:
-                        out_tokens = out[-num_bw_tokens:]
-                        for t in out_tokens:
-                            assert t.numel() == 0
-
                         out = out[:-num_bw_tokens]
 
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile

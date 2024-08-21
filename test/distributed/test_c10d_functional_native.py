@@ -522,7 +522,7 @@ class CompileTest(TestCase):
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.all_reduce_.default(buf2")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            # Expect no in-place with graph input (buf5 is a clone)
+            # Expect no in-place with graph input
             .check("torch.ops._c10d_functional.all_reduce_.default(buf9")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf9")
             # Expect no extra copy on return
@@ -562,13 +562,13 @@ class CompileTest(TestCase):
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
                 ".default([buf0, buf1]"
             )
-            # Expect no in-place with graph input (buf5, buf6 are clones)
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            # Expect no in-place with graph input
             .check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
                 ".default([buf15, buf16]"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf15")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf16")
             # Expect no extra copy on return
@@ -838,7 +838,7 @@ class CompileTest(TestCase):
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.broadcast_.default(buf2")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            # Expect no in-place with graph input (buf5 is a clone)
+            # Expect no in-place with graph input
             .check("torch.ops._c10d_functional.broadcast_.default(buf9")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf9")
             # Expect no extra copy on return

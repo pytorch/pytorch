@@ -11,7 +11,6 @@ It does so by:
 4. dispatching subclasses
 """
 
-import contextlib
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
@@ -236,45 +235,31 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
         backward_out: Tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
-            with contextlib.ExitStack() as context_stack:
-                functional_tensor_mode = (
-                    torch.utils._python_dispatch._detect_infra_mode(
-                        torch._C._TorchDispatchModeKey.FUNCTIONAL
-                    )
+            functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            if functional_tensor_mode is not None:
+                functional_tensor_mode._tokens_forward_output = (
+                    functional_tensor_mode._tokens
                 )
-                if functional_tensor_mode is not None:
-                    # Prevent partitioner from moving effectful ops happened in backward to forward for side-effects correctness.
+                functional_tensor_mode._tokens = {}
 
-                    functional_tensor_mode._tokens_forward_output = (
-                        functional_tensor_mode._tokens
+            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta():
+                # for full graph export, we always export a joint graph where we assume no tangents are needed.
+                if aot_config.no_tangents:
+                    assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
+                    backward_out = torch.autograd.grad(
+                        needed_outs,
+                        grad_primals,
+                        allow_unused=True,
                     )
-                    functional_tensor_mode._tokens = {}
-
-                from torch._functorch._aot_autograd.traced_function_transforms import (
-                    set_partitioner_tag,
-                )
-
-                context_stack.enter_context(set_partitioner_tag("is_backward"))
-
-                with fx_traceback.preserve_node_meta():
-                    # for full graph export, we always export a joint graph where we assume no tangents are needed.
-                    if aot_config.no_tangents:
-                        assert (
-                            len(needed_tangents) == 1
-                            and needed_tangents[0].numel() == 1
-                        )
-                        backward_out = torch.autograd.grad(
-                            needed_outs,
-                            grad_primals,
-                            allow_unused=True,
-                        )
-                    else:
-                        backward_out = torch.autograd.grad(
-                            needed_outs,
-                            grad_primals,
-                            grad_outputs=needed_tangents,
-                            allow_unused=True,
-                        )
+                else:
+                    backward_out = torch.autograd.grad(
+                        needed_outs,
+                        grad_primals,
+                        grad_outputs=needed_tangents,
+                        allow_unused=True,
+                    )
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -372,6 +357,14 @@ def set_partitioner_tag(tag: str):
         fx_traceback.current_meta[meta_key] = original_val
 
 
+def set_partitioner_tag_is_backward():
+    return set_partitioner_tag("is_backward")
+
+
+def set_partitioner_tag_must_be_in_backward():
+    return set_partitioner_tag("must_be_in_backward")
+
+
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
 # Preconditions:
@@ -463,9 +456,7 @@ def create_functionalized_fn(
                         # Not banning here mutations on inpt_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
-                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag(
-                            "must_be_in_backward"
-                        ):
+                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
                             before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
