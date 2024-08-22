@@ -30,7 +30,7 @@ from torch._export.utils import (
 )
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import Dim, dynamic_dim, export, unflatten
+from torch.export import Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -2419,32 +2419,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s1, where s1 is an integer",
         ):
             em.module()(x)
-
-    def test_not_correct_dim(self):
-        def f(x):
-            return x.cos()
-
-        def g(x):
-            return x + 4
-
-        inp_for_f = torch.tensor(5)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"
-        ):
-            constraints = [dynamic_dim(inp_for_f, 0)]
-
-        inp_for_f_mul_dim = torch.ones(5, 5)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]",
-        ):
-            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
-
-        inp_for_g = 4
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"
-        ):
-            constraints = [dynamic_dim(inp_for_g, 0)]
 
     @testing.expectedFailureRetraceability  # T183144629
     def test_map(self):

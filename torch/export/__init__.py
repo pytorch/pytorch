@@ -50,7 +50,6 @@ __all__ = [
     "ModuleCallEntry",
     "ModuleCallSignature",
     "dims",
-    "dynamic_dim",
     "export",
     "load",
     "register_dataclass",
@@ -61,7 +60,7 @@ __all__ = [
 ]
 
 
-from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim, ShapesCollection
+from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule

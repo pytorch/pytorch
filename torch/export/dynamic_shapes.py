@@ -31,7 +31,6 @@ __all__ = [
     "Constraint",
     "Dim",
     "dims",
-    "dynamic_dim",
     "refine_dynamic_shapes_from_suggested_fixes",
 ]
 
@@ -227,8 +226,7 @@ def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
 @dataclasses.dataclass
 class _ConstraintTarget:
     """
-    This represents input tensor dimensions.  Do not create this
-    class directly; instead, use :func:`dynamic_dim`.
+    This represents input tensor dimensions.
     """
 
     t_id: int
@@ -353,111 +351,6 @@ class _DerivedConstraint(_ConstraintTarget):
 
 
 Constraint = Union[_Constraint, _DerivedConstraint]
-
-
-def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
-    """
-    .. warning::
-        (This feature is DEPRECATED. See :func:`Dim` instead.)
-
-    :func:`dynamic_dim` constructs a :class:`_Constraint` object that describes the dynamism of
-    a dimension ``index`` of tensor ``t``. :class:`_Constraint` objects should be passed to
-    ``constraints`` argument of :func:`export`.
-
-    Args:
-        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
-        index (int): Index of dynamic dimension
-
-    Returns:
-        A :class:`_Constraint` object that describes shape dynamism. It can be passed to :func:`export` so
-        that :func:`export` does not assume static size of specified tensor, i.e. keeping it dynamic
-        as a symbolic size rather than specializing according to size of example tracing input.
-
-    Specifically :func:`dynamic_dim` can be used to express following types of dynamism.
-
-    - Size of a dimension is dynamic and unbounded::
-
-        t0 = torch.rand(2, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size rather than always being static size 2
-        constraints = [dynamic_dim(t0, 0)]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with a lower bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a lower bound of 5 (inclusive)
-        # Second dimension of t1 can be dynamic size with a lower bound of 2 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) >= 5,
-            dynamic_dim(t1, 1) > 2,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with an upper bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a upper bound of 16 (inclusive)
-        # Second dimension of t1 can be dynamic size with a upper bound of 8 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) <= 16,
-            dynamic_dim(t1, 1) < 8,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic and it is always equal to size of another dynamic dimension::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # Sizes of second dimension of t0 and first dimension are always equal
-        constraints = [
-            dynamic_dim(t0, 1) == dynamic_dim(t1, 0),
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Mix and match all types above as long as they do not express conflicting requirements
-
-    """
-    from torch._dynamo.exc import UserError, UserErrorType
-
-    if not isinstance(t, torch.Tensor):
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected tensor as input to dynamic_dim but got {type(t)}",
-        )
-
-    if t.dim() < 1:
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM, "Cannot mark 0-dimension tensors to be dynamic"
-        )
-
-    if index >= t.dim():
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
-            f" but got {index}, which is out of bounds for the given tensor.",
-        )
-
-    # Import sympy locally
-
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-    from torch.utils._sympy.numbers import int_oo
-    from torch.utils._sympy.value_ranges import ValueRanges
-
-    name = debug_name or f"dynamic_dim_{id(t)}_{index}"
-
-    return _Constraint(
-        id(t),
-        index,
-        name,
-        StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
-    )
 
 
 def _process_equalities(
@@ -856,7 +749,6 @@ def _process_dynamic_shapes(
         import sympy
 
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -925,11 +817,14 @@ def _process_dynamic_shapes(
                 ),
             )
         else:
-            constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
-            if dim.min != 0:
-                constraint = constraint >= dim.min
-            if dim.max != int_oo:
-                constraint = constraint <= dim.max
+            constraint = _Constraint(  # type: ignore[assignment]
+                id(tensor),
+                i,
+                dim.__name__,
+                StrictMinMaxConstraint(
+                    vr=ValueRanges(lower=dim.min, upper=dim.max), warn_only=False  # type: ignore[attr-defined]
+                ),
+            )
         return constraint
 
     def update_symbols(path, tensor, shape):

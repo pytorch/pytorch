@@ -20,14 +20,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    FlatArgsAdapter,
-    unflatten,
-)
+from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck

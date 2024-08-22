@@ -273,7 +273,6 @@ def produce_guards_and_solve_constraints(
         assert constraint_violation_error
         raise constraint_violation_error
     dim_constraints.solve()
-    dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
