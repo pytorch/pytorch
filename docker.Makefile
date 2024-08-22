@@ -22,7 +22,7 @@ INSTALL_CHANNEL          ?= whl
 
 CUDA_PATH                ?= cpu
 ifneq ("$(CUDA_VERSION_SHORT)","cpu")
-CUDA_PATH                = cu$(filter-out \.,$(CUDA_VERSION_SHORT))
+CUDA_PATH                = cu$(subst .,,$(CUDA_VERSION_SHORT))
 endif
 
 PYTHON_VERSION           ?= 3.11
