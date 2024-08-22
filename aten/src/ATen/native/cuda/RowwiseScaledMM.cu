@@ -117,14 +117,10 @@ struct Schedule</*PingPong=*/true, /*FastAccum=*/true> {
 
 // Cutlass rowwise kernel
 template <
-    int TB_M,
-    int TB_N,
-    int TB_K,
-    int TBS_M,
-    int TBS_N,
-    int TBS_K,
-    bool PONG,
-    bool FAST_ACCUM,
+    typename TileShape,
+    typename ClusterShape,
+    typename PingPong,
+    typename FastAccum,
     typename DtypeA,
     typename DtypeB,
     typename DtypeBias>
@@ -151,16 +147,10 @@ void f8f8bf16_rowwise_impl(
   // Tag indicating the minimum SM that supports the intended feature
   using ArchTag = cutlass::arch::Sm90;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
-  // Threadblock-level tile size
-  using TileShape =
-      cute::Shape<cute::Int<TB_M>, cute::Int<TB_N>, cute::Int<TB_K>>;
-  // Shape of the threadblocks in a cluster
-  using ClusterShape =
-      cute::Shape<cute::Int<TBS_M>, cute::Int<TBS_N>, cute::Int<TBS_K>>;
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
-  constexpr int RowBroadcastStages = PONG ? 2 : 1;
+  constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
 
   using XScale = cutlass::epilogue::fusion::
       Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
@@ -216,7 +206,8 @@ void f8f8bf16_rowwise_impl(
           ClusterShape,
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
-          typename Schedule<PONG, FAST_ACCUM>::type>::CollectiveOp;
+          typename Schedule<PingPong::value, FastAccum::value>::type>::
+          CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       cute::Shape<int, int, int>,
@@ -304,8 +295,8 @@ KernelMode get_kernel_mode(at::Tensor XQ, at::Tensor WQ) {
   }
 }
 
-template <typename DtypeA, bool FastAccum, typename BiasDType>
-void dispatch_fp8_rowwise_kernel(
+template <typename... Types>
+void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor XQ,
     at::Tensor WQ,
     at::Tensor x_scale,
@@ -315,43 +306,79 @@ void dispatch_fp8_rowwise_kernel(
   KernelMode kernel = get_kernel_mode(XQ, WQ);
   if (kernel == KernelMode::Small) {
     return f8f8bf16_rowwise_impl<
-        64,
-        128,
-        128,
-        2,
-        1,
-        1,
-        false,
-        FastAccum,
-        DtypeA,
-        /*DtypeB=*/cutlass::float_e4m3_t,
-        BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
+        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+        /*PingPong=*/std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else if (kernel == KernelMode::Large) {
     return f8f8bf16_rowwise_impl<
-        128,
-        128,
-        128,
-        2,
-        1,
-        1,
-        true,
-        FastAccum,
-        DtypeA,
-        /*DtypeB=*/cutlass::float_e4m3_t,
-        BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        /*ClusterShape=*/cute::Shape<cute::_2, cute::_1, cute::_1>,
+        /*PingPong=*/std::true_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     return f8f8bf16_rowwise_impl<
-        128,
-        128,
-        128,
-        1,
-        2,
-        1,
-        false,
-        FastAccum,
-        DtypeA,
-        /*DtypeB=*/cutlass::float_e4m3_t,
-        BiasDType>(XQ, WQ, x_scale, w_scale, bias, out);
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        /*ClusterShape=*/cute::Shape<cute::_1, cute::_2, cute::_1>,
+        /*PingPong=*/std::false_type,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
+template <typename... Types>
+void dispatch_fp8_rowwise_kernel_on_fast_accum(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    bool use_fast_accum,
+    at::Tensor out) {
+  if (use_fast_accum) {
+    dispatch_fp8_rowwise_kernel_on_tile_size<std::true_type, Types...>(
+        XQ, WQ, x_scale, w_scale, bias, out);
+  } else {
+    dispatch_fp8_rowwise_kernel_on_tile_size<std::false_type, Types...>(
+        XQ, WQ, x_scale, w_scale, bias, out);
+  }
+}
+
+template <typename... Types>
+void dispatch_fp8_rowwise_kernel_on_input_dtypes(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    bool use_fast_accum,
+    at::Tensor out) {
+  if (XQ.dtype() == at::kFloat8_e5m2) {
+    dispatch_fp8_rowwise_kernel_on_fast_accum<
+        cutlass::float_e5m2_t,
+        cutlass::float_e4m3_t,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+  } else {
+    dispatch_fp8_rowwise_kernel_on_fast_accum<
+        cutlass::float_e4m3_t,
+        cutlass::float_e4m3_t,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+  }
+}
+
+void dispatch_fp8_rowwise_kernel_on_bias_dtype(
+    at::Tensor XQ,
+    at::Tensor WQ,
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    bool use_fast_accum,
+    at::Tensor out) {
+  if (bias.has_value() && bias->dtype() == at::kBFloat16) {
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<cutlass::bfloat16_t>(
+        XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+  } else {
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<float>(
+        XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
 }
 
@@ -422,58 +449,11 @@ void f8f8bf16_rowwise(
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
   check_inputs(XQ, WQ, x_scale, w_scale, bias, out);
 
-  bool bf16_bias = bias.has_value() && bias->dtype() == at::kBFloat16;
-
-  // Templatize based on input dtype.
-  bool use_e5m2 = XQ.dtype() == at::kFloat8_e5m2;
-
-  if (bf16_bias) {
-    if (use_fast_accum) {
-      if (use_e5m2) {
-        return dispatch_fp8_rowwise_kernel<
-            cutlass::float_e5m2_t,
-            true,
-            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-      } else {
-        return dispatch_fp8_rowwise_kernel<
-            cutlass::float_e4m3_t,
-            true,
-            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-      }
-    } else {
-      if (use_e5m2) {
-        return dispatch_fp8_rowwise_kernel<
-            cutlass::float_e5m2_t,
-            false,
-            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-      } else {
-        return dispatch_fp8_rowwise_kernel<
-            cutlass::float_e4m3_t,
-            false,
-            cutlass::bfloat16_t>(XQ, WQ, x_scale, w_scale, bias, out);
-      }
-    }
-  } else {
-    if (use_fast_accum) {
-      if (use_e5m2) {
-        return dispatch_fp8_rowwise_kernel<cutlass::float_e5m2_t, true, float>(
-            XQ, WQ, x_scale, w_scale, bias, out);
-      } else {
-        return dispatch_fp8_rowwise_kernel<cutlass::float_e4m3_t, true, float>(
-            XQ, WQ, x_scale, w_scale, bias, out);
-      }
-    } else {
-      if (use_e5m2) {
-        return dispatch_fp8_rowwise_kernel<cutlass::float_e5m2_t, false, float>(
-            XQ, WQ, x_scale, w_scale, bias, out);
-      } else {
-        return dispatch_fp8_rowwise_kernel<cutlass::float_e4m3_t, false, float>(
-            XQ, WQ, x_scale, w_scale, bias, out);
-      }
-    }
-  }
+  dispatch_fp8_rowwise_kernel_on_bias_dtype(
+      XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
 #else // BUILD_ROWWISE_FP8_KERNEL
-  TORCH_CHECK(false, "Rowwise scaling is not currenlty supported on your device");
+  TORCH_CHECK(
+      false, "Rowwise scaling is not currenlty supported on your device");
 #endif
 }
 
