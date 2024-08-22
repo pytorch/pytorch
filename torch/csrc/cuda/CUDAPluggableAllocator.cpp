@@ -210,8 +210,8 @@ void CUDAPluggableAllocator::recordStream(
   }
 }
 
-c10::DeviceStats CUDAPluggableAllocator::
-    getDeviceStats(c10::DeviceIndex device) {
+c10::DeviceAllocatorStats CUDAPluggableAllocator::getDeviceStats(
+    c10::DeviceIndex device) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getDeviceStats. "

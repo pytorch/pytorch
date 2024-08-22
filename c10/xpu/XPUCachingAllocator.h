@@ -11,12 +11,6 @@ C10_XPU_API void init(DeviceIndex device_count);
 
 C10_XPU_API void emptyCache();
 
-C10_XPU_API void resetPeakStats(DeviceIndex device);
-
-C10_XPU_API void resetAccumulatedStats(DeviceIndex device);
-
-C10_XPU_API DeviceStats getDeviceStats(DeviceIndex device);
-
 C10_XPU_API void* raw_alloc(size_t size);
 
 C10_XPU_API void raw_delete(void* ptr);
