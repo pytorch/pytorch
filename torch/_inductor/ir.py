@@ -756,8 +756,8 @@ def significant_strides_equal(
         for i, dim in enumerate(size)
         if V.graph.sizevars.size_hint(dim, fallback=2) != 1
     ]
-    strides1 = [strides1[i] for i in non_1_indices]
-    strides2 = [strides2[i] for i in non_1_indices]
+    strides1 = [V.graph.sizevars.size_hint(strides1[i]) for i in non_1_indices]
+    strides2 = [V.graph.sizevars.size_hint(strides2[i]) for i in non_1_indices]
     return strides1 == strides2
 
 
