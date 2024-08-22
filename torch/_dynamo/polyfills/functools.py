@@ -8,6 +8,9 @@ from typing import Callable, Iterable, TypeVar
 from ..decorators import substitute_in_graph
 
 
+__all__ = ["reduce"]
+
+
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 
