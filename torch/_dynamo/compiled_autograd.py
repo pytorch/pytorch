@@ -36,10 +36,6 @@ if TYPE_CHECKING:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
-import logging
-
-
-log = logging.getLogger(__name__)
 
 
 def snapshot_verbose_logging_enabled():
@@ -92,11 +88,6 @@ class AutogradCompilerInstance:
         sizes: List[int],
         scalars: List[Union[int, float]],
     ):
-        # DEBUG: just to observe what eval_frame handler is curently
-        # prior = set_eval_frame(None)
-        log.warning("compiled autograd begin_capture")
-        # set_eval_frame(prior)
-        # DEBUG: just to observe what eval_frame handler is curently
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
