@@ -1012,6 +1012,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
         copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy__1 = None
         return (add,)""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
             if torch._dynamo.config.assume_static_by_default:
@@ -1024,6 +1025,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
         add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(arg1_1, arg0_1);  arg1_1 = arg0_1 = None
         return (add,)""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
         finally:
@@ -1080,6 +1082,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return ()""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
             # 2. Run with inductor backend
@@ -1102,6 +1105,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter_default);  arg0_1 = as_strided_scatter_default = copy_ = None
         return ()""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
         finally:
             cleanup_op("mylib::foo")
@@ -1160,6 +1164,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         select_3: "f32[][]cpu" = torch.ops.aten.select.int(getitem_1, 0, 1);  getitem_1 = None
         return (select_2, select_3)""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
             # 2. Run with inductor backend
@@ -1185,6 +1190,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         select_3: "f32[][]cpu" = torch.ops.aten.select.int(as_strided_scatter_default, 0, 1);  as_strided_scatter_default = None
         return (select_2, select_3)""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
         finally:
             cleanup_op("mylib::foo")
@@ -1244,6 +1250,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
         copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_3);  arg2_1 = getitem_3 = copy__2 = None
         return ()""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
 
             # 2. Run with inductor backend
@@ -1264,6 +1271,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2
         copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__2 = None
         return ()""",
                     ignore_comments=True,
+                    ignore_empty_lines=True,
                 )
         finally:
             cleanup_op("mylib::foo")

@@ -2880,14 +2880,23 @@ class TestCase(expecttest.TestCase):
         filtered_lines = [line for line in lines if not line.strip().startswith('#')]
         return '\n'.join(filtered_lines)
 
+    def remove_empty_lines(self, input_string):
+        lines = input_string.split('\n')
+        filtered_lines = [line for line in lines if not line.strip() == '']
+        return '\n'.join(filtered_lines)
+
     # ignore comments will ignore lines that starts with # after being stripped
-    def assertExpectedInline(self, actual, expect, skip=0, ignore_comments=False):
+    def assertExpectedInline(self, actual, expect, skip=0, ignore_comments=False, ignore_empty_lines=False):
         actual = actual if isinstance(actual, str) else str(actual)
         actual = self._remove_ansi_escape(actual)
         expect = self._remove_ansi_escape(expect)
         if ignore_comments:
             actual = self.remove_comment_lines(actual)
             expect = self.remove_comment_lines(expect)
+
+        if ignore_empty_lines:
+            actual = self.remove_empty_lines(actual)
+            expect = self.remove_empty_lines(expect)
 
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
 
