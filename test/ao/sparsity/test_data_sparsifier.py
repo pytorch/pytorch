@@ -686,7 +686,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.emb1 = nn.Embedding(100, 3)
         self.embbag1 = nn.EmbeddingBag(200, 32)

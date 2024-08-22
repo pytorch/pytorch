@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-
 import inspect
 import traceback
 from typing import Any, Callable, Mapping, Sequence

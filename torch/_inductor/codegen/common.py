@@ -1335,9 +1335,9 @@ class KernelArgs:
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
-        arg_defs = []
-        call_args = []
-        arg_types = []
+        arg_defs: List[str] = []
+        call_args: List[str] = []
+        arg_types: List[torch.dtype] = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
@@ -1560,7 +1560,7 @@ class CSE:
 
 
 class CodeGen:
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.exit_stack = contextlib.ExitStack()
 

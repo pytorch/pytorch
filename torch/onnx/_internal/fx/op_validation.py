@@ -13,7 +13,6 @@ import torch
 import torch.fx
 from torch.fx.experimental import symbolic_shapes
 from torch.onnx import _constants, _type_utils as jit_type_utils
-
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_onnx_interpreter,
@@ -296,7 +295,7 @@ def _convert_torch_args_to_onnxfunction_args(
     args: list[fx_type_utils.Argument],
     kwargs: dict[str, fx_type_utils.Argument],
     allow_extra_kwargs: bool = False,
-) -> tuple[list[Any], dict[str, Any],]:
+) -> tuple[list[Any], dict[str, Any]]:
     """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     NOTE: This is different from the param_schema separating in dispatcher, since at this point

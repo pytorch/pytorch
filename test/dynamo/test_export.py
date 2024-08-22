@@ -1080,7 +1080,7 @@ def forward(self, x, y):
                 return torch.cos(x).relu() + 1
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -1113,7 +1113,7 @@ def forward(self, x, y):
         inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(1, 1))
                 self.buffer = torch.nn.Buffer(torch.ones(1, 1))
@@ -1123,7 +1123,7 @@ def forward(self, x, y):
                 return torch.cos(x).relu() + self.weight + self.buffer
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.block = MyBlock()
 
@@ -1193,7 +1193,7 @@ def forward(self, x, y):
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1219,7 +1219,7 @@ def forward(self, x, y):
 
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1249,7 +1249,7 @@ def forward(self, x, y):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1279,7 +1279,7 @@ def forward(self, x, y):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1305,7 +1305,7 @@ def forward(self, x, y):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.rand(4, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1703,7 +1703,7 @@ def forward(self, x, y):
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1742,7 +1742,7 @@ def forward(self, x, y):
 
         class Module(torch.nn.Module):
             # ok
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -1774,7 +1774,7 @@ def forward(self, x, y):
         from functorch.experimental.control_flow import cond
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1787,7 +1787,7 @@ def forward(self, x, y):
                 return cond(pred, true_fn, false_fn, [x])
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -1800,7 +1800,7 @@ def forward(self, x, y):
                 return cond(pred, true_fn, false_fn, [x + 1])
 
         class FooBar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
@@ -2302,7 +2302,7 @@ def forward(self, x):
             return wrapper
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -2433,7 +2433,7 @@ def forward(self, x):
         self.assertTrue(torch._dynamo.utils.same(inp, out_graph(inp)))
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.ones(3, 3)
 
@@ -2447,7 +2447,7 @@ def forward(self, x):
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.features = torch.nn.Sequential(
                     torch.nn.Conv2d(
@@ -2495,9 +2495,22 @@ def forward(self, x):
 
         torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
 
+    def test_export_fast_binary_broadcast_check_unbacked(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().cuda()
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar))
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = torch.nn.Parameter(torch.ones(2, 3))
 
@@ -2721,7 +2734,7 @@ def forward(self, x):
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+            ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
         ):
             torch.export.export(
                 bar,
@@ -2756,7 +2769,7 @@ def forward(self, x):
 
         x = torch.tensor([3])
         y = torch.randn([8, 8, 6])
-        example_inputs = [x, y]
+        example_inputs = (x, y)
         dynamic_shapes = (None, {0: torch.export.Dim("dimy", min=6, max=10)})
         gm, _ = torch._dynamo.export(
             f,
@@ -2766,7 +2779,7 @@ def forward(self, x):
         )(*example_inputs)
 
         constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-            f, example_inputs, dynamic_shapes=dynamic_shapes
+            {"x": x, "y": y}, dynamic_shapes=dynamic_shapes
         )
         self.assertEqual(
             gm.meta["input_shape_constraints"],
@@ -3037,7 +3050,7 @@ def forward(self, x):
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -3052,7 +3065,7 @@ def forward(self, x):
 
     def test_export_pass_arg_by_name_star_args(self):
         class BasicModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
@@ -3158,7 +3171,7 @@ def forward(self, x):
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.ones(6, 2))
 
@@ -3223,7 +3236,7 @@ def forward(self, x):
     def test_sum_param(self):
         # Setting a new attribute inside forward()
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.randn(3, 2)
 
@@ -3235,7 +3248,7 @@ def forward(self, x):
 
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
@@ -3480,8 +3493,8 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     arg0_1 = arg0
-    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
     sub = sym_size_int - 1
     slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
     slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int);  slice_2 = None
@@ -3675,7 +3688,7 @@ G['macademia'], accessed at:
         fake_mode = fake_tensor.FakeTensorMode()
 
         class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c) -> torch.Tensor:
@@ -3770,7 +3783,7 @@ G['macademia'], accessed at:
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
@@ -3778,7 +3791,7 @@ G['macademia'], accessed at:
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -3786,7 +3799,7 @@ G['macademia'], accessed at:
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3806,7 +3819,7 @@ G['macademia'], accessed at:
 
     def test_nested_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
@@ -3814,7 +3827,7 @@ G['macademia'], accessed at:
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -3822,7 +3835,7 @@ G['macademia'], accessed at:
                 return self.buffer2.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3851,7 +3864,7 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond, map
 
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.zeros(6, 4))
 
@@ -3859,7 +3872,7 @@ G['macademia'], accessed at:
                 return self.buffer1.sum()
 
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer2 = torch.nn.Buffer(torch.ones(6, 4))
 
@@ -3867,7 +3880,7 @@ G['macademia'], accessed at:
                 return self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = A()
                 self.b = B()
@@ -3902,7 +3915,7 @@ G['macademia'], accessed at:
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, pred, x):
@@ -3982,7 +3995,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     )
     def test_retracibility(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -3991,7 +4004,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -4019,7 +4032,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -4028,7 +4041,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -4069,7 +4082,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_retracibility_nested_list_out(self):
         class MyLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(20, 98)
                 self.bias = torch.randn(20)
@@ -4078,7 +4091,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return torch.nn.functional.linear(x, self.weight, self.bias)
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3)
                 self.linear = MyLinear()
@@ -4154,7 +4167,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_param_buffer_safe_from_mutation_simple(self):
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.zeros(5, 5))
 
@@ -4173,7 +4186,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
     def test_param_buffer_safe_from_mutation_recurse(self):
         class Child(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer2 = torch.nn.Buffer(torch.zeros(5))
 
@@ -4181,7 +4194,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return x.sum() + self.buffer2.sum()
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = torch.nn.Buffer(torch.zeros(5))
                 self.child = Child()
@@ -4318,7 +4331,7 @@ def forward(self, arg0_1, arg1_1):
                 return torch.sin(x)
 
         class Module2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = Module1()
 

@@ -31,7 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class DenseModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())

@@ -17,7 +17,6 @@ import linecache
 import logging
 import multiprocessing
 import operator
-import os
 import posixpath
 import random
 import re
@@ -48,6 +47,7 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -2930,10 +2930,12 @@ class FunctionIdSet:
     function_ids: Optional[Set[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
-    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+    def __init__(
+        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+    ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self):
+    def __call__(self) -> Set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -2958,7 +2960,7 @@ class FunctionIdSet:
         if idx in function_ids:
             function_ids.remove(idx)
 
-    def __contains__(self, idx: int):
+    def __contains__(self, idx: int) -> bool:
         return idx in self()
 
 
@@ -2989,7 +2991,7 @@ def _builtin_function_ids() -> Dict[int, str]:
         }
     )
     rv.update(
-        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv.update(
         {
@@ -3108,7 +3110,6 @@ BUILTIN_SKIPLIST = (
     logging,
     multiprocessing,
     operator,
-    os,
     posixpath,
     random,
     re,
@@ -3176,11 +3177,15 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch._higher_order_ops.cond",
+    "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.associative_scan",
+    "torch.nn.attention.flex_attention",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
+    "torch.export.unflatten",
     "torch.optim",
 }
 
@@ -3196,6 +3201,7 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
+        "torch.distributed._composable.fsdp",
     }
 
 
@@ -3221,6 +3227,7 @@ MOD_INLINELIST = {
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export._tree_utils",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
@@ -3246,6 +3253,7 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
+    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
@@ -3452,7 +3460,7 @@ def check_verbose(obj, is_inlined_call=False):
     rule = torch._dynamo.trace_rules.lookup_inner(
         fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
-    if issubclass(rule, UserFunctionVariable):
+    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
@@ -3508,6 +3516,7 @@ def lookup_callable(obj):
         return TorchInGraphFunctionVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
+    return None
 
 
 """

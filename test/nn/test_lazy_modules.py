@@ -753,7 +753,7 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_chained_initialization(self):
         class MyNetwork(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear_1 = torch.nn.LazyLinear(15)
                 self.linear_2 = torch.nn.LazyLinear(10)

@@ -139,7 +139,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             source=source,
         )
 
-    def __init__(self, fn, is_constant=False, **kwargs):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
@@ -325,11 +325,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs):
+    def __init__(self, fn, obj, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
@@ -387,7 +387,7 @@ class UserMethodVariable(UserFunctionVariable):
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, wrapped.obj, **kwargs)
@@ -407,7 +407,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
 
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
@@ -461,7 +461,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -619,7 +619,7 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value, reason=None, **kwargs):
+    def __init__(self, value, reason=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -800,7 +800,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, replacement_var, **kwargs):
+    def __init__(self, fn, *, replacement_var, **kwargs) -> None:
         super().__init__(fn, **kwargs)
         assert isinstance(replacement_var, UserFunctionVariable)
         self.replacement_var = replacement_var
@@ -869,7 +869,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func: VariableTracker, args, keywords, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, **kwargs) -> None:
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -925,6 +925,63 @@ class FunctoolsPartialVariable(VariableTracker):
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+
+
+class PolyfilledFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "fn",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_polyfill_handlers(cls):
+        return {}
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return cls(
+            value,
+            source=source,
+        )
+
+    def __init__(self, fn: VariableTracker, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+
+    def get_function(self):
+        return self.as_python_constant()
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        handler = self._get_polyfill_handlers().get(self.fn)
+        if handler:
+            assert callable(handler)
+            return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+
+        for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
+            handler = getattr(self.fn, candidate, None)
+            if handler:
+                assert callable(handler)
+                if self.source:
+                    source = AttrSource(self.source, candidate)
+                    return UserFunctionVariable.create_with_source(
+                        handler,
+                        source=source,
+                    ).call_function(tx, args, kwargs)
+                return SourcelessBuilder.create(
+                    tx,
+                    handler,
+                ).call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.fn
 
 
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier
@@ -1006,7 +1063,7 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
-    def __init__(self, kernel, kernel_idx, grid, **kwargs):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

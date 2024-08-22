@@ -156,7 +156,8 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -189,7 +190,7 @@ class TestNN(NNTestCase):
 
     def test_share_memory(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.p = nn.Parameter(torch.eye(5))
                 self.par = nn.ParameterList()
@@ -307,7 +308,7 @@ class TestNN(NNTestCase):
             return [k for k, _ in named_parameters]
 
         class M1(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param1 = nn.Parameter(torch.empty(3, 3))
                 self.param2 = self.param1
@@ -319,7 +320,7 @@ class TestNN(NNTestCase):
                          ["param1", "param2"])
 
         class M2(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod1 = nn.Linear(3, 4, bias=False)
                 self.mod2 = self.mod1
@@ -358,7 +359,7 @@ class TestNN(NNTestCase):
 
         # test remove_duplicate
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.buffer1 = Buffer(torch.empty(3, 5))
                 self.buffer2 = self.buffer1
@@ -371,7 +372,7 @@ class TestNN(NNTestCase):
 
     def test_buffer_bad_module_subclass(self):
         class MyBadModule(nn.Linear):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__(2, 2)
                 self.bar = Buffer(torch.rand(2, 2))
 
@@ -384,7 +385,7 @@ class TestNN(NNTestCase):
 
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
@@ -412,7 +413,7 @@ class TestNN(NNTestCase):
 
     def test_train_errors_for_invalid_mode(self):
         class SubclassNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = nn.Linear(2, 2)
 
@@ -485,7 +486,7 @@ class TestNN(NNTestCase):
 
     def test_modules(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = l
                 self.l2 = l
@@ -498,7 +499,7 @@ class TestNN(NNTestCase):
 
     def test_named_modules(self):
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l1 = l
                 self.l2 = l
@@ -2506,7 +2507,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_container_copy(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(4, 5)
 
@@ -4328,7 +4329,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     buf = io.BytesIO()
                     rnn_pickle = torch.save(rnn, buf)
                     buf.seek(0)
-                    rnn2 = torch.load(buf)
+                    # weights_only=False as this is legacy code that saves the model
+                    rnn2 = torch.load(buf, weights_only=False)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
@@ -12018,7 +12020,7 @@ if __name__ == '__main__':
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = nn.Linear(10, 10)
                 self.layer2 = nn.Linear(10, 10)
@@ -12385,12 +12387,20 @@ if __name__ == '__main__':
             result = model(encoder_input, src_key_padding_mask=mask)
             self.assertEqual(result.shape, ref_output.shape)
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
-            # 1 values are masked. Since there is only 1 input embedding this
-            # will result in nan.
             mask = torch.tensor([[1]], device=device) == 1
             result = model(encoder_input, src_key_padding_mask=mask)
+            fast_path_device = result.is_cuda or result.is_cpu
             result = result.cpu().detach().numpy()
-            self.assertTrue(np.isnan(result).all())
+            # Non Fast Paths
+            if training or not batch_first or TEST_WITH_CROSSREF or not fast_path_device:
+                # We changed the semenatic, on the non fast path so that fully masked out rows return
+                # 0 from attention thus NaNs should no longer be present and the output should be nonzero
+                # due to skip connections
+                self.assertTrue(not np.isnan(result).any())
+            else:
+                # Fast Paths
+                self.assertTrue(np.isnan(result).all())
+
 
             # deterministic input
             encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
@@ -12890,13 +12900,13 @@ class TestFusionUtils(TestCase):
 class TestUtils(TestCase):
     def test_consume_prefix_in_state_dict_if_present(self):
         class Block(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(3, 3, 3, bias=True)
                 self.conv2 = nn.Conv2d(3, 3, 3, bias=False)
 
         class Net(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(5, 5)
                 self.linear2 = nn.Linear(5, 5)

@@ -672,7 +672,7 @@ class TypeCheckerTest(TestCase):
 
     def test_type_check_conv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
@@ -761,7 +761,7 @@ class TypeCheckerTest(TestCase):
 
     def test_type_typechecl_maxpool2d_3dinput(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.pool = torch.nn.MaxPool2d(5, 8)
 
@@ -1119,7 +1119,7 @@ class TypeCheckerTest(TestCase):
 
     def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)

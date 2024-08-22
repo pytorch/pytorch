@@ -88,7 +88,7 @@ class TestAsync(JitTestCase):
         class Mod(torch.jit.ScriptModule):
             __constants__ = ["const"]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.const = 42
                 self.param = nn.Parameter(torch.randn(2, 2))
@@ -253,7 +253,7 @@ class TestAsync(JitTestCase):
                 return (torch.neg(x), x)
 
         class Mod(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 x = torch.rand(3, 3)
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
@@ -276,7 +276,7 @@ class TestAsync(JitTestCase):
                 return (tensor_list, tensor_tuple, tensor_tuple[1])
 
         class TupleCl(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.module = Mod()
 
@@ -467,7 +467,7 @@ class TestAsync(JitTestCase):
                 return fut_list
 
         class TestModuleWrapper(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.list_fut_mod = TestListFutureModule()
 
@@ -492,7 +492,7 @@ class TestAsync(JitTestCase):
                 return input, fut_res
 
         class TestModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.gen_output = DifferentOutputModule()
 

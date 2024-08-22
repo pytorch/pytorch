@@ -26,6 +26,7 @@ from torch import inf, Tensor
 
 from .optimizer import Optimizer
 
+
 __all__ = [
     "LambdaLR",
     "MultiplicativeLR",
@@ -246,8 +247,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
-                param_group["lr"].fill_(lr_val)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
@@ -1074,7 +1074,7 @@ class CosineAnnealingLR(LRScheduler):
         self,
         optimizer: Optimizer,
         T_max: int,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107
@@ -1741,7 +1741,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         optimizer: Optimizer,
         T_0: int,
         T_mult=1,
-        eta_min=0,
+        eta_min=0.0,
         last_epoch=-1,
         verbose="deprecated",
     ):  # noqa: D107

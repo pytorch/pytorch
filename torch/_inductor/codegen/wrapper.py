@@ -32,6 +32,7 @@ import torch
 import torch._ops
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -54,7 +55,7 @@ from ..utils import (
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
-from .triton_utils import config_of, signature_to_meta
+from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
 if TYPE_CHECKING:
@@ -357,7 +358,6 @@ class MemoryPlanningLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Second pass to output code"""
-        pass
 
     def __str__(self) -> str:
         """
@@ -531,6 +531,11 @@ class WrapperCodeGen(CodeGen):
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
 
+        # intermediate tensor value printing utility
+        self.debug_printer = DebugPrinterManager(
+            enable_debug_printer=config.aot_inductor.debug_intermediate_value_printer
+        )
+
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
 
@@ -542,7 +547,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(
             f"""
                 {aot_config_comment}
-                from ctypes import c_void_p, c_long
+                from ctypes import c_void_p, c_long, c_int
                 import torch
                 import math
                 import random
@@ -564,6 +569,7 @@ class WrapperCodeGen(CodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -590,7 +596,7 @@ class WrapperCodeGen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
         self.header.splice(import_str)
         if config.triton.autotune_at_compile_time:
@@ -836,8 +842,11 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
-    @dynamo_timed
     def generate(self, is_inference):
+        with dynamo_timed("WrapperCodeGen.generate"):
+            return self._generate(is_inference)
+
+    def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
@@ -1524,14 +1533,21 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-    def generate_default_grid(self, name: str, grid_args: List[Any]):
-        return grid_args
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwags,
+    ):
+        return grid
 
     def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-                return arg + ".item()" if V.graph.is_unspec_arg(arg) else arg
+                return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
@@ -1610,6 +1626,7 @@ class WrapperCodeGen(CodeGen):
         raw_args=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -1632,6 +1649,8 @@ class WrapperCodeGen(CodeGen):
                     grid_str = grid_fn
                 else:
                     grid_str = ", ".join(pexpr(item) for item in grid)
+                    if grid_extra_kwargs:
+                        grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
@@ -1748,7 +1767,7 @@ class WrapperCodeGen(CodeGen):
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
-        if device.type in ("cpu", "cuda"):
+        if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             return (
                 f"{name} = empty_strided_{device.type}("

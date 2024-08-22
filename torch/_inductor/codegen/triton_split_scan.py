@@ -34,7 +34,7 @@ class TritonSplitScanKernel(TritonKernel):
         mutations: Optional[OrderedSet[str]] = None,
         reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
         min_elem_per_thread=0,
-    ):
+    ) -> None:
         super().__init__(
             *groups,
             index_dtype=index_dtype,

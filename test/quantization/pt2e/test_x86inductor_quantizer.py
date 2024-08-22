@@ -2032,7 +2032,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class Sub(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.relu1 = torch.nn.ReLU(inplace=False)
@@ -2045,7 +2045,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 return x
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
                 self.sub = Sub()
@@ -2094,7 +2094,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """Test that if a module name has an underscore, we can still quantize it."""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 # This module name has underscores, which can be part of a mangled name.
                 self.foo_bar = torch.nn.Linear(2, 2)
@@ -2147,7 +2147,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2201,7 +2201,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)
@@ -2380,7 +2380,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = torch.nn.Linear(5, 10)
                 self.linear2 = torch.nn.Linear(10, 5)

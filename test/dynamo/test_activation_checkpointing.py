@@ -84,7 +84,7 @@ def count_ops(
 
 
 class _InvalidContext:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __enter__(self):
@@ -308,7 +308,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_tags_module(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -337,7 +337,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_tags_decomps(self):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
@@ -424,7 +424,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def test_tags_dropout(self):
         # Figure out a way to test the number of inductor_random calls
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
                 self.dropout = torch.nn.Dropout(0.2)
@@ -1021,7 +1021,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return create_selective_checkpoint_contexts(_recomp_policy())
 
         class Parametrization(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def parametrization(self, x):
@@ -1046,7 +1046,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return model
 
         class MLPModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 torch.manual_seed(5)
                 self.net1 = nn.Linear(16, 16, bias=False)
@@ -1121,7 +1121,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_error_msg(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -1145,7 +1145,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_list_inputs(self):
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, ys):
@@ -1245,7 +1245,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.c = 2
