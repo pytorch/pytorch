@@ -69,73 +69,56 @@ data, so we use storage resizing on the all-gather output.
 
 lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
 
-lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
 
-@torch.library.impl(lib, "set_", "Meta")
-@torch.library.impl(lib, "set_", "CUDA")
-@torch.library.impl(lib, "set_", "CPU")
-def set_(tensor, data):
-    tensor.set_(data)
+@torch.library.impl(lib, "copy_", "Meta")
+@torch.library.impl(lib, "copy_", "CUDA")
+@torch.library.impl(lib, "copy_", "CPU")
+def copy_(tensor, data):
+    tensor.copy_(data)
 
 
 """
-[Note: Avoiding functionalization for fsdp.set_ and inductor.resize_storage_bytes_(0)]
+[Note: Avoiding functionalization for fsdp.copy_ and inductor.resize_storage_bytes_(0)]
 
-Currently we don't functionalize `fsdp.set_` op or `inductor.resize_storage_bytes_(0)` op
+Currently we don't functionalize `fsdp.copy_` op or `inductor.resize_storage_bytes_(0)` op
 (i.e. they show up as a mutation op in the middle of the AOT joint graph).
 
 Reason:
 Traceable FSDP2 compiled autograd BWD graph have the following traits:
 (1) Two inputs of the graph were aliased to each other (one from hook closed-over tensors, one from FWD saved tensors).
-(2) One of them is mutated (set_ and resize_(0) to handle the all-gathered param).
+(2) One of them is mutated (copy_ and resize_(0) to handle the all-gathered param).
 (3) They are both subclasses.
 The combination of these traits is not supported by AOTAutograd (it's difficult to reason about subclass aliasing).
 So this doesn't work at all for Traceable FSDP2.
 
-The compromise we use is to avoid functionalization for the FSDP2 set_ and resize_(0) ops.
+The compromise we use is to avoid functionalization for the FSDP2 copy_ and resize_(0) ops.
 This avoids the problem above, because from AOTAutograd point-of-view there are no mutations
 that functionalization needs to handle. (Although we need to be careful not to DCE those mutable ops.)
 
 We can avoid this functionalization because:
-(1) The nn.Parameter is never used before its .set_() is called in eager code (i.e. no alias of it is created),
-so it's safe to call .set_() in the middle of the graph to swap out its storage and start using the nn.Parameter downstream.
+(1) The nn.Parameter is never used before its .copy_() is called in eager code (i.e. no alias of it is created),
+so it's safe to call .copy_() in the middle of the graph to update its content and start using the nn.Parameter downstream.
 (2) We always re-allocate the buffer for nn.Parameter to store the AllGather output and to be used in downstream user ops.
 So calling resize-to-0 in the middle of the graph to free nn.Parameter memory after use should always be okay
 (since we always allocate anew next time we need it, we strictly don't need to keep the old tensor storage around anymore).
-
-Q: But doesn't the torch.compile stack have the "functional graph" assumption in many places?
-A: Yes - this is WIP but we will try to get back to functional graph as early as possible in the lowering process.
-Specifically, we believe we can move both .set_ and .resize_(0) ops to end of graph in AOT joint graph before partitioner
-(i.e. effectively "re-functionalizing" those ops). Put it in another way, we avoid functionalization for those two ops just to
-make AOTAutograd alias analysis happy, and as soon as we are past that point, we "re-functionalize" the graph.
-This requires a custom FX pass but we believe it's not hard to write and maintain.
-
-Q: What's the importance of partitioner not saving views of nn.Parameter as FWD saved tensors?
-A: This is critical: we do want to save FWD nn.Parameter graph input (instead of its view) for BWD use,
-so that downstream ops in BWD graph uses the post-`.set_` nn.Parameter instead of any of its saved views as input.
-This is because .set_ will not update any of the nn.Parameter's views, so BWD downstream ops must use the original
-nn.Parameter in order to see the result of .set_.
 """
 
 
-@torch.library.impl(lib, "set_", "Functionalize")
-def set__functionalize(tensor, data):
+@torch.library.impl(lib, "copy_", "Functionalize")
+def copy__functionalize(tensor, data):
     torch._sync(tensor)
     torch._sync(data)
-    # AOTDispatcher needs to know if any inputs had their storages mutated.
-    # (Why? It sometimes detaches inputs before sending them into the graph,
-    #  when it sees that they do not need to have any gradients computed)
-    torch._functionalize_set_storage_changed(tensor)
     tensor_inner = torch._from_functional_tensor(tensor)
     data_inner = torch._from_functional_tensor(data)
     with torch._C._ExcludeDispatchKeyGuard(
         torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
     ):
-        torch.ops.fsdp.set_.default(tensor_inner, data_inner)
+        torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
 
 
-torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):
@@ -479,7 +462,10 @@ class FSDPParam:
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
-                torch.ops.fsdp.set_.default(self._unsharded_param, unsharded_param)
+                size = self._unsharded_param.numel() * self._unsharded_param.itemsize
+                if (storage := self._unsharded_param.untyped_storage()).size() != size:
+                    storage.resize_(size)
+                torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
@@ -609,13 +595,24 @@ class FSDPParam:
             alloc_storage(tensor)
 
     def free_unsharded_param(self) -> None:
-        for tensor in itertools.chain(
-            self.all_gather_outputs, self._unsharded_inner_tensors
-        ):
-            free_storage(tensor)
         if ca.compiled_autograd_enabled:
+            """
+            Assumptions under compile:
+            - `self._unsharded_param` is NOT an alias of `self.all_gather_outputs`.
+            Instead, we explicitly *copy* the data from `self.all_gather_outputs`
+            to `self._unsharded_param` in `init_unsharded_param()`.
+            - `self.all_gather_outputs` and `self._unsharded_inner_tensors` are NOT
+            graph inputs. They are created within the graph and is guaranteed to be freed
+            by the end of the graph. They don't leak outside of the graph.
+            """
+            free_storage(self._unsharded_param)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
+        else:
+            for tensor in itertools.chain(
+                self.all_gather_outputs, self._unsharded_inner_tensors
+            ):
+                free_storage(tensor)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
