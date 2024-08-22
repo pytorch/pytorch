@@ -29,6 +29,7 @@
 #include <ATen/ops/_foreach_expm1_native.h>
 #include <ATen/ops/_foreach_floor_native.h>
 #include <ATen/ops/_foreach_frac_native.h>
+#include <ATen/ops/_foreach_global_norm_native.h>
 #include <ATen/ops/_foreach_lerp_native.h>
 #include <ATen/ops/_foreach_lgamma_native.h>
 #include <ATen/ops/_foreach_log10_native.h>
@@ -54,6 +55,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
@@ -448,6 +450,32 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
   }
   return result;
+}
+
+Tensor foreach_tensor_global_norm_slow(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  for (const auto& t : tensors) {
+    result.emplace_back(
+        at::linalg_vector_norm(t, ord, {}, true, dtype).view({-1}));
+  }
+  const double p = [](const Scalar& lp) -> double {
+    if (lp.isIntegral(false)) {
+      return lp.to<int64_t>();
+    } else if (lp.isFloatingPoint()) {
+      return lp.to<double>();
+    } else {
+      TORCH_CHECK(false, "foreach_ expects ord to be integer or float");
+    }
+  }(ord);
+  if (p == 0.0) {
+    return at::cat(result, 0).sum();
+  } else {
+    return at::linalg_vector_norm(at::cat(result, 0), ord, {}, false, dtype);
+  }
 }
 
 std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
