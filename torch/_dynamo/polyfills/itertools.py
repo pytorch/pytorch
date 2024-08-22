@@ -11,7 +11,7 @@ from ..decorators import substitute_in_graph
 
 
 __all__ = [
-    "chain",
+    "chain___new__",
     "chain_from_iterable",
     "tee",
 ]
@@ -22,7 +22,7 @@ _T = TypeVar("_T")
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
 @substitute_in_graph(itertools.chain.__new__)  # type: ignore[arg-type]
-def chain(
+def chain___new__(
     cls: type[itertools.chain[_T]],
     *iterables: Iterable[_T],
 ) -> Iterator[_T]:
@@ -35,9 +35,6 @@ def chain(
 @substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
 def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
-
-
-chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
