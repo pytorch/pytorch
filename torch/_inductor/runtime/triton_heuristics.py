@@ -269,7 +269,7 @@ class CachingAutotuner(KernelInterface):
                 and device_prop.type in ["cuda", "hip"]
                 and device_prop.major
                 and (device_prop.major >= 8 or torch.version.hip)
-                and device_prop.regs_per_multiprocessor != None
+                and device_prop.regs_per_multiprocessor is not None
             ):
                 assert device_prop.regs_per_multiprocessor
                 assert device_prop.max_threads_per_multi_processor
