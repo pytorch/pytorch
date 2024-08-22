@@ -54,13 +54,19 @@ def patch_init_py(
 def patch_setup_py(path: Path) -> None:
     with open(path) as f:
         orig = f.read()
-    orig = check_and_replace(
-        orig,
-        "https://tritonlang.blob.core.windows.net/llvm-builds/",
-        "https://oaitriton.blob.core.windows.net/public/llvm-builds/",
-    )
-    with open(path, "w") as f:
-        f.write(orig)
+    try:
+        orig = check_and_replace(
+            orig,
+            "https://tritonlang.blob.core.windows.net/llvm-builds/",
+            "https://oaitriton.blob.core.windows.net/public/llvm-builds/",
+        )
+        with open(path, "w") as f:
+            f.write(orig)
+    except RuntimeError as e:
+        print(
+            f"Applying patch_setup_py() for llvm-build package failed: {e}.",
+            "If you are trying to build a newer version of Triton, you can ignore this.",
+        )
 
 
 def build_triton(
@@ -105,8 +111,7 @@ def build_triton(
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         # TODO: remove this and patch_setup_py() once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
-        if device not in ["xpu"]:
-            patch_setup_py(triton_pythondir / "setup.py")
+        patch_setup_py(triton_pythondir / "setup.py")
 
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
