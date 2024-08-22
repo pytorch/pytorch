@@ -41,13 +41,15 @@ def wrap_inline(fn):
     return inner
 
 
-def call_hook(hook, *args):
+def call_hook(hook, *args, **kwargs):
     """
     Used by compiled autograd to handle hook returning None
     """
     result = hook(*args)
     if result is None:
         return args[0]
+    elif kwargs["hook_type"] == "post_acc_grad_hook":
+        raise RuntimeError("Tensor post accumulate grad hooks should return None.")
     return result
 
 
