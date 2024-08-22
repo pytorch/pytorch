@@ -70,7 +70,7 @@ RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
 
 ARG TARGETPLATFORM
 
-# INSTALL_CHANNEL won't actually be anything other than [nightly, test] so no need to worry about an extra slash
+# INSTALL_CHANNEL whl - release, whl/nightly - nightly, whle/test - test channels
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
          *)              pip install --extra-index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_VERSION#.}/ torch torchvision torchaudio ;; \
