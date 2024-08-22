@@ -202,30 +202,6 @@ void reshape_attn_mask_to_4d(
 }
 
 template <typename scalar_t>
-inline void copy_pad_col_zero(
-    const scalar_t* value_ptr,
-    scalar_t* padding_value_ptr,
-    int64_t rows,
-    int64_t cols,
-    int64_t ldi) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  for (int64_t i = 0; i < rows; i++) {
-    int64_t j = 0;
-    for (; j < cols - 1 - ((cols - 1) % vec_size); j += vec_size) {
-      auto vec_v =
-          at::vec::Vectorized<scalar_t>::loadu(value_ptr + i * ldi + j);
-      vec_v.store(padding_value_ptr + i * cols + j);
-    }
-    if (j < cols - 1) {
-      auto vec_v = at::vec::Vectorized<scalar_t>::loadu(
-          value_ptr + i * ldi + j, cols - 1 - j);
-      vec_v.store(padding_value_ptr + i * cols + j, cols - 1 - j);
-      *(padding_value_ptr + i * cols + cols - 1) = scalar_t(0);
-    }
-  }
-}
-
-template <typename scalar_t>
 inline void copy_value_with_pad(
     const scalar_t* value_ptr,
     scalar_t* dst_ptr,
@@ -508,7 +484,7 @@ void cpu_flash_attention(
                 /* ld_src */ kStrideN,
                 /* dst */ reinterpret_cast<uint16_t*>(transpose_buffer_ptr),
                 /* ld_dst */ packb_size);
-            // padding [headSize, x] -> [eheadSize, x]
+            // Pad [headSize, x] -> [eheadSize, x]
             if (!headSize_even) {
               pad_remain_row_col_zero<scalar_t>(
                   transpose_buffer_ptr,
@@ -589,14 +565,17 @@ void cpu_flash_attention(
           static_cast<accum_t>(0), qBlockSize);
       int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       if (!headSize_even && need_pack) {
-        // pad query if headSize is not even
+        // Pad query if headSize is not even
         // [qBlockSize, headSize] -> [qBlockSize, eheadSize]
-        copy_pad_col_zero<scalar_t>(
-            q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-            query_t_padding_ptr,
-            qBlockSize,
-            eheadSize,
-            qStrideM);
+        copy_value_with_pad<scalar_t>(
+          q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+          query_t_padding_ptr,
+          qBlockSize,
+          headSize,
+          qBlockSize,
+          eheadSize,
+          qStrideM
+        );
       }
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
