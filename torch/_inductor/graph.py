@@ -1350,6 +1350,9 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
+                        # To avoid converting possible view ops to a copy kernel, we use the previous
+                        # require_exact_strides to handle views. But ultimately it's better to require
+                        # the right strides at the tensor definition.
                         if n.meta["val"]._is_view():
                             result = ir.ExternKernel.require_stride_order(
                                 result,
