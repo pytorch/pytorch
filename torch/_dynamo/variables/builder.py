@@ -2580,15 +2580,8 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-<<<<<<< HEAD
-        static_shapes, reason = tensor_always_has_static_shape(
-            e, is_tensor, guard_source=source.guard_source()
-=======
         static_shapes, _ = tensor_always_has_static_shape(
-            e,
-            is_tensor,
-            tensor_source=source,
->>>>>>> fdf25a55f46 (Remove unused variables)
+            e, is_tensor, guard_source=source.guard_source()
         )
 
         if not parent_context:
