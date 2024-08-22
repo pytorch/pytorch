@@ -3247,7 +3247,6 @@ MOD_INLINELIST = [
     "torch.overrides",
     "torch.random",
     "torch.sparse",
-    "torch.testing._internal.hypothesis_utils",
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
@@ -3262,9 +3261,6 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
-    MOD_INLINELIST.add("torch.distributed._functional_collectives")
-    MOD_INLINELIST.add("torch.distributed._composable.replicate")
-    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
