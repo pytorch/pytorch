@@ -10,6 +10,9 @@ from typing import AnyStr
 from ..decorators import substitute_in_graph
 
 
+__all__ = ["fspath"]
+
+
 # Copied from os.py in the standard library
 @substitute_in_graph(os.fspath)
 def fspath(path: AnyStr | os.PathLike[AnyStr]) -> AnyStr:
