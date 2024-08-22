@@ -2747,8 +2747,8 @@ def native_layer_norm(
     if is_type_half:
         denominator = g.op(
             "Cast",
-            denominator,  # type: ignore[possibly-undefined]
-            to_i=_type_utils.JitScalarType(input_dtype).onnx_type(),
+            denominator,
+            to_i=_type_utils.JitScalarType(input_dtype).onnx_type(),  # type: ignore[possibly-undefined]
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
