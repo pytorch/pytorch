@@ -19518,7 +19518,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    unittest.expectedFailure,
                    'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive'
+                   'test_make_fx_symbolic_exhaustive_out'
                ),
            )),
     OpInfo('vstack',
