@@ -226,7 +226,7 @@ class TensorVariable(VariableTracker):
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
             fake_val = self.proxy.node.meta["example_value"]
-            attrs, ctx = fake_val.__tensor_flatten__()
+            attrs, _ = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
             example_value = getattr(fake_val, name)
             if name in attrs:
