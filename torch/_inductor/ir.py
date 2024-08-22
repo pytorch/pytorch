@@ -5105,9 +5105,20 @@ class UserDefinedTritonKernel(ExternKernel):
         ]
         # Call to kernel
         self.codegen_comment(wrapper)
-        wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
-        )
+
+        call_args = [
+            raw_arg.get_name()
+            for i, raw_arg in enumerate(raw_args)
+            if i not in kernel.constexprs
+            and isinstance(raw_arg, IRNode)
+            and raw_arg is not None
+        ]
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(call_args, new_name, None, kernel)
+        with debug_printer_manager:
+            wrapper.generate_user_defined_triton_kernel(
+                new_name, raw_args, self.grid, configs, triton_meta, kernel.constexprs
+            )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         # add unbacked symbols used in the grid to the ones used
