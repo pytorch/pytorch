@@ -96,7 +96,7 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
@@ -133,8 +133,6 @@ def make_fake_inputs(
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
-        if constraint.shared is not None:
-            t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
     context = torch._guards.TracingContext.try_get()
     if context is not None:
@@ -191,6 +189,7 @@ def make_fake_inputs(
             (args, kwargs),
         )
 
+        names: Dict[str, Tuple[int, int]] = {}
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
@@ -199,6 +198,7 @@ def make_fake_inputs(
                 constraint,
                 lambda t_id, dim: sources[(t_id, dim)],
                 fake_mode.shape_env,
+                names,
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
