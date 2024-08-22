@@ -506,7 +506,6 @@ def aot_dispatch_autograd(
                     and not fw_metadata.input_info[i].is_leaf
                 )
                 if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
-                    continue  # HACK(yf225): please replace with the right fix
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
