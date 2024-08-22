@@ -489,6 +489,8 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     const void* mat3_scale_ptr = GetDScalePointerFromParams<T>(params);
     const void* amax_ptr = GetAmaxPointerFromParams<T>(params);
     const int8_t fast_accum_mode = GetFastAccumModeFromParams<T>(params);
+    const void* bias_ptr = GetBiasPointerFromParams<T>(params);
+    auto bias_datatype = GetBiasTypeFromParams<T>(params);
     if (mat1_scale_ptr && mat2_scale_ptr && mat3_scale_ptr) {
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
@@ -499,9 +501,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         }
 
         computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fast_accum_mode);
-        const void* bias_ptr = GetBiasPointerFromParams<T>(params);
         if (bias_ptr) {
-            auto bias_datatype = GetBiasTypeFromParams<T>(params);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, CUBLASLT_EPILOGUE_BIAS);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
             computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
@@ -511,6 +511,10 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
     at::cuda::blas::CuBlasLtMatrixLayout Adesc(a_dtype, params->m, params->k, params->lda, opa == CUBLAS_OP_T);
     at::cuda::blas::CuBlasLtMatrixLayout Bdesc(b_dtype, params->k, params->n, params->ldb, opb == CUBLAS_OP_T);
     at::cuda::blas::CuBlasLtMatrixLayout Cdesc(c_dtype, params->m, params->n, params->ldc);
+    if constexpr (std::is_same_v<ParamsT, ScaledGemmParams<T>>) {
+        Cdesc = at::cuda::blas::CuBlasLtMatrixLayout(bias_datatype, params->m, params->n, params->ldc);
+    }
+    at::cuda::blas::CuBlasLtMatrixLayout Ddesc(c_dtype, params->m, params->n, params->ldc);
 
     int batch_size = GetBatchFromParams<T>(params);
     if (batch_size > 1) {
@@ -551,7 +555,7 @@ auto GetCublasLtTypeStringAndOps(const ParamsT* params) {
         Adesc.descriptor(),
         Bdesc.descriptor(),
         Cdesc.descriptor(),
-        Cdesc.descriptor(),
+        Ddesc.descriptor(),
         preference.descriptor(),
         8,
         heuristicResults,
