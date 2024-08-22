@@ -7,7 +7,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at::native {
 
@@ -37,8 +37,8 @@ void cpu_max_unpool(
 
   // treat batch size and channels as one dimension
   // and the feature map as another dimension
-  int64_t channels, output_depth, output_height, output_width;
-  if (is_3d) {
+  [[maybe_unused]] int64_t channels, output_depth, output_height, output_width;
+  if constexpr (is_3d) {
     TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d: expect input to be 4d or 5d tensor.");
     channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
     output_depth = output.size(-3);
@@ -79,7 +79,7 @@ void cpu_max_unpool(
   });
 
   if (optional_error_index) {
-    if (is_3d) {
+    if constexpr (is_3d) {
       AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);

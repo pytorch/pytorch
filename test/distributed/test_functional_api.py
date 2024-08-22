@@ -10,12 +10,12 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
-
 from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -443,6 +443,10 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
+        global BACKEND
+
+        if "BACKEND" in os.environ:
+            BACKEND = os.environ["BACKEND"]
         if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.dist_init()
@@ -457,6 +461,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = dist.Backend.NCCL
+        BACKEND = dist.Backend.NCCL
         self._spawn_processes()
 
     @property
@@ -581,6 +586,28 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device="cuda"), self.process_group, self.rank
+        )
+        dist.barrier()
 
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):

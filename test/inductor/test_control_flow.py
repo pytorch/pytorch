@@ -3,7 +3,7 @@ import itertools
 
 import torch
 import torch._dynamo.testing
-
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -220,6 +220,42 @@ class CondTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    def test_cond_control_flow_with_precomputed_size(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(
+                    512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                )
+                self.threshold = 20
+
+            def forward(self, x: torch.Tensor, index) -> torch.Tensor:
+                def true_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                def false_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                return torch.cond(
+                    index < self.threshold and index >= 0, true_fn, false_fn, (x,)
+                )
+
+        main_model = TestModel().to(GPU_TYPE)
+        x1 = torch.rand(2, 512, 128, 72).to(GPU_TYPE)
+        x2 = torch.rand(2, 512, 96, 96).to(GPU_TYPE)
+
+        opt_model = torch.compile(main_model)
+        out1 = main_model(x1, 1)
+        opt_out1 = opt_model(x1, 1)
+        self.assertTrue(torch.allclose(out1, opt_out1, atol=1e-5))
+
+        out2 = main_model(x2, 30)
+        opt_out2 = opt_model(x2, 30)
+        self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
@@ -660,8 +696,73 @@ class WhileLoopTests(TestCase):
         )
 
 
+class AssociativeScanTests(TestCase):
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    @parametrize("backend", ["inductor"])
+    def test_pointwise_associative_scan_CUDA_flip(self, device, backend):
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        for n in range(10):
+            x = torch.arange(n, device=device)
+            torch.compiler.reset()
+            associative_scan1 = torch.compile(
+                associative_scan, backend=backend, fullgraph=True
+            )
+            associative_scan2 = associative_scan
+
+            result1 = associative_scan1(fct, x, 0, reverse=False)
+            result2 = associative_scan2(fct, x, 0, reverse=False)
+            result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only non-compiled and compare with compiled reverse=True
+            result1 = associative_scan1(fct, x, 0, reverse=True)
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only compiled and compare with non-compiled reverse=True
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Use reverse=False, but flip both results before and after
+            result1 = torch.flip(
+                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result2 = torch.flip(
+                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Reverse=True
+            result1 = associative_scan1(fct, x, 0, reverse=True)
+            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
+instantiate_parametrized_tests(AssociativeScanTests)
 
 
 if __name__ == "__main__":

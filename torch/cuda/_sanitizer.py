@@ -77,8 +77,6 @@ class Access:
 class SynchronizationError(Exception):
     """Base class for errors detected by CUDA Sanitizer."""
 
-    pass
-
 
 class UnsynchronizedAccessError(SynchronizationError):
     """Stores information about two unsynchronized accesses to one data pointer."""
@@ -163,7 +161,7 @@ class TensorInfo:
 
 
 class _TensorsAccessed:
-    def __init__(self):
+    def __init__(self) -> None:
         self.accesses: Dict[DataPtr, TensorInfo] = {}
 
     def ensure_tensor_exists(self, data_ptr: DataPtr) -> None:
@@ -218,7 +216,7 @@ class _TensorsAccessed:
 
 
 class StreamSynchronizations:
-    def __init__(self):
+    def __init__(self) -> None:
         self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
         self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
         self.host_sync_state: Dict[StreamId, SeqNum] = {}
@@ -338,7 +336,7 @@ class EventHandler:
     data race.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.tensors_accessed = _TensorsAccessed()
         self.syncs = StreamSynchronizations()
         self.seq_num: SeqNum = 0
@@ -478,10 +476,10 @@ def zip_arguments(
 
 
 class ArgumentHandler:
-    def __init__(self):
+    def __init__(self) -> None:
         self.dataptrs_read: Set[DataPtr] = set()
         self.dataptrs_written: Set[DataPtr] = set()
-        self.tensor_aliases: Dict[DataPtr, List[str]] = dict()
+        self.tensor_aliases: Dict[DataPtr, List[str]] = {}
         self.outputs: Set[DataPtr] = set()
 
     def _handle_argument(
@@ -527,7 +525,7 @@ class ArgumentHandler:
 
 
 class CUDASanitizerDispatchMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self) -> None:
         self.event_handler = EventHandler()
         torch._C._activate_gpu_trace()
         gpu_trace.register_callback_for_event_creation(
@@ -596,7 +594,7 @@ class CUDASanitizer:
     This approach was deemed more elegant than using the atexit module.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.dispatch = CUDASanitizerDispatchMode()
         self.enabled = False
 

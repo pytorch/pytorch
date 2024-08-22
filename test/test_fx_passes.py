@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class TestModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(4, 4)
         self.linear2 = torch.nn.Linear(4, 4)
@@ -45,7 +45,7 @@ class TestModule(torch.nn.Module):
         return add_4, add_6, relu
 
 class TestDeepModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(4, 4)
 

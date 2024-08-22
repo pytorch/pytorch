@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/ir/graph_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TypePtr getTensorType(const at::Tensor& t, bool complete) {
   auto r = TensorType::create(t);
@@ -89,5 +88,4 @@ void setInputTensorTypes(
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

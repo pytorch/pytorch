@@ -223,7 +223,7 @@ class InlineOptionalDeviceGuard {
   {}
 
   /// Set the current device to the passed Device, if it is not nullopt.
-  explicit InlineOptionalDeviceGuard(optional<Device> device_opt)
+  explicit InlineOptionalDeviceGuard(std::optional<Device> device_opt)
       : guard_() { // See Note [Explicit initialization of optional fields]
     if (device_opt.has_value()) {
       guard_.emplace(device_opt.value());
@@ -235,7 +235,8 @@ class InlineOptionalDeviceGuard {
       typename U = T,
       typename =
           typename std::enable_if_t<!std::is_same_v<U, VirtualGuardImpl>>>
-  explicit InlineOptionalDeviceGuard(optional<DeviceIndex> device_index_opt)
+  explicit InlineOptionalDeviceGuard(
+      std::optional<DeviceIndex> device_index_opt)
       : guard_() { // See Note [Explicit initialization of optional fields]
     if (device_index_opt.has_value()) {
       guard_.emplace(device_index_opt.value());
@@ -403,17 +404,17 @@ class InlineOptionalDeviceGuard {
 
   /// Returns the device that was set immediately prior to initialization of
   /// the, guard, or nullopt if the guard is uninitialized.
-  optional<Device> original_device() const {
-    return guard_.has_value() ? make_optional(guard_->original_device())
-                              : nullopt;
+  std::optional<Device> original_device() const {
+    return guard_.has_value() ? std::make_optional(guard_->original_device())
+                              : std::nullopt;
   }
 
   /// Returns the most recent device that was set using this device guard,
   /// either from construction, or via set_device, if the guard is initialized,
   /// or nullopt if the guard is uninitialized.
-  optional<Device> current_device() const {
-    return guard_.has_value() ? make_optional(guard_->current_device())
-                              : nullopt;
+  std::optional<Device> current_device() const {
+    return guard_.has_value() ? std::make_optional(guard_->current_device())
+                              : std::nullopt;
   }
 
   /// Restore the original device, resetting this guard to uninitialized state.
@@ -422,7 +423,7 @@ class InlineOptionalDeviceGuard {
   }
 
  private:
-  optional<InlineDeviceGuard<T>> guard_;
+  std::optional<InlineDeviceGuard<T>> guard_;
 };
 
 } // namespace c10::impl

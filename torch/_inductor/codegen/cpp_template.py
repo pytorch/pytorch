@@ -3,7 +3,6 @@ import ctypes
 import functools
 import itertools
 import logging
-
 import sys
 from typing import Callable, List, Optional
 from unittest.mock import patch
@@ -17,6 +16,7 @@ from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateCaller, CppTemplateKernel
 
+
 log = logging.getLogger(__name__)
 
 
@@ -28,12 +28,14 @@ class CppTemplate(KernelTemplate):
         name: str,
         input_nodes,
         layout: ir.Layout,
+        num_threads: int,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-    ):
+    ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
         self.layout = layout
+        self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
 
     def generate(self, **kwargs):
@@ -41,7 +43,7 @@ class CppTemplate(KernelTemplate):
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
-            kernel_name=kernel_name,
+            kernel_name=kernel_name, num_threads=self.num_threads
         ) as kernel:
             code = kernel.render(self, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
@@ -80,15 +82,17 @@ class CppTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
+            flag_template_buffer_has_other_users: bool,
             epilogue_nodes: Optional[List[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
-                kernel_name=str(Placeholder.KERNEL_NAME),
+                kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads
             )
             render = functools.partial(
                 kernel.render,
                 self,
                 template_buffer_node=template_node,
+                flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,
             )
@@ -112,9 +116,10 @@ class CppTemplate(KernelTemplate):
                 #include "c10/util/Unroll.h"
             """
         )
-        enable_kernel_profile = (
-            config.cpp.enable_kernel_profile and sys.platform == "linux"
-        )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         if enable_kernel_profile:
             res.writelines(["#include <ATen/record_function.h>"])
         return res
