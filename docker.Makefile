@@ -20,6 +20,11 @@ CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL          ?= whl
 
+CUDA_PATH                ?= cpu
+ifneq ("$(CUDA_VERSION_SHORT)","cpu")
+CUDA_PATH                = cu$(filter-out \.,$(CUDA_VERSION_SHORT))
+endif
+
 PYTHON_VERSION           ?= 3.11
 # Match versions that start with v followed by a number, to avoid matching with tags like ciflow
 PYTORCH_VERSION          ?= $(shell git describe --tags --always --match "v[1-9]*.*")
@@ -30,8 +35,8 @@ BUILD_PROGRESS           ?= auto
 TRITON_VERSION           ?=
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
-							--build-arg CUDA_VERSION=$(CUDA_VERSION_SHORT) \
-							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
+							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+							--build-arg CUDA_PATH=$(CUDA_PATH) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
 							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
