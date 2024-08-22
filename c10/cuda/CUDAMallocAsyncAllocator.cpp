@@ -713,17 +713,17 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // Here, in the cudaMallocAsync allocator:
     // We simply ask the driver's opinion about active memory.
     // We don't bother distinguishing between allocated_bytes and active_bytes.
-    stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
-        static_cast<int64_t>(used_mem_current);
-    stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
+    stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+        .current = static_cast<int64_t>(used_mem_current);
+    stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
         static_cast<int64_t>(used_mem_peak);
-    stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
+    stats.active_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].current =
         static_cast<int64_t>(used_mem_current);
-    stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
+    stats.active_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
         static_cast<int64_t>(used_mem_peak);
-    stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
-        static_cast<int64_t>(reserved_mem_current);
-    stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
+    stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+        .current = static_cast<int64_t>(reserved_mem_current);
+    stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
         static_cast<int64_t>(reserved_mem_peak);
 
     return stats;

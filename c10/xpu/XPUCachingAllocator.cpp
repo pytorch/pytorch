@@ -332,7 +332,7 @@ class DeviceCachingAllocator {
   }
 
   MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
-    MemoryStatType stat_types = {};
+    MemoryStatTypeArray stat_types = {};
     stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
         pool.is_small ? MemoryStatType::SMALL_POOL
