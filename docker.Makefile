@@ -30,7 +30,7 @@ BUILD_PROGRESS           ?= auto
 TRITON_VERSION           ?=
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
-							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+							--build-arg CUDA_VERSION=$(CUDA_VERSION_SHORT) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
