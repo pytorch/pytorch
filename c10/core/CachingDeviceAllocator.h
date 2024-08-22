@@ -112,7 +112,7 @@ struct DeviceAllocatorStats {
 };
 
 // Size pretty-printer
-std::string format_memory_size(uint64_t size) {
+inline std::string format_memory_size(uint64_t size) {
   std::ostringstream os;
   os.precision(2);
   os << std::fixed;
