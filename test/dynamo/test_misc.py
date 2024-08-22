@@ -14,6 +14,7 @@ import math
 import operator
 import os
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -796,7 +797,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             self.assertEqual(compiled_args, eager_args)
         finally:
             cleanup_op("mylib::foo")
-            del lib
 
     def test_auto_functionalize_with_returns(self):
         try:
@@ -856,6 +856,271 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             eager_out = f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
             self.assertEqual(compiled_out, eager_out)
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
+
+    # Returns [output, graph]
+    def run_aot_eager(self, f, orig_args):
+        aot_eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+
+        log_stream, ctx = logs_to_string(
+                "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+        )
+
+        result = None 
+        with ctx():
+            result = torch.compile(f, backend="aot_eager", fullgraph=True)(*aot_eager_args)
+            
+            graph = "\n".join(
+                log_stream.getvalue().strip().split("\n")[4:]
+            ).strip()
+        return [aot_eager_args, result, graph]
+
+
+    # Returns [output, graph]
+    def run_inductor(self, f, orig_args):
+        compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+        
+        log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+        result = None 
+        with ctx():
+            result = torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+
+            graph = "\n".join(
+                log_stream.getvalue().strip().split("\n")[3:]
+            ).strip()
+
+        return [compiled_args, result, graph]
+
+    # foo takes two inputs that are not views.
+    def test_auto_functionalize_extra1(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x, y):
+                torch.ops.mylib.foo(x, y)
+                return x + y
+                
+            orig_args = (torch.randn(2), torch.randn(2))
+
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(f,orig_args)
+            [inductor_args, result2, graph_inductor] = self.run_inductor(f,orig_args)
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+            
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+            
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_aot,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = arg1_1, y = arg0_1, _x_base = arg1_1, _y_base = arg0_1, _all_bases = [arg1_1, arg0_1])
+        getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
+        getitem_2: "f32[2][1]cpu" = auto_functionalized[2];  auto_functionalized = None
+        
+        add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(getitem_1, getitem_2)
+        
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_2);  arg0_1 = getitem_2 = copy_ = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy__1 = None
+        return (add,)""",
+                    ignore_comments=True,
+                )            
+
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_inductor,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg1_1, arg0_1);  foo_default = None
+        
+        add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(arg1_1, arg0_1);  arg1_1 = arg0_1 = None
+        return (add,)""",
+                    ignore_comments=True,
+                )
+
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
+
+    # foo takes two view on the same input, function does not have return.
+    def test_auto_functionalize_extra2(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                a = x[0]
+                b = x[1]
+                torch.ops.mylib.foo(a,  b)
+                return 
+                
+            orig_args = [torch.randn(2)]
+
+  
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(f,orig_args)
+            [inductor_args, result2, graph_inductor] = self.run_inductor(f,orig_args)
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+            
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+            
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_aot,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
+        
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _x_base = arg0_1, _y_base = arg0_1, _all_bases = [arg0_1]);  select = select_1 = None
+        getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return ()""",
+                    ignore_comments=True,
+                )            
+
+            # 2. Run with inductor backend 
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_inductor,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
+        
+        as_strided_default: "f32[2][1]cpu" = torch.ops.aten.as_strided.default(select_1, [2], [1], 0);  select_1 = None
+        clone_default: "f32[2][1]cpu" = torch.ops.aten.clone.default(as_strided_default);  as_strided_default = None
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default, [], [], 1);  clone_default = None
+        foo_default = torch.ops.mylib.foo.default(select, as_strided_default_1);  select = foo_default = None
+        as_strided_scatter_default: "f32[2][1]cpu" = torch.ops.aten.as_strided_scatter.default(arg0_1, as_strided_default_1, [], [], 1);  as_strided_default_1 = None
+        
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter_default);  arg0_1 = as_strided_scatter_default = copy_ = None
+        return ()""",
+                    ignore_comments=True,
+                )
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
+
+    # foo takes two view on the same input, function returns both views and the input
+    def test_auto_functionalize_extra3(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                a = x[0]
+                b = x[1]
+                torch.ops.mylib.foo(a,  b)
+                return  (a,b, x)
+                
+            orig_args = [torch.randn(2)]
+
+  
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(f,orig_args)
+            [inductor_args, result2, graph_inductor] = self.run_inductor(f,orig_args)
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+            
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+            
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_aot,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
+        
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _x_base = arg0_1, _y_base = arg0_1, _all_bases = [arg0_1]);  select = select_1 = None
+        getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
+        
+        select_2: "f32[][]cpu" = torch.ops.aten.select.int(getitem_1, 0, 0)
+        select_3: "f32[][]cpu" = torch.ops.aten.select.int(getitem_1, 0, 1);  getitem_1 = None
+        return (select_2, select_3)""",
+                    ignore_comments=True,
+                )            
+
+            # 2. Run with inductor backend 
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_inductor,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
+        
+        as_strided_default: "f32[2][1]cpu" = torch.ops.aten.as_strided.default(select_1, [2], [1], 0);  select_1 = None
+        clone_default: "f32[2][1]cpu" = torch.ops.aten.clone.default(as_strided_default);  as_strided_default = None
+        as_strided_default_1: "f32[][]cpu" = torch.ops.aten.as_strided.default(clone_default, [], [], 1);  clone_default = None
+        foo_default = torch.ops.mylib.foo.default(select, as_strided_default_1);  select = foo_default = None
+        as_strided_scatter_default: "f32[2][1]cpu" = torch.ops.aten.as_strided_scatter.default(arg0_1, as_strided_default_1, [], [], 1);  as_strided_default_1 = None
+        
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter_default);  arg0_1 = copy_ = None
+        
+        select_2: "f32[][]cpu" = torch.ops.aten.select.int(as_strided_scatter_default, 0, 0)
+        select_3: "f32[][]cpu" = torch.ops.aten.select.int(as_strided_scatter_default, 0, 1);  as_strided_scatter_default = None
+        return (select_2, select_3)""",
+                    ignore_comments=True,
+                )
         finally:
             cleanup_op("mylib::foo")
             del lib
@@ -2910,7 +3175,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8
+            np.uint8,
             # np.dtype('int')       # XXX: as above
         ]
 
@@ -7836,8 +8101,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
-            def forward(self):
-                ...
+            def forward(self): ...
 
             def training_step(self):
                 self()
