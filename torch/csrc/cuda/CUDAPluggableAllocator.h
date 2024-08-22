@@ -115,7 +115,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
 
   void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  c10::DeviceAllocatorStats getDeviceStats(c10::DeviceIndex device) override;
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;

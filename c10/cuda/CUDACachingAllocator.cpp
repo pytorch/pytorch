@@ -133,10 +133,10 @@ namespace {
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 void decrease_stat_array(
-    MemoryStatArray& stat_array,
+    StatArray& stat_array,
     size_t amount,
-    const MemoryStatTypeArray& stat_types) {
-  for_each_selected_memory_stat_type(
+    const StatTypes& stat_types) {
+  for_each_selected_stat_type(
       stat_types, [&stat_array, amount](size_t stat_type) {
         stat_array[stat_type].decrease(amount);
       });
@@ -733,7 +733,7 @@ struct AllocParams {
       cudaStream_t stream,
       BlockPool* pool,
       size_t alloc_size,
-      DeviceAllocatorStats& stats)
+      DeviceStats& stats)
       : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
 
   c10::DeviceIndex device() const {
@@ -750,7 +750,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block{nullptr};
-  MemoryStatTypeArray stat_types = {false};
+  StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
 };
 
@@ -998,8 +998,7 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     } else {
       ss << "Process " << proc.pid;
     }
-    ss << " has " << format_memory_size(proc.usedGpuMemory)
-       << " memory in use. ";
+    ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
   return ss.str();
 #else
@@ -1015,7 +1014,7 @@ class DeviceCachingAllocator {
   mutable std::recursive_mutex mutex;
 
   // device statistics
-  DeviceAllocatorStats stats;
+  DeviceStats stats;
 
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
@@ -1231,8 +1230,7 @@ class DeviceCachingAllocator {
       std::string allowed_info;
 
       if (set_fraction) {
-        allowed_info =
-            format_memory_size(allowed_memory_maximum) + " allowed; ";
+        allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
       }
 
       std::string proc_info = reportProcessMemoryInfo(device);
@@ -1278,8 +1276,7 @@ class DeviceCachingAllocator {
       std::string private_pool_msg;
 
       if (allocated_in_private_pools > 0) {
-        private_pool_msg = "with " +
-            format_memory_size(allocated_in_private_pools) +
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
             " allocated in private pools (e.g., CUDA Graphs), ";
       }
 
@@ -1319,22 +1316,22 @@ class DeviceCachingAllocator {
           OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
-          format_memory_size(alloc_size),
+          format_size(alloc_size),
           ". GPU ",
           static_cast<int>(device),
           " has a total capacity of ",
-          format_memory_size(device_total),
+          format_size(device_total),
           " of which ",
-          format_memory_size(device_free),
+          format_size(device_free),
           " is free. ",
           proc_info,
           allowed_info,
           "Of the allocated memory ",
-          format_memory_size(allocated_bytes + allocated_in_private_pools),
+          format_size(allocated_bytes + allocated_in_private_pools),
           " is allocated by PyTorch, ",
           private_pool_msg,
           "and ",
-          format_memory_size(
+          format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
@@ -1390,20 +1387,18 @@ class DeviceCachingAllocator {
       } else if (!block->expandable_segment_) {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
-        for_each_selected_memory_stat_type(
-            params.stat_types, [&](size_t stat_type) {
-              stats.inactive_split_bytes[stat_type].increase(remaining->size);
-              stats.inactive_split[stat_type].increase(1);
-            });
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split_bytes[stat_type].increase(remaining->size);
+          stats.inactive_split[stat_type].increase(1);
+        });
       }
 
     } else if (already_split && !block->expandable_segment_) {
       // An already-split block is becoming active
-      for_each_selected_memory_stat_type(
-          params.stat_types, [&](size_t stat_type) {
-            stats.inactive_split_bytes[stat_type].decrease(block->size);
-            stats.inactive_split[stat_type].decrease(1);
-          });
+      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+        stats.inactive_split_bytes[stat_type].decrease(block->size);
+        stats.inactive_split[stat_type].decrease(1);
+      });
     }
 
     block->allocated = true;
@@ -1422,14 +1417,13 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    for_each_selected_memory_stat_type(
-        params.stat_types, [&](size_t stat_type) {
-          stats.allocation[stat_type].increase(1);
-          stats.allocated_bytes[stat_type].increase(block->size);
-          stats.active[stat_type].increase(1);
-          stats.active_bytes[stat_type].increase(block->size);
-          stats.requested_bytes[stat_type].increase(block->requested_size);
-        });
+    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].increase(1);
+      stats.allocated_bytes[stat_type].increase(block->size);
+      stats.active[stat_type].increase(1);
+      stats.active_bytes[stat_type].increase(block->size);
+      stats.requested_bytes[stat_type].increase(block->requested_size);
+    });
     if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
 
@@ -1457,8 +1451,8 @@ class DeviceCachingAllocator {
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.allocation[stat_type].decrease(1);
       stats.allocated_bytes[stat_type].decrease(block->size);
     });
@@ -1591,7 +1585,7 @@ class DeviceCachingAllocator {
   }
 
   /** Returns a copy of the memory allocator stats **/
-  DeviceAllocatorStats getStats() {
+  DeviceStats getStats() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     return stats;
   }
@@ -2249,8 +2243,8 @@ class DeviceCachingAllocator {
 
     // update statistics
     total_allocated_memory += mapped_range.size;
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*to_map->pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*to_map->pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
     });
 
@@ -2347,9 +2341,9 @@ class DeviceCachingAllocator {
       net_change_inactive_split_size += static_cast<int64_t>(block->size);
     }
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(pool);
+    StatTypes stat_types = get_stat_types_for_pool(pool);
 
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       // inactive_split tries to capture the idea that blocks
       // cannot be freed when requested, but fully free pages
       // of expandable blocks can always be freed.
@@ -2438,8 +2432,8 @@ class DeviceCachingAllocator {
     }
   }
 
-  MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
-    MemoryStatTypeArray stat_types = {false};
+  StatTypes get_stat_types_for_pool(const BlockPool& pool) {
+    StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
         pool.is_small ? MemoryStatType::SMALL_POOL
@@ -2681,7 +2675,7 @@ class DeviceCachingAllocator {
 
     total_allocated_memory += size;
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
-    for_each_selected_memory_stat_type(p.stat_types, [&](size_t stat_type) {
+    for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
@@ -2815,8 +2809,8 @@ class DeviceCachingAllocator {
       pool->owner_PrivatePool->cudaMalloc_count--;
     }
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].decrease(1);
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
@@ -2872,8 +2866,8 @@ class DeviceCachingAllocator {
 
     // update statistics
     total_allocated_memory -= unmapped.size;
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].decrease(unmapped.size);
     });
 
@@ -3467,7 +3461,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         ": did you call init?");
   }
 
-  DeviceAllocatorStats getDeviceStats(c10::DeviceIndex device) override {
+  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocator[device]->getStats();
   }
