@@ -664,7 +664,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
-  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
+  DeviceAllocatorStats getDeviceStats(c10::DeviceIndex device) override {
     assertValidDevice(device);
 
     // Memory currently reserved by the mempool
@@ -697,8 +697,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     // Many stat types are specific to the native allocator. We leave these
-    // untouched. Their "struct Stat"s will contain zeroed values.
-    DeviceStats stats;
+    // untouched. Their "struct DeviceAllocatorStats"s will contain zeroed
+    // values.
+    DeviceAllocatorStats stats;
 
     // In the native allocator:
     // allocated_bytes is the total bytes of blocks that have been malloc()ed
