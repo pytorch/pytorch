@@ -9,6 +9,20 @@ from typing import Any, Callable, Sequence
 import torch
 
 
+def all(iterator):
+    for elem in iterator:
+        if not elem:
+            return False
+    return True
+
+
+def any(iterator):
+    for elem in iterator:
+        if elem:
+            return True
+    return False
+
+
 def index(iterator, item, start=0, end=None):
     for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
@@ -142,11 +156,13 @@ def mapping_get(obj, key, value=None):
         return value
 
 
-def instantiate_user_defined_class_object(*args, **kwargs):
-    cls = args[0]
-    other_args = args[1:]
-    obj = cls.__new__(cls, *other_args, **kwargs)
-    obj.__init__(*other_args, **kwargs)
+def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
+    obj = cls.__new__(cls, *args, **kwargs)
+
+    # Only call __init__ if the object is an instance of the class
+    # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
+    if isinstance(obj, cls):
+        obj.__init__(*args, **kwargs)
     return obj
 
 

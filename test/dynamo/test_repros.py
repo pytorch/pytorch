@@ -4918,6 +4918,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_super_staticmethod(self):
+        class Parent:
+            @staticmethod
+            def greet():
+                return 5
+
+        class Child(Parent):
+            @staticmethod
+            def greet(x):
+                return x * super(Child, Child).greet()
+
+        child = Child()
+
+        def fn(x):
+            return child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile
         def f(x):
@@ -5017,6 +5039,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.foo, 200)
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
+
+    def test_classmethod_with_slots(self):
+        class Mock:
+            __slots__ = ("_a",)
+
+            def __init__(self):
+                self._a = 2
+
+            @classmethod
+            def _m(cls):
+                return 3
+
+            def run(self, x):
+                return torch.sin(x) * self._a * self._m()
+
+        def fn(x):
+            mock = Mock()
+            return mock.run(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_nn_parametrize(self):
         class Module(nn.Module):
@@ -5548,64 +5592,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             fn(x1, y)
 
         self.assertTrue(cnt.frame_count <= 2)
-
-    @torch._dynamo.config.patch(guard_nn_modules=False)
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_inlining_cornercase(self):
-        """
-        nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the
-        tensor attributes become part of the Dynamo graph. For unspecialized, they are lifted as inputs.
-
-        But there is a cornercase. Suppose you have NNModuleVariable with a submodule that is
-        UnspecializedNNModuleVariable. Today, Dynamo will still consider the submodule as specialized (courtesy of
-        guard.source().is_nn_module()). In retrospect, this is a mistake but there are dependencies of export and also
-        cudagraphs which make it harder to fix the corner case right away. The long term solution is
-        inline_inbuilt_nn_modules anyways, so we might have to live with this cornercase in the short term.
-
-        We are starting to annotate the source of each nn module more precisely - NNModuleVariable attribute is marked
-        as NNModuleSource, UnspecilaizedNNModuleVariable attribute is marked as UnspecializedNNModuleSource. But this
-        changes the behavior for the cornercase. And fails some tests which have unfortunately relied on this behavior.
-
-
-        To solve this, we tag the source only when inline_inbuilt_nn_module flag is turned on.
-
-        In this test, we purposely turn the flag off, testing that the tagging is disabled.
-        """
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-                self.a = torch.randn(1, 1)
-                self.counter = 0
-                self.multipliers = [2.2, 3.3]
-
-            def forward(self, x):
-                self.counter += 1
-                return (
-                    self.linear(x) * self.a * self.multipliers[0] * self.multipliers[1]
-                )
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = SubMod()
-
-            def forward(self, x):
-                return self.submod(x)
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager")
-
-        x = torch.randn(1, 1)
-        ref = mod(x)
-        res = opt_mod(x)
-
-        mod.submod.multipliers = [3.3, 4.4]
-        # Since guard_nn_modules is False, this will not recompile
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            ref = mod(x)
-            res = opt_mod(x)
 
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)

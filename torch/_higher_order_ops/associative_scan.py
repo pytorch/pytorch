@@ -67,6 +67,15 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
+class AssociativeScanOp(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("associative_scan")
+
+    def __call__(self, combine_fn, input, dim):
+        return super().__call__(combine_fn, input, dim)
+
+
+associative_scan_op = AssociativeScanOp()
 
 
 def associative_scan(
@@ -265,9 +274,6 @@ def generic_associative_scan(operator, elems_flat, dim=0):
     scans = _scan(elems_flat)
 
     return scans
-
-
-associative_scan_op = HigherOrderOperator("associative_scan")
 
 
 def trace_associative_scan(
