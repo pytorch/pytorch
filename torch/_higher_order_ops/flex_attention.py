@@ -204,11 +204,12 @@ def math_attention(
         mask_mod_other_buffers,
     )
 
-    # TODO Unconditionally return logsumexp for backwards
-    # if any(t.requires_grad for t in (query, key, value)):
+    # Set fully masked rows' sumexp to 0.0
     logsumexp = post_mod_scores.logsumexp(dim=-1)
+    masked_rows = torch.all(post_mod_scores == -float("inf"), dim=-1)
+    logsumexp = torch.where(masked_rows, 0.0, logsumexp)
 
-    post_mod_scores = post_mod_scores.softmax(dim=-1)
+    post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
     return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
@@ -816,7 +817,7 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
+    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
     node_args = (
