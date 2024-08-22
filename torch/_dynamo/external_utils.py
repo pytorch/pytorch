@@ -2,6 +2,7 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+import warnings
 from typing import List
 
 import torch
@@ -81,6 +82,13 @@ class FakeBackwardCFunction:
         self.saved_tensors = saved_tensors
 
     def __getattr__(self, name):
+        if name == "saved_variables":
+            warnings.warn(
+                "'saved_variables' is deprecated; use 'saved_tensors'",
+                DeprecationWarning,
+            )
+            return self.saved_tensors
+
         # route any attribute that isn't defined on this obj
         return getattr(self.real, name)
 
