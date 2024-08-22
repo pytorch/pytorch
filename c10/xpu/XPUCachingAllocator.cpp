@@ -117,7 +117,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block;
-  MemoryStatTypeArray stat_types = {};
+  StatTypes stat_types = {};
 };
 
 } // anonymous namespace
@@ -125,7 +125,7 @@ struct AllocParams {
 class DeviceCachingAllocator {
  private:
   mutable std::recursive_mutex mutex;
-  DeviceAllocatorStats stats;
+  DeviceStats stats;
   BlockPool large_blocks; // unallocated cached blocks larger than 1 MB
   BlockPool small_blocks; // unallocated cached blocks 1 MB or smaller
   ska::flat_hash_set<Block*> active_blocks; // allocated or in use by a stream
@@ -176,8 +176,8 @@ class DeviceCachingAllocator {
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.active_bytes[stat_type].decrease(block->size);
       stats.requested_bytes[stat_type].decrease(block->requested_size);
     });
@@ -258,7 +258,7 @@ class DeviceCachingAllocator {
       return false;
     }
     p.block = new Block(device, p.queue(), size, p.pool, ptr);
-    for_each_selected_memory_stat_type(p.stat_types, [&](size_t stat_type) {
+    for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(size);
     });
     return true;
@@ -293,8 +293,8 @@ class DeviceCachingAllocator {
     auto* pool = block->pool;
     pool->blocks.erase(block);
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
@@ -331,12 +331,11 @@ class DeviceCachingAllocator {
     }
   }
 
-  MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
-    MemoryStatTypeArray stat_types = {};
-    stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
+  StatTypes get_stat_types_for_pool(const BlockPool& pool) {
+    StatTypes stat_types = {};
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        pool.is_small ? MemoryStatType::SMALL_POOL
-                      : MemoryStatType::LARGE_POOL)] = true;
+        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
     return stat_types;
   }
 
@@ -376,12 +375,11 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted)
 
-    for_each_selected_memory_stat_type(
-        params.stat_types, [&](size_t stat_type) {
-          stats.allocated_bytes[stat_type].increase(block->size);
-          stats.active_bytes[stat_type].increase(block->size);
-          stats.requested_bytes[stat_type].increase(block->requested_size);
-        });
+    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocated_bytes[stat_type].increase(block->size);
+      stats.active_bytes[stat_type].increase(block->size);
+      stats.requested_bytes[stat_type].increase(block->requested_size);
+    });
 
     return block;
   }
@@ -423,24 +421,24 @@ class DeviceCachingAllocator {
       c10::xpu::get_device_properties(&device_prop, device);
       auto device_total = device_prop.global_mem_size;
       auto allocated_bytes =
-          stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
       auto reserved_bytes =
-          stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
           "XPU out of memory. Tried to allocate ",
-          format_memory_size(alloc_size),
+          format_size(alloc_size),
           ". GPU ",
           static_cast<int>(device),
           " has a total capacity of ",
-          format_memory_size(device_total),
+          format_size(device_total),
           ". Of the allocated memory ",
-          format_memory_size(allocated_bytes),
+          format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
-          format_memory_size(reserved_bytes - allocated_bytes),
+          format_size(reserved_bytes - allocated_bytes),
           " is reserved by PyTorch but unallocated.",
           " Please use `empty_cache` to release all unoccupied cached memory.");
     }
@@ -452,8 +450,8 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
 
-    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
-    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       stats.allocated_bytes[stat_type].decrease(block->size);
     });
 
@@ -477,7 +475,7 @@ class DeviceCachingAllocator {
     release_cached_blocks();
   }
 
-  DeviceAllocatorStats getStats() {
+  DeviceStats getStats() {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     return stats;
   }
@@ -486,7 +484,7 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       stats.allocated_bytes[statType].reset_accumulated();
       stats.reserved_bytes[statType].reset_accumulated();
       stats.active_bytes[statType].reset_accumulated();
@@ -498,7 +496,7 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       stats.allocated_bytes[statType].reset_peak();
       stats.reserved_bytes[statType].reset_peak();
       stats.active_bytes[statType].reset_peak();
@@ -648,7 +646,7 @@ class XPUAllocator : public Allocator {
         ": did you call init?");
   }
 
-  DeviceAllocatorStats getDeviceStats(DeviceIndex device) {
+  DeviceStats getDeviceStats(DeviceIndex device) {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
   }
@@ -690,7 +688,7 @@ void resetAccumulatedStats(DeviceIndex device) {
   return allocator.resetAccumulatedStats(device);
 }
 
-DeviceAllocatorStats getDeviceStats(DeviceIndex device) {
+DeviceStats getDeviceStats(DeviceIndex device) {
   return allocator.getDeviceStats(device);
 }
 
