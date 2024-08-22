@@ -7,8 +7,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -156,5 +155,4 @@ void PropagateRequiresGrad(Block* block) {
 void PropagateRequiresGrad(std::shared_ptr<Graph>& graph) {
   PropagateRequiresGrad(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

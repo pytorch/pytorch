@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 """Unit tests for the internal registration wrapper module."""
+
 from __future__ import annotations
 
 import operator
@@ -20,6 +21,7 @@ from torch.onnx._internal.fx import (
     registration,
 )
 from torch.testing._internal import common_utils
+
 
 # TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
 TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16])

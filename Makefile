@@ -1,6 +1,7 @@
 # This makefile does nothing but delegating the actual building to cmake.
 PYTHON = python3
-PIP = pip3
+PIP = $(PYTHON) -m pip
+NIGHTLY_TOOL_OPTS := pull
 
 all:
 	@mkdir -p build && cd build && cmake .. $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && $(MAKE)
@@ -22,9 +23,26 @@ linecount:
 		echo "Cloc is not available on the machine. You can install cloc with " && \
 		echo "    sudo apt-get install cloc"
 
-setup_lint:
+ensure-branch-clean:
+	@if [ -n "$(shell git status --porcelain)" ]; then \
+		echo "Please commit or stash all changes before running this script"; \
+		exit 1; \
+	fi
+
+setup-env: ensure-branch-clean
+	$(PYTHON) tools/nightly.py $(NIGHTLY_TOOL_OPTS)
+
+setup-env-cuda:
+	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --cuda"
+
+setup_env: setup-env
+setup_env_cuda: setup-env-cuda
+
+setup-lint:
 	$(PIP) install lintrunner
 	lintrunner init
+
+setup_lint: setup-lint
 
 lint:
 	lintrunner

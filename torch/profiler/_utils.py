@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Dict, List, TYPE_CHECKING
 
 from torch.autograd.profiler import profile
-
 from torch.profiler import DeviceType
+
 
 if TYPE_CHECKING:
     from torch.autograd import _KinetoEvent

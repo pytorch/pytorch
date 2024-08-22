@@ -166,15 +166,15 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    return sizeof(T) * std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    return sizeof(T) * std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n * batch;
+    return sizeof(T) * std::min(ldc, stride_c) * n * batch;
   }
 
   size_t GetSize(bool duplicate_inputs) const {

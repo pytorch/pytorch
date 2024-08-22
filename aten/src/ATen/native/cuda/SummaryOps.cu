@@ -257,9 +257,9 @@ Tensor _bincount_cuda_template(
     return at::zeros(
         {minlength},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         kCUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
@@ -295,9 +295,9 @@ Tensor _bincount_cuda_template(
     output = at::zeros(
         {nbins},
         kLong,
-        c10::nullopt /* layout */,
+        std::nullopt /* layout */,
         DeviceType::CUDA,
-        c10::nullopt /* pin_memory */);
+        std::nullopt /* pin_memory */);
     cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
@@ -317,9 +317,9 @@ Tensor _histc_cuda_template(
   Tensor output = at::zeros(
       {nbins},
       self.scalar_type(),
-      c10::nullopt /* layout */,
+      std::nullopt /* layout */,
       DeviceType::CUDA,
-      c10::nullopt /* pin_memory */);
+      std::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max && self.numel() > 0) {

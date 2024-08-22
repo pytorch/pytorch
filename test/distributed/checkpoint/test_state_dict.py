@@ -176,8 +176,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 device_mesh = init_device_mesh("cuda", (self.world_size,))
 
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
-            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=True)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3, foreach=True)
             if wrapping:
                 strategy = set(wrapping)
             else:
@@ -204,7 +204,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
-            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3, foreach=True)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
@@ -217,7 +217,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_orig_params": [True, False],
                 "use_composable": [True, False],
                 "use_dtensor": [True, False],
-                "wrapping": [tuple(), (nn.Linear, UnitModule)],
+                "wrapping": [(), (nn.Linear, UnitModule)],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_fsdp,
@@ -231,7 +231,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_orig_params": [True],
                 "use_composable": [False],
                 "use_dtensor": [False],
-                "wrapping": [tuple()],
+                "wrapping": [()],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_fsdp,
@@ -894,6 +894,60 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_setting_meta_device_model(self) -> None:
+        # This test verifies that we can set model state dict by a meta device model
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            for layer in meta_model:
+                fully_shard(layer)
+            fully_shard(meta_model)
+        with torch.device("cpu"):
+            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            full_sd = cpu_model.state_dict()
+        set_model_state_dict(
+            meta_model,
+            model_state_dict=full_sd,
+            options=StateDictOptions(full_state_dict=True, strict=False),
+        )
+        meta_model_dict = meta_model.state_dict()
+        cpu_mocel_dict = get_model_state_dict(cpu_model)
+        for key, value in cpu_mocel_dict.items():
+            device = value.device
+            meta_model_change_device = meta_model_dict[key].to(device=device)
+            self.assertEqual(value, meta_model_change_device)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_setting_meta_device_model_broadcasting(self) -> None:
+        # This test verifies that we can set model state dict by a meta device model
+        # With the correlated changes in state_dict, meta device model should be accepted
+        # in broadcasting and get copied successfully.
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            for layer in meta_model:
+                fully_shard(layer)
+            fully_shard(meta_model)
+        with torch.device("cpu"):
+            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            full_sd = cpu_model.state_dict()
+        set_model_state_dict(
+            meta_model,
+            model_state_dict=full_sd,
+            options=StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True, strict=False
+            ),
+        )
+        meta_model_dict = meta_model.state_dict()
+        cpu_mocel_dict = get_model_state_dict(cpu_model)
+        for key, value in cpu_mocel_dict.items():
+            device = value.device
+            meta_model_change_device = meta_model_dict[key].to(device=device)
+            self.assertEqual(value, meta_model_change_device)
 
 
 class TestNoComm(MultiProcessTestCase):
