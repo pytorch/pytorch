@@ -43,7 +43,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMPSVersionIfLessThan, skipMeta, get_all_device_types
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -8205,6 +8205,7 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
     @dtypesIfMPS(torch.float, torch.bfloat16, torch.complex64)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
