@@ -8,6 +8,12 @@ from typing import Iterable
 from ..decorators import substitute_in_graph
 
 
+__all__ = [
+    "all",
+    "any",
+]
+
+
 @substitute_in_graph(builtins.all)
 def all(iterable: Iterable[object], /) -> bool:
     for elem in iterable:
