@@ -2910,6 +2910,8 @@ class TestSDPACudaOnly(NNTestCase):
             return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
+        if TEST_WITH_ROCM and is_causal and seq_len_q != seq_len_k:
+            self.skipTest("ROCm does not accept is_casual when seq_len_q != seq_len_k")
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -3187,7 +3189,6 @@ class TestSDPACudaOnly(NNTestCase):
             fudge_factors=fudge_factors
         )
 
-    @skipIfRocm  # FIXME: "capturing stream has unjoined work"
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [256, 1024])
@@ -3235,6 +3236,8 @@ class TestSDPACudaOnly(NNTestCase):
 
         if fused_kernel == SDPBackend.FLASH_ATTENTION and is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
+        if TEST_WITH_ROCM and is_causal and seq_len_q != seq_len_k:
+            self.skipTest("ROCm does not accept is_casual when seq_len_q != seq_len_k")
 
         seed = 42
         n_heads = 4
