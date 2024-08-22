@@ -518,9 +518,9 @@ class TestAutograd(TestCase):
             def backward(ctx, grad_output):
                 return torch.randn(10, dtype=torch.float)
 
-        # with self.assertRaisesRegex(RuntimeError, "expected shape"):
-        input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
-        MyFunction.apply(input).sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "expected shape"):
+            input = torch.randn(5, 5, dtype=torch.float, requires_grad=True)
+            MyFunction.apply(input).sum().backward()
 
     def test_unrelated_inputs(self):
         # test to ensure grad(grad)check runs successfully even if there is an
