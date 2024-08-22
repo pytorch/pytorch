@@ -251,6 +251,16 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
+# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
+# Using TH_BINARY_BUILD to check whether is binary build.
+# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
+if(DEFINED ENV{TH_BINARY_BUILD})
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
+                         "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
+else()
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
+endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -1036,8 +1046,6 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
-                               CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
@@ -1290,6 +1298,10 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDSS.cmake
+    DESTINATION share/cmake/Caffe2/
+    COMPONENT dev)
+  install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
@@ -1342,6 +1354,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
     if(BUILD_LIBTORCHLESS)
+      caffe2_update_option(USE_CUDA OFF)
       set(ALL_PT_TARGETS "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
     else()
       # @todo test if we can remove this

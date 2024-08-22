@@ -744,6 +744,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
             "torch/csrc/distributed/c10d/Utils.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
