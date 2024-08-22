@@ -1562,20 +1562,46 @@ class CppKernel(Kernel):
         reduction_init_fn=reduction_init,
         welford_weight_reciprocal_vec_fn=None,
     ):
+        """
+        MSVC don't support dynamic array(VLA). Please use std::unique_ptr to instead of it.
+        Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
+        Let's use fixed array to fix VLA issue, and it also keep high performance without allocation.
+        """
+        fixed_thread_pool_size = 1024
         if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
             self.parallel_reduction_prefix.writeline(
                 "int max_threads = omp_get_max_threads();"
             )
+            # Check fixed size and num_threads, warn to user on demand.
+            num_threads_warn_msg = f'"Reserved fixed_thread_pool_size({fixed_thread_pool_size}) is smaller than num_threads: %d, it will limited performance.", max_threads'  # noqa: B950
+
+            size_check = (
+                f"if ({fixed_thread_pool_size} < max_threads)",
+                "{",
+                f"    TORCH_WARN_ONCE({num_threads_warn_msg});",
+                "}",
+            )
+            self.parallel_reduction_prefix.writelines(size_check)
+
+            # Use smaller number for real num_threads, avoid over buffer.
+            max_threads_resize = (
+                f"max_threads = std::min(max_threads, {fixed_thread_pool_size});"
+            )
+            self.parallel_reduction_prefix.writeline(max_threads_resize)
+
         acc_local = f"{acc}_local"
         num_threads = (
             "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
         )
-        acc_per_thread = f"{acc}_arr[{num_threads}]"
+        acc_per_thread_var_name = f"{acc}_arr"
+        acc_per_thread = f"{acc_per_thread_var_name}[{num_threads}]"
+        acc_per_thread_decl = f"{acc_per_thread_var_name}[{fixed_thread_pool_size}]"
+
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
         self.local_reduction_init.writeline(
             f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
         )
-        self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread};")
+        self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread_decl};")
         self.parallel_reduction_prefix.writelines(
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
