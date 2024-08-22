@@ -135,7 +135,7 @@ def auto_functionalized_dense(
     new_kwargs = dict(**kwargs)
     result = []
 
-    # We need this for the clone to be observed during decomposition(this could be an underlying bug?),
+    # Note1: We need this for the clone to be observed during decomposition(this could be an underlying bug?),
     # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
     # decomposition its all good for now.
 
@@ -151,10 +151,12 @@ def auto_functionalized_dense(
             if kwargs[name] is not None and isinstance(kwargs[name], list):
                 new_kwargs[name] = [clone_preserve_strides(x) for x in kwargs[name]]
                 for item in new_kwargs[name]:
+                    # see Note1
                     if _only_clone_these_tensors is not None:
                         result_not_used.append(item)
             elif kwargs[name] is not None:
-                clone_preserve_strides(kwargs[name])
+                new_kwargs[name] = clone_preserve_strides(kwargs[name])
+                # see Note1
                 if _only_clone_these_tensors is not None:
                     result_not_used.append(new_kwargs[name])
 
