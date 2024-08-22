@@ -172,7 +172,7 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
-        if SEMI_STRUCTURED_SUPPORTED_BACKENDS is None:
+        if SEMI_STRUCTURED_SUPPORTED_BACKENDS == {}:
             self.skipTest('semi-structured sparsity has no available backend!')
         super().setUp()
 
@@ -261,7 +261,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 class TestSparseSemiStructured(TestCase):
 
     def setUp(self):
-        if SEMI_STRUCTURED_SUPPORTED_BACKENDS is None:
+        if SEMI_STRUCTURED_SUPPORTED_BACKENDS == {}:
             self.skipTest('semi-structured sparsity has no available backend!')
         if IS_WINDOWS:
             self.skipTest("torch.compile not supported on windows")
@@ -1131,8 +1131,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             assert torch.backends.cusparselt.version() is None
 
 
-if SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
