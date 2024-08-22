@@ -4031,7 +4031,7 @@ class CppScheduling(BaseScheduling):
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
-        we will spilt z2 -> 30*z2 + z3, then the node's var_ranges will be changed to
+        we will split z2 -> 30*z2 + z3, then the node's var_ranges will be changed to
         {z0: 2, z1: 9216, z2: 32, z3: 30} and indexing_exprs will be changed to
         {'index0': 8847360*z0 + 960*z1 + 30*z2 + z3, 'index1': 32*z0 + z2, 'index2': 30*z2 + z3}.
         """
