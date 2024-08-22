@@ -202,10 +202,6 @@ class DynamoExport(_exporter_legacy.FXGraphExtractor):
                 *model_args,
                 **model_kwargs,
             )
-
-        for node in graph_module.graph.nodes:
-            if node.op == "placeholder":
-                print("EEEE", node.name, node.meta["example_value"].shape)
         del graph_guard  # Unused
         torch._dynamo.reset()
 
