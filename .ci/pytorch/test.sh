@@ -415,7 +415,7 @@ pr_time_benchmarks() {
   fi
   export SHA_TO_COMPARE
 
-  # We try to do an inceremental build if we succeed then we can run side B, next we will add a compare script.
+  # We try to do an inceremental build if we succeed then we can run the benchmarks on the `SHA_TO_COMPARE` commit.
   git checkout "${SHA_TO_COMPARE}"
   if TORCH_CUDA_ARCH_LIST="7.5" python setup.py develop; then
      PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks  source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
