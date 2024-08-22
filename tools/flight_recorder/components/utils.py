@@ -4,22 +4,23 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from enum import Enum
-from typing import (  # type: ignore[attr-defined]
-    Any,
-    Dict,
-    List,
-    Set,
-    Tuple,
-    Type,
+import math
+from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+
+from tools.flight_recorder.components.types import (
+    Group,
+    MatchState,
+    Membership,
+    Op,
+    P2P,
 )
 
-from tools.flight_recorder.components.types import Op, Group, Membership, MatchState, P2P
 
 try:
     from tabulate import tabulate
 except ModuleNotFoundError:
     print("tabulate is not installed. Proceeding without it.")
+
 
 def match_one_event(
     event_a: Dict[Any, Any],
@@ -134,6 +135,15 @@ def match_coalesced_groups(
 
     visualize_ops(True)
     return True
+
+
+def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int, int]:
+    input_numel = 0
+    output_numel = 0
+    for e in alltoall_cases:
+        input_numel += math.prod(e["input_sizes"][0])
+        output_numel += math.prod(e["output_sizes"][0])
+    return input_numel == output_numel, input_numel, output_numel
 
 
 def find_coalesced_group(

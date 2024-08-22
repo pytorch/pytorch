@@ -6,25 +6,29 @@
 
 import argparse
 import ast
-import math
 import sys
-from enum import Enum
-from typing import (  # type: ignore[attr-defined]
-    _eval_type,
-    Any,
-    Dict,
-    Generic,
-    List,
-    NamedTuple,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
+from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+
+from tools.flight_recorder.components.types import (
+    Collective,
+    Database,
+    Group,
+    MatchState,
+    Membership,
+    NCCLCall,
+    Op,
+    Traceback,
 )
-
-from tools.flight_recorder.components.utils import match_one_event, match_coalesced_groups, find_coalesced_group, just_print_entries, check_no_missing_dump_files, check_version, check_trace_from_beginning
-from tools.flight_recorder.components.types import Op, Group, Membership, NCCLCall, Traceback, Collective, MatchState, Database
-
+from tools.flight_recorder.components.utils import (
+    check_no_missing_dump_files,
+    check_size_alltoall,
+    check_trace_from_beginning,
+    check_version,
+    find_coalesced_group,
+    just_print_entries,
+    match_coalesced_groups,
+    match_one_event,
+)
 
 
 try:
@@ -40,6 +44,8 @@ except ModuleNotFoundError:
 """
 Flat DB builder
 """
+
+
 def build_groups_memberships(
     pg_config: Any,
 ) -> Tuple[List[Group], Dict[Any, Group], List[Membership], Dict[str, Set[Any]]]:

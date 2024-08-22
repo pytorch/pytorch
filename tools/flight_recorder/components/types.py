@@ -168,6 +168,23 @@ class MatchState(Enum):
     UNDECIDED = 5
 
 
+def check_size_evenly_broadcasting(
+    list1: List[Any], list2: List[Any], size: int
+) -> bool:
+    ratio = None
+    for a, b in zip(list1, list2):
+        current_ratio = int(a) / int(b)
+        if current_ratio == 1:
+            continue
+        if current_ratio != size:
+            return False
+        elif ratio is None:
+            ratio = current_ratio
+        else:
+            return False
+    return True
+
+
 class Op:
     """Parses relevant info about operation out of 'event' dict
 
@@ -279,14 +296,14 @@ class Op:
             if self.type in [
                 "all_gather",
                 "all_gather_base",
-            ] and not check_size_even_expand(
+            ] and not check_size_evenly_broadcasting(
                 other.output_sizes, self.input_sizes, self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
-            ] and not check_size_even_expand(
+            ] and not check_size_evenly_broadcasting(
                 other.input_sizes, self.output_sizes, self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH
