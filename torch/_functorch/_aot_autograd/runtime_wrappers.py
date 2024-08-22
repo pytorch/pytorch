@@ -1734,9 +1734,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
+
+                # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
+                # There are tests that count these calls, saving to var.
+                ctx_saved_tensors = ctx.saved_tensors
                 all_args = [
                     *ctx.symints,
-                    *ctx.saved_tensors,
+                    *ctx_saved_tensors,
                     *flat_bw_args_with_grads,
                     *bw_tokens,
                     *rng_args,
@@ -1795,7 +1799,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     - len(rng_args)
                     - len(bw_tokens)
                 )
-                assert tangents_start_idx == len(ctx.symints) + len(ctx.saved_tensors)
+                assert tangents_start_idx == len(ctx.symints) + len(ctx_saved_tensors)
                 tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # TODO: figure out how to refactor the backward properly
