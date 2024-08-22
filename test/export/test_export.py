@@ -36,7 +36,13 @@ from torch.export._trace import (
     _export_to_torch_ir,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
-from torch.export.graph_signature import InputKind
+from torch.export.graph_signature import (
+    ExportGraphSignature,
+    InputKind,
+    OutputKind,
+    OutputSpec,
+    TensorArgument,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -177,6 +183,15 @@ def is_training_ir_test(test_name):
     return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
         TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
     )
+
+
+def get_hop_schema(ep: torch.export.ExportedProgram):
+    hop_node = next(
+        node
+        for node in ep.graph.nodes
+        if isinstance(node.target, torch._ops.HigherOrderOperator)
+    )
+    return torch._library.utils.hop_schema_from_fx_node(hop_node)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -4175,6 +4190,11 @@ def forward(self, x):
         dim0 = torch.export.Dim("dim0", min=3)
         inp = torch.ones(6, 4)
         ep = export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0}})
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
@@ -5564,6 +5584,11 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
         )
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
+        )
 
         cond_top_level_nn_module_stack = [
             node.meta["nn_module_stack"]
@@ -5648,6 +5673,12 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 pre_dispatch=True,
                 strict=False,
             )
+
+        schema = get_hop_schema(exported_program)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.code.strip()),
@@ -6133,6 +6164,12 @@ def forward(self, x):
                 (torch.randn(4), torch.randn(4), torch.randn(4)),
                 pre_dispatch=True,
             )
+
+        schema = get_hop_schema(ep)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, GraphModule true_fn, GraphModule false_fn, Tensor[3] operands) -> Tensor[1]""",
+        )
         # test cond subgraph
         expected_names_and_ops = [
             ("mul_2", "placeholder"),
@@ -7185,6 +7222,87 @@ def forward(self, x):
                     nn_module_stack_1.values(), nn_module_stack_2.values()
                 ):
                     self.assertEqual(v1, v2)
+
+    def test_duplicated_getitem(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 2)
+
+        foo = Foo()
+        inputs = (torch.randn(3),)
+        ep = torch.export.export(foo, inputs, strict=False)
+
+        graph_module = copy.deepcopy(ep.graph_module)
+
+        call_function_node = None
+        num_getitems = 0
+        for node in graph_module.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.topk.default
+            ):
+                call_function_node = node
+            elif node.op == "call_function" and node.target == operator.getitem:
+                self.assertIs(node.args[0], call_function_node)
+                num_getitems += 1
+
+        self.assertIsNotNone(call_function_node)
+        self.assertEqual(num_getitems, 2)
+
+        output_node = list(graph_module.graph.nodes)[-1]
+
+        nodes = []
+        with graph_module.graph.inserting_before(output_node):
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 1)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 0)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 0)
+                )
+            )
+            nodes.append(
+                graph_module.graph.call_function(
+                    operator.getitem, (call_function_node, 1)
+                )
+            )
+        signature = ExportGraphSignature(
+            input_specs=ep.graph_signature.input_specs,
+            output_specs=ep.graph_signature.output_specs
+            + [
+                OutputSpec(
+                    kind=OutputKind.USER_OUTPUT,
+                    arg=TensorArgument(name=node.name),
+                    target=None,
+                )
+                for node in nodes
+            ],
+        )
+        output_node.args = (output_node.args[0] + tuple(nodes),)
+        graph_module.recompile()
+        new_ep = ep._update(graph_module, signature)
+
+        new_num_getitems = 0
+        for node in new_ep.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.topk.default
+            ):
+                call_function_node = node
+            elif node.op == "call_function" and node.target == operator.getitem:
+                self.assertIs(node.args[0], call_function_node)
+                new_num_getitems += 1
+        self.assertEqual(num_getitems, new_num_getitems)
+        self.assertEqual(
+            len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

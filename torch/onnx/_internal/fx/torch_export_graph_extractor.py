@@ -94,7 +94,9 @@ class TorchExport(_exporter_legacy.FXGraphExtractor):
         # Thus, we need to run this step after io_adapters.
         model = model.run_decompositions(options.decomposition_table)
         # Export FX graph to ONNX ModelProto.
-        return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
+        return self.pre_export_passes(  # type: ignore[return-value]
+            options, model, model.graph_module, updated_model_args
+        )
 
     def pre_export_passes(
         self,
