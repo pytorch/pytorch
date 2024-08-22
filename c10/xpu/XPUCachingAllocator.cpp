@@ -26,39 +26,6 @@ constexpr size_t kRoundLarge = 2097152;
 
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
-using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
-
-void increase_stat(Stat& stat, size_t amount) {
-  stat.current += static_cast<int64_t>(amount);
-  stat.peak = std::max(stat.current, stat.peak);
-  stat.allocated += static_cast<int64_t>(amount);
-}
-
-void decrease_stat(Stat& stat, size_t amount) {
-  stat.current -= static_cast<int64_t>(amount);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stat.current >= 0,
-      "Negative tracked stat in XPU allocator (likely logic error).");
-  stat.freed += static_cast<int64_t>(amount);
-}
-
-void reset_accumulated_stat(Stat& stat) {
-  stat.allocated = 0;
-  stat.freed = 0;
-}
-
-void reset_peak_stat(Stat& stat) {
-  stat.peak = stat.current;
-}
-
-template <typename Func>
-void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
-  for (const auto stat_type : c10::irange(stat_types.size())) {
-    if (stat_types[stat_type]) {
-      f(stat_type);
-    }
-  }
-}
 
 struct Block;
 typedef bool (*Comparison)(const Block*, const Block*);
@@ -150,35 +117,15 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block;
-  StatTypes stat_types = {};
+  MemoryStatType stat_types = {};
 };
 
 } // anonymous namespace
 
-// Size pretty-printer
-std::string format_size(uint64_t size) {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024) {
-    os << size << " bytes";
-  } else if (size <= 1048576) {
-    os << (static_cast<double>(size) / 1024.0);
-    os << " KiB";
-  } else if (size <= 1073741824ULL) {
-    os << static_cast<double>(size) / 1048576.0;
-    os << " MiB";
-  } else {
-    os << static_cast<double>(size) / 1073741824.0;
-    os << " GiB";
-  }
-  return os.str();
-}
-
 class DeviceCachingAllocator {
  private:
   mutable std::recursive_mutex mutex;
-  DeviceStats stats;
+  DeviceAllocatorStats stats;
   BlockPool large_blocks; // unallocated cached blocks larger than 1 MB
   BlockPool small_blocks; // unallocated cached blocks 1 MB or smaller
   ska::flat_hash_set<Block*> active_blocks; // allocated or in use by a stream
@@ -229,7 +176,7 @@ class DeviceCachingAllocator {
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    StatTypes stat_types = get_stat_types_for_pool(pool);
+    MemoryStatType stat_types = get_stat_types_for_pool(pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       decrease_stat(stats.active_bytes[stat_type], block->size);
       decrease_stat(stats.requested_bytes[stat_type], block->requested_size);
@@ -346,7 +293,7 @@ class DeviceCachingAllocator {
     auto* pool = block->pool;
     pool->blocks.erase(block);
 
-    StatTypes stat_types = get_stat_types_for_pool(*pool);
+    MemoryStatType stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       decrease_stat(stats.reserved_bytes[stat_type], block->size);
     });
@@ -384,8 +331,8 @@ class DeviceCachingAllocator {
     }
   }
 
-  StatTypes get_stat_types_for_pool(const BlockPool& pool) {
-    StatTypes stat_types = {};
+  MemoryStatType get_stat_types_for_pool(const BlockPool& pool) {
+    MemoryStatType stat_types = {};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
         pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
@@ -483,15 +430,15 @@ class DeviceCachingAllocator {
           OutOfMemoryError,
           false,
           "XPU out of memory. Tried to allocate ",
-          format_size(alloc_size),
+          format_memory_size(alloc_size),
           ". GPU ",
           static_cast<int>(device),
           " has a total capacity of ",
-          format_size(device_total),
+          format_memory_size(device_total),
           ". Of the allocated memory ",
-          format_size(allocated_bytes),
+          format_memory_size(allocated_bytes),
           " is allocated by PyTorch, and ",
-          format_size(reserved_bytes - allocated_bytes),
+          format_memory_size(reserved_bytes - allocated_bytes),
           " is reserved by PyTorch but unallocated.",
           " Please use `empty_cache` to release all unoccupied cached memory.");
     }
@@ -503,7 +450,7 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
 
-    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
+    MemoryStatType stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       decrease_stat(stats.allocated_bytes[stat_type], block->size);
     });
@@ -528,7 +475,7 @@ class DeviceCachingAllocator {
     release_cached_blocks();
   }
 
-  DeviceStats getStats() {
+  DeviceAllocatorStats getStats() {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     return stats;
   }
@@ -699,7 +646,7 @@ class XPUAllocator : public Allocator {
         ": did you call init?");
   }
 
-  DeviceStats getDeviceStats(DeviceIndex device) {
+  DeviceAllocatorStats getDeviceStats(DeviceIndex device) {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
   }
@@ -741,7 +688,7 @@ void resetAccumulatedStats(DeviceIndex device) {
   return allocator.resetAccumulatedStats(device);
 }
 
-DeviceStats getDeviceStats(DeviceIndex device) {
+DeviceAllocatorStats getDeviceStats(DeviceIndex device) {
   return allocator.getDeviceStats(device);
 }
 

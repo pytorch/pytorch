@@ -371,16 +371,16 @@ void mallocAsync(
         device,
         " would exceed allowed memory. (out of memory)",
         "\nCurrently allocated     : ",
-        format_size(pytorch_used_bytes[device]),
+        format_memory_size(pytorch_used_bytes[device]),
         "\nRequested               : ",
-        format_size(size),
+        format_memory_size(size),
         "\nDevice limit            : ",
-        format_size(device_total),
+        format_memory_size(device_total),
         "\nFree (according to CUDA): ",
-        format_size(device_free),
+        format_memory_size(device_free),
         "\nPyTorch limit (set by user-supplied memory fraction)"
         "\n                        : ",
-        format_size(pytorch_memory_limits[device]));
+        format_memory_size(pytorch_memory_limits[device]));
   } else {
     C10_CUDA_CHECK(err);
   }
