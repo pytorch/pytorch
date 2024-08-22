@@ -4770,15 +4770,16 @@ class ExternKernel(InputsKernel):
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
-                order
-                and x.get_layout().is_stride_ordered(order)
+                (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
                     and (
                         isinstance(x.data, ReinterpretView)
                         or list(x.get_layout().stride) == exact_strides
                     )
-                    and x.get_layout().is_stride_ordered(get_stride_order(V.graph.sizevars.size_hints(exact_strides)))
+                    and x.get_layout().is_stride_ordered(
+                        get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+                    )
                 )
             ):
                 return x
@@ -4798,11 +4799,15 @@ class ExternKernel(InputsKernel):
                     return x
 
         # TODO - Storage to InputBuffer
-        # TODO - how about exact_strides?
-        if (
-            isinstance(x, InputBuffer)
-            and order
-            and x.get_layout().is_stride_ordered(order)
+        if isinstance(x, InputBuffer) and (
+            (order and x.get_layout().is_stride_ordered(order))
+            or (
+                exact_strides
+                and list(x.get_layout().stride) == exact_strides
+                and x.get_layout().is_stride_ordered(
+                    get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+                )
+            )
         ):
             return x
         if (
