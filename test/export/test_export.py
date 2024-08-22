@@ -5787,7 +5787,6 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
-    def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -5829,6 +5828,22 @@ def forward(self, x, b_t, y):
 
         _test(MyModule(), "foo")
         _test(MyOuterModule(), "inner.foo")
+
+    def test_export_with_set_grad_enabled(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                with torch.no_grad():
+                    return self.linear(x)
+
+        model = Model()
+        ep = export(model, (torch.randn(4, 4),), {})
+        self.assertIn(
+            "torch.ops.higher_order.wrap_with_set_grad_enabled", ep.graph_module.code
+        )
 
     def test_export_as_backend(self):
         def f(x, y):
