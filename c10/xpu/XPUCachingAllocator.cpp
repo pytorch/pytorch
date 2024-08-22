@@ -117,7 +117,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block;
-  MemoryStatType stat_types = {};
+  MemoryStatTypeArray stat_types = {};
 };
 
 } // anonymous namespace
@@ -176,10 +176,10 @@ class DeviceCachingAllocator {
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    MemoryStatType stat_types = get_stat_types_for_pool(pool);
-    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_stat(stats.active_bytes[stat_type], block->size);
-      decrease_stat(stats.requested_bytes[stat_type], block->requested_size);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(pool);
+    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+      stats.active_bytes[stat_type].decrease(block->size);
+      stats.requested_bytes[stat_type].decrease(block->requested_size);
     });
   }
 
@@ -258,8 +258,8 @@ class DeviceCachingAllocator {
       return false;
     }
     p.block = new Block(device, p.queue(), size, p.pool, ptr);
-    for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
-      increase_stat(stats.reserved_bytes[stat_type], size);
+    for_each_selected_memory_stat_type(p.stat_types, [&](size_t stat_type) {
+      stats.reserved_bytes[stat_type].increase(size);
     });
     return true;
   }
@@ -293,9 +293,9 @@ class DeviceCachingAllocator {
     auto* pool = block->pool;
     pool->blocks.erase(block);
 
-    MemoryStatType stat_types = get_stat_types_for_pool(*pool);
-    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_stat(stats.reserved_bytes[stat_type], block->size);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*pool);
+    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+      stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
     delete block;
@@ -331,11 +331,12 @@ class DeviceCachingAllocator {
     }
   }
 
-  MemoryStatType get_stat_types_for_pool(const BlockPool& pool) {
+  MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
     MemoryStatType stat_types = {};
-    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+        pool.is_small ? MemoryStatType::SMALL_POOL
+                      : MemoryStatType::LARGE_POOL)] = true;
     return stat_types;
   }
 
@@ -375,11 +376,12 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted)
 
-    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-      increase_stat(stats.allocated_bytes[stat_type], block->size);
-      increase_stat(stats.active_bytes[stat_type], block->size);
-      increase_stat(stats.requested_bytes[stat_type], block->requested_size);
-    });
+    for_each_selected_memory_stat_type(
+        params.stat_types, [&](size_t stat_type) {
+          stats.allocated_bytes[stat_type].increase(block->size);
+          stats.active_bytes[stat_type].increase(block->size);
+          stats.requested_bytes[stat_type].increase(block->requested_size);
+        });
 
     return block;
   }
@@ -421,10 +423,10 @@ class DeviceCachingAllocator {
       c10::xpu::get_device_properties(&device_prop, device);
       auto device_total = device_prop.global_mem_size;
       auto allocated_bytes =
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
               .current;
       auto reserved_bytes =
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
               .current;
       TORCH_CHECK_WITH(
           OutOfMemoryError,
@@ -450,9 +452,9 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
 
-    MemoryStatType stat_types = get_stat_types_for_pool(*block->pool);
-    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_stat(stats.allocated_bytes[stat_type], block->size);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
+    for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocated_bytes[stat_type].decrease(block->size);
     });
 
     if (!block->stream_uses.empty()) {
@@ -484,11 +486,11 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
-      reset_accumulated_stat(stats.allocated_bytes[statType]);
-      reset_accumulated_stat(stats.reserved_bytes[statType]);
-      reset_accumulated_stat(stats.active_bytes[statType]);
-      reset_accumulated_stat(stats.requested_bytes[statType]);
+         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+      stats.allocated_bytes[statType].reset_accumulated();
+      stats.reserved_bytes[statType].reset_accumulated();
+      stats.active_bytes[statType].reset_accumulated();
+      stats.requested_bytes[statType].reset_accumulated();
     }
   }
 
@@ -496,11 +498,11 @@ class DeviceCachingAllocator {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
-      reset_peak_stat(stats.allocated_bytes[statType]);
-      reset_peak_stat(stats.reserved_bytes[statType]);
-      reset_peak_stat(stats.active_bytes[statType]);
-      reset_peak_stat(stats.requested_bytes[statType]);
+         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+      stats.allocated_bytes[statType].reset_peak();
+      stats.reserved_bytes[statType].reset_peak();
+      stats.active_bytes[statType].reset_peak();
+      stats.requested_bytes[statType].reset_peak();
     }
   }
 };

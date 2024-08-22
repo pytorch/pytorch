@@ -44,9 +44,14 @@ enum struct MemoryStatType : uint64_t {
   NUM_TYPES = 3 // remember to update this whenever a new stat type is added
 };
 
+typedef std::array<MemoryStat, static_cast<size_t>(MemoryStatType::NUM_TYPES)>
+    MemoryStatArray;
+typedef std::array<bool, static_cast<size_t>(MemoryStatType::NUM_TYPES)>
+    MemoryStatTypeArray;
+
 template <typename Func>
 void for_each_selected_memory_stat_type(
-    const MemoryStatType& stat_types,
+    const MemoryStatTypeArray& stat_types,
     Func f) {
   for (const auto stat_type : c10::irange(stat_types.size())) {
     if (stat_types[stat_type]) {
@@ -54,9 +59,6 @@ void for_each_selected_memory_stat_type(
     }
   }
 }
-
-typedef std::array<MemoryStat, static_cast<size_t>(MemoryStatType::NUM_TYPES)>
-    MemoryStatArray;
 
 struct DeviceAllocatorStats {
   // COUNT: allocations requested by client code

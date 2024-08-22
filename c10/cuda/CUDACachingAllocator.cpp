@@ -135,7 +135,7 @@ using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 void decrease_stat_array(
     StatArray& stat_array,
     size_t amount,
-    const MemoryStatType& stat_types) {
+    const MemoryStatTypeArray& stat_types) {
   for_each_selected_memory_stat_type(
       stat_types, [&stat_array, amount](size_t stat_type) {
         stat_array[stat_type].decrease(amount);
@@ -750,7 +750,7 @@ struct AllocParams {
   BlockPool* pool;
   size_t alloc_size;
   Block* block{nullptr};
-  MemoryStatType stat_types = {false};
+  MemoryStatTypeArray stat_types = {false};
   cudaError_t err{cudaSuccess};
 };
 
@@ -998,7 +998,8 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     } else {
       ss << "Process " << proc.pid;
     }
-    ss << " has " << format_memory_size(proc.usedGpuMemory) << " memory in use. ";
+    ss << " has " << format_memory_size(proc.usedGpuMemory)
+       << " memory in use. ";
   }
   return ss.str();
 #else
@@ -1230,7 +1231,8 @@ class DeviceCachingAllocator {
       std::string allowed_info;
 
       if (set_fraction) {
-        allowed_info = format_memory_size(allowed_memory_maximum) + " allowed; ";
+        allowed_info =
+            format_memory_size(allowed_memory_maximum) + " allowed; ";
       }
 
       std::string proc_info = reportProcessMemoryInfo(device);
@@ -1276,7 +1278,8 @@ class DeviceCachingAllocator {
       std::string private_pool_msg;
 
       if (allocated_in_private_pools > 0) {
-        private_pool_msg = "with " + format_memory_size(allocated_in_private_pools) +
+        private_pool_msg = "with " +
+            format_memory_size(allocated_in_private_pools) +
             " allocated in private pools (e.g., CUDA Graphs), ";
       }
 
@@ -1452,7 +1455,7 @@ class DeviceCachingAllocator {
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
-    MemoryStatType stat_types = get_stat_types_for_pool(*block->pool);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
       stats.allocation[stat_type].decrease(1);
       stats.allocated_bytes[stat_type].decrease(block->size);
@@ -2242,7 +2245,7 @@ class DeviceCachingAllocator {
 
     // update statistics
     total_allocated_memory += mapped_range.size;
-    MemoryStatType stat_types = get_stat_types_for_pool(*to_map->pool);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*to_map->pool);
     for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
     });
@@ -2340,7 +2343,7 @@ class DeviceCachingAllocator {
       net_change_inactive_split_size += static_cast<int64_t>(block->size);
     }
 
-    MemoryStatType stat_types = get_stat_types_for_pool(pool);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(pool);
 
     for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
       // inactive_split tries to capture the idea that blocks
@@ -2431,8 +2434,8 @@ class DeviceCachingAllocator {
     }
   }
 
-  MemoryStatType get_stat_types_for_pool(const BlockPool& pool) {
-    MemoryStatType stat_types = {false};
+  MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
+    MemoryStatTypeArray stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
         pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
@@ -2807,7 +2810,7 @@ class DeviceCachingAllocator {
       pool->owner_PrivatePool->cudaMalloc_count--;
     }
 
-    MemoryStatType stat_types = get_stat_types_for_pool(*pool);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].decrease(1);
       stats.reserved_bytes[stat_type].decrease(block->size);
@@ -2864,7 +2867,7 @@ class DeviceCachingAllocator {
 
     // update statistics
     total_allocated_memory -= unmapped.size;
-    MemoryStatType stat_types = get_stat_types_for_pool(*block->pool);
+    MemoryStatTypeArray stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_memory_stat_type(stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].decrease(unmapped.size);
     });
