@@ -3108,27 +3108,15 @@ class TestSDPACudaOnly(NNTestCase):
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
         grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
-        fudge_factors = {
-            'out': 4,
-            'grad_query': 160.0,
-            'grad_key': 16,
-            'grad_value': 4,
-        }
-        if TEST_WITH_ROCM:
-            if head_dim > 128:
-                fudge_factors['grad_key'] *= 1.5
-            if seq_len_q >= 512 or seq_len_k >= 512:
-                fudge_factors['grad_query'] *= 1.25
-                fudge_factors['grad_key'] *= 3.0
-            if seq_len_q >= 2048:
-                fudge_factors['grad_query'] *= 1.5
-            if seq_len_k >= 2048:
-                fudge_factors['grad_query'] *= 4.0
-                fudge_factors['grad_key'] *= 4.0
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
             *zip(grads_ref, grads_ref_lp, grads),
-            fudge_factors=fudge_factors
+            fudge_factors={
+                'out': 4,
+                'grad_query': 160.0,
+                'grad_key': 16,
+                'grad_value': 4,
+            }
         )
 
     @skipIfRocm  # FIXME: "capturing stream has unjoined work"

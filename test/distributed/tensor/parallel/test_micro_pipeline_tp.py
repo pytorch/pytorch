@@ -56,6 +56,15 @@ def _fp8_all_gather(tensor: torch.Tensor, gather_dim: int, group_name: str):
     return torch.cat(chunks, dim=gather_dim).view(tensor.dtype)
 
 
+def is_rocm_testing_and_without_new_arch():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx94' not in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return False
+    return False
+
+
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
@@ -228,6 +237,7 @@ class MicroPipelineTPTest(TestCase):
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
 
+    @unittest.skipIf(is_rocm_testing_and_without_new_arch(), "ROCm needs recent GPU arch")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
@@ -324,6 +334,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
+    @unittest.skipIf(is_rocm_testing_and_without_new_arch(), "ROCm needs recent GPU arch")
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
