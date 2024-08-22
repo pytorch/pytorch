@@ -161,7 +161,6 @@ def auto_functionalized_dense(
 
     out = _mutable_op(**new_kwargs)
 
-    # Map every argument to the addresses of its aliases.
     def transform(input):
         if input is None:
             return None
@@ -203,13 +202,14 @@ def auto_functionalized_dense(
                 _only_clone_these_tensors is not None
                 and name not in _only_clone_these_tensors
             ):
-                # if the argument is mutated in place, item would have already observed the effect.
+                # if the argument is mutated in place, base would have already observed the effect.
                 continue
 
             if isinstance(arg, list):
                 for i, elem in enumerate(arg):
-                    base_address = _arg_to_base_address[name][i]
-                    if base._cdata != base_address:
+                    # check `base` is a base for the this argument
+                    arg_base_address = _arg_to_base_address[name][i]
+                    if base._cdata != arg_base_address:
                         continue
                     mutation_source = new_kwargs[name][i]
                     base_with_effects = observe_mutation(
@@ -217,8 +217,9 @@ def auto_functionalized_dense(
                     )
 
             else:
-                base_address = _arg_to_base_address[name]
-                if base._cdata != base_address:
+                # check `base` is a base for the this argument
+                arg_base_address = _arg_to_base_address[name]
+                if base._cdata != arg_base_address:
                     continue
                 mutation_source = new_kwargs[name]
                 base_with_effects = observe_mutation(base_with_effects, mutation_source)
@@ -281,8 +282,6 @@ def get_mutable_arg_names(op: OpOverload) -> List[str]:
 
 def do_auto_functionalize(
     op: OpOverload,
-    storage_to_aliases: Dict[int, List[int]],
-    tensors_look_up: Dict[int, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Any:
@@ -385,7 +384,6 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    # the only outputs are the base_list outputs
     for orig_arg, unwrapped_out in zip(all_basis_list, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:

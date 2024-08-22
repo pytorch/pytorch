@@ -15,7 +15,6 @@ import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -1031,7 +1030,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
             cleanup_op("mylib::foo")
             del lib
 
-    # foo takes two view on the same input, function does not have return.
+    # foo takes two views on the same input, function does not have return.
     def test_auto_functionalize_extra2(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -1108,7 +1107,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             cleanup_op("mylib::foo")
             del lib
 
-    # foo takes two view on the same input, function returns both views and the input
+    # foo takes two views on the same input, function returns both views and the input
     def test_auto_functionalize_extra3(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")

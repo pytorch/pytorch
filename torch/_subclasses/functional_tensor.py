@@ -2,7 +2,6 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -309,12 +308,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
-        # we use this to track what tensors are aliases of each other
-        self.storage_to_aliases = defaultdict(set)
-
-        # maps tensor cdata every tensor address to the tensor.
-        self.tensors_look_up = {}
-
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -353,18 +346,6 @@ class FunctionalTensorMode(TorchDispatchMode):
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
-
-        def add_to_storage_table(tensor):
-            self.storage_to_aliases[tensor.untyped_storage()._cdata].add(tensor._cdata)
-            self.tensors_look_up[tensor._cdata] = tensor
-
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                add_to_storage_table(arg)
-            if isinstance(arg, list):
-                for elem in arg:
-                    if isinstance(elem, torch.Tensor):
-                        add_to_storage_table(elem)
 
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
@@ -439,9 +420,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # it doesn't matter what mode we use here because
             # the implementation of do_auto_functionalize doesn't
             # interact with FunctionalTensorMode at all
-            return do_auto_functionalize(
-                func, self.storage_to_aliases, self.tensors_look_up, args, kwargs
-            )
+            return do_auto_functionalize(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
