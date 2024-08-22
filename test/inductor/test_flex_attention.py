@@ -17,7 +17,6 @@ from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
-    _score_mod_signature,
     and_masks,
     BlockMask,
     create_block_mask,
@@ -213,7 +212,8 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
-        if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
+        # TODO: Make this check stricter after updating eager SDPA masked_softmax semantics
+        if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
@@ -263,7 +263,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: _score_mod_signature,
+        score_mod: Callable,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = H,
@@ -273,7 +273,6 @@ class TestFlexAttention(InductorTestCase):
         KV_H: int = H,
         KV_S: int = S,
         KV_D: int = D,
-        block_mask: Optional[BlockMask] = None,
     ):
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
@@ -286,6 +285,7 @@ class TestFlexAttention(InductorTestCase):
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        block_mask = None
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -1437,8 +1437,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
-    @common_utils.parametrize("compile", [True, False])
-    def test_fully_masked_out_rows_0_check(self, compile: bool):
+    def test_fully_masked_out_rows(self):
         # Ensure fully masked out rows won't cause NaNs.
         query = torch.randn(
             (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
@@ -1449,6 +1448,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         value = torch.randn(
             (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
         )
+        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
 
         M = S // 2
 
@@ -1456,32 +1456,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return q < M
 
         block_mask = create_block_mask(mask_mod, 1, 1, S, S)
-
-        flex = (
-            torch.compile(flex_attention, dynamic=False) if compile else flex_attention
+        out = torch.compile(flex_attention, dynamic=False)(
+            query, key, value, block_mask=block_mask
         )
-        out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
+        # TODO: Switch to self.run_test_with_call after updating eager SDPA masked_softmax semantics
         self.assertEqual(out[:, :, M:, :].sum(), 0)
-        self.assertTrue((lse[:, :, M:] == 0.0).all())
 
-        loss = out.sum() + lse.sum()
-        loss.backward()
+        out.backward(do)
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
-
-    @supported_platform
-    @common_utils.parametrize("compile", [True, False])
-    def test_fully_masked_out_rows(self, compile: bool):
-        M = S // 2
-
-        def mask_mod(b, h, q, kv):
-            return q < M
-
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
-
-        def noop_mod(score, b, h, q_idx, kv_idx):
-            return score
-
-        self.run_test(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
 
     @supported_platform
     def test_comparison_vs_sdpa(self):
