@@ -56,7 +56,7 @@ if torch.cuda.is_available():
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
 
     # add cuSPASRELt tests if available
-    if torch.backends.cusparselt.is_available():
+    if torch.backends.cusparselt.is_available() and (_IS_SM8X or _IS_SM9X):
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
 
 inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.int8)
@@ -1064,8 +1064,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, bias=bias)
 
         alpha_scaled = torch.stack([alpha] * 128).t()
-        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtype)
+        dense_result = alpha_scaled * torch.mmA.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtypeneuckcttbkkccrkfec)
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
