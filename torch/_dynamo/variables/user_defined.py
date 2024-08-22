@@ -8,7 +8,6 @@ import inspect
 import itertools
 import random
 import sys
-import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -17,7 +16,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
@@ -175,6 +174,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
 
+        # Special handling of collections.OrderedDict.fromkeys()
+        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
+        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
+        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
+        # and we need duplicate code to handle both cases.
+        if (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            return super().var_getattr(tx, name)
+
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
@@ -188,20 +198,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
+        elif isinstance(obj, types.ClassMethodDescriptorType):
+            # e.g.: inspect.getattr_static(dict, "fromkeys")
+            #       inspect.getattr_static(itertools.chain, "from_iterable")
+            func = obj.__get__(None, self.value)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif source:
             # __mro__ is a member in < 3.12, an attribute in >= 3.12
             if inspect.ismemberdescriptor(obj) or (
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
-
-        # Special handling of collections.OrderedDict.fromkeys()
-        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
-        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
-        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
-        # and we need duplicate code to handle both cases.
-        if self.value is collections.OrderedDict and name == "fromkeys":
-            return super().var_getattr(tx, name)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -398,9 +408,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            and self.value.__new__ == object.__new__
+            and self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source is not None
+            and self.source
             and not is_forbidden_context_manager(self.value)
         ):
             # import here to avoid an unfortunate circular dependency.
@@ -515,7 +525,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return tx.inline_user_function_return(
                 SourcelessBuilder.create(
-                    tx, polyfill.instantiate_user_defined_class_object
+                    tx, polyfills.instantiate_user_defined_class_object
                 ),
                 [self, *args],
                 kwargs,
@@ -890,23 +900,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return get_custom_getattr(self.value)
 
     def _getattr_static(self, name):
+        subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
+        import _collections
+
+        # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
+        # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
         if (
-            isinstance(self.value, PyTreeSpec)
-            or "__slots__" in self.value.__class__.__dict__
-            or type(self.value) == threading.local
+            subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
+            or isinstance(
+                subobj, _collections._tuplegetter
+            )  # namedtuple fields are represented by _tuplegetter
+            or (
+                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
+            )  # handle memberdecriptor and slots
+            or (
+                isinstance(subobj, property)
+                and isinstance(
+                    subobj.fget, types.BuiltinFunctionType
+                )  # property with C-defined fget
+            )
         ):
-            try:
-                cls_var = inspect.getattr_static(
-                    self.value.__class__, name, NO_SUCH_SUBOBJ
-                )
-                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
-                    # maybe user-defined @property that we need to inline
-                    return cls_var
-            except AttributeError:
-                pass  # __slots__
-            subobj = getattr(self.value, name)
-        else:
-            subobj = inspect.getattr_static(self.value, name)
+            # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
+            # want to call getattr because it can be user-overridden.
+            subobj = self.value.__getattribute__(name)
+
         return subobj
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
@@ -925,8 +942,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
         from . import ConstantVariable
+        from .builder import SourcelessBuilder, VariableBuilder
 
-        value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
 
@@ -1009,6 +1026,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
+        elif isinstance(subobj, types.ClassMethodDescriptorType):
+            # e.g.: inspect.getattr_static({}, "fromkeys")
+            func = subobj.__get__(self.value, None)
+            if source is not None:
+                return VariableBuilder(tx, source)(func)
+            else:
+                return SourcelessBuilder.create(tx, func)
         elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
             subobj.__get__
         ):
@@ -1066,7 +1090,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return trace_rules.lookup(func)(func)
 
         if (
-            torch._dynamo.config.inline_inbuilt_nn_modules
+            # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
+            # keep Dynamo behavior compatible with no inlining, as there will be some delay to turn on the flag in
+            # fbcode.
+            (
+                torch._dynamo.config.inline_inbuilt_nn_modules
+                or isinstance(self, variables.FSDPManagedNNModuleVariable)
+            )
             and source
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
@@ -1096,8 +1126,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         return variables.LazyVariableTracker.create(
                             subobj_from_class, src_from_class
                         )
-
-                from .builder import SourcelessBuilder
 
                 return SourcelessBuilder.create(tx, subobj)
 
@@ -1266,7 +1294,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "get" and type(self.value).get is collections.abc.Mapping.get:
-            return variables.UserMethodVariable(polyfill.mapping_get, self)
+            return variables.UserMethodVariable(polyfills.mapping_get, self)
         else:
             return super().var_getattr(tx, name)
 

@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -764,7 +764,9 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+        return variables.UserFunctionVariable(
+            polyfills.getattr_and_trace
+        ).call_function(
             tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
         )
 
@@ -925,6 +927,63 @@ class FunctoolsPartialVariable(VariableTracker):
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+
+
+class PolyfilledFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "fn",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_polyfill_handlers(cls):
+        return {}
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return cls(
+            value,
+            source=source,
+        )
+
+    def __init__(self, fn: VariableTracker, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+
+    def get_function(self):
+        return self.as_python_constant()
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        handler = self._get_polyfill_handlers().get(self.fn)
+        if handler:
+            assert callable(handler)
+            return SourcelessBuilder.create(tx, handler).call_function(tx, args, kwargs)
+
+        for candidate in ("__torch_dynamo_polyfill__", "__python_implementation__"):
+            handler = getattr(self.fn, candidate, None)
+            if handler:
+                assert callable(handler)
+                if self.source:
+                    source = AttrSource(self.source, candidate)
+                    return UserFunctionVariable.create_with_source(
+                        handler,
+                        source=source,
+                    ).call_function(tx, args, kwargs)
+                return SourcelessBuilder.create(
+                    tx,
+                    handler,
+                ).call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.fn
 
 
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier

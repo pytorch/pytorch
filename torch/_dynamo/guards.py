@@ -1419,20 +1419,22 @@ class GuardBuilder(GuardBuilderBase):
         else:
             np_types = ()
 
+        ok_mutable_types = (list, set)
+
         ok_types = tuple(
             common_constant_types
             | {
                 type,
-                list,
                 tuple,
-                set,
                 frozenset,
                 slice,
                 range,
                 torch.Size,
                 *np_types,
+                *ok_mutable_types,
             }
         )
+
         if torch.distributed.is_available():
             from torch.distributed._tensor.placement_types import (
                 Partial,
@@ -1491,6 +1493,11 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_guard_manager:
             # Construct a debug string to put into the c++ equals match guard.
             code = [f"{ref} == {val!r}"]
+            if istype(val, ok_mutable_types):
+                # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
+                # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+                # pointer equality check.
+                val = deepcopy(val)
             self.get_guard_manager(guard).add_equals_match_guard(
                 val, get_verbose_code_parts(code, guard)
             )
@@ -1754,6 +1761,7 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            names: Dict[str, Tuple[int, int]] = {}
             source_pairs: List[Tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
                 Tuple[Source, Union[Source, Symbol], Callable]
@@ -1765,6 +1773,7 @@ class GuardBuilder(GuardBuilderBase):
                         constraint,
                         get_sources,
                         output_graph.shape_env,
+                        names,
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
