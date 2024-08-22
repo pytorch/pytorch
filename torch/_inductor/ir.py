@@ -4790,7 +4790,9 @@ class ExternKernel(InputsKernel):
                     or (
                         exact_strides
                         and significant_strides_equal(
-                            exact_strides, x.get_layout().real_layout().stride, x.get_size()
+                            exact_strides,
+                            x.get_layout().real_layout().stride,
+                            x.get_size(),
                         )
                     )
                 ):
