@@ -61,6 +61,12 @@ import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._C import (
+    _get_function_stack_at,
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
@@ -1461,6 +1467,16 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
+
+
+def get_safe_global_name(tx, root, obj):
+    # The global_mangled_class_name should be different for different
+    # invocations of torch.compile. Otherwise, we can run into a situation
+    # where multiple torch.compile invocations re-use the same global name,
+    # but the global's lifetime is tied to the first invocation (and
+    # may be deleted when the first torch.compile invocation is deleted)
+    # We mangle it based off of the output_graph's id.
+    return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
 def wrap_fake_exception(fn):
@@ -3009,6 +3025,29 @@ def _disable_saved_tensors_hooks_during_tracing():
 
 def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
+
+
+def get_torch_function_mode_stack(filter_ignored=True):
+    from .variables.torch_function import IGNORED_MODES
+
+    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+    if filter_ignored:
+        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
+
+    return stack
+
+
+def get_torch_function_mode_stack_at(ind):
+    assert ind < _len_torch_function_stack() and ind >= 0
+    return torch._C._get_function_stack_at(ind)
+
+
+def set_torch_function_mode_stack(stack):
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
+
+    for mode in stack:
+        _push_on_torch_function_stack(mode)
 
 
 def verify_guard_fn_signature(value):
