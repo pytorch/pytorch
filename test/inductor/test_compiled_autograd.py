@@ -2481,7 +2481,6 @@ known_graph_breaks_tests = {
     "test_return_leaf",  # assertEqual
     "test_save_none_for_backward",  # assertIsNone
     "test_saved_variables_deprecated",  # warnings.warn
-    "test_autograd_node_isinstance",  # assertIsInstance
 }
 
 test_contexts = {
@@ -2502,7 +2501,6 @@ skipped_tests = {
     # Running these tests succeed, but somehow cause other tests to fail
     "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
     "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
-    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
 known_failing_tests = {
@@ -2587,6 +2585,8 @@ known_failing_tests = {
     "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
+    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
+    "test_autograd_node_isinstance",  # must use a fake ctx, can't directly assert it being a Node
     # Uncategorized
     "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
     "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
