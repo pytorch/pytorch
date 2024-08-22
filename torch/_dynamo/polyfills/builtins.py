@@ -12,6 +12,14 @@ from typing import Iterable, TypeVar
 from ..decorators import substitute_in_graph
 
 
+__all__ = [
+    "all",
+    "any",
+    "enumerate",
+    "sum",
+]
+
+
 _T = TypeVar("_T")
 
 
@@ -32,7 +40,7 @@ def any(iterable: Iterable[object], /) -> bool:
 
 
 @substitute_in_graph(builtins.enumerate.__new__)  # type: ignore[arg-type]
-def enumerate___new__(
+def enumerate(
     cls: type[builtins.enumerate[_T]],
     iterable: Iterable[_T],
     start: int = 0,
