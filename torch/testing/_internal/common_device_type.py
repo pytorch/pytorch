@@ -1632,8 +1632,10 @@ def expectedFailureXPU(fn):
 def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure("meta")(fn))
 
+
 def expectedFailureMPS(fn):
     return expectedFailure("mps")(fn)
+
 
 def expectedFailureXLA(fn):
     return expectedFailure("xla")(fn)
