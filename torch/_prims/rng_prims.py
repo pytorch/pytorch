@@ -142,6 +142,8 @@ def get_device(args, kwargs):
     devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
     if any(dev == "cuda" for dev in devices):
         return "cuda"
+    elif any(dev == "xpu" for dev in devices):
+        return "xpu"
     elif any(dev == "hpu" for dev in devices):
         return "hpu"
     elif any(dev == "cpu" for dev in devices):
@@ -170,9 +172,18 @@ def register_run_and_save_rng_state_op():
             return torch.hpu.get_rng_state(), op(*args, **kwargs)
         raise RuntimeError("functionalize a hpu RNG operator is not supported.")
 
+    @run_and_save_rng_state.py_impl(DispatchKey.XPU)
+    def impl_xpu(op, *args, **kwargs):
+        return torch.xpu.get_rng_state(), op(*args, **kwargs)
+
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
-        impl_map = {"cuda": impl_cuda, "cpu": impl_cpu, "hpu": impl_hpu}
+        impl_map = {
+            "cuda": impl_cuda,
+            "cpu": impl_cpu,
+            "hpu": impl_hpu,
+            "xpu": impl_xpu,
+        }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"
         impl = impl_map[device]
@@ -230,6 +241,14 @@ def register_run_with_rng_state_op():
             return out
         raise RuntimeError("functionalize a hpu RNG operator is not supported.")
 
+    @run_with_rng_state.py_impl(DispatchKey.XPU)
+    def impl_xpu(rng_state, op, *args, **kwargs):
+        current_state = torch.xpu.get_rng_state()
+        torch.xpu.set_rng_state(rng_state)
+        out = op(*args, **kwargs)
+        torch.xpu.set_rng_state(current_state)
+        return out
+
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, rng_state, op, *args, **kwargs):
         # TODO: you don't need to do this, the dispatch here already disabled
@@ -245,7 +264,12 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(rng_state, op, *args, **kwargs):
-        impl_map = {"cuda": impl_cuda, "cpu": impl_cpu, "hpu": impl_hpu}
+        impl_map = {
+            "cuda": impl_cuda,
+            "cpu": impl_cpu,
+            "hpu": impl_hpu,
+            "xpu": impl_xpu,
+        }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"
         impl = impl_map[device]
