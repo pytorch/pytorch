@@ -24,7 +24,8 @@ Usage
 python fr_trace.py -d <dump dir containing trace files> [-o <output file>]
 
 - Omitting the optional output file will still yield analysis information to stdout
-- the output file is a pickle of the flat DB, which may change in format in the future.
+- The output file is a pickle of the flat DB, which may change in format in the future.
+- This script is versioned so that we can ensure our future changes to flight recorder are backwards compatible.
 """
 
 import argparse

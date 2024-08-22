@@ -52,20 +52,24 @@ def build_groups_memberships(
     """
     pg_config: {
         global_rank: {
-            (pg_id, desc, ranks)
+            (pg_guid, desc, ranks)
         }
     }
 
-    `pg_id` is a system generated id, but depending on the mode of PG creation it could be a globally incrementing int
+    `pg_guid` is a system generated id, but depending on the mode of PG creation it could be a globally incrementing int
           or a hash of the ranks.  See `_process_group_name` in distributed_c10d.py.
     `desc` is provided by the user (optionally) and should be 'meaningful' (e.g. TP/PP/DP group)
     `ranks` is a list of the 'global ranks' that are members of the PG.
 
-    (pg_id, desc, ranks) tuples are appended lazily to the flight buffer when `getNCCLComm` is called on a PG and
+    (pg_guid, desc, ranks) tuples are appended lazily to the flight buffer when `getNCCLComm` is called on a PG and
     the `enabled_` flag is true for that PG.
         - the order of calling (init_process_group, new_group, etc) does not affect the order of the tuples in the list
 
-    Returns: a groups table and a membership table, where each row is a Group or Membership namedtuple
+    Returns:
+        `groups`: a groups table where each row is a Group namedtuple.
+        `_groups`: a dict that is indexed by pg_guid with Group namedtuple as value.
+        `memberships`: a membership table where each row is a Membership namedtuple.
+        `_memberships`: a dict that is indexed by pg_guid with set of ranks (int) as value.
     """
     # flat lists for return
     groups = []
@@ -75,28 +79,27 @@ def build_groups_memberships(
     _groups = {}
     _memberships = {}
     for global_rank in pg_config:
-        for pg_id in pg_config[global_rank]:
-            desc = pg_config[global_rank][pg_id]["desc"]
-            ranks = ast.literal_eval(pg_config[global_rank][pg_id]["ranks"])
+        for pg_guid in pg_config[global_rank]:
+            desc = pg_config[global_rank][pg_guid]["desc"]
+            ranks = ast.literal_eval(pg_config[global_rank][pg_guid]["ranks"])
             if isinstance(ranks, str):
                 # TODO Bug in FR data format? ranks is '[0, 1,...]'
                 ranks = eval(ranks)
 
-            if pg_id not in _groups:
-                groups.append(Group(id=pg_id, desc=desc, size=len(ranks)))
+            if pg_guid not in _groups:
+                groups.append(Group(id=pg_guid, desc=desc, size=len(ranks)))
                 for rank in ranks:
-                    memberships.append(Membership(group_id=pg_id, global_rank=rank))
-                _groups[pg_id] = groups[-1]
-                # TODO: make ranks int no matter what input (because it can be json or pickled string)
-                _memberships[pg_id] = set(ranks)
+                    memberships.append(Membership(group_id=pg_guid, global_rank=rank))
+                _groups[pg_guid] = groups[-1]
+                _memberships[pg_guid] = set(ranks)
             else:
                 # validation across ranks
                 assert (
-                    _groups[pg_id].desc == desc
-                ), f"mismatch in desc {_groups[pg_id].desc} vs {desc}"
-                assert _memberships[pg_id] == set(
+                    _groups[pg_guid].desc == desc
+                ), f"mismatch in desc {_groups[pg_guid].desc} vs {desc}"
+                assert _memberships[pg_guid] == set(
                     ranks
-                ), f"mismatch in membership {_memberships[pg_id]} vs {set(ranks)}"
+                ), f"mismatch in membership {_memberships[pg_guid]} vs {set(ranks)}"
     return groups, _groups, memberships, _memberships
 
 
@@ -387,10 +390,10 @@ def build_db(details: Dict[str, Dict[str, Any]], args: argparse.Namespace) -> Da
     )
     print("built collectives, nccl_calls")
     if args.verbose:
-        print("Groups\n", tabulate(groups, headers=Group._fields))  # type: ignore[operator]
-        print("Memberships\n", tabulate(memberships, headers=Membership._fields))  # type: ignore[operator]
-        print("Collectives\n", tabulate(collectives, headers=Collective._fields))  # type: ignore[operator]
-        print("NCCLCalls\n", tabulate(nccl_calls, headers=NCCLCall._fields))  # type: ignore[operator]
+        print("Groups\n", tabulate(groups, headers=Group._fields))
+        print("Memberships\n", tabulate(memberships, headers=Membership._fields))
+        print("Collectives\n", tabulate(collectives, headers=Collective._fields))
+        print("NCCLCalls\n", tabulate(nccl_calls, headers=NCCLCall._fields))
     db = Database(
         tracebacks=tracebacks,
         collectives=collectives,

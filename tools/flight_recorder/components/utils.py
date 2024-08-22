@@ -194,7 +194,7 @@ def just_print_entries(
         if progress:
             rows.append(row)
 
-    print(tabulate(rows, headers=headers))  # type: ignore[operator]
+    print(tabulate(rows, headers=headers))
 
 
 def check_no_missing_dump_files(
@@ -216,6 +216,7 @@ def check_version(versions: Dict[str, Any]) -> None:
         # assert minor >= 0, f"Rank {rank} unsupported version {version}"
 
 
+# TODO: We need to revisit this function to see if we still need it.
 def check_trace_from_beginning(entries: Dict[str, Any]) -> bool:
     for rank in entries:
         first_record_id = entries[rank][0]["record_id"]
