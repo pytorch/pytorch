@@ -397,7 +397,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
@@ -1406,8 +1405,6 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(final_kernel, MultiKernel)
             else [None, [], None, None]
         )
-        call_args: List[str]
-        arg_signatures: Optional[List[type]]
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.enable_debug_printer = enable_debug_printer
         debug_printer_manager.set_printer_args(
@@ -1782,7 +1779,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.expr]] = OrderedSet()
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)

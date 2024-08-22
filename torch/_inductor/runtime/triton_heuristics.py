@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -42,6 +42,9 @@ from .runtime_utils import (
     triton_config_to_hashable,
 )
 
+
+if TYPE_CHECKING:
+    from ..remote_cache import RemoteCacheBackend
 
 try:
     import triton
@@ -220,6 +223,9 @@ class CachingAutotuner(KernelInterface):
             inductor_meta=self.inductor_meta,
         )
         self.filename = filename
+
+        self.precompile_time_taken_ns = 0
+        self.autotune_time_taken_ns = 0
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
@@ -628,7 +634,7 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, **kwargs):
+    def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs wiht spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
@@ -646,9 +652,7 @@ class CachingAutotuner(KernelInterface):
             return float("inf")
 
         device_interface = self.get_device_interface()
-        stream = device_interface.get_raw_stream(  # type: ignore[call-arg]
-            device_interface.current_device()
-        )
+        stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
             if launcher.config.pre_hook is not None:
@@ -663,6 +667,11 @@ class CachingAutotuner(KernelInterface):
                 grid=grid,
                 stream=stream,
             )
+
+        if with_profiler:
+            from torch._inductor.utils import do_bench_using_profiling
+
+            return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
 
@@ -718,10 +727,13 @@ class CachingAutotuner(KernelInterface):
         """Do the actual autotuning"""
         start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
-        time_taken_ns = time.time_ns() - start_time
+        benchmark_time_taken_ns = time.time_ns() - start_time
         self.launchers = [builtins.min(timings, key=timings.get)]
+        self.autotune_time_taken_ns = (
+            self.precompile_time_taken_ns + benchmark_time_taken_ns
+        )
         if self.save_cache_hook:
-            self.save_cache_hook(self.launchers[0].config, time_taken_ns)
+            self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
@@ -803,17 +815,23 @@ class CachingAutotuner(KernelInterface):
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
         )
-        time_taken_ns = time.time_ns() - start_time
+        coordesc_time_taken_ns = time.time_ns() - start_time
         best_config.found_by_coordesc = True
 
         if self.save_cache_hook:
-            self.save_cache_hook(best_config, time_taken_ns, found_by_coordesc=True)
+            self.save_cache_hook(
+                best_config,
+                self.autotune_time_taken_ns + coordesc_time_taken_ns,
+                found_by_coordesc=True,
+            )
         return config2launcher.get(best_config)
 
     def run(self, *args, grid, stream, **kwargs):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
+                start_time = time.time_ns()
                 self.precompile()
+                self.precompile_time_taken_ns = time.time_ns() - start_time
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid, **kwargs)
 
@@ -938,8 +956,9 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
-    def __init__(self, *args, regex_filter="", **kwargs):
+    def __init__(self, *args, regex_filter="", with_profiler=False, **kwargs):
         self.regex_filter = regex_filter
+        self.with_profiler = with_profiler
         super().__init__(*args, **kwargs)
         self.cached = None
 
@@ -952,7 +971,9 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = self.bench(
+                launcher, *args, grid=grid, with_profiler=self.with_profiler
+            )
             num_in_out_ptrs = len(
                 [
                     arg_name
@@ -1079,7 +1100,7 @@ def cached_autotune(
 
         local_cache = None
         cache_filename = None
-        remote_cache = None
+        remote_cache: Optional[RemoteCacheBackend] = None
         remote_cache_key = None
         best_config = None
         if not inductor_meta.get("force_disable_caches", False):
@@ -1146,7 +1167,7 @@ def cached_autotune(
             if local_cache is not None and cache_filename is not None:
                 local_cache.put(cache_filename, data)
             if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)
+                remote_cache.put(remote_cache_key, data)  # type: ignore[arg-type]
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -1176,6 +1197,9 @@ def cached_autotune(
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
+                with_profiler=inductor_meta[
+                    "profile_bandwidth_with_do_bench_using_profiling"
+                ],
                 configs=configs,
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
@@ -1229,6 +1253,36 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
             f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
             f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
         )
+
+
+def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
+    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
+    # therefore using half the number of warps here correspondingly.
+    if torch.version.hip:
+        max_num_warps = (max_num_warps + 1) // 2
+        min_num_warps = (min_num_warps + 1) // 2
+    # persistent reduction is register intensive
+    if register_intensive:
+        max_num_warps = max_num_warps // 2
+    return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
+
+
+def _check_max_grid_x(size_hints, x, num_warps):
+    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
+    max_grid_x = 2147483647
+    warp_size = (
+        64 if torch.version.hip else 32
+    )  # TODO: query warp size once #129663 is merged
+    num_blocks = (size_hints[0] + x - 1) // x
+
+    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
+        x *= 2  # Scale up XBLOCK if grid exceeds limits
+        num_blocks = num_blocks // 2
+        if x >= max_grid_x:
+            raise AssertionError(
+                "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+            )
+    return x, num_blocks
 
 
 def triton_config(
@@ -1296,8 +1350,8 @@ def triton_config(
     ):
         z *= 2
 
-    num_warps = next_power_of_2(
-        min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8)
+    num_warps = _num_warps(
+        conditional_product(x, y, z) // num_elements_per_warp, min_num_warps=1
     )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
@@ -1305,7 +1359,8 @@ def triton_config(
     # given that this is a rare situation, don't expect this to affect perf
     # in general
     # see https://github.com/pytorch/pytorch/pull/97950
-    num_warps = max(num_warps, 4) if conditional_product(x, y, z) >= 128 else num_warps
+    if conditional_product(x, y, z) >= 128 and not torch.version.hip:
+        num_warps = max(num_warps, 4)
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None
@@ -1317,11 +1372,14 @@ def triton_config(
     )
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+
     cfg = {"XBLOCK": x}
     if y:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
+    assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -1351,25 +1409,12 @@ def triton_config_reduction(
 
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
-    # therefore using half the number of warps here correspondingly.
-    max_num_warps = 8 if torch.version.hip else 16
-    # persistent reduction is register intensive
-    if register_intensive:
-        max_num_warps = max_num_warps // 2
-    min_num_warps = 1 if torch.version.hip else 2
-    num_warps = next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
+    num_warps = _num_warps(
+        num_warps, max_num_warps=16, register_intensive=register_intensive
+    )
 
-    # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
-    max_grid_x = 2147483647
-    warp_size = (
-        64 if torch.version.hip else 32
-    )  # TODO: query warp size once #129663 is merged
-    num_blocks = (size_hints[0] + x - 1) // x
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
 
-    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
-        x *= 2  # Scale up XBLOCK if grid exceeds limits
-        num_blocks = num_blocks // 2
     while conditional_product(x, r) > target:
         if r == 1:
             break
@@ -1379,9 +1424,6 @@ def triton_config_reduction(
     check_config(cfg, xnumel=size_hints[0])
     assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
-    assert (
-        num_blocks * num_warps * warp_size
-    ) <= max_grid_x, "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1410,7 +1452,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
         y *= 2
 
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
+    num_warps = _num_warps(conditional_product(x, y, r) // 256, min_num_warps=1)
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)

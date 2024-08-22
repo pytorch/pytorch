@@ -231,6 +231,7 @@ compute_flex_attention = r"""
     kv_indices = KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
+    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
 
     K_block_ptr = tl.make_block_ptr(
         base=K,
@@ -251,14 +252,14 @@ compute_flex_attention = r"""
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     acc, l_i, m_i = forward_inner(
+        {{gen_argdefs()}},
         q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
         acc, l_i, m_i,
         off_z, off_hq, offs_m[:, None], offs_n[None, :],
         kv_indices, kv_num_blocks,
-        0, kv_num_blocks * SPARSE_KV_MULTIPLE,
+        0, block_n_end,
         MATMUL_PRECISION,
-        {{gen_argdefs()}},
-        IS_FULL_BLOCKS=False
+        IS_FULL_BLOCKS=False,
     )
 
     # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -269,6 +270,7 @@ compute_flex_attention = r"""
         kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N, 1))
 
         K_block_ptr = tl.make_block_ptr(
             base=K,
@@ -289,14 +291,14 @@ compute_flex_attention = r"""
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
+            {{gen_argdefs()}},
             q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
             acc, l_i, m_i,
             off_z, off_hq, offs_m[:, None], offs_n[None, :],
             kv_indices, kv_num_blocks,
-            0, kv_num_blocks * SPARSE_KV_MULTIPLE,
+            0, block_n_end,
             MATMUL_PRECISION,
-            {{gen_argdefs()}},
-            IS_FULL_BLOCKS=True
+            IS_FULL_BLOCKS=True,
         )
 
 
@@ -324,9 +326,10 @@ compute_flex_attention = r"""
  """
 
 
-compute_forward_block = r"""
+compute_forward_inner = r"""
 @triton.jit
 def forward_inner(
+    {{gen_argdefs()}},
     q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
@@ -338,16 +341,12 @@ def forward_inner(
     # start kv and end kv block
     block_n_start, block_n_end,
     MATMUL_PRECISION,
-    {{gen_argdefs()}},
     IS_FULL_BLOCKS,
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
-
-    # initialize offsets
-
     RCP_LN2: tl.constexpr = 1.44269504
 
     if PRESCALE_QK:
@@ -356,14 +355,14 @@ def forward_inner(
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
         if IS_DIVISIBLE:
-            acc, l_i, m_i = fwd_compute_block_mn(
+            acc, l_i, m_i = forward_block_mn(
+                {{gen_argdefs()}},
                 q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}},
                 IS_FULL_BLOCKS,
             )
         else:
@@ -371,15 +370,15 @@ def forward_inner(
             # it's on par or slightly faster than only applying to the last block in fwd.
             # However, we choose different strategy for bwd, where we only apply mod & mask
             # to the last block because it's faster a lot.
-            acc, l_i, m_i = fwd_compute_block_mn(
+            acc, l_i, m_i = forward_block_mn(
+                {{gen_argdefs()}},
                 q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}},
-                IS_FULL_BLOCKS, True,
+                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
             )
 
         # update pointers
@@ -398,17 +397,17 @@ def forward_inner(
 """
 
 
-fwd_compute_block_mn = r"""
+compute_forward_block_mn = r"""
 @triton.jit
-def fwd_compute_block_mn(
+def forward_block_mn(
+    {{gen_argdefs()}},
     q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
     off_z, off_h, offs_m, offs_n,
     MATMUL_PRECISION, RCP_LN2,
-    {{gen_argdefs()}},
-    IS_FULL_BLOCKS, is_last_block=False,
+    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
@@ -423,7 +422,7 @@ def fwd_compute_block_mn(
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if is_last_block:
+    if IS_LAST_BLOCK:
         # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
         # which is larger than the actual number of elements. To avoid access memory out of bound,
         # we need to mask out the elements that are out of Q_LEN & KV_LEN.
@@ -441,7 +440,7 @@ def fwd_compute_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if is_last_block:
+    if IS_LAST_BLOCK:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -456,7 +455,7 @@ def fwd_compute_block_mn(
             n="offs_n",
         ) | indent_except_first(2) }}
 
-        if is_last_block:
+        if IS_LAST_BLOCK:
             mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, float("-inf"))
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -502,9 +501,9 @@ flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
     source=compute_flex_attention
-    + compute_forward_block
+    + compute_forward_inner
     + compute_next_offset_func
-    + fwd_compute_block_mn,
+    + compute_forward_block_mn,
 )
 
 
@@ -983,14 +982,14 @@ flex_attention_backward_template = TritonTemplate(
 
         offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
         dq = bwd_dq_inner(
+            {{gen_argdefs()}},
             K, V,
             dq, q, do, Di, lse,
             off_z, off_hq2, offs_m2, offs_n2,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
-            {{gen_argdefs()}},
-            IS_FULL_BLOCKS=False
+            IS_FULL_BLOCKS=False,
         )
 
         if HAS_FULL_BLOCKS:
@@ -1002,14 +1001,14 @@ flex_attention_backward_template = TritonTemplate(
 
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
+                {{gen_argdefs()}},
                 K, V,
                 dq, q, do, Di, lse,
                 off_z, off_hq2, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
-                {{gen_argdefs()}},
-                IS_FULL_BLOCKS=True
+                IS_FULL_BLOCKS=True,
             )
 
         # Write back dQ.
@@ -1076,14 +1075,14 @@ flex_attention_backward_template = TritonTemplate(
 
             offs_m1 = q_start + tl.arange(0, BLOCK_M1)
             dk, dv = bwd_dkdv_inner(
+                {{gen_argdefs()}},
                 Q1, DO1, DELTA1, LSE1,
                 dk, dv, k, v,
                 off_z, off_hq1, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION,
-                {{gen_argdefs()}},
-                IS_FULL_BLOCKS=False
+                IS_FULL_BLOCKS=False,
             )
 
 
@@ -1096,14 +1095,14 @@ flex_attention_backward_template = TritonTemplate(
 
                 offs_m1 = q_start + tl.arange(0, BLOCK_M1)
                 dk, dv = bwd_dkdv_inner(
+                    {{gen_argdefs()}},
                     Q1, DO1, DELTA1, LSE1,
                     dk, dv, k, v,
                     off_z, off_hq1, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION,
-                    {{gen_argdefs()}},
-                    IS_FULL_BLOCKS=True
+                    IS_FULL_BLOCKS=True,
                 )
 
         # Write back dV and dK.
@@ -1123,13 +1122,14 @@ flex_attention_backward_template = TritonTemplate(
 
 @triton.jit
 def bwd_dq_inner(
+    {{gen_argdefs()}},
     K, V,  # pointers
     dq, q, do, Di, lse,
     off_z, off_hq, offs_m2, offs_n2,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION,
-    {{gen_argdefs()}}, IS_FULL_BLOCKS
+    IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
@@ -1144,17 +1144,18 @@ def bwd_dq_inner(
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
-    hi = sparse_kv_num_blocks * SPARSE_KV_MULTIPLE
+    hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(KV_LEN // BLOCK_N2, 1))
     if not IS_DIVISIBLE:
         if hi >= 1:
             for start_n in range(0, hi - 1):
-                dq = bwd_dq_compute_block_mn(
+                dq = bwd_dq_block_mn(
+                    {{gen_argdefs()}},
                     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
                     off_z, off_hq, offs_m2, offs_n2,
                     stride_kn, stride_kd, stride_vn, stride_vd,
                     kv_indices, sparse_kv_num_blocks,
                     MATMUL_PRECISION, RCP_LN2,
-                    {{gen_argdefs()}}, IS_FULL_BLOCKS
+                    IS_FULL_BLOCKS,
                 )
 
                 # Increment pointers.
@@ -1168,23 +1169,25 @@ def bwd_dq_inner(
 
                 offs_n2 += offset
 
-            dq = bwd_dq_compute_block_mn(
+            dq = bwd_dq_block_mn(
+                {{gen_argdefs()}},
                 dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
                 off_z, off_hq, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}}, IS_FULL_BLOCKS, True,
+                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
             )
     else:
         for start_n in range(0, hi):
-            dq = bwd_dq_compute_block_mn(
+            dq = bwd_dq_block_mn(
+                {{gen_argdefs()}},
                 dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
                 off_z, off_hq, offs_m2, offs_n2,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}}, IS_FULL_BLOCKS
+                IS_FULL_BLOCKS,
             )
 
             # Increment pointers.
@@ -1202,13 +1205,14 @@ def bwd_dq_inner(
 
 
 @triton.jit
-def bwd_dq_compute_block_mn(
+def bwd_dq_block_mn(
+    {{gen_argdefs()}},
     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
     off_z, off_hq, offs_m2, offs_n2,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    {{gen_argdefs()}}, IS_FULL_BLOCKS, is_last_block=False,
+    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
 ):
     {{gen_defines() | indent_except_first(1)}}
 
@@ -1221,7 +1225,7 @@ def bwd_dq_compute_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    if is_last_block:
+    if IS_LAST_BLOCK:
         m = offs_m2[:, None] % Q_LEN
         n = offs_n2[None, :] % KV_LEN
     else:
@@ -1238,7 +1242,7 @@ def bwd_dq_compute_block_mn(
         out="qk"
     ) | indent_except_first(1) }}
 
-    if is_last_block:
+    if IS_LAST_BLOCK:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -1253,7 +1257,7 @@ def bwd_dq_compute_block_mn(
             n="n",
         ) | indent_except_first(2) }}
 
-        if is_last_block:
+        if IS_LAST_BLOCK:
             mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -1279,13 +1283,13 @@ def bwd_dq_compute_block_mn(
         n="n",
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
-    if is_last_block:
+    if IS_LAST_BLOCK:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
-        if is_last_block:
+        if IS_LAST_BLOCK:
             mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
@@ -1299,13 +1303,14 @@ def bwd_dq_compute_block_mn(
 
 @triton.jit
 def bwd_dkdv_inner(
+    {{gen_argdefs()}},
     Q, DO, DELTA, LSE, # pointers
     dk, dv, k, v,
     off_z, off_hq, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION,
-    {{gen_argdefs()}}, IS_FULL_BLOCKS
+    IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
     SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
@@ -1319,18 +1324,19 @@ def bwd_dkdv_inner(
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_k[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
-    hi = sparse_q_num_blocks * SPARSE_Q_MULTIPLE
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(Q_LEN // BLOCK_M1, 1))
 
     if not IS_DIVISIBLE:
         if hi >= 1:
             for start_m in range(0, hi - 1):
-                dk, dv = bwd_dkdv_compute_block_mn(
+                dk, dv = bwd_dkdv_block_mn(
+                    {{gen_argdefs()}},
                     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
                     off_z, off_hq, offs_n1, offs_m1,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION, RCP_LN2,
-                    {{gen_argdefs()}}, IS_FULL_BLOCKS
+                    IS_FULL_BLOCKS,
                 )
                 # Increment pointers.
                 offset = get_offset_for_next_block(
@@ -1343,23 +1349,25 @@ def bwd_dkdv_inner(
 
                 offs_m1 += offset
 
-            dk, dv = bwd_dkdv_compute_block_mn(
+            dk, dv = bwd_dkdv_block_mn(
+                {{gen_argdefs()}},
                 dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
                 off_z, off_hq, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}}, IS_FULL_BLOCKS, True,
+                IS_FULL_BLOCKS, IS_LAST_BLOCK=True,
             )
     else:
         for start_m in range(0, hi):
-            dk, dv = bwd_dkdv_compute_block_mn(
+            dk, dv = bwd_dkdv_block_mn(
+                {{gen_argdefs()}},
                 dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
                 off_z, off_hq, offs_n1, offs_m1,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION, RCP_LN2,
-                {{gen_argdefs()}}, IS_FULL_BLOCKS
+                IS_FULL_BLOCKS,
             )
             # Increment pointers.
             offset = get_offset_for_next_block(
@@ -1376,13 +1384,14 @@ def bwd_dkdv_inner(
 
 
 @triton.jit
-def bwd_dkdv_compute_block_mn(
+def bwd_dkdv_block_mn(
+    {{gen_argdefs()}},
     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
     off_z, off_hq, offs_n1, offs_m1,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    {{gen_argdefs()}}, IS_FULL_BLOCKS, is_last_block=False,
+    IS_FULL_BLOCKS, IS_LAST_BLOCK=False,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
@@ -1397,7 +1406,7 @@ def bwd_dkdv_compute_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if is_last_block:
+    if IS_LAST_BLOCK:
         m = offs_m1[None, :] % Q_LEN
         n = offs_n1[:, None] % KV_LEN
     else:
@@ -1415,7 +1424,7 @@ def bwd_dkdv_compute_block_mn(
         out="qkT"
     ) | indent_except_first(1) }}
 
-    if is_last_block:
+    if IS_LAST_BLOCK:
         # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
         post_mod_scores = tl.where(offs_n1[:, None] < KV_LEN, post_mod_scores, float("-inf"))
 
@@ -1429,7 +1438,7 @@ def bwd_dkdv_compute_block_mn(
             m="m",
             n="n",
         ) | indent_except_first(2) }}
-        if is_last_block:
+        if IS_LAST_BLOCK:
             mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
@@ -1462,12 +1471,12 @@ def bwd_dkdv_compute_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
-    if is_last_block:
+    if IS_LAST_BLOCK:
         grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
 
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
-        if is_last_block:
+        if IS_LAST_BLOCK:
             mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
