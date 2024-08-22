@@ -70,6 +70,7 @@
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
+#include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1529,6 +1530,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_isEnabledTorchFunction,
      METH_NOARGS,
      nullptr},
+    {"_is_torch_function_all_disabled",
+     THPModule_isAllDisabledTorchFunction,
+     METH_NOARGS,
+     nullptr},
     {"_disabled_torch_function_impl",
      THPModule_disable_torch_function,
      METH_VARARGS,
@@ -1698,6 +1703,7 @@ PyObject* initModule() {
 #endif
   torch::mtia::initModule(module);
   torch::cpu::initModule(module);
+  torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
