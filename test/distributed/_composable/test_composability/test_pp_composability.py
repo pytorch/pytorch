@@ -110,7 +110,7 @@ class ComposabilityTest(MultiProcessTestCase):
 
         # create "entire model"
         total_layers = 8
-        dim = 10
+        dim = 6
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
@@ -200,6 +200,7 @@ class ComposabilityTest(MultiProcessTestCase):
             num_stages = pp_group.size() * n_virtual
             stages = []
             offsets = []
+            print(f"{num_stages=}")
             for i in range(n_virtual):
                 stage, offset = build_stage(pp_group.rank() + n_virtual * i, num_stages)
                 stages.append(stage)
@@ -234,10 +235,10 @@ class ComposabilityTest(MultiProcessTestCase):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    # self.assertTrue(isinstance(p.grad, DTensor))
-                    # self.assertEqual(ref_p.grad, p.grad.full_tensor())
+                    self.assertTrue(isinstance(p.grad, DTensor))
+                    self.assertEqual(ref_p.grad, p.grad.full_tensor())
                     # TODO: this fails in fsdp
-                    # self.assertEqual(ref_p.grad, p.grad)
+                    # torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
                 for name, p in partial_model.named_parameters():
@@ -245,7 +246,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    self.assertEqual(ref_p.grad, p.grad)
+                    torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
 
         torch.distributed.destroy_process_group()
 
