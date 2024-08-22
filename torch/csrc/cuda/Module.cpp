@@ -553,7 +553,13 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
-  const auto statToDict = [](const c10::MemoryStat& stat) {
+
+  using c10::CachingDeviceAllocator::DeviceStats;
+  using c10::CachingDeviceAllocator::Stat;
+  using c10::CachingDeviceAllocator::StatArray;
+  using c10::CachingDeviceAllocator::StatType;
+
+  const auto statToDict = [](const Stat& stat) {
     py::dict dict;
 
     dict["current"] = stat.current;
@@ -563,10 +569,9 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
     return dict;
   };
 
-  const auto statArrayToDict = [=](const c10::MemoryStatArray& statArray) {
-    const std::
-        array<const char*, static_cast<size_t>(c10::MemoryStatType::NUM_TYPES)>
-            statTypeNames = {"all", "small_pool", "large_pool"};
+  const auto statArrayToDict = [=](const StatArray& statArray) {
+    const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
+        statTypeNames = {"all", "small_pool", "large_pool"};
     py::dict dict;
     for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
@@ -574,7 +579,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
     return dict;
   };
 
-  const c10::DeviceAllocatorStats stats =
+  const DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_index);
 
   py::dict result;

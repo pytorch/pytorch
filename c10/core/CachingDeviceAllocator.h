@@ -5,9 +5,9 @@
 
 #include <array>
 
-namespace c10 {
+namespace c10::CachingDeviceAllocator {
 
-struct MemoryStat {
+struct Stat {
   void increase(size_t amount) {
     current += static_cast<int64_t>(amount);
     peak += std::max(current, peak);
@@ -37,22 +37,18 @@ struct MemoryStat {
   int64_t freed = 0;
 };
 
-enum struct MemoryStatType : uint64_t {
+enum struct StatType : uint64_t {
   AGGREGATE = 0,
   SMALL_POOL = 1,
   LARGE_POOL = 2,
   NUM_TYPES = 3 // remember to update this whenever a new stat type is added
 };
 
-typedef std::array<MemoryStat, static_cast<size_t>(MemoryStatType::NUM_TYPES)>
-    MemoryStatArray;
-typedef std::array<bool, static_cast<size_t>(MemoryStatType::NUM_TYPES)>
-    MemoryStatTypeArray;
+using StatArray = std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)>;
+using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
 template <typename Func>
-void for_each_selected_memory_stat_type(
-    const MemoryStatTypeArray& stat_types,
-    Func f) {
+void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   for (const auto stat_type : c10::irange(stat_types.size())) {
     if (stat_types[stat_type]) {
       f(stat_type);
@@ -60,27 +56,28 @@ void for_each_selected_memory_stat_type(
   }
 }
 
-struct DeviceAllocatorStats {
+// Struct containing memory allocator summary statistics for a device.
+struct DeviceStats {
   // COUNT: allocations requested by client code
-  MemoryStatArray allocation;
+  StatArray allocation;
   // COUNT: number of allocated segments from device memory allocation.
-  MemoryStatArray segment;
+  StatArray segment;
   // COUNT: number of active memory blocks (allocated or used by stream)
-  MemoryStatArray active;
+  StatArray active;
   // COUNT: number of inactive, split memory blocks (unallocated but can't be
   // released via device memory deallocation)
-  MemoryStatArray inactive_split;
+  StatArray inactive_split;
 
   // SUM: bytes allocated by this memory alocator
-  MemoryStatArray allocated_bytes;
+  StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
-  MemoryStatArray reserved_bytes;
+  StatArray reserved_bytes;
   // SUM: bytes within active memory blocks
-  MemoryStatArray active_bytes;
+  StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks
-  MemoryStatArray inactive_split_bytes;
+  StatArray inactive_split_bytes;
   // SUM: bytes requested by client code
-  MemoryStatArray requested_bytes;
+  StatArray requested_bytes;
 
   // COUNT: total number of failed calls to device malloc necessitating cache
   // flushes.
@@ -91,10 +88,10 @@ struct DeviceAllocatorStats {
   int64_t num_ooms = 0;
 
   // COUNT: total number of oversize blocks allocated from pool
-  MemoryStat oversize_allocations;
+  Stat oversize_allocations;
 
   // COUNT: total number of oversize blocks requiring malloc
-  MemoryStat oversize_segments;
+  Stat oversize_segments;
 
   // COUNT: total number of synchronize_and_free_events() calls
   int64_t num_sync_all_streams = 0;
@@ -112,7 +109,7 @@ struct DeviceAllocatorStats {
 };
 
 // Size pretty-printer
-inline std::string format_memory_size(uint64_t size) {
+inline std::string format_size(uint64_t size) {
   std::ostringstream os;
   os.precision(2);
   os << std::fixed;
@@ -131,4 +128,4 @@ inline std::string format_memory_size(uint64_t size) {
   return os.str();
 }
 
-} // namespace c10
+} // namespace c10::CachingDeviceAllocator
