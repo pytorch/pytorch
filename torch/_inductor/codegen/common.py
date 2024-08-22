@@ -265,7 +265,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
-        from .cpu import device_op_overrides as cpu_op_overrides  # noqa: F401
+        from . import cpu_device_op_overrides
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
@@ -1773,7 +1773,6 @@ class Kernel(CodeGen):
         if mask:
             cond = f"({cond}) | ~({mask})"
 
-        return ""
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def check_bounds(

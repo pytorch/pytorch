@@ -657,27 +657,20 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             warmup_arg["warmup"] = False
 
         if output_tensor.device.type == "cpu":
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                output_tensor,
-                *self.extra_args,
-                grid=self.grid,
-                **warmup_arg,
-                stream=0,
-            )
+            stream = 0
         else:
             from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+            stream = get_raw_stream(self.output_tensor_meta.device.index)
 
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                output_tensor,
-                *self.extra_args,
-                grid=self.grid,
-                **warmup_arg,
-                stream=get_raw_stream(self.output_tensor_meta.device.index),
-            )
+        return functools.partial(
+            run_method,
+            *input_tensors,
+            output_tensor,
+            *self.extra_args,
+            grid=self.grid,
+            **warmup_arg,
+            stream=stream,
+        )
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
