@@ -462,7 +462,12 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
+      if [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
+        # aarch64 does not have native bfloat16 support
+        dtype=float16
+      else
+        dtype=bfloat16
+      fi
     elif [[ "$mode" == "training" ]]; then
       dtype=amp
     fi
