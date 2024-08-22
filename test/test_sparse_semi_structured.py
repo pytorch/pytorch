@@ -1064,8 +1064,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, bias=bias)
 
         alpha_scaled = torch.stack([alpha] * 128).t()
-        dense_result = alpha_scaled * torch.mmA.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtypeneuckcttbkkccrkfec)
+        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
