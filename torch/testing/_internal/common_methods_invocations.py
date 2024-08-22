@@ -19513,6 +19513,10 @@ op_db: List[OpInfo] = [
            skips=(
                # grad actually does work with out=
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error'),
+               DecorateInfo(
+                   unittest.skip("Expected __torch_dispatch__ for aten::unbind_copy.int_out "
+                                 "to return None but it returned something else instead."),
+                            'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     OpInfo('vstack',
            aliases=('row_stack',),

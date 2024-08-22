@@ -11,13 +11,13 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
-      - conda/Dockerfile
-      - 'common/*'
+      - '.ci/docker/conda/*'
+      - '.ci/docker/common/*'
       - .github/workflows/build-conda-images.yml
   pull_request:
     paths:
-      - conda/Dockerfile
-      - 'common/*'
+      - '.ci/docker/conda/*'
+      - '.ci/docker/common/*'
       - .github/workflows/build-conda-images.yml
 
 env:
@@ -32,7 +32,7 @@ concurrency:
 jobs:
   build-docker:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.9xlarge.ephemeral
+    runs-on: am2.linux.9xlarge.ephemeral
     strategy:
       matrix:
         cuda_version: ["11.8", "12.1", "12.4", "cpu"]
