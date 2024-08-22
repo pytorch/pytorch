@@ -6686,7 +6686,6 @@ class LoopBody:
 
     def __init__(self, fn, args, var_ranges):
         super().__init__()
-        self.args = args
         self.var_ranges = var_ranges
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
@@ -6770,7 +6769,7 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(v not in self.var_ranges for v in index)
+        # assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)

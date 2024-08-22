@@ -4094,24 +4094,20 @@ class CppScheduling(BaseScheduling):
                 else:
                     val_to_split = iter_ranges[idx]
                     new_iter_ranges += (val_to_split // split_number, split_number)
-            new_reduce_ranges: Tuple[sympy.Expr, ...] = ()
 
             new_index = sympy.core.symbol.Symbol(
-                "z" + str(len([*node._body.var_ranges.values()])),
-                integer=True,
-                nonnegative=True,
+                "z" + str(len(iter_ranges)), integer=True, nonnegative=True
             )
-            replacements = {split_var: split_var * split_number + new_index}  # type: ignore[operator]
-            new_vars = [
-                [sympy_subs(expr, replacements) for expr in node._body.args[0]],
-                [],
+            new_iter_vars = [
+                var * split_number + new_index if var == split_var else var
+                for var in iter_vars
             ]
 
             # Here decide the final loop order
             node.recompute_size_and_body(
                 extra_size_and_var_constraints=(
-                    (new_iter_ranges, new_reduce_ranges),
-                    new_vars,
+                    (new_iter_ranges, ()),
+                    [new_iter_vars, []],
                 )
             )
 

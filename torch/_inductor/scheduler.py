@@ -827,10 +827,11 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         if extra_size_and_var_constraints:
             assert isinstance(self.node, (ir.ComputedBuffer))
-            self._sizes, new_vars = extra_size_and_var_constraints
-            _, body, _ = self.node.get_default_sizes_body()
-            _, var_ranges = dependencies.index_vars_no_squeeze(*self._sizes, prefix="z")
-            self._body = ir.LoopBody(body, new_vars, var_ranges)
+            self._sizes, new_args = extra_size_and_var_constraints
+            _, new_var_ranges = dependencies.index_vars_no_squeeze(
+                *self._sizes, prefix="z"
+            )
+            self._body = ir.LoopBody(self._body, new_args, new_var_ranges)
         else:
             assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
             self._sizes, self._body = self.node.simplify_and_reorder(
