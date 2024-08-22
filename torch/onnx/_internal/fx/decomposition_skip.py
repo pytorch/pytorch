@@ -11,7 +11,6 @@ https://github.com/pytorch/pytorch/issues/115883
 
 This solution will no longer be required once the issue is resolved.
 """
-
 from __future__ import annotations
 
 import abc
