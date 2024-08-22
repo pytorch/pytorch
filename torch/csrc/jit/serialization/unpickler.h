@@ -45,6 +45,7 @@ class TORCH_API Unpickler {
         type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -76,8 +77,7 @@ class TORCH_API Unpickler {
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        device_(std::move(device)),
+        device_(device),
         use_storage_device_(use_storage_device),
         type_parser_(type_parser),
         storage_context_(std::move(storage_context)),

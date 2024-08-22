@@ -1,5 +1,4 @@
 import contextlib
-
 import copy
 import hashlib
 import inspect
@@ -12,6 +11,7 @@ from types import FunctionType, ModuleType
 from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
@@ -52,7 +52,10 @@ def install_config_module(module: ModuleType) -> None:
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")
-                setattr(dest, key, proxy)
+                if dest is module:
+                    setattr(dest, key, proxy)
+                else:
+                    dest.__dict__[key] = proxy
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 

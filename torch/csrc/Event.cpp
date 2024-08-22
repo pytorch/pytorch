@@ -156,15 +156,16 @@ static PyObject* THPEvent_from_ipc_handle(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_ipc_handle(
+    PyObject* _self [[maybe_unused]],
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
-  (void)self;
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "torch.Event ipc is not supported yet, please open an issue if you need this!");
-  std::string handle = "0";
-  return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
+  constexpr const char* handle = "0";
+  return PyBytes_FromStringAndSize(
+      handle, std::char_traits<char>::length(handle));
   END_HANDLE_TH_ERRORS
 }
 

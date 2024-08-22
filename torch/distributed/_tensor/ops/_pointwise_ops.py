@@ -476,7 +476,7 @@ def common_pointwise_strategy(
 
         input_specs: List[DTensorSpec] = []
         redistribute_costs: List[List[float]] = []
-        for idx, input_arg in enumerate(args_schema):
+        for input_arg in args_schema:
             if isinstance(input_arg, OpStrategy):
                 # every arg follow the out_placements, but need to handle broadcasting
                 input_arg_spec = input_arg.strategies[0].output_spec
@@ -545,10 +545,18 @@ for_each_ops = [
     aten._foreach_clamp_max_.Scalar,
     aten._foreach_clamp_min_.Scalar,
     aten._foreach_div_.List,
+    aten._foreach_div_.Scalar,
     aten._foreach_div_.ScalarList,
+    aten._foreach_div_.Tensor,
+    aten._foreach_div.List,
+    aten._foreach_div.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div.Tensor,
     aten._foreach_lerp_.Scalar,
     aten._foreach_maximum_.List,
     aten._foreach_mul.Scalar,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul.Tensor,
     aten._foreach_mul.List,
     aten._foreach_mul_.Scalar,
     aten._foreach_mul_.ScalarList,
@@ -557,11 +565,21 @@ for_each_ops = [
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
-    aten._foreach_sub.List,
+    aten._foreach_sub.Scalar,
     aten._foreach_sub_.Scalar,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.ScalarList,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
     aten._foreach_zero_.default,
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
 ]
 
 for_each_linearity_ops = [

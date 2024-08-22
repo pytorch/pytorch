@@ -1,8 +1,10 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import List, Optional
 
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 ANEURALNETWORKS_PREFER_LOW_POWER = 0
 ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER = 1
@@ -180,8 +182,6 @@ def process_for_nnapi(
         module.prepare will mutate ser_model according to the computed operand
         shapes, based on the shapes of args.  Returns a list of output templates.
         """
-
-        pass
 
     shape_compute_module = torch.jit.script(ShapeComputeModule())
     real_shape_compute_lines = [

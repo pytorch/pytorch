@@ -19,7 +19,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -40,7 +39,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_symbols,
@@ -52,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
@@ -81,17 +80,15 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
-    layout_constraints,
     lowerings,
     make_fallback,
+    maybe_layout_constraints,
     needs_realized_inputs,
     unsupported_output_tensor,
 )
-
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
 from .utils import (
@@ -318,7 +315,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
-    ):
+    ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
         self.layout_opt = (
@@ -347,35 +344,40 @@ class GraphLowering(torch.fx.Interpreter):
         self.ras_by_symbol: Dict[
             sympy.Symbol, List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
-        self.bound_unbacked_symbols: Set[sympy.Symbol] = set()
+        self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.device_types: Set[str] = (
-            const_module.device_types if const_module else set()
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
+        self.device_types: OrderedSet[str] = (
+            const_module.device_types if const_module else OrderedSet()
         )
-        self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
+        self.device_idxs: OrderedSet[int] = (
+            const_module.device_idxs if const_module else OrderedSet()
+        )
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
         self.operations: List[ir.Operation] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
-        self.folded_constants: Set[str] = (
-            set(const_output_index.keys()) if const_output_index else set()
+        self.folded_constants: OrderedSet[str] = (
+            OrderedSet(const_output_index.keys())
+            if const_output_index
+            else OrderedSet()
         )
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
-        self.removed_operations: Set[str] = set()
-        self.removed_buffers: Set[str] = set()
-        self.removed_inplace_buffers: Set[str] = set()
-        self.mutated_buffers: Set[str] = set()
-        self.never_reuse_buffers: Set[str] = set()
-        self.inplaced_to_remove: Set[str] = set()
+        self.removed_operations: OrderedSet[str] = OrderedSet()
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
+        self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
@@ -391,7 +393,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
-        self.mutated_inputs: Set[str] = set()
+        self.mutated_inputs: OrderedSet[str] = OrderedSet()
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
@@ -402,7 +404,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
-        # since cpp_wrapper flag is set to false for the first pass of codegen.
+        # since cpp_wrapper flag is OrderedSet to false for the first pass of codegen.
         self.record_multi_kernel_choice = cpp_wrapper
         self.multi_kernel_to_choice: Dict[str, int] = {}
 
@@ -411,7 +413,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
-            self.find_nodes_prefer_channels_last() if self.layout_opt else set()
+            self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
@@ -441,8 +443,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs: Set[str] = set()
-        self.no_fuse_buffer_names: Set[str] = set()
+        self.aligned_inputs: OrderedSet[str] = OrderedSet()
+        self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+
+        # Below field is related to printing debug intermediate tensor values info for debugging
+        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -645,7 +650,7 @@ class GraphLowering(torch.fx.Interpreter):
             name=self.qualify_name(subgraph_name),
         )
 
-    def find_nodes_prefer_channels_last(self) -> Set[Node]:
+    def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
         The rule to decide if an node prefer channels last is simple.
         1. if it's input/output of a convolution
@@ -664,7 +669,7 @@ class GraphLowering(torch.fx.Interpreter):
         With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
         can be saved.
         """
-        output_set = set()
+        output_set: OrderedSet[Node] = OrderedSet()
         for n in reversed(self.module.graph.nodes):
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
@@ -761,9 +766,9 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    @dynamo_timed
-    def run(self, *args: Any) -> Any:  # type: ignore[override]
-        return super().run(*args)
+    def run(self, *args: Any) -> Any:
+        with dynamo_timed("GraphLowering.run"):
+            return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
         assert op.operation_name is None, f"Operation registered twice: {op}"
@@ -898,7 +903,7 @@ class GraphLowering(torch.fx.Interpreter):
         if self.constants[name].device == device_override or device_override is None:
             return name
         with torch.utils._python_dispatch._disable_current_modes():
-            # caller might have set fake tensor mode which will create a fake tensor
+            # caller might have OrderedSet fake tensor mode which will create a fake tensor
             # when calling .to, so unset modes here
             return self.allocate_non_dup_const_name(
                 f"{name}_{device_override.type}{device_override.index or 0}",
@@ -906,9 +911,9 @@ class GraphLowering(torch.fx.Interpreter):
             )
 
     def placeholder(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: Tuple[object], kwargs: Dict[str, object]
     ) -> Union[Expr, TensorBox, None]:
-        example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
+        example = super().placeholder(target, args, kwargs)
         self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
@@ -963,7 +968,7 @@ class GraphLowering(torch.fx.Interpreter):
                 self.aligned_inputs.add(target)
         return tensor
 
-    def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
+    def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
@@ -974,25 +979,6 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
-        def get_custom_op_layout_constraints(
-            target: torch._ops.OpOverload, args: Any, kwargs: Dict[str, Any]
-        ) -> Tuple[Optional[Callable], Tuple[Any], Dict[str, Any]]:  # type: ignore[type-arg]
-            # Custom operations that require preserving stride order
-            # which run through implicit fallback must constrain their
-            # arguments' fx strides
-            layout_constraint = None
-            if torch._C.Tag.needs_fixed_stride_order in target.tags:
-                # We have to set the current args because call_function will immediately
-                # evaluate this lowering after creating the fallback, without evaluating
-                # the layout constraint
-                args, kwargs = constrain_to_fx_strides(
-                    self.current_node, *args, **kwargs
-                )
-                # Also register the layout constraint so when the fallback
-                # is used again, we can constrain the args to the same layout
-                layout_constraint = constrain_to_fx_strides
-            return layout_constraint, args, kwargs
-
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
@@ -1001,9 +987,6 @@ class GraphLowering(torch.fx.Interpreter):
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
-                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
-                    target, args, kwargs
-                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -1013,7 +996,7 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target, layout_constraint)
+                make_fallback(target)
 
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
@@ -1040,7 +1023,7 @@ class GraphLowering(torch.fx.Interpreter):
         return len(t.shape) == 1 and t.shape[0] <= 8
 
     def get_attr(
-        self, target: str, args: Tuple[()], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: Tuple[()], kwargs: Dict[str, object]
     ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1080,9 +1063,9 @@ class GraphLowering(torch.fx.Interpreter):
         raise AssertionError
 
     def output(
-        self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
+        self, target: str, args: Tuple[object], kwargs: Dict[str, object]
     ) -> None:
-        result = super().output(target, args, kwargs)  # type: ignore[arg-type]
+        result = super().output(target, args, kwargs)
         if not isinstance(result, (tuple, list)):
             # nested subgraphs can have singleton outputs
             result = (result,)
@@ -1229,6 +1212,49 @@ class GraphLowering(torch.fx.Interpreter):
         )
         return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
 
+    def propagate_mutation(
+        self,
+        fx_node: torch.fx.Node,
+        old_args: Tuple[Any],
+        old_kwargs: Dict[str, Any],
+        new_args: Tuple[Any],
+        new_kwargs: Dict[str, Any],
+    ) -> None:
+        """Propagate mutations on new_args/new_kwargs back to old_args/old_kwargs.
+
+        Assumes we may have cloned old_args/old_kwargs into new_args/new_kwargs
+        and then called fx_node(*new_args, **new_kwargs).
+
+        If fx_node mutates any of new_args/new_kwargs, and they are different from
+        old_args/old_kwargs, then we need to update the original tensor.
+        """
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
+        assert len(old_args) == len(new_args)
+        assert len(old_kwargs) == len(new_kwargs)
+
+        def maybe_propagate(
+            schema_arg: torch._C.Argument, old_arg: ir.IRNode, new_arg: ir.IRNode
+        ) -> None:
+            if old_arg is new_arg:
+                return
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
+                # The lowering for copy_ is smart enough to "replace" old_arg with
+                # new_arg in all future uses so a copy_ kernel never gets emitted.
+                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+
+        schema = fx_node.target._schema
+        for idx, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
+            schema_arg = schema.arguments[idx]
+            maybe_propagate(schema_arg, old_arg, new_arg)
+
+        schema_kwargs = {arg.name: arg for arg in schema.arguments}
+
+        for key in old_kwargs.keys():
+            old_arg = old_kwargs[key]
+            new_arg = new_kwargs[key]
+            schema_arg = schema_kwargs[key]
+            maybe_propagate(schema_arg, old_arg, new_arg)
+
     def run_node(self, n: torch.fx.Node) -> object:
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
@@ -1237,12 +1263,15 @@ class GraphLowering(torch.fx.Interpreter):
         operation_watermark = len(self.operations)
 
         origins = {n}
-        if n.op == "call_function":
+        is_call_function = n.op == "call_function"
+        if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(
+        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
             n
-        ), V.set_current_node(n):
+        ), V.set_current_node(
+            n
+        ):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1252,10 +1281,18 @@ class GraphLowering(torch.fx.Interpreter):
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs  # type: ignore[possibly-undefined]
                 )
-            elif n.op == "call_function" and n.target in layout_constraints:
+            elif n.op == "call_function" and (
+                layout_constraints := maybe_layout_constraints(n.target)  # type: ignore[arg-type]
+            ):
                 debug("layout_constraints")
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
+                old_args = args  # type: ignore[possibly-undefined]
+                old_kwargs = kwargs  # type: ignore[possibly-undefined]
+                args, kwargs = layout_constraints(n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
+                # layout_constraints are allowed to make new copies of the inputs.
+                # if they do, and if the target is mutable, then we need to
+                # write the new values back into the original inputs.
+                self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
@@ -1339,7 +1376,7 @@ class GraphLowering(torch.fx.Interpreter):
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
-            num_users = len(set(n.users))
+            num_users = len(OrderedSet(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
@@ -1448,7 +1485,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.register_users_of(result)
 
-        new_unbacked_defs = set()
+        new_unbacked_defs: OrderedSet[sympy.Symbol] = OrderedSet()
         for buf in self.buffers[buffer_watermark:]:
             new_unbacked_defs |= buf.get_unbacked_symbol_defs()
         for op in self.operations[operation_watermark:]:
@@ -1518,7 +1555,7 @@ class GraphLowering(torch.fx.Interpreter):
                     fvs = free_unbacked_symbols(ra.expr)
                     missing = fvs - self.bound_unbacked_symbols
                     if missing:
-                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        i1 = min(missing, key=str)
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
@@ -1542,10 +1579,10 @@ class GraphLowering(torch.fx.Interpreter):
             # end up needing to test equalities on the symbols, and a fresh
             # symbol is likely to hit lots of GuardOnDataDependent errors that
             # we already know facts for.
-            renamed_unbacked_bindings = {
+            renamed_unbacked_bindings = OrderedSet(
                 V.fake_mode.shape_env.unbacked_renamings.get(s, s)
                 for s in unbacked_bindings.keys()
-            }
+            )
             assert new_unbacked_defs >= renamed_unbacked_bindings, (
                 f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
                 f"fx node is: {n.format_node()}\n"
@@ -1558,7 +1595,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.disable_cpp_codegen:
             raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-        if sys.platform not in ["linux", "darwin"]:
+        if sys.platform not in ["linux", "darwin", "win32"]:
             raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
@@ -1613,9 +1650,9 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # Although triton.store_cubin was OrderedSet in compile_fx, the backward pass didn't pick
             # that up. In theory it should work by only setting triton.store_cubin to True here,
-            # but that will cause a problem when use_runtime_constant_folding is set.
+            # but that will cause a problem when use_runtime_constant_folding is OrderedSet.
             with config.patch({"triton.store_cubin": True}):
                 compiled = self.compile_to_module().call
 
@@ -1654,7 +1691,7 @@ class GraphLowering(torch.fx.Interpreter):
                         for x in itertools.chain(params_flat, V.real_inputs)
                     ]
                 else:
-                    # In the backward pass, V.real_inputs is not set.
+                    # In the backward pass, V.real_inputs is not OrderedSet.
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
@@ -1715,6 +1752,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
+
+        log.debug(
+            "Finished codegen for all nodes. The list of kernel names available: %s",
+            V.graph.all_codegen_kernel_names,
+        )
+
         result = self.wrapper_code.generate(self.is_inference)
         self.wrapper_code.pop_codegened_graph()
         return result
@@ -1759,8 +1802,13 @@ class GraphLowering(torch.fx.Interpreter):
         # No-op to be patched for unit tests
         pass
 
-    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self) -> ModuleType:
+        with dynamo_timed(
+            "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
+        ):
+            return self._compile_to_module()
+
+    def _compile_to_module(self) -> ModuleType:
         from .codecache import PyCodeCache
 
         code, linemap = (
@@ -1849,4 +1897,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list
