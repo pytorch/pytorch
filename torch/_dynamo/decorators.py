@@ -13,7 +13,7 @@ from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
-from .utils import is_function
+from .utils import is_function, lru_cache_with_skip_unhashable
 
 
 if TYPE_CHECKING:
@@ -43,6 +43,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
+@lru_cache_with_skip_unhashable
 def disable(fn=None, recursive=True):
     """
     Decorator and context manager to disable TorchDynamo
