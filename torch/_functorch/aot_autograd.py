@@ -17,6 +17,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import dynamo_timed, preserve_rng_state
 from torch._guards import detect_fake_mode
+from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -941,6 +942,7 @@ def aot_module_simplified(
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
+    cudagraphs: Optional[BoxedBool] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -959,6 +961,9 @@ def aot_module_simplified(
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
+
+    if cudagraphs is None:
+        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -1060,7 +1065,7 @@ def aot_module_simplified(
     # Autograd cache stuff
     if config.enable_autograd_cache:
         compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile, mod, fake_flat_args, aot_config
+            dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
         )
     else:
         compiled_fn = dispatch_and_compile()
