@@ -2734,7 +2734,7 @@ def forward(self, x):
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*y.*size.*2.* = 4 is not equal to .*x.*size.*1.* = 3",
+            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
         ):
             torch.export.export(
                 bar,
