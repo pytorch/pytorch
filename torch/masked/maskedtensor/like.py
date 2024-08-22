@@ -6,7 +6,14 @@ it to a masked tensor using the mask from the given tensor.
 """
 
 import torch
-from torch.masked.maskedtensor.core import _get_data, _maybe_get_mask, MaskedTensor
+
+from .core import _get_data, _maybe_get_mask, MaskedTensor
+
+
+__all__ = [
+    "LIKE_NAMES",
+    "LIKE_FNS",
+]
 
 
 LIKE_NAMES = [
