@@ -15,7 +15,8 @@ C10_XPU_API void resetPeakStats(DeviceIndex device);
 
 C10_XPU_API void resetAccumulatedStats(DeviceIndex device);
 
-C10_XPU_API DeviceAllocatorStats getDeviceStats(DeviceIndex device);
+C10_XPU_API c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+    DeviceIndex device);
 
 C10_XPU_API void* raw_alloc(size_t size);
 
