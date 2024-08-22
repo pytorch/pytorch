@@ -10,7 +10,7 @@ namespace c10::CachingDeviceAllocator {
 struct Stat {
   void increase(size_t amount) {
     current += static_cast<int64_t>(amount);
-    peak += std::max(current, peak);
+    peak = std::max(current, peak);
     allocated += static_cast<int64_t>(amount);
   }
 

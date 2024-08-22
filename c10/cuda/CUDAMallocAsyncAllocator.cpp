@@ -698,7 +698,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     // Many stat types are specific to the native allocator. We leave these
-    // untouched. Their "struct DeviceStats"s will contain zeroed
+    // untouched. Their "struct Stat"s will contain zeroed
     // values.
     DeviceStats stats;
 
