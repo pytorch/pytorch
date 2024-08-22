@@ -4,9 +4,8 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import operator
-import re
 import itertools
+import operator
 import types
 import warnings
 from collections import namedtuple
@@ -464,7 +463,7 @@ def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
                 else:
                     node_id[node] = node.name
 
-                    
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
