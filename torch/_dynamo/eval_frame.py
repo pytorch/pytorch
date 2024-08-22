@@ -103,6 +103,7 @@ unset = Unset.token
 
 
 context_id_to_warmup_count = {}
+context_id_to_state = {}
 
 def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
@@ -117,19 +118,38 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
     else:
         assert state in ["enter", "exit"]
         if state == "enter":
+            context_id_to_state[context_id] = "enter"
             if context_id not in context_id_to_warmup_count:
                 context_id_to_warmup_count[context_id] = 0
-            if context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs:
-                log.warn("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
+            if (
+                context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs
+                # NOTE: Compiled Autograd warmup is handled by itself, not here.
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            ):
+                log.warn("here1 enter eval_frame warmup run start: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
                 return callback
             else:
+                log.warn("here2 enter eval_frame normal run: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
                 return set_eval_frame(callback)
         elif state == "exit":
-            if context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs:
-                log.warn("eval_frame warmup run end: %d", torch._dynamo.utils.warmup_count)
+            context_id_to_state[context_id] = "exit"
+            some_cid_is_still_in_enter_state = False
+            for cid, c_state in context_id_to_state.items():
+                if c_state == "enter":
+                    log.warn(f"this context_id {cid} is still in enter state")
+                    some_cid_is_still_in_enter_state = True
+            if not some_cid_is_still_in_enter_state:
+                log.warn(f"all context_id are in exit state, which is good")
+            if (
+                context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs
+                # NOTE: Compiled Autograd warmup is handled by itself, not here.
+                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            ):
+                log.warn("here3 exit eval_frame warmup run end: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
                 context_id_to_warmup_count[context_id] += 1
                 return set_eval_frame(callback)
             else:
+                log.warn("here4 exit eval_frame normal run: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
                 return set_eval_frame(callback)
 
 
