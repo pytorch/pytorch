@@ -2882,7 +2882,7 @@ class TestCase(expecttest.TestCase):
 
     # ignore comments will ignore lines that starts with # after being stripped
     def assertExpectedInline(self, actual, expect, skip=0, ignore_comments=False):
-        
+        actual = actual if isinstance(actual, str) else str(actual)
         actual = self._remove_ansi_escape(actual)
         expect = self._remove_ansi_escape(expect)
         if ignore_comments:

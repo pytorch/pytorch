@@ -797,6 +797,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             self.assertEqual(compiled_args, eager_args)
         finally:
             cleanup_op("mylib::foo")
+            del lib
 
     def test_auto_functionalize_with_returns(self):
         try:
@@ -860,7 +861,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             cleanup_op("mylib::foo")
             del lib
 
-    # Returns [output, graph]
     def run_aot_eager(self, f, orig_args):
         aot_eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
 
@@ -878,7 +878,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         return [aot_eager_args, result, graph]
 
 
-    # Returns [output, graph]
     def run_inductor(self, f, orig_args):
         compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
         
