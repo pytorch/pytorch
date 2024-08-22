@@ -1738,6 +1738,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
                 # There are tests that count these calls, saving to var.
                 ctx_saved_tensors = ctx.saved_tensors
+                num_ctx_saved_tensors = len(ctx_saved_tensors)
                 all_args = [
                     *ctx.symints,
                     *ctx_saved_tensors,
@@ -1745,6 +1746,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *bw_tokens,
                     *rng_args,
                 ]
+                del ctx_saved_tensors
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1799,7 +1801,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     - len(rng_args)
                     - len(bw_tokens)
                 )
-                assert tangents_start_idx == len(ctx.symints) + len(ctx_saved_tensors)
+                assert tangents_start_idx == len(ctx.symints) + num_ctx_saved_tensors
                 tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # TODO: figure out how to refactor the backward properly
