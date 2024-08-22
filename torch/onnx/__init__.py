@@ -84,6 +84,7 @@ from .utils import (
 
 
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
+    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -214,13 +215,12 @@ def export(
                     def forward(self, x):
                         return torch.sum(x, dim=1)
 
-
                 torch.onnx.export(
                     SumModule(),
                     (torch.ones(2, 2),),
                     "onnx.pb",
                     input_names=["x"],
-                    output_names=["sum"],
+                    output_names=["sum"]
                 )
 
             Produces::
@@ -256,7 +256,7 @@ def export(
                         "x": {0: "my_custom_axis_name"},
                         # list value: automatic names
                         "sum": [0],
-                    },
+                    }
                 )
 
             Produces::
