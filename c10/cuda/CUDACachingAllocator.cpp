@@ -3124,8 +3124,11 @@ class DeviceCachingAllocator {
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
-  bool force_uncached =
-      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+  // Allow either CUDA or HIP name for env var for maximum user comfort
+  // break up the name to avoid hipify changing it
+  static const char* cuda_env = getenv("PYTORCH_NO_C""UDA_MEMORY_CACHING");
+  static const char* rocm_env = getenv("PYTORCH_NO_HIP_MEMORY_CACHING");
+  static bool force_uncached = (cuda_env != nullptr) || (rocm_env != nullptr);
   return force_uncached;
 }
 
