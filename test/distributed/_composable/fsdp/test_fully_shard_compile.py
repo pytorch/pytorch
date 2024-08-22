@@ -634,7 +634,7 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self, all_requires_grad=True):
+    def _create_transformer_factory_fns(self, all_requires_grad):
         seq_len = 16
         vocab_size = 8
         n_layers = 3
