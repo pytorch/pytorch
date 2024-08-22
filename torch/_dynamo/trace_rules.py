@@ -3155,7 +3155,11 @@ THIRDPARTY_SKIPLIST = (
 
 
 def _as_posix_path(path):
-    return Path(os.path.normpath(path)).as_posix()
+    posix_path = Path(os.path.normpath(path)).as_posix()
+    # os.path.normpath and pathlib.Path remove trailing slash, so we need to add it back
+    if path.endswith((os.path.sep, "/")):
+        posix_path += "/"
+    return posix_path
 
 
 def _strip_init_py(s):
@@ -3213,19 +3217,23 @@ if torch.distributed.is_available():
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
-MOD_INLINELIST = {
-    "torch.utils._python_dispatch",
-    "torch._refs",
-    "torch._prims",
+MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
-    "torch._functorch.vmap",
     "torch._functorch.autograd_function",
-    "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
+    "torch._functorch.functional_call",
+    "torch._functorch.vmap",
+    "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
+    "torch._library.custom_ops",
+    "torch._prims",
+    "torch._refs",
+    "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
@@ -3239,19 +3247,17 @@ MOD_INLINELIST = {
     "torch.overrides",
     "torch.random",
     "torch.sparse",
-    "torch.testing",
     "torch.testing._internal.hypothesis_utils",
+    "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
+    "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",
-    "torch._tensor",
-    "torch._higher_order_ops.strict_mode",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._functorch.functional_call",
-}
+]
+assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
+MOD_INLINELIST = set(MOD_INLINELIST)
 
 
 if torch.distributed.is_available():
