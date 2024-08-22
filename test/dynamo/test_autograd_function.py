@@ -468,6 +468,27 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_set_materialize_grads_no_graph_break(self):
+        class MulY(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_materialize_grads(True)
+                return x * 3
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return MulY.apply(x)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        result = f(x)
+        result.sum().backward()
+        self.assertEqual(result, MulY.apply(x))
+        self.assertEqual(x.grad, 3.0)
+
     def test_user_defined_object_as_input(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -1054,6 +1075,30 @@ class GraphModule(torch.nn.Module):
 
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_mark_non_differentiable(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, input):
+                output = input > 0
+                ctx.mark_non_differentiable(output)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return (grad_output * 0).to(torch.double)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.randn(5, 5, requires_grad=True)
+        mask = fn(x)
+        self.assertFalse(mask.requires_grad)
+        y = x.masked_fill(mask, 0)
+        y.sum().backward()
 
     def test_default_values(self):
         from torch.autograd import Function
