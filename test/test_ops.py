@@ -2475,9 +2475,16 @@ class TestFakeTensor(TestCase):
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
-                        # prims/decomps must correctly model strides,
-                        # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                        prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                        if op.op not in [
+                            torch.ops.aten._efficient_attention_forward,
+                            torch.ops.aten._flash_attention_forward,
+                        ]:
+                            # prims/decomps must correctly model strides,
+                            # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+
+                            # note: the excluded ops have intentionally incorrect device;
+                            # see "Note [Seed and Offset]" (_meta_registrations.py)
+                            prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                         if name not in aliasing_failures:
                             fake_aliasing = outputs_alias_inputs(
