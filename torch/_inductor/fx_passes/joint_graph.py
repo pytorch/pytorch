@@ -593,7 +593,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
@@ -620,7 +620,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
