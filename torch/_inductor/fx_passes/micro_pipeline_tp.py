@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Dict, List, Optional, Set, Tuple
+from typing import Any, cast, Dict, List, Optional, Set
 
 import torch
 from torch._functorch._aot_autograd.utils import is_with_effects
@@ -814,15 +814,13 @@ def _insert_fused_matmul_reduce_scatter(
         raise AssertionError(f"Unexpected matmul match type: {type(matmul)}")
 
 
-def with_effects_users(
-    node: torch.fx.Node, strict: bool = True
-) -> Tuple[torch.fx.Node, torch.fx.Node]:
+def with_effects_users(node: torch.fx.Node, strict: bool = True):
     assert node.target == torch.ops.higher_order.with_effects
     users = node.users
     if not strict:
         assert (
             len(users) == 2
-        ), f"XXX with_effects node {node} users:{users}, expected 2 users"
+        ), f"with_effects node {node} users:{users}, expected 2 users"
     getitem_users: List[Optional[torch.fx.Node]] = [None, None]
     for user in users.keys():
         assert user.target == operator.getitem
