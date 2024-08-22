@@ -465,6 +465,8 @@ combo_kernels_autotune = 1
 # Enable masking for combining kernels of mixed sizes: 0 - disable, 1 - enable
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
+# Enable dynamic shapes for foreach kernels
+combo_kernel_foreach_dynamic_shapes = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True

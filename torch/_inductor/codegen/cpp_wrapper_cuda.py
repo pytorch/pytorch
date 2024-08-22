@@ -190,6 +190,12 @@ class CppWrapperCuda(CppWrapperCpu):
 
         return ", ".join(new_args)
 
+    def _process_grid(self, grid: List[Any]):
+        if isinstance(grid, (list, tuple)):
+            return [self._process_grid(e) for e in grid]
+        else:
+            return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
+
     def generate_default_grid(
         self,
         name: str,
@@ -205,7 +211,7 @@ class CppWrapperCuda(CppWrapperCpu):
         if not cuda:
             return grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
-        grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
+        grid = self._process_grid(grid)
         grid_callable = grid_callable or default_grid
         if not grid_extra_kwargs:
             grid_fn = grid_callable(*grid)
