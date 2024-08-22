@@ -108,12 +108,6 @@ endif()
 #BLIS?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "blis")))
-  check_fortran_libraries(
-  BLAS_LIBRARIES
-  BLAS
-  sgemm
-  ""
-  "blis")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "blis")
   endif(BLAS_LIBRARIES)
