@@ -254,7 +254,7 @@ class VecZVECTOR(VecISA):
 
 @dataclasses.dataclass
 class VecVSX(VecISA):
-    _bit_width = 256 #VSX simd supports 128 bit_width, but aten is emulating it as 256
+    _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
     _macro = ["CPU_CAPABILITY_VSX"]
     _arch_flags = "-mvsx"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
