@@ -3,7 +3,7 @@ Python polyfills for common builtins.
 """
 
 # NOTE: 1. Please do not import any submodule in the directory here to avoid circular imports.
-#       2. While adding a new polyfill module, please add it to loader.py as well.
+#       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 
 # mypy: allow-untyped-defs
 
