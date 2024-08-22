@@ -1,10 +1,10 @@
 import csv
 from abc import ABC, abstractmethod
 
-from fbscribelogger import make_scribe_logger
-
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
+
+from fbscribelogger import make_scribe_logger
 from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
@@ -141,8 +141,10 @@ class BenchmarkBase(ABC):
             r = self._count_compile_time_instructions()
             # TODO add logging to scribe.
             self.results.append(
-                self.name(),
-                "compile_time_instruction_count",
-                r,
+                (
+                    self.name(),
+                    "compile_time_instruction_count",
+                    r,
+                )
             )
         return self
