@@ -144,8 +144,6 @@ void f8f8bf16_rowwise_impl(
       WQ.is_cuda() && WQ.ndimension() == 2 && WQ.stride(1) == WQ.size(0) &&
       WQ.stride(0) == 1);
 
-  // auto Y = at::empty({M, N}, XQ.options().dtype(at::kBFloat16));
-
   using LayoutInputA = cutlass::layout::RowMajor;
   constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
 
@@ -155,23 +153,15 @@ void f8f8bf16_rowwise_impl(
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  using ArchTag = cutlass::arch::Sm90; // Tag indicating the minimum SM that
-                                       // supports the intended feature
+  // Tag indicating the minimum SM that supports the intended feature
+  using ArchTag = cutlass::arch::Sm90;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
-  using TileShape = cute::Shape<
-      cute::Int<TB_M>,
-      cute::Int<TB_N>,
-      cute::Int<TB_K>>; // Threadblock-level
-                        // tile size
-  using ClusterShape = cute::Shape<
-      cute::Int<TBS_M>,
-      cute::Int<TBS_N>,
-      cute::Int<TBS_K>>; // Shape of the
-                         // threadblocks in a
-                         // cluster
-  using KernelSchedule = cutlass::gemm::collective::
-      KernelScheduleAuto; // Kernel to launch based on the default setting in
-                          // the Collective Builder
+  // Threadblock-level tile size
+  using TileShape =
+      cute::Shape<cute::Int<TB_M>, cute::Int<TB_N>, cute::Int<TB_K>>;
+  // Shape of the threadblocks in a cluster
+  using ClusterShape =
+      cute::Shape<cute::Int<TBS_M>, cute::Int<TBS_N>, cute::Int<TBS_K>>;
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
@@ -200,8 +190,8 @@ void f8f8bf16_rowwise_impl(
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
-          cutlass::arch::Sm90,
-          cutlass::arch::OpClassTensorOp,
+          ArchTag,
+          OperatorClass,
           TileShape,
           ClusterShape,
           cutlass::epilogue::collective::EpilogueTileAuto,
@@ -394,10 +384,6 @@ void f8f8bf16_rowwise(
             bias.value().dtype() == at::kBFloat16,
         "Bias type must be bfloat16 or float32 if provided.");
   }
-  // Extract problem size.
-  int M = XQ.size(0);
-  int N = WQ.size(1);
-  int K = XQ.size(1);
 
   bool bf16_bias = bias.has_value() && bias->dtype() == at::kBFloat16;
 
