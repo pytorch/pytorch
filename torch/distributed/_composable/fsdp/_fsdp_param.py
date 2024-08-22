@@ -601,9 +601,9 @@ class FSDPParam:
             - `self._unsharded_param` is NOT an alias of `self.all_gather_outputs`.
             Instead, we explicitly *copy* the data from `self.all_gather_outputs`
             to `self._unsharded_param` in `init_unsharded_param()`.
-            - `self.all_gather_outputs` and `self._unsharded_inner_tensors` are
-            graph intermediates and will be freed at the end of the graph. They don't
-            leak outside of the graph.
+            - `self.all_gather_outputs` and `self._unsharded_inner_tensors` are NOT
+            graph inputs. They are created within the graph and is guaranteed to be freed
+            by the end of the graph. They don't leak outside of the graph.
             """
             free_storage(self._unsharded_param)
             self.all_gather_outputs = []
