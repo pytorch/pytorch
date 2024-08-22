@@ -633,7 +633,7 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self, all_requires_grad):
+    def _create_transformer_factory_fns(self, all_requires_grad=True):
         seq_len = 16
         vocab_size = 8
         n_layers = 3
@@ -694,7 +694,7 @@ class TestFullyShardCompile(FSDPTest):
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
-        for fullgraph in [True]:  # TODO: fix bug and enable [True, False]:
+        for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(fullgraph):
@@ -709,7 +709,7 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
-        for fullgraph in [True]:  # TODO: fix bug and enable [True, False]:
+        for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(),
@@ -723,9 +723,7 @@ class TestFullyShardCompile(FSDPTest):
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
         for fullgraph, all_requires_grad in itertools.product(
-            [True],
-            [True]
-            # [True, False], [True, False]
+            [True, False], [True, False]
         ):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
