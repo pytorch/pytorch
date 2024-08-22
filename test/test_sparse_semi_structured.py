@@ -42,7 +42,7 @@ import pytest
 
 from torch.utils._triton import has_triton
 
-SEMI_STRUCTURED_SUPPORTED_BACKENDS = {}
+SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 
 _IS_SM8X = False
 _IS_SM9X = False
@@ -172,7 +172,7 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
-        if SEMI_STRUCTURED_SUPPORTED_BACKENDS == {}:
+        if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
             self.skipTest('semi-structured sparsity has no available backend!')
         super().setUp()
 
@@ -261,7 +261,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 class TestSparseSemiStructured(TestCase):
 
     def setUp(self):
-        if SEMI_STRUCTURED_SUPPORTED_BACKENDS == {}:
+        if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0: 
             self.skipTest('semi-structured sparsity has no available backend!')
         if IS_WINDOWS:
             self.skipTest("torch.compile not supported on windows")
