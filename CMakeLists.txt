@@ -251,6 +251,7 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
 # Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
 # Using TH_BINARY_BUILD to check whether is binary build.
 # USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
@@ -1294,6 +1295,10 @@ if(BUILD_SHARED_LIBS)
     COMPONENT dev)
   install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
+    DESTINATION share/cmake/Caffe2/
+    COMPONENT dev)
+  install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDSS.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
