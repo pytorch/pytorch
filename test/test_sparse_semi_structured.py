@@ -1126,7 +1126,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             assert torch.backends.cusparselt.version() == 400
         # CUDA 12.1 has cuSPARSELt v0.5.2 support
         elif version == (12, 1):
-            assert torch.backends.cusparselt.version() == 502
+            assert torch.backends.cusparselt.version() == 602
         # CUDA 12.4+ has cuSPARSELt v0.5.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
