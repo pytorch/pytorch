@@ -922,7 +922,9 @@ class aot_inductor:
     )
 
     # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
-    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+    filtered_kernel_names = os.environ.get(
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "default"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
