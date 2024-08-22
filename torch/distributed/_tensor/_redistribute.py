@@ -169,7 +169,6 @@ def redistribute_local_tensor(
     device_mesh = current_spec.mesh
 
     my_coordinate = device_mesh.get_coordinate()
-    print(f"rank {device_mesh.get_rank()} my_coordinate: {my_coordinate}")
 
     if my_coordinate is None:
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
@@ -202,7 +201,6 @@ def redistribute_local_tensor(
                 new_local_tensor = current_placement._to_replicate_tensor(
                     local_tensor, device_mesh, i, transform_info.logical_shape
                 )
-                print(f"rank {device_mesh.get_rank()} reshard({current_placement} -> {target}): {local_tensor} -> {new_local_tensor}")
             else:
                 raise RuntimeError(
                     f"redistribute from {current} to {target} not supported yet"
@@ -218,11 +216,9 @@ def redistribute_local_tensor(
                 )
             elif current.is_replicate():
                 # split the tensor and return the corresponding cloned local shard
-                print(f"rep -> shard. rank {device_mesh.get_rank()} my_coordinate: {my_coordinate}")
                 new_local_tensor = target_placement._replicate_to_shard(
                     local_tensor, device_mesh, i, my_coordinate[i]
                 )
-                print(f"rank {device_mesh.get_rank()} reshard({current} -> {target}): {local_tensor} -> {new_local_tensor}")
             else:
                 assert (
                     current.is_shard()
