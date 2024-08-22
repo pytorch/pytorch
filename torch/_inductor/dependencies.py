@@ -124,7 +124,7 @@ class MemoryDep(Dep):
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
-            vars: OrderedSet[sympy.Expr] = OrderedSet(self.index.free_symbols)
+            vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
             numel = sympy.Integer(1)
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
