@@ -4778,6 +4778,7 @@ class ExternKernel(InputsKernel):
                         isinstance(x.data, ReinterpretView)
                         or list(x.get_layout().stride) == exact_strides
                     )
+                    and x.get_layout().is_stride_ordered(get_stride_order(V.graph.sizevars.size_hints(exact_strides)))
                 )
             ):
                 return x
