@@ -14,7 +14,7 @@ namespace torch::aot_inductor {
 
 void OSSProxyExecutor::prefill_stack_with_static_arguments(
     int index,
-    const at::TypePtr& schema_arg_type,
+    at::TypePtr schema_arg_type,
     const nlohmann::json& serialized_arg,
     OSSOpKernel& op_kernel) {
   auto& stack = op_kernel.stack_;
@@ -29,7 +29,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       TORCH_CHECK(serialized_arg_type == "as_tensor");
       stack.emplace_back();
       dynamic_args.emplace_back(
-          index, DynamicArgType::TensorType, 1, serialized_arg_val);
+          index, DynamicArgType::TensorType, 1, std::move(serialized_arg_val));
       break;
     }
     // TODO: handle the other input types
@@ -73,7 +73,7 @@ void OSSProxyExecutor::get_output_info_from_serialized(
     auto& serialized_output_val = serialized_output.begin().value();
 
     auto& schema_return = schema_returns[output_index];
-    const at::TypePtr& schema_return_type = schema_return.real_type();
+    at::TypePtr schema_return_type = schema_return.real_type();
 
     switch (schema_return_type->kind()) {
       case c10::TypeKind::TensorType: {
@@ -126,6 +126,8 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
     int device_idx = -1;
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
   }
+
+  std::string extern_kernel_nodes_serialized;
 
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open());
