@@ -371,16 +371,16 @@ void mallocAsync(
         device,
         " would exceed allowed memory. (out of memory)",
         "\nCurrently allocated     : ",
-        format_memory_size(pytorch_used_bytes[device]),
+        format_size(pytorch_used_bytes[device]),
         "\nRequested               : ",
-        format_memory_size(size),
+        format_size(size),
         "\nDevice limit            : ",
-        format_memory_size(device_total),
+        format_size(device_total),
         "\nFree (according to CUDA): ",
-        format_memory_size(device_free),
+        format_size(device_free),
         "\nPyTorch limit (set by user-supplied memory fraction)"
         "\n                        : ",
-        format_memory_size(pytorch_memory_limits[device]));
+        format_size(pytorch_memory_limits[device]));
   } else {
     C10_CUDA_CHECK(err);
   }
@@ -664,7 +664,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
-  DeviceAllocatorStats getDeviceStats(c10::DeviceIndex device) override {
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override {
     assertValidDevice(device);
 
     // Memory currently reserved by the mempool
@@ -697,9 +698,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     // Many stat types are specific to the native allocator. We leave these
-    // untouched. Their "struct DeviceAllocatorStats"s will contain zeroed
+    // untouched. Their "struct DeviceStats"s will contain zeroed
     // values.
-    DeviceAllocatorStats stats;
+    c10::CachingDeviceAllocator::DeviceStats stats;
 
     // In the native allocator:
     // allocated_bytes is the total bytes of blocks that have been malloc()ed
