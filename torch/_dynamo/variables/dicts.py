@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import raise_observed_exception, unimplemented
@@ -335,6 +335,20 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
+        elif name == "setdefault" and arg_hashable and self.mutable_local:
+            assert not kwargs
+            assert len(args) <= 2
+            value = self.maybe_getitem_const(args[0])
+            if value is not None:
+                return value
+            else:
+                if len(args) == 1:
+                    x = ConstantVariable.create(None)
+                else:
+                    x = args[1]
+                tx.output.side_effects.mutation(self)
+                self.items[Hashable(args[0])] = x
+                return x
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -460,25 +474,25 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert len(args) == 1
             return variables.UserFunctionVariable(
-                polyfill.set_isdisjoint
+                polyfills.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             assert not kwargs
             assert len(args) == 1
             return variables.UserFunctionVariable(
-                polyfill.set_intersection
+                polyfills.set_intersection
             ).call_function(tx, [self, args[0]], {})
         elif name == "union":
             assert not kwargs
             assert len(args) == 1
-            return variables.UserFunctionVariable(polyfill.set_union).call_function(
+            return variables.UserFunctionVariable(polyfills.set_union).call_function(
                 tx, [self, args[0]], {}
             )
         elif name == "difference":
             assert not kwargs
             assert len(args) == 1
             return variables.UserFunctionVariable(
-                polyfill.set_difference
+                polyfills.set_difference
             ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
