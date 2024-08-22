@@ -4589,15 +4589,7 @@ class LoopLevel:
             if self.simd_omp and self.simd_nelements > 1
             else ""
         )
-        # TODO: parallel dynamic tail loop
-        if (
-            self.offset != sympy.Integer(0)
-            and self.steps != sympy.Integer(1)
-            and isinstance(self.size, sympy.Expr)
-            and not self.size.is_number
-        ):
-            line1 = ""
-        elif self.parallel:
+        if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = "#pragma omp for"
             if self.parallel > 1:
@@ -4614,7 +4606,14 @@ class LoopLevel:
             line1 = ""
         offset_str = f"{INDEX_TYPE} {self.var}={offset_expr}"
         size_str = f"{self.var}<{size_expr}"
-        steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        if self.steps.is_number:
+            steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        else:
+            step_1 = sympy.Integer(1)
+            steps_str = (
+                f"{self.var}+={cexpr_index(self.steps)} >= {cexpr_index(step_1)} ? "
+                f"{cexpr_index(self.steps)} : {cexpr_index(step_1)}"
+            )
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]
