@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import dataclasses
 import functools
 import io
@@ -2423,13 +2424,15 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn, fullgraph):
+def make_wrapped(fn, ctxs):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        with compiled_autograd.enable(make_compiler_fn(fullgraph=fullgraph)):
-            out = fn(self)
-
+        stack = contextlib.ExitStack()
+        for ctx in ctxs:
+            stack.enter_context(ctx)
+        out = fn(self)
+        stack.close()
         return out
 
     return wrapped
@@ -2445,7 +2448,11 @@ def wrap_test_class(orig_cls):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
             fullgraph = name not in known_graph_breaks_tests
-            dct[name] = make_wrapped(fn, fullgraph)
+            ctxs = [
+                compiled_autograd.enable(make_compiler_fn(fullgraph=fullgraph)),
+                test_contexts.get(name, contextlib.nullcontext()),
+            ]
+            dct[name] = make_wrapped(fn, ctxs)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -2469,6 +2476,10 @@ known_graph_breaks_tests = {
     "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # allclose
 }
 
+test_contexts = {
+    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True)
+}
+
 # These groups of tests aren't supported yet
 known_failures_re = re.compile(
     r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)"
@@ -2490,9 +2501,9 @@ known_failing_tests = {
     # Category: Inductor
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
+    # Category: FakeTensor
+    "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
     # Uncategorized
-    "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
-    "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
     "test_save_tensor_hook_version_counter_not_shared",  # raise UnsupportedInputs
     "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
