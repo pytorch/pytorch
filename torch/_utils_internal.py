@@ -237,3 +237,7 @@ REQUIRES_SET_PYTHON_MODULE = False
 def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
     return None
+
+
+def log_chromium_event_internal(event, stack, logger_uuid, start_timestamp=None):
+    return None
