@@ -492,7 +492,6 @@ class TestSparseSemiStructured(TestCase):
     @inference_dtypes
     @parametrize_backends
     def test_min_sparse_shape(self, dtype, device, backend):
-        return
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         config = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend]._DTYPE_SHAPE_CONSTRAINTS[dtype]
         A = rand_sparse_semi_structured_mask(config.sparse_min_rows, config.sparse_min_cols, dtype=dtype, device=device)
@@ -1050,11 +1049,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=out_dtype)
         torch.testing.assert_close(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skip("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
     @training_dtypes
     def test_cslt_sparse_mm_alpha(self, dtype, device):
-        cslt_version = torch.backends.cusparselt.version()
-        if cslt_version and cslt_version > 520:
-            self.skipTest("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
@@ -1126,15 +1123,16 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             assert torch.backends.cusparselt.version() == 400
         # CUDA 12.1 has cuSPARSELt v0.5.2 support
         elif version == (12, 1):
-            assert torch.backends.cusparselt.version() == 602
-        # CUDA 12.4+ has cuSPARSELt v0.5.2 support
+            assert torch.backends.cusparselt.version() == 502
+        # CUDA 12.4+ has cuSPARSELt v0.6.2 support
         elif version >= (12, 4):
             assert torch.backends.cusparselt.version() == 602
         else:
             assert torch.backends.cusparselt.version() is None
 
 
-instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+if SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+    instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUTLASS, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda")
 instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_for="cuda")
