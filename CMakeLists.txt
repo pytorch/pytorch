@@ -208,7 +208,6 @@ endif()
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
-option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF
        "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
@@ -252,6 +251,15 @@ cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
+# Binary builds will fail for cufile due to https://github.com/pytorch/builder/issues/1924
+# Using TH_BINARY_BUILD to check whether is binary build.
+# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
+if(DEFINED ENV{TH_BINARY_BUILD})
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF
+                         "USE_CUDA AND NOT $ENV{TH_BINARY_BUILD} AND NOT WIN32" OFF)
+else()
+  cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
+endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -539,8 +547,14 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
-  set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
+
+  set(ENV_LDFLAGS "$ENV{LDFLAGS}")
+  string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
+  # Do not append linker flags passed via env var if they already there
+  if(NOT ${CMAKE_SHARED_LINKER_FLAGS} MATCHES "${ENV_LDFLAGS}")
+     set(CMAKE_SHARED_LINKER_FLAGS
+         "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
+  endif()
 endif()
 
 if(MSVC)
@@ -750,7 +764,6 @@ if(NOT TORCH_BUILD_VERSION)
       CACHE STRING "Torch build version" FORCE)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
-caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
 set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
@@ -983,8 +996,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
@@ -1032,15 +1043,8 @@ if(NOT MSVC)
     endif()
   endif()
 
-  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override"
-                               CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported(
-    "-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-invalid-partial-specialization"
-                               CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
@@ -1173,6 +1177,10 @@ if(APPLE)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 
+if(USE_XPU)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
+endif()
+
 if(EMSCRIPTEN)
   string(
     APPEND
@@ -1222,45 +1230,6 @@ endif()
 # ---[ Main build
 add_subdirectory(c10)
 add_subdirectory(caffe2)
-
-# --[ Documentation
-if(BUILD_DOCS)
-  # check if Doxygen is installed
-  find_package(Doxygen)
-  if(DOXYGEN_FOUND)
-    message("Generating documentation")
-
-    set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-c)
-    set(DOXYGEN_C_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-c)
-    set(DOXYGEN_P_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/.Doxyfile-python)
-    set(DOXYGEN_P_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/caffe2/Doxyfile-python)
-
-    if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
-      file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif()
-
-    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
-    configure_file(${DOXYGEN_P_IN} ${DOXYGEN_P_OUT} @ONLY)
-
-    add_custom_target(
-      doc_doxygen_c ALL
-      COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_C_OUT}
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMENT "Generating C++ API documentation with Doxygen"
-      VERBATIM)
-
-    add_custom_target(
-      doc_doxygen_python ALL
-      COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_P_OUT}
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      COMMENT "Generating Python API documentation with Doxygen"
-      VERBATIM)
-  else()
-    message(
-      FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif()
-endif()
 
 # ---[ CMake related files Uninistall option.
 if(NOT TARGET caffe2_uninstall)
@@ -1380,6 +1349,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
     if(BUILD_LIBTORCHLESS)
+      caffe2_update_option(USE_CUDA OFF)
       set(ALL_PT_TARGETS "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
     else()
       # @todo test if we can remove this

@@ -461,6 +461,41 @@ Vectorized<c10::quint8> inline minimum(
   return a.minimum(b);
 }
 
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator+(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator-(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator*(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator/(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator&(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator|(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::quint8> C10_ALWAYS_INLINE operator^(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+  return Vectorized<c10::quint8>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
 } // namespace
 } // namespace vec
 } // namespace at

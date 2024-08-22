@@ -3,13 +3,14 @@
 import functools
 import itertools
 import operator
-from typing import cast, Iterable, List, Sequence, Tuple, Union
+from typing import cast, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
 )
@@ -110,25 +111,6 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
     elif isinstance(dims, tuple):
         dims = tuple([normalize_dim(dim, ndim) for dim in dims])
     return dims
-
-
-def normalize_to_torch_size(size) -> torch.Size:
-    """
-    Unify variable types of size argument to torch.Size
-    Acceptable types include:
-        int, Sequence[int], Tuple[int], Tuple[Sequence[int]],
-        or torch.Size
-    """
-    if isinstance(size, torch.Size):
-        return size
-
-    if isinstance(size, int):
-        torch_size = [size]
-    elif len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = list(size[0])
-    else:
-        torch_size = list(size)
-    return torch.Size(torch_size)
 
 
 def prod(xs: Iterable[int]) -> int:
@@ -237,7 +219,7 @@ def generate_redistribute_costs(
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_mesh_dim_strategies: List[List[Placement]],
+    single_mesh_dim_strategies: List[PlacementList],
     *,
     input_index: int = 1,
     inplace_op: bool = False,
@@ -249,14 +231,21 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list = []
+        spec_list: List[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
-            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+            if specs[0] is not None:
+                spec_list.append(DTensorSpec(mesh, specs))
+            else:
+                spec_list.append(None)
 
-        input_specs = spec_list[input_index:]
+        input_specs: List[DTensorSpec] = [
+            s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
+        ]
+
         input_args_strategy = op_schema.args_strategy
         assert len(input_specs) == len(input_args_strategy)
         self_spec = input_args_strategy[0].strategies[0].output_spec
+
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the placement strategy to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
@@ -274,10 +263,15 @@ def expand_to_full_mesh_op_strategy(
                 generate_redistribute_costs(input_strategy, input_spec)
                 for input_strategy, input_spec in zip(input_args_strategy, input_specs)
             ]
+            if input_index > 1:
+                output_specs = tuple(spec_list[:input_index])
+            else:
+                if spec_list[0] is not None:
+                    output_specs = spec_list[0]  # type: ignore[assignment]
+                else:
+                    raise RuntimeError("output spec is None")
             strategy = PlacementStrategy(
-                output_specs=tuple(spec_list[:input_index])
-                if input_index > 1
-                else spec_list[0],
+                output_specs=output_specs,
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,
             )
