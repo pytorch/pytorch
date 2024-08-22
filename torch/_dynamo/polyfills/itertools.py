@@ -72,12 +72,23 @@ def islice___new__(
             "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
         )
 
-    indices = itertools.count() if stop is None else range(max(start, stop))
-    next_i = start
-    for i, element in zip(indices, iterable):
-        if i == next_i:
-            yield element
-            next_i += step
+    if stop is None:
+        # TODO: use indices = itertools.count() and merge implementation with the else branch
+        #       when we support infinite iterators
+        i = 0
+        next_i = start
+        for element in iterable:
+            if i == next_i:
+                yield element
+                next_i += step
+            i += 1
+    else:
+        indices = range(max(start, stop))
+        next_i = start
+        for i, element in zip(indices, iterable):
+            if i == next_i:
+                yield element
+                next_i += step
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
