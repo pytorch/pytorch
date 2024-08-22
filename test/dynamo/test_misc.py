@@ -317,6 +317,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfNNModuleInlined("fails internal CI")
+    @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
     def test_cpp_extension_recommends_custom_ops(self):
         cpp_source = """
         #include <torch/extension.h>
