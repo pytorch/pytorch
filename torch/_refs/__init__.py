@@ -5004,7 +5004,7 @@ def arange(
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if dtype == torch.int64:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
