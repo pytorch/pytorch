@@ -1527,7 +1527,7 @@ class GraphLowering(torch.fx.Interpreter):
                     fvs = free_unbacked_symbols(ra.expr)
                     missing = fvs - self.bound_unbacked_symbols
                     if missing:
-                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        i1 = min(missing, key=str)
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
