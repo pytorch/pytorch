@@ -23,12 +23,12 @@ __all__ = [
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
-    parallelize_plan: Optional[Union[ParallelStyle, Dict[str, ParallelStyle]]] = None,
+    plan: Optional[Union[ParallelStyle, Dict[str, ParallelStyle]]] = None,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
 
-    We parallelize module or sub_modules based on a parallelize_plan. The parallelize_plan contains
+    We parallelize module or sub_modules based on a plan. The plan contains
     :class:`ParallelStyle`, which indicates how user wants the module or sub_module
     to be parallelized.
 
@@ -43,7 +43,7 @@ def parallelize_module(  # type: ignore[return]
         device_mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology
             of devices for the DTensor.
-        parallelize_plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]]):
+        plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]]):
             The plan used to parallelize the module. It can be either a
             :class:`ParallelStyle` object which contains how
             we prepare input/output for Tensor Parallelism or it can be a
@@ -64,17 +64,15 @@ def parallelize_module(  # type: ignore[return]
 
     .. note:: For complex module architecture like Attention, MLP layers, we recommend composing
         different ParallelStyles together (i.e. ``ColwiseParallel`` and ``RowwiseParallel``) and pass
-        as a parallelize_plan, to achieves the desired sharding computation.
+        as a plan, to achieves the desired sharding computation.
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     _validate_tp_mesh_dim(device_mesh)
 
-    if parallelize_plan is None:
-        warnings.warn(
-            "No parallelize_plan is provided, so parallelize_module does nothing."
-        )
+    if plan is None:
+        warnings.warn("No plan is provided, so parallelize_module does nothing.")
         return module
 
     # instantiate a TP RNG state tracker if it's not there
@@ -89,10 +87,10 @@ def parallelize_module(  # type: ignore[return]
         # after parallelizing the model.
         random._rng_tracker.distribute_region_enabled = False
 
-    if isinstance(parallelize_plan, ParallelStyle):
-        return parallelize_plan._apply(module, device_mesh)
-    elif isinstance(parallelize_plan, dict):
-        for module_path, parallelize_style in parallelize_plan.items():
+    if isinstance(plan, ParallelStyle):
+        return plan._apply(module, device_mesh)
+    elif isinstance(plan, dict):
+        for module_path, parallelize_style in plan.items():
             path_splits = module_path.split(".")
             if len(path_splits) == 0:
                 raise ValueError(
@@ -122,5 +120,5 @@ def parallelize_module(  # type: ignore[return]
     else:
         raise TypeError(  # pyre-ignore[7]
             "Expect Union[ParallelStyle, Dict[str, ParallelStyle]] for"
-            f" parallelize_plan, {type(parallelize_plan)} found!"
+            f" plan, {type(plan)} found!"
         )
