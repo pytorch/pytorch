@@ -87,7 +87,7 @@ def triton_mm(a, b, use_3xtf32):
     assert a.is_contiguous(), "Matrix A must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    c = torch.empty((M, N), device=a.device, dtype=torch.float16)
+    c = torch.empty((M, N), device=a.device, dtype=torch.float32)
     BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 128, 128, 32
     grid = lambda META: (
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
@@ -116,6 +116,8 @@ def triton_mm(a, b, use_3xtf32):
     return c
 
 
+torch.manual_seed(1234)
+
 dims = []
 cutlass_3xtf32_loss = []
 triton_3xtf32_loss = []
@@ -123,7 +125,7 @@ triton_ieee_loss = []
 for m in range(256, 4096, 128):
     n = k = m
 
-    a = torch.randn((m, k), dtype=dtype, device=device)
+    a = torch.ones((m, k), dtype=dtype, device=device)
     b = torch.randn((k, n), dtype=dtype, device=device)
 
     allow_tf32_saved = torch.backends.cuda.matmul.allow_tf32

@@ -350,6 +350,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -990,12 +991,13 @@ class GraphLowering(torch.fx.Interpreter):
                 # We have to OrderedSet the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
-                args, kwargs = constrain_to_fx_strides(
-                    self.current_node, *args, **kwargs
+                constrain_fn = functools.partial(
+                    constrain_to_fx_strides, ignore_mutated_args_FIXME=True
                 )
+                args, kwargs = constrain_fn(self.current_node, *args, **kwargs)
                 # Also register the layout constraint so when the fallback
                 # is used again, we can constrain the args to the same layout
-                layout_constraint = constrain_to_fx_strides
+                layout_constraint = constrain_fn
             return layout_constraint, args, kwargs
 
         if target not in lowerings:
@@ -1525,7 +1527,7 @@ class GraphLowering(torch.fx.Interpreter):
                     fvs = free_unbacked_symbols(ra.expr)
                     missing = fvs - self.bound_unbacked_symbols
                     if missing:
-                        i1 = sorted(missing, key=lambda x: str(x))[0]
+                        i1 = min(missing, key=str)
                         self.ras_by_symbol.setdefault(i1, []).append(ra)
                     else:
                         make_assert(ra.expr, f"{ra.expr}")
@@ -1867,4 +1869,4 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
-        )
+        ) or name in self.zero_dim_cpu_tensor_list
