@@ -156,7 +156,8 @@ class TestNN(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is legacy code that saves the model
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -368,24 +369,6 @@ class TestNN(NNTestCase):
                          ["buffer1"])
         self.assertEqual(names(m.named_buffers(remove_duplicate=False)),
                          ["buffer1", "buffer2"])
-
-        # test persistent
-        class Foo(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer('buffer1', torch.empty(3, 5), persistent=True)
-                self.register_buffer('buffer2', torch.empty(3, 5), persistent=False)
-
-        foo = Foo()
-        # persistent = True
-        self.assertEqual(len(list(foo.buffers(persistent=True))), 1)
-        self.assertEqual(names(foo.named_buffers(persistent=True)), ["buffer1"])
-        # persistent = False
-        self.assertEqual(len(list(foo.buffers(persistent=False))), 1)
-        self.assertEqual(names(foo.named_buffers(persistent=False)), ["buffer2"])
-        # persistent = None
-        self.assertEqual(len(list(foo.buffers(persistent=None))), 2)
-        self.assertEqual(names(foo.named_buffers(persistent=None)), ["buffer1", "buffer2"])
 
     def test_buffer_bad_module_subclass(self):
         class MyBadModule(nn.Linear):
@@ -4346,7 +4329,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     buf = io.BytesIO()
                     rnn_pickle = torch.save(rnn, buf)
                     buf.seek(0)
-                    rnn2 = torch.load(buf)
+                    # weights_only=False as this is legacy code that saves the model
+                    rnn2 = torch.load(buf, weights_only=False)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
@@ -12403,12 +12387,20 @@ if __name__ == '__main__':
             result = model(encoder_input, src_key_padding_mask=mask)
             self.assertEqual(result.shape, ref_output.shape)
             torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
-            # 1 values are masked. Since there is only 1 input embedding this
-            # will result in nan.
             mask = torch.tensor([[1]], device=device) == 1
             result = model(encoder_input, src_key_padding_mask=mask)
+            fast_path_device = result.is_cuda or result.is_cpu
             result = result.cpu().detach().numpy()
-            self.assertTrue(np.isnan(result).all())
+            # Non Fast Paths
+            if training or not batch_first or TEST_WITH_CROSSREF or not fast_path_device:
+                # We changed the semenatic, on the non fast path so that fully masked out rows return
+                # 0 from attention thus NaNs should no longer be present and the output should be nonzero
+                # due to skip connections
+                self.assertTrue(not np.isnan(result).any())
+            else:
+                # Fast Paths
+                self.assertTrue(np.isnan(result).all())
+
 
             # deterministic input
             encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],

@@ -567,8 +567,6 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            pass
-
             fut: Future[List[WriteResult]] = Future()
             fut.set_result(res)
             return fut
