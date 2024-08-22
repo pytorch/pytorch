@@ -1314,9 +1314,6 @@ class TensorSubclassVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def python_type(self):
-        return type(self.value)
-
 
 class UntypedStorageVariable(VariableTracker):
     _nonvar_fields = {

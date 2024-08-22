@@ -1144,9 +1144,6 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -1263,9 +1260,6 @@ class NumpyVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -1440,9 +1434,6 @@ class ConstantLikeVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
