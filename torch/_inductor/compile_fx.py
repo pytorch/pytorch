@@ -23,6 +23,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     counters,
@@ -52,6 +53,7 @@ from torch._inductor.utils import (
     count_tangents,
     fresh_inductor_cache,
     InputType,
+    is_gpu,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -59,6 +61,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.monitor import _WaitCounter
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module  # type: ignore[attr-defined]
@@ -375,11 +378,11 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
     """
-    has_cuda = any(
-        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
+    has_gpu = any(
+        is_gpu(t.device.type) for t in example_inputs if isinstance(t, torch.Tensor)
     )
 
-    if config.comprehensive_padding and not has_cuda:
+    if config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
         return config.patch(comprehensive_padding=False)
     else:
@@ -419,6 +422,10 @@ def should_use_remote_fx_graph_cache():
         return config.fx_graph_remote_cache
     if not config.is_fbcode():
         return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
     try:
         from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
     except ModuleNotFoundError:
@@ -637,40 +644,41 @@ def _compile_fx_inner(
         compiled_graph.boxed_forward_device_index = boxed_forward_device_index
         return compiled_graph
 
-    if (
-        not config.force_disable_caches
-        and (config.fx_graph_cache or fx_graph_remote_cache)
-        and not aot_mode
-    ):
-        for i, input in enumerate(example_inputs):
-            if (
-                isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
-                and i in static_input_idxs
-            ):
-                input._is_inductor_static = True  # type: ignore[attr-defined]
+    with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+        if (
+            not config.force_disable_caches
+            and (config.fx_graph_cache or fx_graph_remote_cache)
+            and not aot_mode
+        ):
+            for i, input in enumerate(example_inputs):
+                if (
+                    isinstance(input, torch.Tensor)
+                    and input.device.type == "cuda"
+                    and i in static_input_idxs
+                ):
+                    input._is_inductor_static = True  # type: ignore[attr-defined]
 
-        compiled_graph = FxGraphCache.load(
-            codegen_and_compile,
-            gm,
-            example_inputs,
-            graph_kwargs,
-            inputs_to_check,
-            local=config.fx_graph_cache,
-            remote=fx_graph_remote_cache,
-        )
-    else:
-        compiled_graph = codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
-        )
-        if aot_mode:
-            # AOT mode is special because codegen_and_compile returns a string.
-            # In that case, we don't need to run all post compilation steps, we just need
-            # to return the string directly.
-            return compiled_graph
-        compiled_graph = FxGraphCache.post_compile(
-            compiled_graph, example_inputs, cudagraphs
-        )
+            compiled_graph = FxGraphCache.load(
+                codegen_and_compile,
+                gm,
+                example_inputs,
+                graph_kwargs,
+                inputs_to_check,
+                local=config.fx_graph_cache,
+                remote=fx_graph_remote_cache,
+            )
+        else:
+            compiled_graph = codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs  # type: ignore[arg-type]
+            )
+            if aot_mode:
+                # AOT mode is special because codegen_and_compile returns a string.
+                # In that case, we don't need to run all post compilation steps, we just need
+                # to return the string directly.
+                return compiled_graph
+            compiled_graph = FxGraphCache.post_compile(
+                compiled_graph, example_inputs, cudagraphs
+            )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -701,6 +709,12 @@ def fx_codegen_and_compile(
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
+    if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+        import time
+
+        log.warning("Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec)
+        time.sleep(sleep_sec)
+
     with dynamo_utils.preserve_rng_state():
         if is_tf32_warning_applicable(gm):
             _warn_tf32_disabled()
@@ -930,8 +944,8 @@ def get_input_idxs_to_check(
         if not isinstance(input, torch.Tensor):
             # non-tensors don't need alignment
             continue
-        if input.device.type != "cuda":
-            # right now we only care for cuda tensors
+        if not is_gpu(input.device.type):
+            # right now we only care for gpu tensors
             continue
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
@@ -1511,6 +1525,7 @@ def compile_fx(
                 decompositions=decompositions,
                 partition_fn=partition_fn,
                 keep_inference_input_mutations=True,
+                cudagraphs=cudagraphs,
             )(model_, example_inputs_)
 
 
@@ -1584,7 +1599,8 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
     def warn_and_skip(device) -> None:
         from torch._dynamo.exc import SkipFrame
 
-        device_props = torch.cuda.get_device_properties(device)
+        device_interface = get_interface_for_device(device.type)
+        device_props = device_interface.get_device_properties(device)
         warnings.warn(
             f"{device_props.name} does not support bfloat16 compilation natively, skipping"
         )
@@ -1592,20 +1608,22 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
     for inp in graph.graph_inputs.values():
         device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if device.type != "cuda" or inp.get_dtype() != torch.bfloat16:
+        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        device_interface = get_interface_for_device(device.type)
+        if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(device)
 
     for out in graph.graph_outputs:
         device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if device.type != "cuda" or out.get_dtype() != torch.bfloat16:
+        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        if torch.cuda.is_bf16_supported(including_emulation=False):
+        device_interface = get_interface_for_device(device.type)
+        if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(device)
