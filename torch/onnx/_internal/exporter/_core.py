@@ -808,9 +808,9 @@ def _exported_program_to_onnx_program(
             value, Sequence
         ), f"Input '{value_name}' should not be a sequence. This is unexpected."
 
-        value.metadata_props[
-            "pkg.torch.export.graph_signature.InputSpec.kind"
-        ] = input_kind.name
+        value.metadata_props["pkg.torch.export.graph_signature.InputSpec.kind"] = (
+            input_kind.name
+        )
         value.metadata_props[
             "pkg.torch.export.graph_signature.InputSpec.persistent"
         ] = str(persistent)
@@ -859,9 +859,9 @@ def _exported_program_to_onnx_program(
             )
 
         for value in _values:
-            value.metadata_props[
-                "pkg.torch.export.graph_signature.OutputSpec.kind"
-            ] = output_kind.name
+            value.metadata_props["pkg.torch.export.graph_signature.OutputSpec.kind"] = (
+                output_kind.name
+            )
             if output_kind == graph_signature.OutputKind.USER_OUTPUT:
                 model.graph.outputs.append(value)
 
@@ -1218,7 +1218,9 @@ def export(
         if byte_size < 2 * 1024 * 1024 * 1024:
             # The checker may segfault so we need to run it in a separate process
             _isolated.safe_call(
-                onnx.checker.check_model, onnx_program.model_proto, full_check=True  # type: ignore[attr-defined]
+                onnx.checker.check_model,
+                onnx_program.model_proto,
+                full_check=True,  # type: ignore[attr-defined]
             )
             export_status.onnx_checker = True
             verbose_print("Run `onnx.checker` on the ONNX model... ✅")
@@ -1312,9 +1314,7 @@ def export(
                     _format_exceptions_for_all_strategies(failed_results)
                 )
             if onnx_runtime_error_message:
-                traceback_lines.append(
-                    "# ⚠️ ONNX Runtime error -----------------------"
-                )
+                traceback_lines.append("# ⚠️ ONNX Runtime error -----------------------")
                 traceback_lines.append(onnx_runtime_error_message)
             if not traceback_lines:
                 traceback_lines.append("No errors")
