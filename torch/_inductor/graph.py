@@ -1323,8 +1323,11 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
-
                 if len(strides):
+                    strides = [
+                        s.node.expr if isinstance(s, torch.SymInt) else s
+                        for s in strides
+                    ]
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
@@ -1347,9 +1350,16 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        result = ir.ExternKernel.require_exact_strides(
-                            result, strides, allow_padding=allow_padding
-                        )
+                        if n.meta["val"]._is_view():
+                            result = ir.ExternKernel.require_stride_order(
+                                result,
+                                ir.get_stride_order(strides),
+                                allow_padding=allow_padding,
+                            )
+                        else:
+                            result = ir.ExternKernel.require_exact_strides(
+                                result, strides, allow_padding=allow_padding
+                            )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.

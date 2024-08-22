@@ -745,6 +745,22 @@ def get_reduction_combine_fn(
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
 
+def significant_strides_equal(
+    strides1: Sequence[_IntLike], strides2: Sequence[_IntLike], size: Sequence[_IntLike]
+) -> bool:
+    """
+    Returns true if the strides are equal, ignoring dimensions of size 1 .
+    """
+    non_1_indices = [
+        i
+        for i, dim in enumerate(size)
+        if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+    ]
+    strides1 = [strides1[i] for i in non_1_indices]
+    strides2 = [strides2[i] for i in non_1_indices]
+    return strides1 == strides2
+
+
 @dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
@@ -4705,31 +4721,16 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def is_stride_ascending(cls, strides, sizes):
-        # ignore dimensions of size 1, they dont affect layout
-        non_1_indices = [
-            i
-            for i, dim in enumerate(sizes)
-            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
-        ]
-
-        tmp_stride = [strides[i] for i in non_1_indices]
-        stride_size_hint = [V.graph.sizevars.size_hint(x) for x in tmp_stride]
-        # check if it is in ascending order
-        for i in range(len(tmp_stride) - 1):
-            if stride_size_hint[i] > stride_size_hint[i + 1]:
-                return False
-        return True
-
-    @classmethod
-    def require_strides(cls, x, order=None, exact_strides=None, allow_padding=False):
+    def require_strides(
+        cls,
+        x,
+        order: Optional[Sequence[int]] = None,
+        exact_strides: Optional[Sequence[_IntLike]] = None,
+        allow_padding=False,
+    ):
         assert order is not None or exact_strides is not None
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
-        if exact_strides:
-            exact_strides = [
-                s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
-            ]
         # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
@@ -4773,12 +4774,8 @@ class ExternKernel(InputsKernel):
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
-                    and (
-                        isinstance(x.data, ReinterpretView)
-                        or list(x.get_layout().stride) == exact_strides
-                    )
-                    and x.get_layout().is_stride_ordered(
-                        get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+                    and significant_strides_equal(
+                        exact_strides, x.get_layout().stride, x.get_size()
                     )
                 )
             ):
@@ -4792,8 +4789,9 @@ class ExternKernel(InputsKernel):
                     (order and x.get_layout().real_layout().is_stride_ordered(order))
                     or (
                         exact_strides
-                        and list(x.get_layout().real_layout().stride)
-                        == list(exact_strides)
+                        and significant_strides_equal(
+                            exact_strides, x.get_layout().real_layout().stride, x.get_size()
+                        )
                     )
                 ):
                     return x
@@ -4803,9 +4801,8 @@ class ExternKernel(InputsKernel):
             (order and x.get_layout().is_stride_ordered(order))
             or (
                 exact_strides
-                and list(x.get_layout().stride) == exact_strides
-                and x.get_layout().is_stride_ordered(
-                    get_stride_order(V.graph.sizevars.size_hints(exact_strides))
+                and significant_strides_equal(
+                    exact_strides, x.get_layout().stride, x.get_size()
                 )
             )
         ):
