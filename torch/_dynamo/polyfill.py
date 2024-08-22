@@ -24,11 +24,34 @@ def any(iterator):
 
 
 def index(iterator, item, start=0, end=None):
-    for i, elem in list(enumerate(iterator))[start:end]:
+    for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
+
+
+def islice(iterator, start=0, end=None, step=1):
+    if start < 0 or (end is not None and end < 0) or step < 0:
+        raise ValueError("Indices must be non-negative")
+    if step == 0:
+        raise ValueError("Step cannot be 0")
+
+    it = iter(iterator)
+
+    for _ in range(start):
+        next(it)
+
+    if end is None:
+        for i, element in enumerate(it):
+            if i % step == 0:
+                yield element
+    else:
+        for i, element in enumerate(it):
+            if i % step == 0 and i + start < end - start:
+                yield element
+            elif i + start >= end - start:
+                break
 
 
 def repeat(item, count):
@@ -133,9 +156,23 @@ def mapping_get(obj, key, value=None):
         return value
 
 
-def instantiate_user_defined_class_object(*args, **kwargs):
-    cls = args[0]
-    other_args = args[1:]
-    obj = cls.__new__(cls, *other_args, **kwargs)
-    obj.__init__(*other_args, **kwargs)
+def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
+    obj = cls.__new__(cls, *args, **kwargs)
+
+    # Only call __init__ if the object is an instance of the class
+    # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
+    if isinstance(obj, cls):
+        obj.__init__(*args, **kwargs)
     return obj
+
+
+def fspath(path):
+    # Python equivalent of os.fspath
+    if isinstance(path, (str, bytes)):
+        return path
+    elif hasattr(path, "__fspath__"):
+        return path.__fspath__()
+    else:
+        raise TypeError(
+            f"expected str, bytes or os.PathLike object, not {type(path).__name__}"
+        )
