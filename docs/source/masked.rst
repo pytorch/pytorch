@@ -277,18 +277,12 @@ The following ops are currently supported:
     chunk
     column_stack
     dsplit
-    empty_like
     flatten
-    full_like
     hsplit
     hstack
     kron
     meshgrid
     narrow
-    ones_like
-    rand_like
-    randint_like
-    randn_like
     ravel
     select
     split
@@ -296,12 +290,24 @@ The following ops are currently supported:
     transpose
     vsplit
     vstack
-    zeros_like
     Tensor.expand
     Tensor.expand_as
     Tensor.reshape
     Tensor.reshape_as
     Tensor.view
+
+Other functions
+---------------
+
+The following :mod:`torch` functions has also a specific support for :class:`~torch.masked.MaskedTensor`:
+
+:func:`~torch.empty_like`,
+:func:`~torch.full_like`,
+:func:`~torch.ones_like`,
+:func:`~torch.rand_like`,
+:func:`~torch.randint_like`,
+:func:`~torch.randn_like`,
+:func:`~torch.zeros_like`.
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
