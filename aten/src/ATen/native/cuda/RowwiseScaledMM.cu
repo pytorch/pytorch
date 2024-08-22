@@ -74,14 +74,6 @@ using DtypeAccum = float;
 using DtypeEpilogue = float;
 using DtypeOutput = cutlass::bfloat16_t;
 
-template <typename T>
-struct identity {
-  CUTLASS_HOST_DEVICE
-  T operator()(T lhs) const {
-    return lhs;
-  }
-};
-
 using Multiply = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::multiplies,
     DtypeEpilogue,
@@ -95,7 +87,7 @@ using Add = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::FloatRoundStyle::round_to_nearest>;
 
 using Cast = cutlass::epilogue::fusion::Sm90Compute<
-    identity,
+    cutlass::epilogue::thread::Identity,
     DtypeOutput,
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
@@ -157,17 +149,17 @@ void f8f8bf16_rowwise_impl(
   using OperatorClass = cutlass::arch::OpClassTensorOp;
 
   // Implement rowwise scaling epilogue.
-  constexpr int ColBcastStages = 0;
-  constexpr int RowBcastStages = PingPong::value ? 2 : 1;
+  constexpr int ColBroadcastStages = 0;
+  constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
 
   using XScale = cutlass::epilogue::fusion::
-      Sm90ColBroadcast<ColBcastStages, TileShape, DtypeScale>;
+      Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
 
   using WScale = cutlass::epilogue::fusion::
-      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeScale>;
+      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeScale>;
 
   using Bias = cutlass::epilogue::fusion::
-      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeBias>;
+      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
@@ -391,12 +383,12 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
 }
 
 void check_inputs(
-    at::Tensor a,
-    at::Tensor b,
-    at::Tensor scale_a,
-    at::Tensor scale_b,
-    std::optional<at::Tensor> bias,
-    at::Tensor out) {
+    const at::Tensor& a,
+    const at::Tensor& b,
+    const at::Tensor& scale_a,
+    const at::Tensor& scale_b,
+    const std::optional<at::Tensor>& bias,
+    const at::Tensor& out) {
   TORCH_CHECK(a.is_cuda());
   TORCH_CHECK(a.device() == b.device());
   TORCH_CHECK(scale_a.device() == a.device());
