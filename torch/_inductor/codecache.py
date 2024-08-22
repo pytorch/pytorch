@@ -53,7 +53,7 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import ChromiumEventLogger, counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -1362,7 +1362,8 @@ class FxGraphCache:
                 )
         assert compiled_graph is not None
         cache_info["cache_state"] = cache_state
-        ChromiumEventLogger.log_instant_event(
+        chromium_log = get_chromium_event_logger()
+        chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
