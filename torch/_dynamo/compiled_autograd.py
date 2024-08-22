@@ -508,7 +508,6 @@ class _EnableContext:
 
     def __enter__(self):
         if self.warmup_count >= torch._dynamo.config.warmup_runs:
-            log.warning("compiled autograd normal run start: %s", self.warmup_count)  # type: ignore[attr-defined]
             self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                 functools.partial(AutogradCompilerInstance, self.compiler_fn)
             )
@@ -523,15 +522,14 @@ class _EnableContext:
             )
             self.set_multithreading_enabled_ctx_mgr.__enter__()
         else:
-            log.warning("compiled autograd warmup run start: %s", self.warmup_count)  # type: ignore[attr-defined]
+            # TODO: insert eager profiling start event here
+            pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
+            # TODO: insert eager profiling end event here
             self.warmup_count += 1  # type: ignore[attr-defined]
-            # print("compiled autograd warmup run end: %s", self.warmup_count)
-            log.warning("compiled autograd warmup run end: %s", self.warmup_count)  # type: ignore[attr-defined]
         else:
-            log.warning("compiled autograd normal run end: %s", self.warmup_count)
             if self.set_multithreading_enabled_ctx_mgr:
                 self.set_multithreading_enabled_ctx_mgr.__exit__(
                     exc_type, exc_val, exc_tb
@@ -544,24 +542,6 @@ class _EnableContext:
 
 
 enable = _EnableContext
-
-
-# @contextlib.contextmanager
-# def enable(compiler_fn):
-#     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-#         functools.partial(AutogradCompilerInstance, compiler_fn)
-#     )
-#     if snapshot_verbose_logging_enabled():
-#         torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-#     global compiled_autograd_enabled
-#     compiled_autograd_enabled = True
-#     try:
-#         with torch.autograd.set_multithreading_enabled(False):
-#             yield
-#     finally:
-#         if not prior:
-#             compiled_autograd_enabled = False
-#         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
