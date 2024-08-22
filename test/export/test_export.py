@@ -1488,7 +1488,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-    @testing.expectedFailureRetraceability  # Unexpected type in sourceless builder torch._higher_order_ops.wrap.WrapWithSetGradEnabled
     def test_set_grad_empty(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -5842,9 +5841,13 @@ def forward(self, x, b_t, y):
 
         model = Model()
         ep = export(model, (torch.randn(4, 4),), {})
-        self.assertIn(
-            "torch.ops.higher_order.wrap_with_set_grad_enabled", ep.graph_module.code
-        )
+        # _export_for_traininig is using pre_dispatch=False
+        # Therefore the set_grad calls are not replaced with a hop.
+        if not is_training_ir_test(self._testMethodName):
+            self.assertIn(
+                "torch.ops.higher_order.wrap_with_set_grad_enabled",
+                ep.graph_module.code,
+            )
 
     def test_export_as_backend(self):
         def f(x, y):
