@@ -282,9 +282,11 @@
   - torch/_C/_distributed*
   - torch/csrc/distributed/**
   - torch/testing/_internal/distributed/**
+  - torch/multiprocessing/**
   - test/distributed/**
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
+  - test/*multiprocessing*
   approved_by:
   - wconstab
   - mrshenli
