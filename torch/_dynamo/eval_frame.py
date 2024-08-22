@@ -102,13 +102,13 @@ cached_backends: Dict[int, CompilerFn] = {}
 unset = Unset.token
 
 
-context_id_to_warmup_count = {}
-context_id_to_state = {}
+context_id_to_warmup_count: Dict[int, int] = {}
 
-# somehow we can't set this in _dynamo.config (it doesn't take effect). Need to figure out why.
+# TODO(yf225): somehow we can't set this in _dynamo.config (it doesn't take effect). Need to figure out why.
 warmup_runs = 1
 
-def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str):
+
+def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
     from torch._C._dynamo.eval_frame import set_eval_frame
@@ -120,44 +120,23 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
         return callback
     else:
         assert state in ["enter", "exit"]
-        if state == "enter":
-            context_id_to_state[context_id] = "enter"
-            if context_id not in context_id_to_warmup_count:
-                context_id_to_warmup_count[context_id] = 0
-            if (
-                context_id_to_warmup_count[context_id] < warmup_runs
-                # NOTE: Compiled Autograd warmup is handled by itself, not here.
-                # and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-            ):
-                ret = set_eval_frame(None)
-                log.warn("here1 enter eval_frame warmup run start: %d, context_id: %d, id(new_callback): %d, id(old_callback): %d", context_id_to_warmup_count[context_id], context_id, id(None), id(ret))
-                return ret
-            else:
-                ret = set_eval_frame(callback)
-                log.warn("here2 enter eval_frame normal run start: %d, warmup_runs: %d, context_id: %d, id(new_callback): %d, id(old_callback): %d", context_id_to_warmup_count[context_id], warmup_runs, context_id, id(callback), id(ret))
-                return ret
-        elif state == "exit":
-            context_id_to_state[context_id] = "exit"
-            some_cid_is_still_in_enter_state = False
-            for cid, c_state in context_id_to_state.items():
-                if c_state == "enter":
-                    log.warn(f"this context_id {cid} is still in enter state")
-                    some_cid_is_still_in_enter_state = True
-            if not some_cid_is_still_in_enter_state:
-                log.warn(f"all context_id are in exit state, which is good")
-            if (
-                context_id_to_warmup_count[context_id] < warmup_runs
-                # NOTE: Compiled Autograd warmup is handled by itself, not here.
-                # and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-            ):
-                ret = set_eval_frame(callback)
-                log.warn("here3 exit eval_frame warmup run end: %d, context_id: %d, id(new_callback): %d, id(old_callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback), id(ret))
-                context_id_to_warmup_count[context_id] += 1
-                return ret
-            else:
-                ret = set_eval_frame(callback)
-                log.warn("here4 exit eval_frame normal run end: %d, context_id: %d, id(new_callback): %d, id(old_callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback), id(ret))
-                return ret
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # NOTE: Compiled Autograd graph cannot be executed in eager mode and must be Dynamo traced through
+            return set_eval_frame(callback)
+        else:
+            if state == "enter":
+                if context_id not in context_id_to_warmup_count:
+                    context_id_to_warmup_count[context_id] = 0
+                if context_id_to_warmup_count[context_id] < warmup_runs:
+                    return set_eval_frame(None)
+                else:
+                    return set_eval_frame(callback)
+            elif state == "exit":
+                if context_id_to_warmup_count[context_id] < warmup_runs:
+                    return set_eval_frame(callback)
+                    context_id_to_warmup_count[context_id] += 1
+                else:
+                    return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
