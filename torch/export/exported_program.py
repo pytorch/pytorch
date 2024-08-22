@@ -4,6 +4,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import operator
 import re
 import types
 import warnings
@@ -630,6 +631,28 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature
 
 
+def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
+    with gm._set_replace_hook(graph_signature.get_replace_hook()):
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+
+            node_id: Dict[torch.fx.Node, str] = {}
+            getitems: Dict[str, torch.fx.Node] = {}
+            for node in module.graph.nodes:
+                if node.op == "call_function" and node.target == operator.getitem:
+                    source, idx = node.args
+                    new_id = f"{node_id[source]}.{idx}"
+                    if new_id in getitems:
+                        node.replace_all_uses_with(getitems[new_id])
+                        module.graph.erase_node(node)
+                    else:
+                        getitems[new_id] = node
+                        node_id[node] = new_id
+                else:
+                    node_id[node] = node.name
+
+
 def _decompose_exported_program(
     ep,
     *,
@@ -704,6 +727,7 @@ class ExportedProgram:
         if isinstance(root, torch.fx.GraphModule):
             self._graph_module.meta.update(root.meta)
 
+        _common_getitem_elimination_pass(self._graph_module, graph_signature)
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints

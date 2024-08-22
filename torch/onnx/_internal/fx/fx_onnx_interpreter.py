@@ -554,7 +554,7 @@ class FxOnnxInterpreter:
                 )
 
         with diagnostic.log_section(logging.DEBUG, "ONNX Graph:"):
-            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)
+            diagnostic.debug("```\n%s\n```", onnxscript_graph.torch_graph)  # type: ignore[attr-defined]
 
         return onnxscript_graph
 
@@ -626,7 +626,8 @@ class FxOnnxInterpreter:
     ):
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
+            fx_name_to_onnxscript_value[node.args[0].name],  # type: ignore[union-attr,index]
+            tuple,
         ):
             onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
             index = node.args[1]
@@ -655,14 +656,15 @@ class FxOnnxInterpreter:
         # function signature in OpSchema, and find the best matched overload.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
             node=node,
-            onnx_args=onnx_args,
+            onnx_args=onnx_args,  # type: ignore[arg-type]
             onnx_kwargs=onnx_kwargs,
             diagnostic_context=self.diagnostic_context,
         )
         with onnxscript.evaluator.default_as(onnxscript_tracer):
-            output: onnxscript_graph_building.TorchScriptTensor | tuple[
-                onnxscript_graph_building.TorchScriptTensor, ...
-            ] = symbolic_fn(*onnx_args, **onnx_kwargs)
+            output: (
+                onnxscript_graph_building.TorchScriptTensor
+                | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
+            ) = symbolic_fn(*onnx_args, **onnx_kwargs)
         assert (
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
@@ -779,9 +781,10 @@ class FxOnnxInterpreter:
         # be considered.
         unique_module_name = f"{sub_module._get_name()}_{node.target}"
 
-        outputs: onnxscript_graph_building.TorchScriptTensor | tuple[
-            onnxscript_graph_building.TorchScriptTensor, ...
-        ] = parent_onnxscript_graph.add_module_call(
+        outputs: (
+            onnxscript_graph_building.TorchScriptTensor
+            | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
+        ) = parent_onnxscript_graph.add_module_call(  # type: ignore[assignment]
             unique_module_name, sub_onnxscript_graph, onnx_args
         )
 
