@@ -1,11 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import os
-import sys
-import tempfile
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.fsdp.fully_shard import (
     fully_shard,
@@ -25,12 +22,14 @@ from torch.distributed.pipelining.schedules import (
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcessTestCase,
     requires_nccl,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
 )
 
@@ -50,25 +49,33 @@ class MLPModule(torch.nn.Module):
         return x
 
 
-class ComposabilityTest(MultiProcContinousTest):
+class ComposabilityTest(MultiProcessTestCase):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
         return "nccl"
 
-    @classmethod
-    def setUpClass(cls):
-        """
-        Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the device.
-        """
-        super().setUpClass()
-        dev_id = cls.rank % torch.cuda.device_count()
-        cls.device = torch.device(f"cuda:{dev_id}")
-        # TODO: investigate why this is needed to prevent multiple NCCL ranks from hitting the same device
-        torch.cuda.set_device(cls.device)
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 4
+
+    @property
+    def device(self):
+        return self.rank
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["DDP", "FSDP"])
     @parametrize(
@@ -81,7 +88,18 @@ class ComposabilityTest(MultiProcContinousTest):
             ScheduleFlexibleInterleaved1F1B,
         ],
     )
-    def test_manual_with_data_parallel(self, dp_type, ScheduleClass):
+    @parametrize("use_new_runtime", [False, True])
+    def test_manual_with_data_parallel(self, dp_type, ScheduleClass, use_new_runtime):
+        device = torch.device("cuda", self.device)
+        torch.cuda.set_device(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
         device_mesh = init_device_mesh(
             "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
         )
@@ -162,6 +180,11 @@ class ComposabilityTest(MultiProcContinousTest):
 
         # Attach to a schedule
         if issubclass(ScheduleClass, PipelineScheduleSingle):
+            if use_new_runtime:
+                # Can't test PipelineScheduleSingle classes using new runtime
+                # return should still clean up this test instance correctly
+                torch.distributed.destroy_process_group()
+                return
             pipeline_stage, offset = build_stage(pp_group.rank(), pp_group.size())
             partial_models = [pipeline_stage.submod]
             offsets = [offset]
@@ -220,34 +243,10 @@ class ComposabilityTest(MultiProcContinousTest):
                     ref_p = ref_parameters[name]
                     self.assertEqual(ref_p.grad, p.grad)
 
+        torch.distributed.destroy_process_group()
+
 
 instantiate_parametrized_tests(ComposabilityTest)
 
 if __name__ == "__main__":
-    # Check if GPU and NCCL are available
-    if not (
-        dist.is_available()
-        and dist.is_nccl_available()
-        and torch.cuda.device_count() >= 4
-    ):
-        print(
-            "Composability test requires at least 4 GPUs, but not enough found, skipping",
-            file=sys.stderr,
-        )
-        sys.exit(0)
-
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 4))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ComposabilityTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            ComposabilityTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()
