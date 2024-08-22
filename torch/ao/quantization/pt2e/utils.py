@@ -107,8 +107,8 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"
-        and dq_node.args[0].target in _QUANTIZE_OPS
+        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
+        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
     ):
         q_node = dq_node.args[0]
     return (q_node, dq_node)
@@ -362,7 +362,7 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
     aten_pattern = capture_pre_autograd_graph(
-        pattern,
+        pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
     )
@@ -382,7 +382,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
