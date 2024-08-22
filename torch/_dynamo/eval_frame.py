@@ -102,7 +102,9 @@ cached_backends: Dict[int, CompilerFn] = {}
 unset = Unset.token
 
 
-def _maybe_set_eval_frame(callback: DynamoCallback):
+context_id_to_warmup_count = {}
+
+def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
     # Users can disable torchDynamo by setting the JK to False.
     from torch._C._dynamo.eval_frame import set_eval_frame
@@ -113,18 +115,22 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         )
         return callback
     else:
-        if (
-            torch._dynamo.utils.warmup_count < torch._dynamo.config.warmup_runs
-            # NOTE: Compiled Autograd warmup is handled by itself, not here.
-            and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-        ):
-            # print("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
-            log.warn("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
-            torch._dynamo.utils.warmup_count += 1
-            log.warn("eval_frame warmup run end: %d", torch._dynamo.utils.warmup_count)
-            return callback
-        else:
-            return set_eval_frame(callback)
+        assert state in ["enter", "exit"]
+        if state == "enter":
+            if context_id not in context_id_to_warmup_count:
+                context_id_to_warmup_count[context_id] = 0
+            if context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs:
+                log.warn("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
+                return callback
+            else:
+                return set_eval_frame(callback)
+        elif state == "exit":
+            if context_id_to_warmup_count[context_id] < torch._dynamo.config.warmup_runs:
+                log.warn("eval_frame warmup run end: %d", torch._dynamo.utils.warmup_count)
+                context_id_to_warmup_count[context_id] += 1
+                return set_eval_frame(callback)
+            else:
+                return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
@@ -366,11 +372,11 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
-        self.prior = _maybe_set_eval_frame(self.callback)
+        self.prior = _maybe_set_eval_frame(self.callback, id(self), "enter")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
-        _maybe_set_eval_frame(self.prior)
+        _maybe_set_eval_frame(self.prior, id(self), "exit")
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -464,7 +470,7 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(callback, id(self), "enter")
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -484,7 +490,7 @@ class _TorchDynamoContext:
                     saved_dynamic_layer_stack_depth
                 )
 
-                _maybe_set_eval_frame(prior)
+                _maybe_set_eval_frame(prior, id(self), "exit")
                 for cleanup in cleanups:
                     cleanup()
 
@@ -642,11 +648,11 @@ class DisableContext(_TorchDynamoContext):
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(callback)
+            prior = _maybe_set_eval_frame(callback, id(self), "enter")
             try:
                 return fn(*args, **kwargs)
             finally:
-                _maybe_set_eval_frame(prior)
+                _maybe_set_eval_frame(prior, id(self), "exit")
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
