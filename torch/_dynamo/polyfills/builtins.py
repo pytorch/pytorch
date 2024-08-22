@@ -16,9 +16,9 @@ from ..decorators import substitute_in_graph
 __all__ = [
     "all",
     "any",
-    "enumerate",
+    "enumerate___new__",
     "sum",
-    "zip",
+    "zip___new__",
 ]
 
 
@@ -42,7 +42,7 @@ def any(iterable: Iterable[object], /) -> bool:
 
 
 @substitute_in_graph(builtins.enumerate.__new__)  # type: ignore[arg-type]
-def enumerate(
+def enumerate___new__(
     cls: type[builtins.enumerate[_T]],
     iterable: Iterable[_T],
     start: int = 0,
@@ -67,7 +67,7 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
 if sys.version_info >= (3, 10):
 
     @substitute_in_graph(builtins.zip.__new__)  # type: ignore[arg-type]
-    def zip(
+    def zip___new__(
         cls: type[builtins.zip[tuple[_T, ...]]],
         *iterables: Iterable[_T],
         strict: bool = False,
@@ -112,7 +112,7 @@ if sys.version_info >= (3, 10):
 else:
 
     @substitute_in_graph(builtins.zip.__new__)  # type: ignore[arg-type]
-    def zip(
+    def zip___new__(
         cls: type[builtins.zip[tuple[_T, ...]]],
         *iterables: Iterable[_T],
     ) -> Iterable[tuple[_T, ...]]:
