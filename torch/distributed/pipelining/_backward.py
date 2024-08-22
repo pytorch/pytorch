@@ -219,12 +219,17 @@ def stage_backward_input(
                 inp.grad += dinputs[i]
     else:
         dinputs = None
+    # for p_group in param_groups:
+    #     print(f"{p_group['params']=}")
+    # print(f"{param_groups=}")
     return dinputs, param_groups
 
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
 ):
+    # for w in weights:
+    #     print(f"{w=}")
     all_dweights = dict()
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
@@ -246,8 +251,12 @@ def stage_backward_weight(
             all_dweights[w] = dw
     # return grads in the original order weights were provided in
     out = []
+    # grad_accs = [_get_grad_fn_or_grad_acc(w) for w in weights]
+    # print(f"{all_dweights.keys()=} {grad_accs=}")
     for w in weights:
         grad_acc = _get_grad_fn_or_grad_acc(w)
+        if grad_acc not in all_dweights:
+            raise RuntimeError(f"{grad_acc=} not in {all_dweights.keys()=}")
         dweight = all_dweights[grad_acc]
         out.append(dweight)
         if w.grad is None:

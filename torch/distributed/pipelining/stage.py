@@ -481,6 +481,7 @@ class _PipelineStageBase(ABC):
             # For backwards are split into weight and input, we will see twice as many bwd_chunks
             last_backward = self._seen_bwd_chunks == 2 * self.chunks - 1  # type: ignore[operator]
 
+        params = self.submod.parameters()
         def perform_backward(backward_type):
             if backward_type == "full":
                 return lambda: stage_backward(
@@ -493,11 +494,11 @@ class _PipelineStageBase(ABC):
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
                     bwd_kwargs["input_values"],
-                    self.submod.parameters(),
+                    params,
                 )
             elif backward_type == "weight":
                 return lambda: stage_backward_weight(
-                    self.submod.parameters(), bwd_kwargs["param_groups"]
+                    params, bwd_kwargs["param_groups"]
                 )
             else:
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
@@ -522,12 +523,19 @@ class _PipelineStageBase(ABC):
         elif isinstance(self.submod, FSDPModule):
             # used for FSDP
             if backward_type == "input":
+                print(f"[{self.stage_index}] input: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
                 self.submod.set_reshard_after_backward(False)
-            # elif backward_type == "weight":
-            #     self.submod.set_reshard_after_backward(True)
+            elif backward_type == "weight":
+                print(f"[{self.stage_index}] weight: {last_backward=} {self._seen_bwd_chunks=}, {self.chunks=}")
+                self.submod.set_reshard_after_backward(last_backward)
+                if last_backward:
+                    print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] BEFORE! {next(self.submod.parameters())=}")
             self.submod.set_is_last_backward(last_backward)
             self.submod.set_requires_gradient_sync(last_backward)
             result = perform_backward(backward_type)()
+            if last_backward:
+                self.submod.reshard()
+                print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] AFTER! {next(self.submod.parameters())=}")
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
@@ -668,15 +676,21 @@ class _PipelineStageBase(ABC):
                 if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
                     bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
+                module_params = self.submod.named_parameters()
+                # for name, param in module_params:
+                #     print(f"{self.log_prefix}{name=}, {param=}")
                 grads_input, param_groups = self.backward_maybe_with_nosync(
                     "input", bwd_kwargs
                 )
+
+
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
                     input_values,
                     param_groups,
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
+                    module_params,
                 )
                 self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
@@ -697,7 +711,18 @@ class _PipelineStageBase(ABC):
                 param_groups,
                 stage_output,
                 output_grads,
+                module_params,
             ) = self.backward_state.pop(bwd_chunk_id)
+
+            # print(f"testing")
+            # if module_params != self.submod.named_parameters():
+            #     print(module_params), print(self.submod.named_parameters())
+            #     print("The following named parameters are different:")
+            #     for name, param1 in module_params:
+            #         param2 = dict(self.submod.named_parameters())[name]
+            #         if param1 is not param2:
+            #             print(f"{name}: {param1} vs {param2}")
+
             if self.stage_index != 0:
                 bwd_kwargs = {
                     "stage_output": stage_output,
