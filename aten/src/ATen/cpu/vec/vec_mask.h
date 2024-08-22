@@ -86,21 +86,21 @@ struct VecMaskCast<T, N, T, N> {
 template <typename T, int N>
 struct VecMaskCheck {
   static inline bool all_zero(const VectorizedN<T, N>& vec_mask) {
-    __at_align__ T mask[vec_mask.size()];
+    __at_align__ T mask[VectorizedN<T, N>::size()];
     vec_mask.store(mask);
     return std::all_of(
-        mask, mask + vec_mask.size(), [](T m) { return m == static_cast<T>(0); });
+        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m == static_cast<T>(0); });
   }
 
   static inline bool all_masked(const VectorizedN<T, N>& vec_mask) {
-    __at_align__ T mask[vec_mask.size()];
+    __at_align__ T mask[VectorizedN<T, N>::size()];
     vec_mask.store(mask);
     return std::all_of(
-        mask, mask + vec_mask.size(), [](T m) { return m != static_cast<T>(0); });
+        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m != static_cast<T>(0); });
   }
 
   static inline bool is_masked(const VectorizedN<T, N>& vec_mask, int i) {
-    __at_align__ T mask[vec_mask.size()];
+    __at_align__ T mask[VectorizedN<T, N>::size()];
     vec_mask.store(mask);
     return mask[i] != static_cast<T>(0);
   }
