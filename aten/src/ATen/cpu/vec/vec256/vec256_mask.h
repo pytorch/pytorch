@@ -17,8 +17,8 @@ struct VecMaskLoad<
     mask_n,
     typename std::enable_if_t<
         (mask_n == 1 || mask_n == 2) &&
-        (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-            std::is_same_v<T, uint32_t>),
+            (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+             std::is_same_v<T, uint32_t>),
         void>> {
   static inline VectorizedN<T, 1> apply(
       const T* ptr,
@@ -40,8 +40,8 @@ struct VecMaskLoad<
     mask_n,
     typename std::enable_if_t<
         (mask_n == 2 || mask_n == 4) &&
-        (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
-            std::is_same_v<T, uint32_t>),
+            (std::is_same_v<T, float> || std::is_same_v<T, int32_t> ||
+             std::is_same_v<T, uint32_t>),
         void>> {
   static inline VectorizedN<T, 2> apply(
       const T* ptr,
@@ -50,10 +50,12 @@ struct VecMaskLoad<
     auto result = at::vec::VectorizedN<T, 2>();
     if constexpr (std::is_same_v<T, float>) {
       result[0] = _mm256_maskload_ps(ptr, int_mask[0]);
-      result[1] = _mm256_maskload_ps(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
+      result[1] =
+          _mm256_maskload_ps(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
     } else {
       result[0] = _mm256_maskload_epi32(ptr, int_mask[0]);
-      result[1] = _mm256_maskload_epi32(ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
+      result[1] = _mm256_maskload_epi32(
+          ptr + at::vec::Vectorized<T>::size(), int_mask[1]);
     }
     return result;
   }
@@ -66,8 +68,7 @@ struct VecMaskLoad<
     mask_t,
     1,
     typename std::enable_if_t<
-        std::is_same_v<T, int64_t> ||
-        std::is_same_v<T, double>>> {
+        std::is_same_v<T, int64_t> || std::is_same_v<T, double>>> {
   static inline VectorizedN<T, 2> apply(
       const T* ptr,
       const VecMask<mask_t, 1>& vec_mask) {
@@ -75,12 +76,15 @@ struct VecMaskLoad<
     auto result = at::vec::VectorizedN<T, 2>();
     if constexpr (std::is_same_v<T, double>) {
       result[0] = _mm256_maskload_pd(ptr, int64_mask[0]);
-      result[1] = _mm256_maskload_pd(ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
+      result[1] = _mm256_maskload_pd(
+          ptr + at::vec::Vectorized<T>::size(), int64_mask[1]);
     } else {
-      result[0] = _mm256_maskload_epi64(reinterpret_cast<const long long*>(ptr),
-                                        int64_mask[0]);
-      result[1] = _mm256_maskload_epi64(reinterpret_cast<const long long*>(ptr + at::vec::Vectorized<T>::size()),
-                                        int64_mask[1]);
+      result[0] = _mm256_maskload_epi64(
+          reinterpret_cast<const long long*>(ptr), int64_mask[0]);
+      result[1] = _mm256_maskload_epi64(
+          reinterpret_cast<const long long*>(
+              ptr + at::vec::Vectorized<T>::size()),
+          int64_mask[1]);
     }
     return result;
   }
@@ -150,15 +154,20 @@ struct VecMaskCast<
     dst_n,
     mask_t,
     mask_n,
-    typename std::enable_if_t<dst_n == 2 * mask_n, void>> {
-  static inline VecMask<int64_t, dst_n> apply(const VecMask<mask_t, mask_n>& vec_mask) {
-    auto result = at::vec::VectorizedN<int64_t, 2 * mask_n>();
+    typename std::enable_if_t<
+        ((mask_n == 1) || (mask_n == 2)) && (dst_n == 2 * mask_n) &&
+            (std::is_same_v<mask_t, float> || std::is_same_v<mask_t, int>),
+        void>> {
+  static inline VecMask<int64_t, dst_n> apply(
+      const VecMask<mask_t, mask_n>& vec_mask) {
+    auto result = VectorizedN<int64_t, dst_n>();
     auto int_mask = vec_mask.template cast<int, mask_n>();
 #ifndef _MSC_VER
 #pragma unroll
 #endif
     for (int i = 0; i < dst_n; i += 2) {
-      auto int64_vec = convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[i]));
+      auto int64_vec =
+          convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[i]));
       result[i] = int64_vec[0];
       result[i + 1] = int64_vec[1];
     }
@@ -172,10 +181,14 @@ struct VecMaskCast<
     dst_n,
     int64_t,
     mask_n,
-    typename std::enable_if_t<mask_n == 2 * dst_n, void>> {
-  static inline VecMask<dst_t, dst_n> apply(const VecMask<int64_t, mask_n>& vec_mask) {
-    auto result = VecMask<int, dst_n>();
-    auto int64_vec = at::vec::VectorizedN<int64_t, 2>();
+    typename std::enable_if_t<
+        ((dst_n == 1) || (dst_n == 2)) && (mask_n == 2 * dst_n) &&
+            (std::is_same_v<dst_t, float> || std::is_same_v<dst_t, int>),
+        void>> {
+  static inline VecMask<dst_t, dst_n> apply(
+      const VecMask<int64_t, mask_n>& vec_mask) {
+    auto result = VectorizedN<int, dst_n>();
+    auto int64_vec = VectorizedN<int64_t, 2>();
 #ifndef _MSC_VER
 #pragma unroll
 #endif
@@ -219,14 +232,13 @@ inline bool VecMask<int, 1>::all_masked() const {
   return mask == 0xff;
 }
 
-
-
 template <int N>
 struct VecMaskCheck<int64_t, N> {
   static inline bool all_zero(const VectorizedN<int64_t, N>& vec_mask) {
     bool all_zero = true;
     for (int i = 0; i < N; ++i) {
-      all_zero = all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) == 0);
+      all_zero =
+          all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) == 0);
       if (!all_zero) {
         return all_zero;
       }
@@ -237,7 +249,8 @@ struct VecMaskCheck<int64_t, N> {
   static inline bool is_masked(const VectorizedN<int64_t, N>& vec_mask, int i) {
     for (int j = 0; j < N; ++j) {
       if (i < (j + 1) * 4) {
-        return _mm256_movemask_pd(_mm256_castsi256_pd(vec_mask[j])) & (1 << (i - j * 4));
+        return _mm256_movemask_pd(_mm256_castsi256_pd(vec_mask[j])) &
+            (1 << (i - j * 4));
       }
     }
     return false;
@@ -246,7 +259,8 @@ struct VecMaskCheck<int64_t, N> {
   static inline bool all_masked(const VectorizedN<int64_t, N>& vec_mask) {
     bool all_masked = true;
     for (int i = 0; i < N; ++i) {
-      all_masked = all_masked && (_mm256_movemask_pd(_mm256_castsi256_pd(vec_mask[i])) == 0x0f);
+      all_masked = all_masked &&
+          (_mm256_movemask_pd(_mm256_castsi256_pd(vec_mask[i])) == 0x0f);
       if (!all_masked) {
         return all_masked;
       }
