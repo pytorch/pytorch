@@ -18,7 +18,7 @@ CMAKE_VARS               ?=
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
-INSTALL_CHANNEL          ?= nightly
+INSTALL_CHANNEL          ?= whl
 
 PYTHON_VERSION           ?= 3.11
 # Match versions that start with v followed by a number, to avoid matching with tags like ciflow
