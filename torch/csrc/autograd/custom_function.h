@@ -206,7 +206,8 @@ struct CppNode : public Node {
     args.collect(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    args.collect(ctx_.saved_variables_);
+    args.collect(
+        ctx_.saved_variables_, true); // always unpacked as output in eager
     TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
     args.collect(ctx_.materialize_grads_);
     args.collect(ctx_.has_freed_buffers_);
