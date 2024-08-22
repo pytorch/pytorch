@@ -3,18 +3,7 @@
 import functools
 import itertools
 import operator
-from typing import (
-    Callable,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
-from typing_extensions import ParamSpec
+from typing import cast, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
@@ -35,21 +24,15 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
 
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
-def register_prop_rule(
-    op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+def register_prop_rule(op, schema_info=None):
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
+    def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
@@ -60,9 +43,7 @@ def register_prop_rule(
     return wrapper
 
 
-def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+def register_op_strategy(op, schema_info=None):
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
@@ -130,25 +111,6 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
     elif isinstance(dims, tuple):
         dims = tuple([normalize_dim(dim, ndim) for dim in dims])
     return dims
-
-
-def normalize_to_torch_size(size) -> torch.Size:
-    """
-    Unify variable types of size argument to torch.Size
-    Acceptable types include:
-        int, Sequence[int], Tuple[int], Tuple[Sequence[int]],
-        or torch.Size
-    """
-    if isinstance(size, torch.Size):
-        return size
-
-    if isinstance(size, int):
-        torch_size = [size]
-    elif len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = list(size[0])
-    else:
-        torch_size = list(size)
-    return torch.Size(torch_size)
 
 
 def prod(xs: Iterable[int]) -> int:

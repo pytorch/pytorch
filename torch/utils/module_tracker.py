@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import weakref
-
 from typing import Set
 
 import torch
@@ -10,6 +9,7 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
+
 
 __all__ = ["ModuleTracker"]
 
@@ -52,7 +52,7 @@ class ModuleTracker:
     A Set containing the fqn for each module currently running their forward
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.parents = {"Global"}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()

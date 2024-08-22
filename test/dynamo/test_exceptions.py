@@ -2,7 +2,6 @@
 
 import torch
 import torch._dynamo.config
-
 import torch._dynamo.test_case
 import torch._functorch.config
 import torch.utils.checkpoint
@@ -189,9 +188,31 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_dynamo_undo_kw_names(self):
+        def g(x, k=None):
+            if k:
+                raise TypeError("error")
+            return x.sin()
+
+        def fn(x):
+            d = {"a": x}
+            try:
+                g(x, k=True)
+            except Exception:
+                y = 0
+                for _, b in d.items():  # noqa: PERF102
+                    y += b.sum()
+            return y
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got = opt_fn(x)
+        self.assertEqual(expected, got)
+
     def test_nn_module_getattr(self):
         class A:
-            def __init__(self):
+            def __init__(self) -> None:
                 self._b = 20
 
             def __getattr__(self, name):
@@ -201,7 +222,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise AttributeError(f"{name} absent")
 
         class B(A):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.a = 10
 
             def __getattr__(self, name):
@@ -272,6 +293,75 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
+
+    def test_key_error(self):
+        def fn(x, d):
+            try:
+                a = d["b"]
+            except KeyError:
+                a = 2
+            return x * a
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        d = {"a": 1}
+        ref = fn(x, d)
+        res = opt_fn(x, d)
+        self.assertEqual(ref, res)
+
+    def test_atrribute_error(self):
+        class Mock:
+            def __init__(self):
+                self.a = 1
+
+        mock = Mock()
+
+        def fn(x):
+            try:
+                c = 2
+                mock.b
+            except AttributeError:
+                c = 3
+            return torch.sin(x) * c
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_raise_from_None(self):
+        # Inspired from os.environ
+        class MyMapping:
+            def __init__(self, d):
+                self._d = d
+
+            def __getitem__(self, key):
+                try:
+                    value = self._d[key]
+                except KeyError:
+                    raise KeyError(key) from None
+                return value
+
+        d = MyMapping({"a": 10, "b": 20})
+
+        def mapping_get(obj, key, value=None):
+            try:
+                return obj.__getitem__(key)
+            except KeyError:
+                return value
+
+        def fn(x, d, key):
+            x = torch.sin(x + 1)
+            return x, mapping_get(d, key)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.rand(2, 3)
+        ref = fn(x, d, "m")
+        res = opt_fn(x, d, "m")
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
 
 
 if __name__ == "__main__":

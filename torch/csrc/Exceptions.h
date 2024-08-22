@@ -166,8 +166,8 @@ struct python_error : public std::exception {
     other.traceback = nullptr;
   }
 
-  python_error& operator==(const python_error& other) = delete;
-  python_error& operator==(python_error&& other) = delete;
+  python_error& operator=(const python_error& other) = delete;
+  python_error& operator=(python_error&& other) = delete;
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~python_error() override {

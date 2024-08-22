@@ -617,7 +617,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -670,7 +670,7 @@ def forward(self, x_1):
 
     def test_make_fx_model_fwd_bwd_wgtupdate(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -1008,7 +1008,7 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     sym_size_int = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = resize_ = None
     return None""")
 
     def test_broadcast_shapes(self):
@@ -1056,8 +1056,8 @@ def forward(self, s0_1, s1_1, x_1, y_1):
             self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    empty = torch.ops.aten.empty.memory_format([sym_size_int], device = device(type='cpu'), pin_memory = False)
     return ((sym_size_int, sym_size_int_1), empty)""")
 
     def test_unary(self):
@@ -1303,7 +1303,7 @@ def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
     scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
-    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
     return x_1"""  # noqa: B950
         )
 
@@ -1321,7 +1321,7 @@ def forward(self, gravity_1, mask_1):
     index = torch.ops.aten.index.Tensor(select, [mask_1]);  select = None
     mul = torch.ops.aten.mul.Tensor(index, -1);  index = None
     select_1 = torch.ops.aten.select.int(gravity_1, 1, 0);  gravity_1 = None
-    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
+    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = index_put_ = None
     return None""")
 
     def test_reflect_r_over_x(self):
@@ -1345,7 +1345,7 @@ def forward(self, crop_camera_1, mask_1):
     lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
-    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
+    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = copy_ = None
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
@@ -1355,11 +1355,11 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
+    mul_4 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
@@ -1412,7 +1412,7 @@ def forward(self, images_1, handedness_1, valid_1):
     eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
     index_2 = torch.ops.aten.index.Tensor(index, [eq])
     flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
-    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = None
+    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = index_put_ = None
     return None""")
 
     def test_neg_shape(self):
@@ -1481,7 +1481,7 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = zeros = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
@@ -1566,9 +1566,9 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1)
-    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2)
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size = None
+    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1);  sym_constrain_range_for_size_1 = None
+    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2);  sym_constrain_range_for_size_2 = None
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
@@ -1628,14 +1628,14 @@ def forward(self, a_1):
     def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 return x + 1
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bar = Bar()
 

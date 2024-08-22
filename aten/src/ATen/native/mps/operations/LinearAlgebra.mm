@@ -124,9 +124,12 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
-  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
-      self.size(0) > max_stride_size || self.size(1) > max_stride_size || other.stride(0) > max_stride_size ||
-      other.stride(1) > max_stride_size || other.size(0) > max_stride_size || other.size(1) > max_stride_size;
+  static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+  return always_use_metal ||
+      (!is_macos_14_4_or_newer &&
+       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+        other.size(0) > max_stride_size || other.size(1) > max_stride_size));
 }
 
 } // anonymous namespace
@@ -243,6 +246,8 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
@@ -272,8 +277,16 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
       std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
           do_mm(mpsGraph, self, other);
     });
-    auto selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->inputTensor_, self) : Placeholder();
-    auto otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
+    // MPS TODO:
+    // Strided API doesn't play nice with complex data types (at least not in case of matmul).
+    auto selfPlaceholder = self.numel() != 0
+        ? Placeholder(
+              cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, !isComplexType(self.scalar_type()))
+        : Placeholder();
+    auto otherPlaceholder = other.numel() != 0
+        ? Placeholder(
+              cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, !isComplexType(other.scalar_type()))
+        : Placeholder();
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder) : nil;
@@ -506,21 +519,26 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   MPSShape* shape = nil;
   bool doTranspose = false;
 
   // Handle transposes for the second batch of matrices.
-  if (batch2.is_view() && !batch2.is_contiguous()) {
-    if (batch2.numel() == batch2._base().numel()) {
-      const IntArrayRef& viewSizes = batch2.sizes();
+  // In macOS 15 this is detected automatically (for all shapes/ranks)
+  // through the strided MPS support.
+  if (!is_macOS_15_0_or_newer) {
+    if (batch2.is_view() && !batch2.is_contiguous()) {
+      if (batch2.numel() == batch2._base().numel()) {
+        const IntArrayRef& viewSizes = batch2.sizes();
 
-      // Handle 3D and 4D tensors.
-      // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
-      int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
-      if (batch2._base().stride(0) == batch2.stride(0) &&
-          batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-        shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
-        doTranspose = true;
+        // Handle 3D and 4D tensors.
+        // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
+        int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
+        if (batch2._base().stride(0) == batch2.stride(0) &&
+            batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
+          shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
+          doTranspose = true;
+        }
       }
     }
   }

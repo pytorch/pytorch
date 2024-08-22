@@ -61,6 +61,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch.utils._mode_utils import no_dispatch
@@ -709,7 +711,7 @@ class FakeTensorTest(TestCase):
         check_copy(mod, mod_copied)
 
         class ModuleNew(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = torch.rand([10, 2])
                 self.b = self.a
@@ -781,7 +783,7 @@ class FakeTensorTest(TestCase):
     )
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
@@ -1323,7 +1325,7 @@ class FakeTensorOperatorInvariants(TestCase):
     )
     def test_flash_attention(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
@@ -1361,24 +1363,24 @@ class FakeTensorOperatorInvariants(TestCase):
                 )
 
     # IMPORTANT!!! Always run even if CUDA is not available
-    def test_fake_cuda_no_init(self):
+    def test_fake_gpu_no_init(self):
         # Skip this test, we will try to run CUDA operations to real prop so
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             return
         with FakeTensorMode():
-            torch.empty(10, device="cuda")
-            torch.ones(10, device="cuda")
-            torch.zeros(10, device="cuda")
-            torch.rand(10, device="cuda")
-            torch.tensor(3.14, device="cuda")
-            torch.tensor([[3.14, 2], [1, 2]], device="cuda")
+            torch.empty(10, device=GPU_TYPE)
+            torch.ones(10, device=GPU_TYPE)
+            torch.zeros(10, device=GPU_TYPE)
+            torch.rand(10, device=GPU_TYPE)
+            torch.tensor(3.14, device=GPU_TYPE)
+            torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
@@ -1408,7 +1410,7 @@ class FakeTensorOperatorInvariants(TestCase):
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.count = 0
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1430,7 +1432,7 @@ make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = torch.nn.Linear(4, 3)
                 self.layer2 = torch.nn.Linear(3, 2)
@@ -1486,7 +1488,7 @@ class FakeTensorPropTest(TestCase):
 
     def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
         class OptionalArgumentInBetween(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer1 = torch.nn.Linear(4, 3)
                 self.layer2 = torch.nn.Linear(3, 2)
@@ -1546,7 +1548,7 @@ class FakeTensorPropTest(TestCase):
 
     def test_torch_load_with_fake_mode(self):
         class TheModelClass(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = torch.nn.Linear(5, 10)
 

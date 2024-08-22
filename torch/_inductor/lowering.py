@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -7,8 +8,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -74,12 +74,13 @@ from .utils import (
 )
 from .virtualized import ops, V
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
-layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+# Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
+_maybe_layout_constraints: Dict[
+    torch._ops.OpOverload, Optional[Callable[..., Any]]
+] = {}
 fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
@@ -89,6 +90,25 @@ foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+
+
+def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., Any]]:
+    """Get layout constraints. Returns None if there are no layout constraints."""
+    if not isinstance(fn, torch._ops.OpOverload):
+        # Only OpOverloads have layout constraints.
+        return None
+    if fn in _maybe_layout_constraints:
+        return _maybe_layout_constraints[fn]
+    # OpOverload with custom lowerings override tag-based layout constraints
+    if fn in lowerings:
+        _maybe_layout_constraints[fn] = None
+        return None
+    # We lazily register tag-based layout constraints.
+    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
+        _maybe_layout_constraints[fn] = constrain_to_fx_strides
+        return _maybe_layout_constraints[fn]
+    _maybe_layout_constraints[fn] = None
+    return None
 
 
 def assert_nyi(cond, msg):
@@ -109,9 +129,9 @@ def add_needs_realized_inputs(fn):
 def add_layout_constraint(fn, constraint):
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
-            layout_constraints[getattr(fn, overload)] = constraint
+            _maybe_layout_constraints[getattr(fn, overload)] = constraint
     else:
-        layout_constraints[fn] = constraint
+        _maybe_layout_constraints[fn] = constraint
 
 
 add_needs_realized_inputs(
@@ -338,7 +358,7 @@ def register_lowering(
     broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+):
     """
     Shim to support decorator syntax.
     """
@@ -424,7 +444,7 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
-    override_fn_when_cuda_float64=None,
+    override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
 ):
@@ -443,21 +463,50 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
+        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
 
+        # in tracing, we will annotate pointwise nodes that correspond to the output of
+        # a pointwise node that would have been run in eager. intermediary pointwise nodes
+        # during decompositions are not annotated.
+        emulate_precision_casts = (
+            V.graph is not None
+            and getattr(V.graph, "current_node", None) is not None
+            and V.graph.current_node.meta is not None
+            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+            and dtype in (torch.bfloat16, torch.float16)
+        )
+
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
+            elif (
+                override_fn_when_gpu_float64
+                and is_gpu_device
+                and dtype == torch.float64
+            ):
+                return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
-                return fn(*[load(index) for load in loaders])
+                inputs_loaded = []
+                for load in loaders:
+                    out = load(index)
+                    if emulate_precision_casts:
+                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, dtype)
+                    inputs_loaded.append(out)
+
+                out = fn(*inputs_loaded)
+                if emulate_precision_casts:
+                    # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
+                    # then upcasting again, to emulate casts that eager would do.
+                    downcast = ops.to_dtype(out, dtype, use_compute_types=False)
+                    return ops.to_dtype(downcast, dtype)
+                return out
 
         if not override_device:
             device = None
@@ -650,7 +699,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
+        override_fn_when_gpu_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
         triton_fallback=triton_fallback,
     )
@@ -676,10 +725,10 @@ def register_frexp():
     frexp = ops_wrapper("frexp")
 
     def frexp0(*args, **kwargs):
-        return frexp(*args, **kwargs)[0]
+        return frexp(*args, **kwargs)[0]  # type: ignore[index] # next PR
 
     def frexp1(*args, **kwargs):
-        return frexp(*args, **kwargs)[1]
+        return frexp(*args, **kwargs)[1]  # type: ignore[index] # next PR
 
     pw_fns = [
         make_pointwise(frexp0),
@@ -2315,7 +2364,6 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
-make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
@@ -5570,7 +5618,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5600,7 +5648,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type] # next PR
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -6005,7 +6053,7 @@ def sym_numel(a):
 
 
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+    register_lowering(method_to_operator(method))(func)
 
 
 @register_lowering(aten._foobar)

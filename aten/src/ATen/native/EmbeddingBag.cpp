@@ -20,7 +20,6 @@
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
 
-#include <algorithm>
 #include <cstring>
 #include <tuple>
 #include <utility>
@@ -123,7 +122,6 @@ index_select_add(
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -148,9 +146,8 @@ index_select_add(
       at::native::cpublas::axpy<data_t>(ddim, 1,
               src_data + src_stride0 * idx, src_stride1,
               output_data + output_stride0 * add_indices_data[i], output_stride1);
-    } else if (bag_size.defined()) {
+    } else if (bag_size_data) {
       // Decrement bag_size to reflect that the index is padded
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
@@ -312,7 +309,6 @@ index_select_add(
     TORCH_CHECK(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<data_t>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -354,9 +350,8 @@ index_select_add(
             output_data_fp32 + ddim * add_indices_data[i],
             1);
 
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -459,7 +454,6 @@ index_select_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -486,9 +480,8 @@ index_select_add(const Tensor &select_indices,
             src_stride1,
             output_data + output_stride0 * add_indices_data[i],
             output_stride1);
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -517,7 +510,6 @@ index_select_scale_add(
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -548,9 +540,8 @@ index_select_scale_add(
       for (const auto j : c10::irange(ddim)) {
         output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
       }
-    } else if (bag_size.defined()) {
+    } else if (bag_size_data) {
       // Decrement bag_size to reflect that the index is padded
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
@@ -701,7 +692,6 @@ index_select_scale_add(
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<data_t>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -735,9 +725,8 @@ index_select_scale_add(
           output_base_fp32[j] += static_cast<float>(src_base[j * src_stride1]) *
               static_cast<float>(scale);
         }
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -840,7 +829,6 @@ index_select_scale_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -869,9 +857,8 @@ index_select_scale_add(const Tensor &select_indices,
         for (const auto j : c10::irange(ddim)) {
           output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
         }
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }

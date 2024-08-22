@@ -6,8 +6,7 @@
 #include <utility>
 #include <variant>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // CAUTION NOT TO BE USED, STILL A WIP, NOT STABLE
 
@@ -54,5 +53,4 @@ TORCH_API std::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
