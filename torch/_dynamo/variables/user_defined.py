@@ -16,7 +16,7 @@ import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
@@ -31,7 +31,6 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     RandomValueSource,
-    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from ..utils import (
@@ -525,7 +524,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return tx.inline_user_function_return(
                 SourcelessBuilder.create(
-                    tx, polyfill.instantiate_user_defined_class_object
+                    tx, polyfills.instantiate_user_defined_class_object
                 ),
                 [self, *args],
                 kwargs,
@@ -1089,19 +1088,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     return trace_rules.lookup(func)(func)
 
-        if (
-            torch._dynamo.config.inline_inbuilt_nn_modules
-            and source
-            and isinstance(self, variables.UnspecializedNNModuleVariable)
-            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
-            # usecase for now.
-            and not tx.output.export
-        ):
-            # Recalculate source for params/buffers
-            if name in ("_buffers", "_parameters"):
-                source = UnspecializedParamBufferSource(self.source, name)
-            source = self._wrap_source(source)
-
         if subobj is not NO_SUCH_SUBOBJ:
             if is_wrapper_or_member_descriptor(subobj):
                 options = {"source": source}
@@ -1288,7 +1274,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "get" and type(self.value).get is collections.abc.Mapping.get:
-            return variables.UserMethodVariable(polyfill.mapping_get, self)
+            return variables.UserMethodVariable(polyfills.mapping_get, self)
         else:
             return super().var_getattr(tx, name)
 

@@ -170,6 +170,7 @@ jobs:
           { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
       sync-tag: asan-build
+    secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
@@ -182,3 +183,4 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
+    secrets: inherit
