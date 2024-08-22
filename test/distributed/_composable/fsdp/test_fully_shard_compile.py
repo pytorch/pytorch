@@ -4,11 +4,10 @@
 import contextlib
 import copy
 import functools
+import itertools
 import unittest
+from collections import defaultdict
 from unittest import mock
-
-import torchtune
-import torchtune.models.llama2
 
 import torch
 import torch._dynamo.testing
@@ -88,6 +87,24 @@ class TestFullyShardCompileCompute(FSDPTest):
             self.assertEqual(trace_rules_check_count, 0)
         else:
             self.assertTrue(trace_rules_check_count > 0)
+
+
+def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
+    storage_id_to_graph_inputs = defaultdict(list)
+    for node in graph.nodes:
+        if node.op == "placeholder" and isinstance(
+            node.meta.get("val", None), torch.Tensor
+        ):
+            storage_id_to_graph_inputs[id(node.meta["val"].untyped_storage())].append(
+                node
+            )
+    for aliased_graph_inputs in storage_id_to_graph_inputs.values():
+        assert (
+            len(aliased_graph_inputs) == 1
+        ), f"""
+Found aliased graph inputs: {aliased_graph_inputs},
+val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
+"""
 
 
 class TestFullyShardCompile(FSDPTest):
@@ -306,20 +323,6 @@ class TestFullyShardCompile(FSDPTest):
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @torch._dynamo.config.patch(
-        inline_inbuilt_nn_modules=True,
-        skip_fsdp_hooks=False,
-    )
-    @torch._functorch.config.patch(recompute_views=True)
-    @torch._functorch.config.patch(cse=False)
-    @torch._inductor.config.patch(
-        reorder_for_compute_comm_overlap=True,
-        reorder_for_compute_comm_overlap_passes=[
-            "sink_waits",
-            "raise_comms",
-            "reorder_compute_for_overlap",
-        ],
-    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -370,7 +373,23 @@ class TestFullyShardCompile(FSDPTest):
             res = run_iters(model, optim)
             return res
 
-        losses_compiled = test_compiled()
+        with torch._dynamo.config.patch(
+            inline_inbuilt_nn_modules=True,
+            skip_fsdp_hooks=False,
+        ), torch._functorch.config.patch(
+            recompute_views=True, cse=False
+        ), torch._inductor.config.patch(
+            reorder_for_compute_comm_overlap=True,
+            reorder_for_compute_comm_overlap_passes=[
+                "sink_waits",
+                "raise_comms",
+                "reorder_compute_for_overlap",
+            ],
+            post_grad_custom_pre_pass=assert_no_aliased_graph_inputs
+            if fullgraph
+            else None,
+        ):
+            losses_compiled = test_compiled()
         losses_eager = test_eager()
         if not self.fake_pg:
             for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
@@ -615,9 +634,10 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self):
+    def _create_transformer_factory_fns(self, all_requires_grad):
         seq_len = 16
         vocab_size = 8
+        n_layers = 3
 
         def model_init_fn():
             torch.manual_seed(self.rank)
@@ -625,9 +645,20 @@ class TestFullyShardCompile(FSDPTest):
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
-                n_layers=3,
+                n_layers=n_layers,
             )
             model = Transformer(model_args)
+            if not all_requires_grad:
+                requires_grad_params = ["attention.wq", "attention.wv"]
+                requires_grad_param_count = 0
+                for k, v in model.named_parameters():
+                    for substring in requires_grad_params:
+                        if substring in k:
+                            v.requires_grad_(True)
+                            requires_grad_param_count += 1
+                        else:
+                            v.requires_grad_(False)
+                assert requires_grad_param_count == n_layers * len(requires_grad_params)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
@@ -692,7 +723,9 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        for fullgraph in [True]:
+        for fullgraph, all_requires_grad in itertools.product(
+            [True, False], [True, False]
+        ):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -702,7 +735,9 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(),
+                        *self._create_transformer_factory_fns(
+                            all_requires_grad=all_requires_grad
+                        ),
                         "inductor",
                         fullgraph=fullgraph,
                     )
@@ -716,7 +751,12 @@ class TestFullyShardCompile(FSDPTest):
                 print(f"fwd_code: {fwd_code}")
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str="triton_", num_copy=4),
+                    dict(
+                        overlapped_compute_op_str="triton_"
+                        if all_requires_grad
+                        else None,
+                        num_copy=4,
+                    ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
                         num_copy=12,
@@ -756,14 +796,22 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **bwd_ag_block_info
                     )
-                for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm("),
-                    dict(
-                        overlapped_compute_op_str=None
-                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                    dict(overlapped_compute_op_str=None),
-                    dict(overlapped_compute_op_str=None),
-                ]:
+                for bwd_rs_block_info in (
+                    [
+                        dict(
+                            overlapped_compute_op_str="extern_kernels.mm("
+                            if all_requires_grad
+                            else None
+                        ),
+                        dict(
+                            overlapped_compute_op_str=None
+                        ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                        dict(overlapped_compute_op_str=None),
+                    ]
+                    + [dict(overlapped_compute_op_str=None)]
+                    if all_requires_grad
+                    else []
+                ):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
@@ -775,142 +823,6 @@ class TestFullyShardCompile(FSDPTest):
                     len(triton_codes) > 2,
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
-
-    def _create_torchtune_llama_factory_fns(self):
-        vocab_size = 8
-
-        def model_init_fn():
-            torch.manual_seed(self.rank)
-            model = torchtune.models.llama2.lora_llama2_7b(
-                lora_attn_modules=["q_proj", "v_proj"],
-            )
-            from collections import OrderedDict
-
-            """
-            original model: TransformerDecoder(
-                (tok_embeddings): Embedding(32000, 4096)
-                (layers): ModuleList(
-                    (0): TransformerDecoderLayer(
-                    (sa_norm): RMSNorm()
-                    (attn): CausalSelfAttention(
-                        (q_proj): LoRALinear(
-                            (dropout): Dropout(p=0.05, inplace=False)
-                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
-                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
-                        )
-                        (k_proj): Linear(in_features=4096, out_features=4096, bias=False)
-                        (v_proj): LoRALinear(
-                            (dropout): Dropout(p=0.05, inplace=False)
-                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
-                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
-                        )
-                        (output_proj): Linear(in_features=4096, out_features=4096, bias=False)
-                        (pos_embeddings): RotaryPositionalEmbeddings()
-                    )
-                    (mlp_norm): RMSNorm()
-                    (mlp): FeedForward(
-                        (w1): Linear(in_features=4096, out_features=11008, bias=False)
-                        (w2): Linear(in_features=11008, out_features=4096, bias=False)
-                        (w3): Linear(in_features=4096, out_features=11008, bias=False)
-                        (activation): SiLU()
-                    )
-                    )
-                )
-                (norm): RMSNorm()
-                (output): Linear(in_features=4096, out_features=32000, bias=False)
-            )
-
-            simplified model: TransformerDecoder(
-                (tok_embeddings): Embedding(32000, 4096)
-                (layers): ModuleList(
-                    (0): TransformerDecoderLayer(
-                    (sa_norm): Identity()
-                    (attn): CausalSelfAttention(
-                        (q_proj): LoRALinear(
-                            (dropout): Dropout(p=0.05, inplace=False)
-                            (lora_a): Linear(in_features=4096, out_features=8, bias=False)
-                            (lora_b): Linear(in_features=8, out_features=4096, bias=False)
-                        )
-                        (k_proj): Identity()
-                        (v_proj): Identity()
-                        (output_proj): Linear(in_features=4096, out_features=4096, bias=False)
-                        (pos_embeddings): RotaryPositionalEmbeddings()
-                    )
-                    (mlp_norm): Identity()
-                    (mlp): Identity()
-                    )
-                )
-                (norm): RMSNorm()
-                (output): Linear(in_features=4096, out_features=32000, bias=False)
-            )
-            """
-
-            str_indices = [str(i) for i in range(len(model.layers._modules))][
-                :1
-            ]  # only pick the first few layers
-            model.layers._modules = OrderedDict(
-                list(zip(str_indices, model.layers._modules.values()))
-            )
-            model.layers[0].sa_norm = torch.nn.Identity()
-            model.layers[0].mlp_norm = torch.nn.Identity()
-            model.layers[0].mlp = torch.nn.Identity()
-            # model.layers[0].attn.output_proj = torch.nn.Identity()  # NOTE: if not nn.Identity, it will cause "size-0 tensor being used" issue.
-            model.layers[0].attn.k_proj = torch.nn.Identity()
-            model.layers[0].attn.v_proj = torch.nn.Identity()
-            print(f"model: {model}")
-            adapter_params = torchtune.modules.peft.peft_utils.get_adapter_params(model)
-            print(f"adapter_params: {list(adapter_params.keys())}")
-            torchtune.modules.peft.peft_utils.set_trainable_params(
-                model, adapter_params
-            )
-
-            fsdp_kwargs = {}
-            # iterating from lowerer modules to higher
-            # eg grouping lora adapters before transformer block
-            for m in reversed(list(model.modules())):
-                if isinstance(m, nn.Linear) and m.weight.requires_grad:
-                    fully_shard(m, reshard_after_forward=True, **fsdp_kwargs)
-                else:
-                    if isinstance(m, torchtune.modules.TransformerDecoderLayer):
-                        fully_shard(m, reshard_after_forward=True, **fsdp_kwargs)
-            fully_shard(model, reshard_after_forward=True, **fsdp_kwargs)
-
-            with torchtune.utils.set_default_dtype(torch.bfloat16):
-                for m in model.modules():
-                    if isinstance(m, torchtune.modules.peft.LoRALinear):
-                        # lora may not be covered in state dict
-                        # if finetune for the 1st time
-                        m.lora_a.to_empty(device="cuda")
-                        m.lora_b.to_empty(device="cuda")
-            # Ensure no params and buffers are on meta device
-            torchtune.utils.validate_no_params_on_meta_device(model)
-
-            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
-
-            # synchronize before training begins
-            torch.distributed.barrier()
-
-            return model, optim
-
-        def input_creation_fn():
-            torch.manual_seed(self.rank)
-            seq_len = torch.randint(1, 255, (1,)).item()
-            inp = torch.randint(
-                0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
-            )
-            return inp
-
-        return model_init_fn, input_creation_fn
-
-    @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_torchtune_llama_backend_inductor(self):
-        for fullgraph in [True]:
-            self._test_traceable_fsdp(
-                *self._create_torchtune_llama_factory_fns(),
-                "inductor",
-                fullgraph=fullgraph,
-            )
 
 
 if __name__ == "__main__":

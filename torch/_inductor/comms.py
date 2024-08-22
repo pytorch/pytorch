@@ -491,53 +491,6 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     graph_pass.apply(graph)  # type: ignore[arg-type]
 
 
-def dedup_fsdp_unsharded_param_aliases(graph: torch.fx.Graph) -> None:
-    """
-    In Traceable FSDP2, each unsharded parameter is captured multiple times as different graph inputs,
-    and the correctness of the program relies on fsdp.copy_() being called before any compute op
-    can be run on any of the aliases. Inductor optimization passes such as compute/comm reordering
-    doesn't know about this and would create a new ordering that puts compute ops above the fsdp.copy_() op,
-    causing the FSDP2 program to no longer be valid.
-
-    In this pass, we fix the problem by deduplicating all aliases of the unsharded parameter so that only
-    one alias of it is used by ops in the program. This will greatly simplify downstream graph optimizations.
-
-    Example:
-
-    (arg30_1 and arg129_1 are aliases of an FSDP2 unsharded parameter, both captured as graph inputs)
-    ...
-    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15)
-    ... (compute ops using arg30_1)
-    ...
-
-    ->
-
-    ...
-    copy__7 = torch.ops.fsdp.copy_.default(arg129_1, as_strided_15)
-    ... (compute ops using arg129_1 instead of arg30_1)
-    ...
-    """
-    def item(elems):
-        assert len(elems) == 1, f"elems: {elems}"
-        return elems[0]
-
-    storage_id_to_graph_inputs = defaultdict(list)
-    all_graph_inputs_used_in_copy_op = set()
-    for node in graph.nodes:
-        if node.op == "placeholder" and isinstance(node.meta['val'], torch.Tensor):
-            storage_id_to_graph_inputs[id(node.meta['val'].untyped_storage())].append(node)
-        if node.target == torch.ops.fsdp.copy_.default and node.args[0].op == "placeholder":
-            all_graph_inputs_used_in_copy_op.add(node.args[0])
-    for graph_inputs in storage_id_to_graph_inputs.values():
-        graph_inputs_used_in_copy_op = [x for x in graph_inputs if x in all_graph_inputs_used_in_copy_op]
-        if len(graph_inputs_used_in_copy_op) > 0:
-            assert len(graph_inputs_used_in_copy_op) == 1
-            replace_with_graph_input = graph_inputs_used_in_copy_op[0]
-            for graph_input in graph_inputs:
-                if graph_input is not replace_with_graph_input:
-                    graph_input.replace_all_uses_with(replace_with_graph_input)
-    
-
 def get_op_idx(snode):
     assert not isinstance(
         snode,
