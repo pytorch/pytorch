@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCPUIf,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
@@ -40,7 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -683,6 +684,7 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
