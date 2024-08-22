@@ -169,13 +169,13 @@ class TestDecomposeMemMM(TestCase):
     def test_decompose_linear_mixed_precision(
         self, m, n, k, has_bias, should_decompose
     ):
-        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+        with torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16):
             torch._logging.set_logs(inductor=logging.DEBUG)
-            input = torch.randn(m, k, device="cuda").requires_grad_(True)
+            input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
 
             counters.clear()
 
-            module = MyModule(k, n, has_bias).to("cuda")
+            module = MyModule(k, n, has_bias).to(GPU_TYPE)
             traced = torch.compile(module)
             input = [input]
             ref = module(*input)
@@ -253,14 +253,14 @@ class TestDecomposeMemMM(TestCase):
     )
     @parametrize("has_bias", [True, False])
     def test_decompose_mm_mixed_precision(self, m, n, k, has_bias, should_decompose):
-        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+        with torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16):
             torch._logging.set_logs(inductor=logging.DEBUG)
-            mat1 = torch.randn(m, k, device="cuda").requires_grad_(True)
-            mat2 = torch.randn(k, n, device="cuda").requires_grad_(True)
+            mat1 = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
+            mat2 = torch.randn(k, n, device=GPU_TYPE).requires_grad_(True)
 
             counters.clear()
 
-            module = MyModule3().to("cuda")
+            module = MyModule3().to(GPU_TYPE)
             traced = torch.compile(module)
             input = [mat1, mat2]
             ref = module(*input)
