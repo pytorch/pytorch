@@ -37,9 +37,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -60,7 +69,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cpu-aarch64-build
+    needs:
+      - manywheel-py3_9-cpu-aarch64-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -105,6 +116,7 @@ jobs:
   manywheel-py3_9-cuda-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -151,6 +163,7 @@ jobs:
   manywheel-py3_10-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -171,7 +184,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cpu-aarch64-build
+    needs:
+      - manywheel-py3_10-cpu-aarch64-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -216,6 +231,7 @@ jobs:
   manywheel-py3_10-cuda-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -262,6 +278,7 @@ jobs:
   manywheel-py3_11-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -282,7 +299,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cpu-aarch64-build
+    needs:
+      - manywheel-py3_11-cpu-aarch64-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -327,6 +346,7 @@ jobs:
   manywheel-py3_11-cuda-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -373,6 +393,7 @@ jobs:
   manywheel-py3_12-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -393,7 +414,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cpu-aarch64-build
+    needs:
+      - manywheel-py3_12-cpu-aarch64-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -438,6 +461,7 @@ jobs:
   manywheel-py3_12-cuda-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder

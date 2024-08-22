@@ -16,7 +16,7 @@ from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -44,7 +44,11 @@ from .ctx_manager import (
 )
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TorchFunctionModeStackVariable,
+)
 
 
 try:
@@ -398,7 +402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.ops.inductor.accumulate_grad_.default)
         def handle_accumulate_grad_(self, tx: "InstructionTranslator", *args, **kwargs):
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.accumulate_grad), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.accumulate_grad), args, kwargs
             )
 
         @register(math.radians)
@@ -406,7 +410,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
                 return tx.inline_user_function_return(
-                    SourcelessBuilder.create(tx, polyfill.radians), args, kwargs
+                    SourcelessBuilder.create(tx, polyfills.radians), args, kwargs
                 )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
@@ -741,6 +745,51 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
                     tx, [*args], kwargs
                 )
+
+        @register(torch._C._pop_torch_function_stack)
+        def handle_pop_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            if not tx.symbolic_torch_function_mode_stack:
+                raise unimplemented("Popping from an empty torch function mode stack")
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            return tx.symbolic_torch_function_mode_stack.pop()
+
+        @register(torch._C._push_on_torch_function_stack)
+        def handle_push_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert len(args) == 1 and not kwargs
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            tx.symbolic_torch_function_mode_stack.append(args[0])
+            return ConstantVariable.create(None)
+
+        @register(torch._C._len_torch_function_stack)
+        def handle_len_torch_function(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            assert not args and not kwargs
+            return ConstantVariable.create(len(tx.symbolic_torch_function_mode_stack))
+
+        @register(torch.set_default_device)
+        def handle_set_default_device(
+            self, tx: "InstructionTranslator", *args, **kwargs
+        ):
+            # Today this is inserted in the graph, once TF mode
+            # handling is complete, we can trace the device context
+            # like any other TF mode and remove this special handling
+            # Insert the TF mode representing the device context at
+            # the bottom of the stack to match the eager semantics
+            # Running the graph will ensure that the DeviceContext mode is
+            # at the correct position in the stack
+            TorchFunctionModeStackVariable.register_mutation(tx)
+            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+                TorchFunctionModeStackVariable.clear_default_device(tx)
+            else:
+                TorchFunctionModeStackVariable.register_device_context_insertion(tx)
+
+            return None
 
         return handlers
 

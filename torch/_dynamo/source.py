@@ -593,6 +593,31 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class TorchFunctionModeStackSource(Source):
+    ind: int
+
+    def name(self):
+        return ""
+
+    def _get_index(self):
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        return TorchFunctionModeStackVariable.get_mode_index(self.ind)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "get_torch_function_mode_stack_at"
+            )
+        )
+        codegen.extend_output([codegen.create_load_const(self._get_index())])
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
 class ConstantSource(Source):
     source_name: str
 
