@@ -17,7 +17,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeIs
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -97,11 +97,11 @@ def sympy_generic_le(lower, upper):
         return not (lower and not upper)
 
 
-def vr_is_bool(vr: ValueRanges[_T]) -> TypeIs[ValueRanges[SympyBoolean]]:
+def vr_is_bool(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[SympyBoolean]]:
     return vr.is_bool
 
 
-def vr_is_expr(vr: ValueRanges[_T]) -> TypeIs[ValueRanges[sympy.Expr]]:
+def vr_is_expr(vr: ValueRanges[_T]) -> TypeGuard[ValueRanges[sympy.Expr]]:
     return not vr.is_bool
 
 

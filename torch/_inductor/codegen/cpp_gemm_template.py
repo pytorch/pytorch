@@ -663,8 +663,6 @@ class CppPackedGemmTemplate(CppTemplate):
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
                 # prepack the weight as input to the template buffer
-                # TODO(jgong5): prune the unused constants in V.graph
-                # Should we implement it with constant folding in the scheduler instead?
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
@@ -676,6 +674,18 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
+
+                # By using the new packed weight for the GEMM template, we can prune the
+                # old weight if it has no other users. This saves memory but makes the FX graph
+                # non-retraceable. To support retracing, we can add a repack node to the
+                # FX graph. For example:
+                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+                for node in reversed(V.graph.graph.nodes):
+                    if node.name == W_node.get_name() and len(node.users) == 1:
+                        del V.graph.constants[node.name]
+                        delattr(V.graph.module, node.name)
+                        delattr(V.graph.graph.owning_module, node.name)
+
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
                 template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
