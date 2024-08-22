@@ -4,10 +4,10 @@
 import contextlib
 import copy
 import functools
+import itertools
 import unittest
 from collections import defaultdict
 from unittest import mock
-import itertools
 
 import torch
 import torch._dynamo.testing
@@ -98,7 +98,7 @@ def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
             storage_id_to_graph_inputs[id(node.meta["val"].untyped_storage())].append(
                 node
             )
-    for storage_id, aliased_graph_inputs in storage_id_to_graph_inputs.items():
+    for aliased_graph_inputs in storage_id_to_graph_inputs.values():
         assert (
             len(aliased_graph_inputs) == 1
         ), f"""
@@ -723,7 +723,9 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        for fullgraph, all_requires_grad in itertools.product([True, False], [True, False]):
+        for fullgraph, all_requires_grad in itertools.product(
+            [True, False], [True, False]
+        ):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -733,7 +735,9 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(all_requires_grad=all_requires_grad),
+                        *self._create_transformer_factory_fns(
+                            all_requires_grad=all_requires_grad
+                        ),
                         "inductor",
                         fullgraph=fullgraph,
                     )
@@ -746,7 +750,12 @@ class TestFullyShardCompile(FSDPTest):
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str="triton_" if all_requires_grad else None, num_copy=4),
+                    dict(
+                        overlapped_compute_op_str="triton_"
+                        if all_requires_grad
+                        else None,
+                        num_copy=4,
+                    ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
                         num_copy=12,
@@ -786,13 +795,22 @@ class TestFullyShardCompile(FSDPTest):
                     file_check = self.inductor_code_check_fsdp_all_gather(
                         file_check, **bwd_ag_block_info
                     )
-                for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm(" if all_requires_grad else None),
-                    dict(
-                        overlapped_compute_op_str=None
-                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                    dict(overlapped_compute_op_str=None),
-                ] + [dict(overlapped_compute_op_str=None)] if all_requires_grad else []:
+                for bwd_rs_block_info in (
+                    [
+                        dict(
+                            overlapped_compute_op_str="extern_kernels.mm("
+                            if all_requires_grad
+                            else None
+                        ),
+                        dict(
+                            overlapped_compute_op_str=None
+                        ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                        dict(overlapped_compute_op_str=None),
+                    ]
+                    + [dict(overlapped_compute_op_str=None)]
+                    if all_requires_grad
+                    else []
+                ):
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
