@@ -5787,6 +5787,7 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
+    def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()

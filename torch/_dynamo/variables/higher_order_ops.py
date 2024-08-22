@@ -1363,6 +1363,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
     This hop is not exposed to users but is inserted into the graph
     after export as a post-processing step.
     """
+
     def call_function(
         self,
         tx: "InstructionTranslator",
