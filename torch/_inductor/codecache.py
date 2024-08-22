@@ -429,6 +429,7 @@ def write(
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
+    encode_utf_8: bool = hash_type == "code"
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -442,7 +443,10 @@ def write_text(text: str) -> str:
 
 
 def write_atomic(
-    path: str, content: Union[str, bytes], make_dirs: bool = False
+    path: str,
+    content: Union[str, bytes],
+    make_dirs: bool = False,
+    encode_utf_8: bool = False,
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
@@ -454,7 +458,7 @@ def write_atomic(
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    with tmp_path.open(write_mode) as f:
+    with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
     tmp_path.rename(path)
 
