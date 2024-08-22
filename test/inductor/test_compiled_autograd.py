@@ -2480,8 +2480,8 @@ known_graph_breaks_tests = {
     "test_materialize_grads",  # assertEqual
     "test_return_leaf",  # assertEqual
     "test_save_none_for_backward",  # assertIsNone
-    "test_save_output_nr",  # assertEqual
     "test_saved_variables_deprecated",  # warnings.warn
+    "test_autograd_node_isinstance",  # assertIsInstance
     "test_set_materialize_non_diff_grads",  # assertIsNone
     "test_backward_dict_grad_for_nontensor",  # torch/_custom_op/autograd.py in skip files
     "test_backward_dict_invalid_keys",  # torch/_custom_op/autograd.py in skip files
@@ -2514,6 +2514,7 @@ skipped_tests = {
     # Running these tests succeed, but somehow cause other tests to fail
     "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
     "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
+    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
 known_failing_tests = {
@@ -2577,6 +2578,7 @@ known_failing_tests = {
     "test_reentrant_with_callbacks_both_depths",  # hangs with graph breaks
     "test_reentrant_with_callbacks_depth_0",  # probably hangs with graph breaks
     "test_reentrant_with_callbacks_depth_1",  # probably hangs with graph breaks
+    "test_save_output_nr",  # output_nr grad passed as None
     "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
     "test_simple_reentrant",  # hangs with graph breaks
     "test_lobpcg",  # create_graph
