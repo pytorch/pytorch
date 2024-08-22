@@ -423,7 +423,7 @@ pr_time_benchmarks() {
      cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_before.txt"
   else
      echo "could not run benchmarks on parent"
-
+  fi
   # resetting the original code
   git checkout --hard "${SHA1}"
 }
