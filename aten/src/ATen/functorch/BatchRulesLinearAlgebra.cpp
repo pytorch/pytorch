@@ -485,6 +485,145 @@ pinv_batch_rule(
     const std::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
 }
+
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_flash_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  c10::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  const auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
+      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale);
+
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  const auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  const auto res8_ = return_debug_mask ? reshape_dim_outof(0, batch_size, res8) : res8;
+
+  return std::make_tuple(
+    res0_, 0,
+    res1_, 0,
+    res2, std::nullopt,
+    res3, std::nullopt,
+    res4,
+    res5,
+    res6, std::nullopt,
+    res7, std::nullopt,
+    res8_, return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
+fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
+  const Tensor& query, optional<int64_t> query_bdim,
+  const Tensor& key, optional<int64_t> key_bdim,
+  const Tensor& value, optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, optional<int64_t> attn_bias_bdim,
+  bool compute_log_sumexp,
+  double dropout_p,
+  bool is_causal,
+  c10::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  std::optional<Tensor> attn_bias_;
+  if (attn_bias.has_value() && attn_bias->defined()) {
+    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+  }
+  const auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
+      query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, scale);
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  const auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  // philox seed is always non-batched
+  return std::make_tuple(res0_, 0, res1_, 0, res2, std::nullopt, res3, std::nullopt);
+}
+
+// Please unify SDPA APIs!!!
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_cudnn_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, std::optional<int64_t> attn_bias_bdim,
+  bool compute_log_sumexp,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  c10::optional<double> scale
+) {
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  std::optional<Tensor> attn_bias_;
+  if (attn_bias.has_value() && attn_bias->defined()) {
+    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+  }
+
+  const auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_cudnn_attention(
+      query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, return_debug_mask, scale);
+
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  Tensor res1_;
+  std::optional<int64_t> res1_bdim;
+  if (compute_log_sumexp) {
+    res1_ = reshape_dim_outof(0, batch_size, res1);
+    res1_bdim = 0;
+  } else {
+    res1_ = res1;
+    res1_bdim = std::nullopt;
+  }
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  const auto res8_ = return_debug_mask ? reshape_dim_outof(0, batch_size, res8) : res8;
+
+  return std::make_tuple(
+    res0_, 0,
+    res1_, res1_bdim,
+    res2, std::nullopt,
+    res3, std::nullopt,
+    res4,
+    res5,
+    res6, std::nullopt,
+    res7, std::nullopt,
+    res8_, return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -612,6 +751,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+
+  VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
