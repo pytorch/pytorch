@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from textwrap import dedent
 
-from ..common import DeviceOpOverrides, register_device_op_overrides
+from .common import DeviceOpOverrides, register_device_op_overrides
 
 
 class CpuDeviceOpOverrides(DeviceOpOverrides):
