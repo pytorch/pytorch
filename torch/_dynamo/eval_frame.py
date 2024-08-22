@@ -104,9 +104,6 @@ unset = Unset.token
 
 context_id_to_warmup_count: Dict[int, int] = {}
 
-# TODO(yf225): somehow we can't set this in _dynamo.config (it doesn't take effect). Need to figure out why.
-warmup_runs = 1
-
 
 def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str):
     # A wrapper on set_eval_frame that is guarded by a Justknob.
@@ -127,14 +124,14 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str)
             if context_id not in context_id_to_warmup_count:
                 context_id_to_warmup_count[context_id] = 0
             if state == "enter":
-                if context_id_to_warmup_count[context_id] < warmup_runs:
+                if context_id_to_warmup_count[context_id] < config.warmup_runs:
                     # TODO: insert eager profiling start event here
-                    # TODO: kick off Remote Execution of torch.compile here
+                    # TODO: maybe kick off Remote Execution of torch.compile here
                     return set_eval_frame(None)
                 else:
                     return set_eval_frame(callback)
             elif state == "exit":
-                if context_id_to_warmup_count[context_id] < warmup_runs:
+                if context_id_to_warmup_count[context_id] < config.warmup_runs:
                     # TODO: insert eager profiling end event here
                     context_id_to_warmup_count[context_id] += 1
                     return set_eval_frame(callback)

@@ -514,7 +514,7 @@ def enforce_comm_ordering_for_fsdp(
                 torch.ops._c10d_functional.all_gather_into_tensor_out.default,
                 torch.ops._c10d_functional.wait_tensor.default,
                 torch.ops.fsdp.split_with_sizes_copy.default,
-                torch.ops.aten.set_.source_Tensor,
+                torch.ops.aten.copy_.default,
             }
             find_recursive_users_of_node(
                 ag_snode,
@@ -560,7 +560,7 @@ def enforce_comm_ordering_for_fsdp(
             assert wait_node_idx is not None
             ag_group_node = _create_group_node(ag_related_snodes[:wait_node_idx])
 
-            # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
+            # Group "all_gather_wait_tensor + copy_out + copy_" into one GroupedSchedulerNode
             ag_wait_group_node = _create_group_node(ag_related_snodes[wait_node_idx:])
 
             ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
