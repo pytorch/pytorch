@@ -135,6 +135,15 @@ void f8f8bf16_rowwise_impl(
   int N = WQ.size(1);
   int K = XQ.size(1);
 
+  // Workaround for https://github.com/pytorch/pytorch/issues/133334.
+  if (M % 256 > 0) {
+    int padded_M = ((M - 1) / 256 + 1) * 256;
+    at::Tensor padded_x_scale = x_scale.new_empty({padded_M, 1});
+    padded_x_scale.slice(/*dim=*/0, /*start=*/0, /*end=*/M)
+        .copy_(std::move(x_scale));
+    x_scale = std::move(padded_x_scale);
+  }
+
   using LayoutInputA = cutlass::layout::RowMajor;
   constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
 
