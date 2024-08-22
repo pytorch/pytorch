@@ -182,7 +182,11 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
-from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
+from .torch_function import (
+    build_torch_function_fn,
+    TensorWithTFOverrideVariable,
+    TorchFunctionModeVariable,
+)
 from .user_defined import (
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -607,6 +611,10 @@ class VariableBuilder:
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
+        elif isinstance(value, torch.overrides.TorchFunctionMode):
+            var = TorchFunctionModeVariable(value, source=self.source)
+            self.tx.output.side_effects.track_object_existing(value, var)
+            return var
         elif istype(value, frozenset) and (
             ConstantVariable.is_literal(x) for x in value
         ):
@@ -1360,7 +1368,10 @@ class VariableBuilder:
             return self.wrap_symfloat(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
-            return ConstantVariable.create(value=value)
+            result = ConstantVariable.create(value=value, source=self.source)
+            if isinstance(value, (list, set)):
+                return self.set_source_and_track_mutable(value, result)
+            return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:

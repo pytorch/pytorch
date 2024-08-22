@@ -50,7 +50,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023"
       build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
@@ -81,7 +81,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
@@ -107,7 +107,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3.8-clang10
       docker-image-name: pytorch-linux-focal-py3.8-clang10
       test-matrix: |
@@ -132,7 +132,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
@@ -160,7 +160,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
@@ -170,6 +170,7 @@ jobs:
           { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
       sync-tag: asan-build
+    secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
@@ -182,3 +183,4 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
+    secrets: inherit
