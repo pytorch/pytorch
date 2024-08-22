@@ -92,8 +92,11 @@ class AutogradCompilerInstance:
         sizes: List[int],
         scalars: List[Union[int, float]],
     ):
-        prior = set_eval_frame(None)
-        print(f"prior: {prior}, id(prior): {id(prior)}")        
+        # DEBUG: just to observe what eval_frame handler is curently
+        # prior = set_eval_frame(None)
+        log.warn(f"compiled autograd begin_capture")        
+        # set_eval_frame(prior)
+        # DEBUG: just to observe what eval_frame handler is curently
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}

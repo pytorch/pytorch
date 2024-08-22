@@ -308,7 +308,9 @@ class TestFullyShardCompile(FSDPTest):
         return file_check
 
     @torch._dynamo.config.patch(
-        inline_inbuilt_nn_modules=True, skip_fsdp_hooks=False, warmup_runs=1
+        inline_inbuilt_nn_modules=True,
+        skip_fsdp_hooks=False,
+        warmup_runs=1,
     )
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
@@ -378,8 +380,8 @@ class TestFullyShardCompile(FSDPTest):
             res = run_iters(model, optim)
             return res
 
-        torch._dynamo.reset()
-        torch._dynamo.compiled_autograd.reset()
+        # torch._dynamo.reset()
+        # torch._dynamo.compiled_autograd.reset()
         losses_eager = test_eager()
         losses_compiled = test_compiled()
         if not self.fake_pg:
