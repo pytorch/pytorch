@@ -262,7 +262,6 @@ class Shard(Placement):
             with_padding=False,
             contiguous=False,
         )
-        print(f"rank {mesh.get_rank()} shards: {shards} shard_index: {shard_index}")
         return shards[shard_index].clone()
 
     def _to_new_shard_dim(

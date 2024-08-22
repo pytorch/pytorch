@@ -315,13 +315,11 @@ else:
                     self._thread_id = threading.get_ident()
 
                 # calculate the coordinates of the current global rank on the mesh
-                print(f"rank: {get_rank()} mesh={self.mesh}")
                 rank_coords = (self.mesh == get_rank()).nonzero()
                 assert rank_coords.size(0) in (0, 1)
                 self._coordinate_on_dim: Optional[List[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-                print(f"rank: {get_rank()} mesh={self.mesh} mesh._coordinate_on_dim={self._coordinate_on_dim} addr={hex(id(self._coordinate_on_dim))}")
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -712,7 +710,6 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            print(f"get_coordinate(): rank {get_rank()} mesh={self.mesh} _coordinate_on_dim={self._coordinate_on_dim} addr={hex(id(self._coordinate_on_dim))}")
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
         def _flatten(self) -> "DeviceMesh":

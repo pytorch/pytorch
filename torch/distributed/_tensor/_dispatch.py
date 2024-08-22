@@ -126,9 +126,6 @@ class OpDispatcher:
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
-        if op_info.mesh.get_rank() == 0:
-            print(f"sharding prop result: op={op_call}; input schema={op_info.schema}; output sharding={output_sharding}")
-
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 

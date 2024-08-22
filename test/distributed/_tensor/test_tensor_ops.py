@@ -1,9 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import itertools
 
 import torch
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -11,7 +10,6 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
-    DTensorOpTestBase,
     with_comms,
 )
 
@@ -656,40 +654,6 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
-
-
-class A(DTensorOpTestBase):
-    @property
-    def world_size(self) -> int:
-        return 4
-
-    #@with_comms
-    def test_stack_family(self):
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
-        x = torch.arange(4, device=self.device_type)
-        y = torch.arange(start=4, end=8, device=self.device_type)
-        z = torch.arange(start=8, end=12, device=self.device_type)
-
-        shard_placement = [Shard(0)]
-        replic_placement = [Replicate()]
-        # dstack
-        expect = torch.dstack((x, y, z))
-        for p1, p2, p3 in itertools.product([replic_placement, shard_placement], repeat=3):
-            print(f"{p1} {p2} {p3}")
-            dist_x = distribute_tensor(x, mesh, p1)
-            dist_y = distribute_tensor(y, mesh, p2)
-            dist_z = distribute_tensor(z, mesh, p3)
-            dist_res = torch.dstack((dist_x, dist_y, dist_z))
-            self.assertEqual(dist_res.full_tensor(), expect)
-
-        # vstack
-        expect = torch.vstack((x, y, z))
-        for p1, p2, p3 in itertools.product([replic_placement, shard_placement], repeat=3):
-            dist_x = distribute_tensor(x, mesh, p1)
-            dist_y = distribute_tensor(y, mesh, p2)
-            dist_z = distribute_tensor(z, mesh, p3)
-            dist_res = torch.vstack((dist_x, dist_y, dist_z))
-            self.assertEqual(dist_res.full_tensor(), expect)
 
 
 if __name__ == "__main__":
