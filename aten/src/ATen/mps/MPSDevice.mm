@@ -6,6 +6,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 
 namespace at::mps {
 
@@ -29,8 +30,14 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   NSError* error = nil;
   if (!_mtl_indexing_library) {
     MTLCompileOptions* options = [MTLCompileOptions new];
+
     [options setLanguageVersion:getMetalLanguageVersion(_mtl_device)];
-    [options setFastMathEnabled:YES];
+
+    if (isMacOS13Plus(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      options.mathMode = MTLMathModeFast;
+    } else {
+      [options setFastMathEnabled:YES];
+    }
     _mtl_indexing_library = [_mtl_device newLibraryWithSource:[NSString stringWithCString:mps::indexing_metal_shaders
                                                                                  encoding:NSASCIIStringEncoding]
                                                       options:options
@@ -96,7 +103,6 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
-  id mpsCD = NSClassFromString(@"MPSGraph");
   auto is_os_version_at_least = [](int major, int minor) {
     @autoreleasepool {
       NSProcessInfo* processInfo = [[NSProcessInfo alloc] init];
@@ -108,7 +114,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_13_2_plus = is_os_version_at_least(13, 2);
   static bool _macos_13_3_plus = is_os_version_at_least(13, 3);
   static bool _macos_14_0_plus = is_os_version_at_least(14, 0);
-  static bool _macos_14_4_plus = is_os_version_at_least(14, 0);
+  static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
 
   switch (version) {

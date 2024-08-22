@@ -141,6 +141,7 @@ def noop_mask(
 
 
 _DEFAULT_SPARSE_BLOCK_SIZE = 128
+_LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
@@ -659,8 +660,8 @@ def _create_sparse_block_from_block_mask(
 
 def create_mask(
     mod_fn: Union[_score_mod_signature, _mask_mod_signature],
-    B: int,
-    H: int,
+    B: Optional[int],
+    H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
     device: str = "cuda",
@@ -679,7 +680,10 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
-
+    if B is None:
+        B = 1
+    if H is None:
+        H = 1
     b = torch.arange(0, B, device=device)
     h = torch.arange(0, H, device=device)
     m = torch.arange(0, Q_LEN, device=device)
@@ -729,9 +733,7 @@ def _create_block_mask_inner(
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
         separate_full_blocks=True,
     )
-    return _create_sparse_block_from_block_mask(
-        (partial_block_mask, full_block_mask), mask_mod
-    )
+    return partial_block_mask, full_block_mask
 
 
 def create_block_mask(
@@ -799,8 +801,11 @@ def create_block_mask(
     if _compile:
         inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
     with TransformGetItemToIndex():
-        block_mask = inner_func(
+        partial_block_mask, full_block_mask = inner_func(
             mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
+        )
+        block_mask = _create_sparse_block_from_block_mask(
+            (partial_block_mask, full_block_mask), mask_mod
         )
     return block_mask
 
@@ -812,12 +817,10 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     of the query and key tensors.
     """
     device = query.device
-    kv_len = _round_up_to_multiple(key.size()[-2], 128)
-    q_len = _round_up_to_multiple(query.size()[-2], 128)
     return BlockMask.from_kv_blocks(
         kv_num_blocks=torch.ones([1, 1, 1], dtype=torch.int32, device=device),
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
-        BLOCK_SIZE=(kv_len, q_len),
+        BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
     )
 
 
