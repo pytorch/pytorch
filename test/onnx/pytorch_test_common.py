@@ -294,8 +294,8 @@ def xfail(error_message: str, reason: Optional[str] = None):
             except Exception as e:
                 if isinstance(e, torch.onnx.OnnxExporterError):
                     # diagnostic message is in the cause of the exception
-                    assert error_message in str(
-                        e.__cause__
+                    assert (
+                        error_message in str(e.__cause__)
                     ), f"Expected error message: {error_message} NOT in {str(e.__cause__)}"
                 else:
                     assert error_message in str(
