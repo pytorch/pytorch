@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import functools
 import types
+import itertools
 import warnings
 from collections import namedtuple
 from contextlib import contextmanager
@@ -57,6 +58,9 @@ from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._remove_unneccessary_copy_op_pass import (
     _remove_unneccessary_copy_op_pass,
+)
+from torch.export._reorder_placeholder_same_as_original_ep_pass import (
+    _reorder_placeholder_same_as_original_ep_pass,
 )
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
@@ -460,8 +464,23 @@ def _decompose_and_get_gm_with_new_signature_constants(
         or ep.graph_signature.backward_signature is not None
     ):
         return _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index)
+    
+    param_buffer_name_to_idx = {}
+    count = 0
+    for name, _ in itertools.chain(ep.named_parameters(), ep.named_buffers()):
+        param_buffer_name_to_idx[name] = count
+        count += 1
 
     mod = ep.module()
+    
+    param_buffer_current_idx_to_original_index = {}
+    count = 0
+    for name, _ in itertools.chain(mod.named_parameters(), mod.named_buffers()):
+        param_buffer_current_idx_to_original_index[count] = param_buffer_name_to_idx[name]
+        count += 1
+
+    print("HEY", [node.name for node in ep.graph_module.graph.nodes if node.op == "placeholder"])
+
     fake_args = []
     for node in mod.graph.nodes:
         if node.op == "placeholder":
@@ -537,7 +556,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
     _verify_stack_trace(gm)
     _verify_placeholder_names(gm, new_graph_signature)
 
-    return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+    gm, new_graph_signature = _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+
+    return _reorder_placeholder_same_as_original_ep_pass(gm, new_graph_signature, param_buffer_current_idx_to_original_index)
 
 
 def _decompose_exported_program(

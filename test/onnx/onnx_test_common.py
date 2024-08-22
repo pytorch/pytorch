@@ -380,6 +380,8 @@ def run_ort(
     else:
         ort_model = onnx_model
 
+    breakpoint()
+
     # Suppress floods of warnings from ONNX Runtime
     session_options = onnxruntime.SessionOptions()
     session_options.log_severity_level = 3  # Error
@@ -387,6 +389,10 @@ def run_ort(
         ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
+    for ix, name in enumerate(input_names):
+        if name == "p_h_1_mlp_c_proj_weight":
+            print("FFFFF", ix)
 
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
@@ -397,6 +403,10 @@ def run_ort(
         k: torch.Tensor.numpy(v, force=True)
         for k, v in zip(input_names, pytorch_inputs)
     }
+
+    for k, v in ort_input.items():
+        if k == "p_h_1_mlp_c_proj_weight":
+            print("FFFFFAAA", v.ndim)
     return session.run(None, ort_input)
 
 

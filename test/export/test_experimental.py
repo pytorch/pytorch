@@ -307,7 +307,6 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
-
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 

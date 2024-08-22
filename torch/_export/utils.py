@@ -871,15 +871,16 @@ def _detect_fake_mode_from_gm(
             fake_val = node.meta["val"]
             if fake_val is not None and isinstance(fake_val, torch.Tensor):
                 fake_inps.append(fake_val)
-        elif len(fake_inps) == 0 and (
-            "example_value" in node.meta or "val" in node.meta
-        ):
-            fake_val = None
-            if "example_value" in node.meta:
-                fake_val = node.meta["example_value"]
-            elif "val" in node.meta:
-                fake_val = node.meta["val"]
-            if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_vals.append(fake_val)
+    
+    if len(fake_inps) == 0:
+        for node in gm.graph.nodes:
+            if ("example_value" in node.meta or "val" in node.meta):
+                fake_val = None
+                if "example_value" in node.meta:
+                    fake_val = node.meta["example_value"]
+                elif "val" in node.meta:
+                    fake_val = node.meta["val"]
+                if fake_val is not None and isinstance(fake_val, torch.Tensor):
+                    fake_vals.append(fake_val)
 
     return detect_fake_mode(fake_inps + fake_vals)
