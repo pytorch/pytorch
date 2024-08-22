@@ -8,6 +8,9 @@ from typing import Iterable, Iterator, Tuple, TypeVar
 from ..decorators import substitute_in_graph
 
 
+__all__ = ["tee"]
+
+
 _T = TypeVar("_T")
 
 
