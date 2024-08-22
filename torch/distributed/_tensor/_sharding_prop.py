@@ -182,10 +182,6 @@ class ShardingPropagator:
         # and tracing does not need to be as fast as eagermode DTensor usages.
         if op_info.schema.has_symints:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-            """
-            elif "unsqueeze" in str(op_info.schema.op):
-                output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-            """
         else:
             output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding

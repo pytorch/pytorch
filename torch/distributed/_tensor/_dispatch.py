@@ -126,6 +126,9 @@ class OpDispatcher:
 
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
+        if op_info.mesh.get_rank() == 0:
+            print(f"sharding prop result: op={op_call}; input schema={op_info.schema}; output sharding={output_sharding}")
+
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
@@ -170,13 +173,7 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                if op_call == aten.unsqueeze.default or op_call == aten.cat.default:
-                    print(f"output_shard={output_sharding}; {local_tensor_args}")
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
-                if op_call == aten.unsqueeze.default:
-                    print(f"unsqueeze result={local_results}")
-                if op_call == aten.cat.default:
-                    print(f"cat result={local_results}")
 
         else:
             # For a non-participating device (happens on rank that does not belong to

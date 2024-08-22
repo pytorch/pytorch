@@ -234,8 +234,6 @@ class OpSchema:
 
     schema_info: Optional[RuntimeSchemaInfo] = None
 
-    hash_to_args = dict()
-
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
         """
@@ -344,13 +342,7 @@ class OpSchema:
             )
             return hash((self.op, args_to_hash, kwargs_to_hash))
         else:
-            hash_val = hash((self.op, args_to_hash))
-            if hash_val not in self.hash_to_args:
-                self.hash_to_args[hash_val] = args_to_hash
-            else:
-                if args_to_hash != self.hash_to_args[hash_val]:
-                    print(f"op {self.op} hash={hash_val} args_to_hash={args_to_hash}")
-            return hash_val
+            return hash((self.op, args_to_hash))
 
     def __eq__(self, other: object) -> bool:
         # early return checks
