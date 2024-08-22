@@ -72,6 +72,10 @@ def is_same_dict(inductor_dict, optimus_dict):
     return True
 
 
+def normalize_node_kwargs_pass(graph):
+    return None
+
+
 def fuse_parallel_linear_pass(graph):
     return None
 
@@ -81,6 +85,18 @@ def remove_split_ops(graph, shape_prop):
 
 
 def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
+    return None
+
+
+def fuse_chunk_reshape_concat_pass(graph):
+    return None
+
+
+def remove_noop_pass(graph):
+    return None
+
+
+def stack_to_unsqueeze_pass(graph):
     return None
 
 
@@ -127,17 +143,36 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
             )
+            # normalize kwargs, must be called as the first pass
             pass_execution_and_save(
-                fuse_chunk_reshape_unsqueeze_concat_pass,
+                normalize_node_kwargs_pass,
                 gm,
                 example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
+                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
+            )
+            pass_execution_and_save(
+                remove_noop_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply remove_noop pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_concat_pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
+            )
+            pass_execution_and_save(
+                normalize_node_kwargs_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
             )
             pass_execution_and_save(
                 fuse_chunk_squeeze_cat_pass.apply,
@@ -168,6 +203,26 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply remove_split_ops",
+            )
+            # run before fuse_chunk_reshape_unsqueeze_concat_pass
+            pass_execution_and_save(
+                stack_to_unsqueeze_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply stack_to_unsqueeze_pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_unsqueeze_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
+            )
+            # Remove noops at the end, which may be generated other passes.
+            pass_execution_and_save(
+                remove_noop_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply remove_noop pass",
             )
             shape_prop(gm)
 

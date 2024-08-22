@@ -13576,7 +13576,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
            )),
     OpInfo('sparse.mm',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            variant_test_name='reduce',
            supports_autograd=True,
            supports_out=False,
@@ -13661,8 +13661,6 @@ op_db: List[OpInfo] = [
                    op=torch.frexp,
                    ref=np.frexp,
                    dtypes=floating_types_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half),
-                   # skip testing torch.frexp as it is not supported by ROCm platform yet
                    decorators=[],
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -16219,9 +16217,6 @@ op_db: List[OpInfo] = [
         decorators=[],
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
         ),
     ),
     OpInfo(
