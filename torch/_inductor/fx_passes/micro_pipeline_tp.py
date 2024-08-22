@@ -814,20 +814,25 @@ def _insert_fused_matmul_reduce_scatter(
         raise AssertionError(f"Unexpected matmul match type: {type(matmul)}")
 
 
-def with_effects_users(node: torch.fx.Node) -> Tuple[torch.fx.Node, torch.fx.Node]:
+def with_effects_users(
+    node: torch.fx.Node, strict: bool = True
+) -> Tuple[torch.fx.Node, torch.fx.Node]:
     assert node.target == torch.ops.higher_order.with_effects
     users = node.users
-    if len(users) != 2:
-        breakpoint()
-    assert len(users) == 2
+    if not strict:
+        assert (
+            len(users) == 2
+        ), f"XXX with_effects node {node} users:{users}, expected 2 users"
     getitem_users: List[Optional[torch.fx.Node]] = [None, None]
     for user in users.keys():
         assert user.target == operator.getitem
         idx = user.args[1]
         assert isinstance(idx, int)
         getitem_users[idx] = user
-    assert getitem_users[0] is not None
-    assert getitem_users[1] is not None
+
+    if not strict:
+        assert getitem_users[0] is not None
+        assert getitem_users[1] is not None
 
     return getitem_users[0], getitem_users[1]
 

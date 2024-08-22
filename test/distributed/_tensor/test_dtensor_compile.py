@@ -564,7 +564,7 @@ def forward(self, primals_1, primals_2):
     sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
     sin_1 = torch.ops.aten.sin.default(sin)
     cos = torch.ops.aten.cos.default(sin);  sin = None
-    return (getitem, sin_1, primals_2, cos)""",
+    return (getitem, sin_1, primals_2, cos)""",  # noqa: B950
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
