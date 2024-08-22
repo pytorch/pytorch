@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfill, variables
+from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -102,7 +102,7 @@ def _polyfill_call_impl(name):
             variables.UserFunctionVariable(fn), args, kwargs
         )
 
-    fn = getattr(polyfill, name)
+    fn = getattr(polyfills, name)
     call_fn.__name__ = f"call_{name}"
     return call_fn
 
