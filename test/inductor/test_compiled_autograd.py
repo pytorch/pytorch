@@ -2474,10 +2474,15 @@ known_graph_breaks_tests = {
     "test_tensor_hooks_inplace_multiple_outputs",  # uses assert in hook
     "test_hooks",  # uses assert in hook
     "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # allclose
+    "test_save_tensor_hook_version_counter_not_shared",  # assertEqual
+    "test_post_accumulate_grad_hook_returns_not_None",  # throws
 }
 
 test_contexts = {
-    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True)
+    "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
+    "test_index_backward_does_not_save_tensor": config.patch(
+        capture_dynamic_output_shape_ops=True
+    ),
 }
 
 # These groups of tests aren't supported yet
@@ -2498,63 +2503,58 @@ known_failing_tests = {
     "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
     "test_reentrant_with_leaf_variable_hook",  # hangs when enabled with graph breaks
     "test_reentrant_with_non_leaf_variable_hook",  # hangs when enabled with graph breaks
+    "test_anomaly_grad_warnings",  # does not support anomaly mode
+    "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
+    "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
+    "test_post_accumulate_grad_hook_ordering",  # accuracy error
+    "test_retain_grad_cycle",  # retains_grad_hooks
+    "test_retain_grad_inplace",  # retains_grad_hooks
+    "test_retain_grad_inplace_over_view",  # retains_grad_hooks
+    "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks
+    "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
+    "test_reentrant_child_error",  # hangs when enabled with graph breaks
+    "test_accumulate_grad",  # create_graph
+    "test_anomaly_assign_parent_cleanup",  # create_graph
+    "test_anomaly_mode_no_check_nan",  # AnomalyMode
+    "test_backward_create_graph_warns",  # create_graph
+    "test_backward_with_nonleaf_inputs",  # create_graph
+    "test_create_graph_and_full_backward_hook_cycle",  # create_graph
+    "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
+    "test_custom_autograd_repeated_grad_grad",  # create_graph
+    "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
+    "test_custom_function_forward_mode_inplace_checks",  # forward AD
+    "test_custom_function_forward_mode_view_checks",  # forward AD
+    "test_custom_function_forward_mode_wrong_formula",  # forward AD
+    "test_default_saved_variable_hooks_double_backward",  # create_graph
+    "test_full_backward_hook_double_backward",  # create_graph
+    "test_function",  # create_graph
+    "test_grad",  # create_graph
+    "test_grad_materialize_grads",  # create_graph
+    "test_grad_nonleaf",  # create_graph
+    "test_grad_nonleaf_many_outputs",  # create_graph
+    "test_hessian_vector",  # create_graph
+    "test_hook_edge_case_when_called_with_grad",  # retains_grad_hooks
+    "test_inplace_on_view_backward",  # create_graph
+    "test_multi_grad_any_hooks",  # register_multi_grad_hook
+    "test_multi_grad_all_hooks",  # retains_grad_hooks
+    "test_nested_anomaly_detect_nan",  # create_graph
+    "test_nested_anomaly_printstack_cleanup",  # create_graph
+    "test_once_differentiable",  # create_graph
+    "test_prehook_ordering",  # retains_grad_hooks
+    "test_retain_grad",  # retains_grad_hooks
+    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
+    # Category: Dynamo
+    "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
+    "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
+    "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
     # Category: Inductor
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     # Category: FakeTensor
     "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
+    "test_wrapped_number_saved_variable_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
+    "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
     # Uncategorized
-    "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
-    "test_save_tensor_hook_version_counter_not_shared",  # raise UnsupportedInputs
-    "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
-    "test_anomaly_grad_warnings",  # "one of the variables needed for gradient computation has been modified by an...
-    "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-    "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-    "test_custom_function_exception",  # "Simulate error on backward pass" does not match "type object 'SimulateBackwa...
-    "test_grad_batched_grad",  # Cannot access storage of BatchedTensorImpl
-    "test_index_backward_does_not_save_tensor",  # dynamic shape operator: aten.nonzero.default
-    "test_post_accumulate_grad_hook_ordering",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_returns_not_None",  # "hooks should return None." does not match
-    "test_reentrant_child_error",  # "Simulate error" does not match "type object 'ReentrantFunc' has no attribute...
-    "test_retain_grad_cycle",  # retains_grad_hooks not implemented for compiled autograd
-    "test_retain_grad_inplace",  # retains_grad_hooks not implemented for compiled autograd
-    "test_retain_grad_inplace_over_view",  # retains_grad_hooks not implemented for compiled autograd
-    "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks not implemented for compiled autograd
-    "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks not implemented for compiled autograd
-    "test_to_sparse_backward",  # backend='inner_compiler' raised:
-    "test_accumulate_grad",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_anomaly_assign_parent_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_anomaly_mode_no_check_nan",  # RuntimeError: compiled_autograd does not support AnomalyMode
-    "test_backward_create_graph_warns",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_backward_with_nonleaf_inputs",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_create_graph_and_full_backward_hook_cycle",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_current_graph_task_id",  # torch._dynamo.exc.Unsupported: torch.* op returned non-Tensor int
-    "test_custom_autograd_repeated_grad_grad",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_custom_function_forward_mode_forward_is_no_op",  # AttributeError: type object 'MyFn'
-    "test_custom_function_forward_mode_inplace_checks",  # AttributeError: type object 'InplaceFn'
-    "test_custom_function_forward_mode_view_checks",  # AttributeError: type object 'ViewFn'
-    "test_custom_function_forward_mode_wrong_formula",  # AttributeError: type object 'UserFn'
-    "test_default_saved_variable_hooks_double_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_full_backward_hook_double_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_function",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_grad",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_grad_materialize_grads",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_grad_nonleaf",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_grad_nonleaf_many_outputs",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_gradient_edge_output",  # RuntimeError: trying to backward through the graph a second time
-    "test_hessian_vector",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
-    "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
-    "test_hook_edge_case_when_called_with_grad",  # retains_grad_hooks NYI
-    "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_multi_grad_any_hooks",  # register_multi_grad_hook NYI
-    "test_multi_grad_all_hooks",  # retains_grad_hooks NYI
-    "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_once_differentiable",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_prehook_ordering",  # retains_grad_hooks NYI
-    "test_retain_grad",  # RuntimeError: retains_grad_hooks not implemented for compiled autograd
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # RuntimeError: compiled_autograd
     "test_select_sum",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # retains_grad_hooks NYI
