@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import atexit
 import collections
 import contextlib
@@ -59,8 +61,14 @@ import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._C import (
+    _get_function_stack_at,
+    _len_torch_function_stack,
+    _pop_torch_function_stack,
+    _push_on_torch_function_stack,
+)
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import Source, TracingContext
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -927,7 +935,7 @@ class CleanupHook:
 
 class CleanupManager(ExactWeakKeyDictionary):
     count = 0
-    instance: ClassVar["CleanupManager"]
+    instance: ClassVar[CleanupManager]
 
     def _remove_id(self, idx):
         for hook in self.values[idx]:
@@ -1224,11 +1232,18 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+"""
+    Difference between is_safe_constant and common_constant_types.
+    * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
+                             as ConstantVariable.
+    * is_safe_constant: Constants can be loaded by LOAD_CONST bytecode.
+"""
+
 
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return isinstance(v, (enum.Enum, type)) or istype(
+    return isinstance(v, (enum.Enum, type, torch.Size)) or istype(
         v,
         common_constant_types | {slice},
     )
@@ -1452,6 +1467,16 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 
 
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
+
+
+def get_safe_global_name(tx, root, obj):
+    # The global_mangled_class_name should be different for different
+    # invocations of torch.compile. Otherwise, we can run into a situation
+    # where multiple torch.compile invocations re-use the same global name,
+    # but the global's lifetime is tied to the first invocation (and
+    # may be deleted when the first torch.compile invocation is deleted)
+    # We mangle it based off of the output_graph's id.
+    return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
 def wrap_fake_exception(fn):
@@ -1768,7 +1793,7 @@ orig_code_map = ExactWeakKeyDictionary()
 guard_failures: DefaultDict[Any, List[Any]] = collections.defaultdict(list)
 
 # Keep a record of graph break reasons for logging
-graph_break_reasons: List["torch._dynamo.output_graph.GraphCompileReason"] = []
+graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
@@ -2239,7 +2264,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    tensor_source: Source,
+    guard_source: torch._guards.GuardSource,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2252,20 +2277,12 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from .source import is_from_unspecialized_param_buffer_source
-
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
-    ) and config.force_nn_module_property_static_shapes:
+        guard_source.is_specialized_nn_module()
+        and config.force_nn_module_property_static_shapes
+    ):
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-
-    if (
-        type(tensor) is torch.nn.Parameter
-        or is_from_unspecialized_param_buffer_source(tensor_source)
-    ) and config.force_parameter_static_shapes:
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
@@ -2817,7 +2834,7 @@ def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
+def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
     from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -3010,6 +3027,29 @@ def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
+def get_torch_function_mode_stack(filter_ignored=True):
+    from .variables.torch_function import IGNORED_MODES
+
+    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+    if filter_ignored:
+        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
+
+    return stack
+
+
+def get_torch_function_mode_stack_at(ind):
+    assert ind < _len_torch_function_stack() and ind >= 0
+    return torch._C._get_function_stack_at(ind)
+
+
+def set_torch_function_mode_stack(stack):
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
+
+    for mode in stack:
+        _push_on_torch_function_stack(mode)
+
+
 def verify_guard_fn_signature(value):
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
@@ -3049,3 +3089,20 @@ def _extract_tensor_dict(t):
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: Dict[int, weakref.ReferenceType[object]] = {}
+
+
+def get_user_object_from_id(obj_id):
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object_weakref(obj):
+    obj_id = id(obj)
+    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)

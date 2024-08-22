@@ -134,7 +134,7 @@ def auto_functionalized_dense(
 
     new_kwargs = dict(**kwargs)
     result = []
-    result_not_used =[]
+    result_not_used = []
     for name in _mutable_args_names:
         if (
             _only_clone_these_tensors is not None
@@ -154,8 +154,8 @@ def auto_functionalized_dense(
         # We need this for the clone to be observed during decomposition(this could be an underlying bug?),
         # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
         # decomposition its all good for now.
-        
-        # Those are never actually needed after this point, will revisit this to see if its a bug. 
+
+        # Those are never actually needed after this point, will revisit this to see if its a bug.
         if _only_clone_these_tensors is not None:
             result_not_used.append(new_kwargs[name])
 
@@ -226,7 +226,7 @@ def auto_functionalized_dense(
         result.append(base_with_effects)
 
     if isinstance(out, tuple):
-        return (*out, *result, *result_not_used )  # type: ignore[return-value]
+        return (*out, *result, *result_not_used)  # type: ignore[return-value]
     else:
         return (out, *result, *result_not_used)  # type: ignore[return-value]
 
@@ -325,8 +325,8 @@ def do_auto_functionalize(
     mutable_args_names = get_mutable_arg_names(op)
 
     all_basis = set()
-    all_basis_addresses = set()
-    basis = {}
+    all_basis_addresses: set[int] = set()
+    basis: Dict[str, Any] = {}
 
     for arg_name in mutable_args_names:
         arg = normalized_kwargs[arg_name]
@@ -359,10 +359,8 @@ def do_auto_functionalize(
 
     with ctx.redispatch_to_next():
         for arg in mutable_args_names:
-            # mypy errors:
-            # No overload variant of "__setitem__" of "list" matches argument types "str", "Any"
-            # Invalid index type "str".
-            unwrapped_kwargs[f"_{arg}_base"] = ctx.unwrap_tensors(basis.get(arg, None))  # type: ignore[call-overload,index]
+            # several mypy errors:
+            unwrapped_kwargs[f"_{arg}_base"] = ctx.unwrap_tensors(basis.get(arg, None))  # type: ignore[call-overload,index,assignment]
 
         unwrapped_outs = auto_functionalized(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
