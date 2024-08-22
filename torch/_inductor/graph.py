@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import functools
 import itertools
 import logging
 import operator
@@ -935,13 +934,12 @@ class GraphLowering(torch.fx.Interpreter):
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
-                constrain_fn = functools.partial(
-                    constrain_to_fx_strides, ignore_mutated_args_FIXME=True
+                args, kwargs = constrain_to_fx_strides(
+                    self.current_node, *args, **kwargs
                 )
-                args, kwargs = constrain_fn(self.current_node, *args, **kwargs)
                 # Also register the layout constraint so when the fallback
                 # is used again, we can constrain the args to the same layout
-                layout_constraint = constrain_fn
+                layout_constraint = constrain_to_fx_strides
             return layout_constraint, args, kwargs
 
         if target not in lowerings:
