@@ -390,8 +390,6 @@ class TestFullyShardCompile(FSDPTest):
             else None,
         ):
             losses_compiled = test_compiled()
-        losses_eager = test_eager()
-        losses_compiled = test_compiled()
         if not self.fake_pg:
             for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
                 self.assertTrue(
