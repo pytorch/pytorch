@@ -10161,14 +10161,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10221,14 +10213,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10277,14 +10261,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10369,14 +10345,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10456,14 +10424,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10512,14 +10472,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=integral_types_and(torch.bool) + complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10626,6 +10578,8 @@ foreach_unary_op_db: List[OpInfo] = [
                 device_type="cuda",
                 dtypes=complex_types(),
             ),
+            # FIXME: the fast path for CUDA sigmoid is either unimplemented or
+            # inaccessible.  The slow path exists, so this is probably an error?
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -10685,14 +10639,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "TestMeta",
                 "test_meta_outplace",
                 dtypes=complex_types_and(torch.bool),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -10822,14 +10768,6 @@ foreach_unary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -10926,14 +10864,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "test_meta_outplace",
                 device_type="cuda",
                 dtypes=(torch.bfloat16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types() + (torch.bfloat16,),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -11048,14 +10978,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -11083,14 +11005,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
@@ -11125,14 +11039,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
                 dtypes=(torch.complex128,),
@@ -11161,14 +11067,6 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
