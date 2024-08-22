@@ -1586,6 +1586,32 @@ def _nested_get_max_seqlen(func, *args, **kwargs):
     return inp._metadata_cache.get("max_seqlen", None)
 
 
+# If a section of the Nested Tensor is fully masked out we still retain the section with a length of 0
+@register_jagged_func(torch.ops.aten.masked_select.default, "self: jt, mask: any")
+def masked_select_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    mask = new_kwargs.pop("mask")
+
+    if inp.ndim > 2:
+        raise RuntimeError("masked_select only support 2-D selections currently")
+    elif inp.shape != mask.shape:
+        raise RuntimeError(
+            f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
+        )
+    res_values = inp._values.masked_select(mask.values())
+    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))
+
+    args = extract_kwargs(inp)
+    args["offsets"] = mask_cumsum[inp._offsets]
+    return NestedTensor(
+        values=res_values,
+        **args,
+    )
+
+
 # Make the dummy available on the C++ side.
 @register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
 def _nested_get_jagged_dummy(func, *args, **kwargs):
