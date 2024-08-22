@@ -42,6 +42,8 @@ C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda::CUDACachingAllocator {
 
+using namespace c10::CachingDeviceAllocator;
+
 // Included here as this is externally used in CUDAAllocatorConfig
 const size_t kLargeBuffer =
     20971520; // "large" allocations may be packed in 20 MiB blocks
@@ -1246,17 +1248,17 @@ class DeviceCachingAllocator {
 
       c10::reportOutOfMemoryToProfiler(
           static_cast<int64_t>(size),
-          stats.allocated_bytes[static_cast<int64_t>(MemoryStatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
-          stats.reserved_bytes[static_cast<int64_t>(MemoryStatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, device));
 
       auto allocated_bytes =
-          stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
       auto reserved_bytes =
-          stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
       auto observers_local = oom_observers_;
 
@@ -1430,10 +1432,8 @@ class DeviceCachingAllocator {
     c10::reportMemoryUsageToProfiler(
         block->ptr,
         static_cast<int64_t>(block->size),
-        stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-            .current,
-        stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-            .current,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
@@ -1485,10 +1485,8 @@ class DeviceCachingAllocator {
     c10::reportMemoryUsageToProfiler(
         orig_block_ptr,
         -static_cast<int64_t>(orig_block_size),
-        stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-            .current,
-        stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-            .current,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, block->device));
   }
 
@@ -1595,7 +1593,7 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       stats.allocation[statType].reset_accumulated();
       stats.segment[statType].reset_accumulated();
       stats.active[statType].reset_accumulated();
@@ -1621,7 +1619,7 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
       stats.allocation[statType].reset_peak();
       stats.segment[statType].reset_peak();
       stats.active[statType].reset_peak();
@@ -2434,10 +2432,9 @@ class DeviceCachingAllocator {
 
   StatTypes get_stat_types_for_pool(const BlockPool& pool) {
     StatTypes stat_types = {false};
-    stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        pool.is_small ? MemoryStatType::SMALL_POOL
-                      : MemoryStatType::LARGE_POOL)] = true;
+        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
     return stat_types;
   }
 
