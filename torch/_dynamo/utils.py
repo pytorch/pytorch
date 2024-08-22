@@ -694,6 +694,14 @@ def is_lazy_module(mod):
     return isinstance(mod, LazyModuleMixin)
 
 
+def is_standard_new(obj):
+    """Check for obj.__new__ being overridden"""
+    new_fn = inspect.getattr_static(obj, "__new__", None)
+    if isinstance(new_fn, staticmethod):
+        new_fn = new_fn.__func__
+    return new_fn in (object.__new__, typing.Generic.__new__)
+
+
 @functools.lru_cache(4096)
 def print_once(*args):
     print(*args)

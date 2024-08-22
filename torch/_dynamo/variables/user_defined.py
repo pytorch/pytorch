@@ -10,7 +10,7 @@ import random
 import sys
 import types
 import warnings
-from typing import Dict, Generic, List, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING
 
 import torch._dynamo.config
 import torch.nn
@@ -39,6 +39,7 @@ from ..utils import (
     get_custom_getattr,
     has_torch_function,
     is_namedtuple_cls,
+    is_standard_new,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
@@ -533,11 +534,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
-        """Check for __new__ being overridden"""
-        new_fn = inspect.getattr_static(self.value, "__new__", None)
-        if isinstance(new_fn, staticmethod):
-            new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__)
+        return is_standard_new(self.value)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
@@ -619,6 +616,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from .torch_function import build_torch_function_fn
 
         return build_torch_function_fn(tx, self.value, self.source)
+
+    def is_standard_new(self):
+        return is_standard_new(self.value)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
@@ -965,6 +965,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 cls_source = self.cls_source
             options = {"source": cls_source}
             return UserDefinedClassVariable(type(self.value), **options)
+
+        if not self.is_standard_new():
+            unimplemented(
+                f"{self} with custom __new__, perhaps C/C++ Python extension created with pybind."
+            )
 
         try:
             subobj = self._getattr_static(name)
