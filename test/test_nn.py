@@ -12082,6 +12082,7 @@ if __name__ == '__main__':
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_elu_inplace_overlap(self, device):
         x = torch.randn((1, 6), dtype=torch.bfloat16, device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -12159,6 +12160,7 @@ if __name__ == '__main__':
             b.backward(torch.ones(2, device=device))
 
     # Merge into OpInfo?
+    @skipMPSVersionIfLessThan(14, 0)  # macOS 13 does not support bfloat16
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
