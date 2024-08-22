@@ -3194,19 +3194,3 @@ def get_user_object_from_id(obj_id):
 def store_user_object_weakref(obj):
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
-
-
-def lru_cache_with_skip_unhashable(func):
-    # A decorator to apply lru_cache if the args of the function are hashable, but fallback to the original function
-    # otherwise.
-    cache = functools.lru_cache(None)(func)
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return cache(*args, **kwargs)
-        except TypeError:
-            # If a TypeError is raised (likely due to unhashable types), call the function without caching
-            return func(*args, **kwargs)
-
-    return wrapper
