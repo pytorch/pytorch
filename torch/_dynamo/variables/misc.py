@@ -611,21 +611,6 @@ class AutogradFunctionVariable(VariableTracker):
             and torch.is_grad_enabled()
             and config.capture_autograd_function
         ):
-            from torch._functorch.autograd_function import (
-                autograd_function_forward_rewritten,
-            )
-            from torch.autograd.function import _is_setup_context_defined
-
-            forward_fn = self.fn_cls.forward
-
-            is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
-            if is_setup_ctx_defined:
-                # If setup_context is defined, we generate a new forward function which includes
-                # the original forward and setup_context function, and trace the new forward function.
-                forward_fn = autograd_function_forward_rewritten(
-                    self.fn_cls.forward, self.fn_cls.setup_context
-                )
-
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
                 unimplemented("NYI - User defind vjp")
@@ -643,22 +628,23 @@ class AutogradFunctionVariable(VariableTracker):
                 )
 
             val = AutogradFunctionApplyVariable(
-                forward_fn,
+                self.fn_cls.forward,
+                self.fn_cls.setup_context,
                 self.fn_cls.backward,
                 source,
                 source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
-            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
-            # the forward function, as we don't want to generate guards for new_forward.__closure__
-            # if forward is rewritten by autograd_function_forward_rewritten.
-            # But we still need to generate correct guards for the original forward and setup_context
-            # functions, so we have to add guards manually.
-            if self.source:
-                fwd_src = AttrSource(self.source, "forward")
-                install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
-                if is_setup_ctx_defined:
-                    setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+            # # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
+            # # the forward function, as we don't want to generate guards for new_forward.__closure__
+            # # if forward is rewritten by autograd_function_forward_rewritten.
+            # # But we still need to generate correct guards for the original forward and setup_context
+            # # functions, so we have to add guards manually.
+            # if self.source:
+            #     fwd_src = AttrSource(self.source, "forward")
+            #     install_guard(fwd_src.make_guard(GuardBuilder.FUNCTION_MATCH))
+            #     if is_setup_ctx_defined:
+            #         setup_ctx_src = AttrSource(self.source, "setup_context")
+            #         install_guard(setup_ctx_src.make_guard(GuardBuilder.FUNCTION_MATCH))
 
             return val
 
