@@ -180,9 +180,6 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
-// Size pretty-printer
-std::string format_size(uint64_t size);
-
 using OutOfMemoryObserver = std::function<void(
     int64_t device,
     size_t allocated,
