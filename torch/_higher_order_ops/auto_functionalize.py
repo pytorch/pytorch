@@ -34,6 +34,9 @@ from torch.fx.experimental.proxy_tensor import (
 # This HOP effectively runs the functional version of the op when
 # called: it clones inputs that will be mutated, runs the op, and
 # then returns (output, Tensors with the new values)
+#
+# if the passed inputs are views of another inputs, we return the changed
+# based tensor and regenerate the future views from it.
 
 
 class AutoFunctionalized(HigherOrderOperator):
