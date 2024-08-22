@@ -63,17 +63,17 @@ FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
 ARG CUDA_VERSION=12.1
 ARG CUDA_CHANNEL=nvidia
-ARG INSTALL_CHANNEL=pytorch-nightly
+ARG INSTALL_CHANNEL=nightly
 # Automatically set by buildx
 RUN /opt/conda/bin/conda update -y -n base -c defaults conda
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
 
 ARG TARGETPLATFORM
 
-# On arm64 we can only install wheel packages.
+# INSTALL_CHANNEL won't actually be anything other than [nightly, test] so no need to worry about an extra slash
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip install --extra-index-url https://download.pytorch.org/whl/${CUDA_VERSION#.}/ torch torchvision torchaudio ;; \
+         *)              pip install --extra-index-url https://download.pytorch.org/whl/${INSTALL_CHANNEL}/${CUDA_VERSION#.}/ torch torchvision torchaudio ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
