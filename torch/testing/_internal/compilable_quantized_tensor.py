@@ -205,13 +205,14 @@ class MyDTypeTensor(torch.Tensor):
 
     """There are two entry points that we can modify the behavior of a pytorch op: torch_function and torch_dispatch:
 
-    __torch_function__: will be called whenever a torch level function is called on the Tensor object, for example: torch.nn.functional.linear,
-    tensor.detach, tensor.reshape, tensor.t etc.
+    __torch_function__: will be called whenever a torch level function is called on the Tensor object,
+    for example: torch.nn.functional.linear, tensor.detach, tensor.reshape, tensor.t etc.
 
-    __torch_dispatch__: will be called in the C++ dispatcher, when an aten operator is called on the Tensor object, for example:
-    aten.mm, aten.addmm, aten.detach.default, aten.t.default etc.
+    __torch_dispatch__: will be called in the C++ dispatcher, when an aten operator is called on the Tensor object,
+    for example: aten.mm, aten.addmm, aten.detach.default, aten.t.default etc.
 
-    We have some helper functions that can dispatch to the functions registered with MyDTypeTensor.implements, but if the default implementation does not work for your use case, please feel free to customize it
+    We have some helper functions that can dispatch to the functions registered with MyDTypeTensor.implements,
+    but if the default implementation does not work for your use case, please feel free to customize it
     """
 
     @classmethod
@@ -359,43 +360,7 @@ def _(func, types, args, kwargs):  # type: ignore[no-untyped-def]
     )
 
 
-class M(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.linear = torch.nn.Linear(1024, 1024)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear(x)
-
-
 #####################
 # Factory functions #
 #####################
 to_my_dtype = MyDTypeTensor.from_float
-
-
-########
-# Test #
-########
-m = M()
-example_inputs = (100 * torch.randn(1024, 1024),)
-NUM_WARMUPS = 10
-NUM_RUNS = 100
-
-for _ in range(NUM_WARMUPS):
-    m(*example_inputs)
-
-compiled = torch.compile(m, mode="max-autotune")
-for _ in range(NUM_WARMUPS):
-    compiled(*example_inputs)
-
-# convert weights to quantized weights
-m.linear.weight = torch.nn.Parameter(to_my_dtype(m.linear.weight), requires_grad=False)
-
-for _ in range(NUM_WARMUPS):
-    m(*example_inputs)
-
-m = torch.compile(m, mode="max-autotune")
-
-for _ in range(NUM_WARMUPS):
-    m(*example_inputs)
