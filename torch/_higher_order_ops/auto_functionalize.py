@@ -134,6 +134,12 @@ def auto_functionalized_dense(
 
     new_kwargs = dict(**kwargs)
     result = []
+
+    # We need this for the clone to be observed during decomposition(this could be an underlying bug?),
+    # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
+    # decomposition its all good for now.
+
+    # Those are never actually needed after this point, will revisit this to see if its a bug.
     result_not_used = []
     for name in _mutable_args_names:
         if (
@@ -142,22 +148,15 @@ def auto_functionalized_dense(
         ):
             new_kwargs[name] = kwargs[name]
         else:
-            new_kwargs[name] = (
-                [clone_preserve_strides(x) for x in kwargs[name]]
-                if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else (
-                    clone_preserve_strides(kwargs[name])
-                    if kwargs[name] is not None
-                    else None
-                )
-            )
-        # We need this for the clone to be observed during decomposition(this could be an underlying bug?),
-        # but we do not need it during functionlizations, since _only_clone_these_tensors only passed during
-        # decomposition its all good for now.
-
-        # Those are never actually needed after this point, will revisit this to see if its a bug.
-        if _only_clone_these_tensors is not None:
-            result_not_used.append(new_kwargs[name])
+            if kwargs[name] is not None and isinstance(kwargs[name], list):
+                new_kwargs[name] = [clone_preserve_strides(x) for x in kwargs[name]]
+                for item in new_kwargs[name]:
+                    if _only_clone_these_tensors is not None:
+                        result_not_used.append(item)
+            elif kwargs[name] is not None:
+                clone_preserve_strides(kwargs[name])
+                if _only_clone_these_tensors is not None:
+                    result_not_used.append(new_kwargs[name])
 
     out = _mutable_op(**new_kwargs)
 

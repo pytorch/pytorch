@@ -1190,6 +1190,85 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             cleanup_op("mylib::foo")
             del lib
 
+    # foo takes a mutable list with views in addition to other args.
+    def test_auto_functionalize_extra4(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!)[] y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y[0].sin_()
+
+            def f(x, y, z):
+                a = x[0]
+                b = z[0]
+                # is it allowed to pass x instead of y here?
+                torch.ops.mylib.foo(a, [b, y])
+
+            orig_args = [torch.randn(2), torch.randn(2), torch.randn(2)]
+
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(f, orig_args)
+            [inductor_args, result2, graph_inductor] = self.run_inductor(f, orig_args)
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_aot,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg1_1, 0, 0)
+
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = [select_1, arg2_1], _x_base = arg0_1, _y_base = [arg1_1, arg2_1], _all_bases = [arg0_1, arg1_1, arg2_1]);  select = select_1 = None
+        getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
+        getitem_2: "f32[2][1]cpu" = auto_functionalized[2]
+        getitem_3: "f32[2][1]cpu" = auto_functionalized[3];  auto_functionalized = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_2);  arg1_1 = getitem_2 = copy__1 = None
+        copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, getitem_3);  arg2_1 = getitem_3 = copy__2 = None
+        return ()""",
+                    ignore_comments=True,
+                )
+
+            # 2. Run with inductor backend
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    graph_inductor,
+                    """\
+def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
+        select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+
+        select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg1_1, 0, 0)
+
+        foo_default = torch.ops.mylib.foo.default(select, [select_1, arg2_1]);  select = select_1 = foo_default = None
+
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  arg0_1 = copy_ = None
+        copy__1: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  arg1_1 = copy__1 = None
+        copy__2: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg2_1, arg2_1);  arg2_1 = copy__2 = None
+        return ()""",
+                    ignore_comments=True,
+                )
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
+
     def test_auto_functionalize_on_view(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
