@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
-
 from __future__ import annotations
 
 from typing import (
@@ -32,7 +31,8 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> torch.dtype | None: ...
+    def dtype(self) -> torch.dtype | None:
+        ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
