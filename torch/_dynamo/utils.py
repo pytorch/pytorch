@@ -3094,7 +3094,6 @@ class CompileTimeInstructionCounter:
         return cls._counter
 
 
-# Those are the metrics that are collected about compi
 class CompileTimeInstructionCollector:
     def __init__(self):
         pass
