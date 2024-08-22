@@ -73,7 +73,7 @@ ARG TARGETPLATFORM
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip install --extra-index-url https://download.pytorch.org/whl/${CUDA_VERSION#.}/ torch torchvision torchaudio ;;
+         *)              pip install --extra-index-url https://download.pytorch.org/whl/${CUDA_VERSION#.}/ torch torchvision torchaudio ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
