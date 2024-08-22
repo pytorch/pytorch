@@ -194,10 +194,11 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
+        assert inspect.isclass(cls)
         return (
             inspect.getattr_static(cls, "__getattribute__", None)
             is object.__getattribute__
-        ) or bool(inspect.getattr_static(cls, "__flags__", 0) & TPFLAGS_IMMUTABLETYPE)
+        ) or bool(cls.__flags__ & TPFLAGS_IMMUTABLETYPE)
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
