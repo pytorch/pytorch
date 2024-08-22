@@ -9,6 +9,8 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+using namespace c10::CachingDeviceAllocator;
+
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 // all sizes are rounded to at least 512 bytes
