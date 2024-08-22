@@ -28,7 +28,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.utils._triton import has_triton
 
 
 def _is_op_in_graph(graph, op):
@@ -40,9 +39,7 @@ def _is_fallback_op_in_snodes(snodes, op):
 
 
 class TestFullyShardCompileCompute(FSDPTest):
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
         self.run_subtests(
@@ -413,18 +410,14 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -433,9 +426,7 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
@@ -503,9 +494,7 @@ class TestFullyShardCompile(FSDPTest):
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -515,9 +504,7 @@ class TestFullyShardCompile(FSDPTest):
             )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -527,9 +514,7 @@ class TestFullyShardCompile(FSDPTest):
             )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor(self):
         for fullgraph in [True, False]:
             with self._reinplace_all_gather_with_optional_checks(
@@ -685,9 +670,7 @@ class TestFullyShardCompile(FSDPTest):
         )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         for fullgraph in [True, False]:
             with self._maybe_add_graph_break_to_sdpa(
@@ -700,9 +683,7 @@ class TestFullyShardCompile(FSDPTest):
                 )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
@@ -715,9 +696,7 @@ class TestFullyShardCompile(FSDPTest):
                 )
 
     @skipIfRocm
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):

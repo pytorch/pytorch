@@ -43,8 +43,6 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 
 import pytest
 
-from torch.utils._triton import has_triton
-
 SEMI_STRUCTURED_SUPPORTED_DTYPES = [torch.float16, torch.bfloat16, torch.float32, torch.int8]
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = {}
 
@@ -983,7 +981,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             torch.backends.cuda.matmul.allow_tf32 = orig
 
 
-    @unittest.skipIf(not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions(self, device, dtype):
 
@@ -1011,7 +1009,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         for r, c in shapes:
             run_test(r, c, device, dtype)
 
-    @unittest.skipIf(not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions_all_patterns(self, device, dtype):
         r, c = 32, 128

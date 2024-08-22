@@ -19,7 +19,6 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.utils._triton import has_triton
 
 
 if not dist.is_available():
@@ -39,9 +38,7 @@ class TestCompile(FSDPTest):
     def world_size(self) -> int:
         return torch.cuda.device_count()
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile(self):
         self.run_subtests(

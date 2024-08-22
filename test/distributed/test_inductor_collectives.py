@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.utils._triton import has_triton
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -59,9 +58,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         # works around issue with skipif<2 and workers with unpredictable #s gpu
         return 2
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_broadcast_inductor(self):
         """
@@ -93,9 +90,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_out = compiled_func(*inputs)
             self.assertTrue(same(eager_out, compiled_out))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor(self):
         """
@@ -128,9 +123,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor_cudagraph_trees(self):
         """
@@ -176,9 +169,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         op = torch.ops.c10d_functional.all_reduce.default
         self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_eager_allreduce_inductor_wait(self):
         def eager_func(a, b, c, d, *, tag, ranks, group_size):
@@ -217,9 +208,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             print(f"inductor_out, {inductor_out}")
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_inductor_allreduce_eager_wait(self):
         def inductor_func(a, b, c, d, *, tag, ranks, group_size):
@@ -254,9 +243,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_allreduce_input_buffer_reuse(self):
@@ -274,9 +261,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_permute_tensor(self):
         def func(tensor, src_dst_pairs, *, tag, ranks, group_size):
@@ -302,9 +287,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(out, expected)
             self.assertEqual(correct, expected)
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_allgather_output_buffer_reuse(self):
@@ -328,9 +311,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
@@ -354,9 +335,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_allgather_into_tensor_inductor(self):
         """
@@ -387,9 +366,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
@@ -416,9 +393,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_all_to_all_single_inductor(self):
@@ -487,9 +462,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single_inductor_split_sizes_none(self):
         def example(inp, *, tag, ranks, group_size):
@@ -545,9 +518,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "group_size": world_size,
         }
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     def test_inductor_single_op(self):
         def func(inp, *, tag, ranks, group_size):
@@ -576,9 +547,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     def test_inductor_steal_buffer(self):
         """
@@ -613,9 +582,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_doesnt_mutate_shared(self):
         """
@@ -1068,9 +1035,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_all_gather_coalesced(self):
         """
@@ -1116,9 +1081,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
 
-    @unittest.skipIf(
-        not (has_triton() and HAS_GPU), "Inductor+gpu needs triton and recent GPU arch"
-    )
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
     def test_inductor_reduce_scatter_coalesced(self):
         """
