@@ -4,7 +4,7 @@ import itertools
 import operator
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedUserStopIteration,
@@ -178,7 +178,7 @@ class ItertoolsVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.islice), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.islice), args, kwargs
             )
         elif self.value is itertools.repeat:
             if len(args) < 2:
@@ -189,18 +189,18 @@ class ItertoolsVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.repeat), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
+            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
                 tx, args, kwargs
             )
         elif self.value is itertools.zip_longest:
-            return variables.UserFunctionVariable(polyfill.zip_longest).call_function(
+            return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
                 tx, args, kwargs
             )
         else:
