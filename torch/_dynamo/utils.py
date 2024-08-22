@@ -53,7 +53,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import Literal, TypeGuard
 
 import torch
 import torch._functorch.config
@@ -68,7 +68,7 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import Source, TracingContext
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -532,14 +532,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeIs[T]:
+) -> TypeGuard[T]:
     ...
 
 
@@ -2264,7 +2264,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
-    tensor_source: Source,
+    guard_source: torch._guards.GuardSource,
 ) -> Tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -2277,20 +2277,12 @@ def tensor_always_has_static_shape(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from .source import is_from_unspecialized_param_buffer_source
-
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
-    ) and config.force_nn_module_property_static_shapes:
+        guard_source.is_specialized_nn_module()
+        and config.force_nn_module_property_static_shapes
+    ):
         return True, TensorStaticReason.NN_MODULE_PROPERTY
-
-    if (
-        type(tensor) is torch.nn.Parameter
-        or is_from_unspecialized_param_buffer_source(tensor_source)
-    ) and config.force_parameter_static_shapes:
+    if type(tensor) is torch.nn.Parameter and config.force_parameter_static_shapes:
         return True, TensorStaticReason.PARAMETER
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
