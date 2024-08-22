@@ -2514,7 +2514,6 @@ skipped_tests = {
     # Running these tests succeed, but somehow cause other tests to fail
     "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
     "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
-    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
 known_failing_tests = {
@@ -2606,6 +2605,8 @@ known_failing_tests = {
     "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
+    "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
+    "test_autograd_node_isinstance",  # must use a fake ctx, can't directly assert it being a Node
     "test_unpack_hooks_exec_count",  # saved tensor packed twice
     # Uncategorized
 }
