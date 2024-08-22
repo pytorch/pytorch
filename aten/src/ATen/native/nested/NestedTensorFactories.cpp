@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 
@@ -193,6 +192,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(dim == 0, "narrow(): only dim=0 supported for nested tensors, but got: ", dim);
   TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative");
