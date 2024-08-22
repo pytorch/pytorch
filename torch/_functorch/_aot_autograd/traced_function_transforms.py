@@ -239,6 +239,14 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
             if functional_tensor_mode is not None:
+                # Side-Effect Tokens:
+                # We want to have independent chains of tokens for forward and backward.
+                # functional_tensor_mode._tokens is used by both.
+                # We memoize the result tokens of forward in functional_tensor_mode._tokens_forward_output,
+                # to return them as joint graph outputs.
+                # We clean functional_tensor_mode._tokens before backward, to prevent reuse of forward tokens in backward.
+                # Joint graph tracing allows tokens discovery,
+                # So all the tokens in backward will be created and added as a graph inputs during tracing.
                 functional_tensor_mode._tokens_forward_output = (
                     functional_tensor_mode._tokens
                 )

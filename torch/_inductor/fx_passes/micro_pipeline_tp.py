@@ -73,6 +73,18 @@ class _AllGatherMatch:
     with_effects: Optional[torch.fx.Node] = None
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
+        if self.with_effects:
+            graph = new_node.graph
+            with graph.inserting_before(new_node):
+                make_token = graph.call_function(torch.ops.prims._make_token.default)
+            with_effects_out_token, with_effects_result = with_effects_users(
+                self.with_effects
+            )
+            with_effects_out_token.replace_all_uses_with(make_token)
+            graph.erase_node(with_effects_out_token)
+            with_effects_result.replace_all_uses_with(new_node)
+            graph.erase_node(with_effects_result)
+
         self.res_node.replace_all_uses_with(new_node)
 
     def erase(self) -> None:
@@ -285,12 +297,31 @@ class _ReduceScatterMatch:
     group_name: str
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
-        self.res_node.replace_all_uses_with(new_node)
+        if is_with_effects(self.res_node):
+            with_effects_out_token, with_effects_result = with_effects_users(
+                self.res_node
+            )
+
+            graph = new_node.graph
+            with graph.inserting_after(new_node):
+                make_token = graph.call_function(torch.ops.prims._make_token.default)
+                with_effects_out_token.replace_all_uses_with(make_token)
+                graph.erase_node(with_effects_out_token)
+            with_effects_result.replace_all_uses_with(new_node)
+            graph.erase_node(with_effects_result)
+        else:
+            self.res_node.replace_all_uses_with(new_node)
 
     def erase(self) -> None:
         for node in reversed(self.match.nodes):
             if len(node.users) == 0:
                 node.graph.erase_node(node)
+
+        if is_with_effects(self.res_node) and self.res_node.users:
+            token, res = with_effects_users(self.res_node)
+            graph = self.res_node.graph
+            graph.erase_node(token)
+            graph.erase_node(res)
 
 
 def make_with_effects_pattern(op, wait_tensor_pattern: PatternExpr):
@@ -566,6 +597,9 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
     """
     Find the matmuls that use `node` as the lhs argument.
     """
+    if is_with_effects(node):
+        _, node = with_effects_users(node)
+
     matmuls = []
     for user in node.users:
         # ND matmuls
@@ -639,19 +673,18 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         or not torch.distributed.is_nccl_available()
     ):
         return
-    c10d = torch.ops._c10d_functional
+
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
     )
 
-    shard_node, ag_node, ag_res_node, gather_dim, group_name, with_effects = (
+    shard_node, ag_node, ag_res_node, gather_dim, group_name = (
         all_gather.shard_node,
         all_gather.ag_node,
         all_gather.res_node,
         all_gather.gather_dim,
         all_gather.group_name,
-        all_gather.with_effects,
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
@@ -662,14 +695,8 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         return
 
     # Find consumer matmuls
-    if with_effects:
-        with_effects_output_token, with_effects_result = with_effects_users(
-            with_effects
-        )
-        if ag_res_node == with_effects:
-            ag_res_node = with_effects_result
-
     matmuls = _find_consumer_matmuls(ag_res_node)
+
     # The matmuls are only fusible if non-A args don't depend on the all-gather
     # result node
     matmuls = [
@@ -677,6 +704,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         for matmul in matmuls
         if all_gather.res_node not in matmul.arg_ancestor_nodes
     ]
+
     if len(matmuls) == 0 or len(set(map(type, matmuls))) != 1:
         return
 
@@ -696,13 +724,6 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         fused_node = _insert_fused_all_gather_matmul(
             graph, matmuls, shard_node, gather_dim, group_name
         )
-
-        if with_effects:
-            with graph.inserting_after(fused_node):
-                make_token = graph.call_function(torch.ops.prims._make_token.default)
-                with_effects_output_token.replace_all_uses_with(make_token)
-                graph.erase_node(with_effects_output_token)
-
         new_ag_node = graph.call_function(
             operator.getitem,
             args=(fused_node, 0),
@@ -718,13 +739,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             )
             matmul.replace_with(new_out_node)
             matmul.erase()
-
-        if with_effects:
-            ag_res_node.replace_all_uses_with(new_ag_node)
-        else:
-            all_gather.replace_with(new_ag_node)
-
-        graph.erase_node(ag_res_node)
+        all_gather.replace_with(new_ag_node)
         all_gather.erase()
 
     # Raise ancestors of non-A args that are topologically ordered between
@@ -802,6 +817,8 @@ def _insert_fused_matmul_reduce_scatter(
 def with_effects_users(node: torch.fx.Node) -> Tuple[torch.fx.Node, torch.fx.Node]:
     assert node.target == torch.ops.higher_order.with_effects
     users = node.users
+    if len(users) != 2:
+        breakpoint()
     assert len(users) == 2
     getitem_users: List[Optional[torch.fx.Node]] = [None, None]
     for user in users.keys():
@@ -884,22 +901,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
             scatter_dim,
             group_name,
         )
-
-        if is_with_effects(reduce_scatter.res_node):
-            with_effects_output_token, with_effects_result = with_effects_users(
-                reduce_scatter.res_node
-            )
-
         reduce_scatter.replace_with(fused_node)
-
-        if is_with_effects(reduce_scatter.res_node):
-            with graph.inserting_after(fused_node):
-                make_token = graph.call_function(torch.ops.prims._make_token.default)
-                with_effects_output_token.replace_all_uses_with(make_token)
-                graph.erase_node(with_effects_output_token)
-            with_effects_result.replace_all_uses_with(fused_node)
-            graph.erase_node(with_effects_result)
-
         reduce_scatter.erase()
         matmul.erase()
 
