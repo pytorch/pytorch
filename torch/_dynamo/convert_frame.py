@@ -27,7 +27,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
-from torch._dynamo.utils import maybe_count_instructions
+from torch._dynamo.utils import CompileTimeInstructionCollector
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -651,11 +651,11 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
-            return _compile_inner(code, one_graph, hooks, transform)
+            with CompileTimeInstructionCollector():
+                return _compile_inner(code, one_graph, hooks, transform)
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
-    @maybe_count_instructions
     def _compile_inner(
         code: CodeType,
         one_graph: bool,

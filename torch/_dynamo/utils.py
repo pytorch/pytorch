@@ -3072,38 +3072,40 @@ def store_user_object_weakref(obj):
 
 class CompileTimeInstructionCounter:
     _counter: int = 0
-    _id: Optional[int] = None
+    _id: int = -1
 
     @classmethod
-    def start(cls):
-        if cls._id is not None:
+    def start(cls) -> None:
+        if cls._id != -1:
             raise RuntimeError("CompileTimeInstructionCounter is already started")
         cls._id = i_counter.start()
 
     @classmethod
-    def end(cls):
+    def end(cls) -> None:
         cls._counter += i_counter.end(cls._id)
-        cls._id = None
+        cls._id = -1
 
     @classmethod
-    def clear(cls):
+    def clear(cls) -> None:
         cls._counter = 0
 
     @classmethod
-    def value(cls):
+    def value(cls) -> int:
         return cls._counter
 
 
-def maybe_count_instructions(func):
-    if config.record_compile_time_instruction_count:
+# Those are the metrics that are collected about compi
+class CompileTimeInstructionCollector:
+    def __init__(self):
+        pass
 
-        @functools.wraps(func)
-        def wrapper_function(*args, **kwargs):
+    def __enter__(self):
+        if config.record_compile_time_instruction_count:
+            self.started = True
             CompileTimeInstructionCounter.start()
-            result = func(*args, **kwargs)
-            CompileTimeInstructionCounter.end()
-            return result
+        else:
+            self.started = False
 
-        return wrapper_function
-    else:
-        return func
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if self.started:
+            CompileTimeInstructionCounter.end()

@@ -7,7 +7,11 @@ from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
 class BenchmarkBase(ABC):
+    # measure total number of instruction spent in _work.
     _instruction_count = False
+
+    # measure total number of instruction spent in convert_frame.compile_inner
+    # TODO is there other parts we need to add ?
     _compile_time_instruction_count = False
 
     def enable_instruction_count(self):
