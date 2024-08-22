@@ -1,7 +1,6 @@
 # Owner(s): ["module: onnx"]
 
 """Test the support on onnxscript in PyTorch-ONNX converter."""
-
 import io
 from typing import List
 
