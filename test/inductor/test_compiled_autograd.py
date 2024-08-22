@@ -4,7 +4,9 @@ import functools
 import io
 import itertools
 import logging
+import os
 import re
+import subprocess
 import sys
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -90,10 +92,19 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["captures"], captures)
             self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
 
-    def test_dynamo_flaky_segfault(self):
-        import os
-        import subprocess
+    def run_as_subprocess(self, script) -> bytes:
+        try:
+            return subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(f"Subprocess exited with return code: {e.returncode}")
 
+    def test_dynamo_flaky_segfault(self):
         script = """
 import torch
 
@@ -120,17 +131,7 @@ main()
         """
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
-            try:
-                subprocess.check_output(
-                    [sys.executable, "-c", script],
-                    stderr=subprocess.STDOUT,
-                    # On Windows, opening the subprocess with the default CWD makes `import torch`
-                    # fail, so just set CWD to this script's directory
-                    cwd=os.path.dirname(os.path.realpath(__file__)),
-                )
-            except subprocess.CalledProcessError as e:
-                if e.returncode < 0:
-                    self.fail("Subprocess exited with a fatal signal")
+            self.run_as_subprocess(script)
 
     def test_basic(self):
         def fn():
@@ -1891,95 +1892,104 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_free_activation_memory(self):
-        self.assertTrue(torch.cuda.memory_allocated() == 0)
+        script = """
+import torch
 
-        # Use an op to check that the memory is freed by the time the op is executed
-        def assertion_impl(to_clone):
-            mem_allocated = torch.cuda.memory_allocated()
-            self.assertTrue(
-                mem_allocated < 4000000, "activations should have been freed"
-            )
-            return to_clone.clone()
+def main():
+    assert(torch.cuda.memory_allocated() == 0)
 
-        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
-            lib.define(
-                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
-            )
-            lib.impl("assertion_op", assertion_impl, "CPU")
-            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+    # Use an op to check that the memory is freed by the time the op is executed
+    def assertion_impl(to_clone):
+        mem_allocated = torch.cuda.memory_allocated()
+        assert mem_allocated < 4000000  # some activations should be freed
+        return to_clone.clone()
 
-            # Create a graph that allows inputs stealing
-            def forward(activations):
-                add = activations[0] + 1
-                out = add.cpu()
-                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
-                return (cloned_out,)
+    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+        lib.define(
+            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+        )
+        lib.impl("assertion_op", assertion_impl, "CPU")
+        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
 
-            gm = torch.fx.symbolic_trace(forward)
-            torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
-            compiled_fn = torch.compile(gm)
+        # Create a graph that allows inputs stealing
+        def forward(activations):
+            add = activations[0] + 1
+            out = add.cpu()
+            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+            return (cloned_out,)
 
-            # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
-            activations = [torch.ones(1000000, dtype=torch.float32, device="cuda")]
-            self.assertTrue(torch.cuda.memory_allocated() > 4000000)
+        gm = torch.fx.symbolic_trace(forward)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
+        compiled_fn = torch.compile(gm)
 
-            out = compiled_fn(activations)
-            self.assertTrue(len(activations) == 0)
+        # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
+        activations = [torch.ones(1000000, dtype=torch.float32, device="cuda")]
+        assert torch.cuda.memory_allocated() > 4000000
+
+        out = compiled_fn(activations)
+        assert len(activations) == 0
+
+main()
+        """
+        self.run_as_subprocess(script)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_free_activation_memory_subclass(self):
         # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
-        self.assertTrue(torch.cuda.memory_allocated() == 0)
 
-        # Use an op to check that the memory is freed by the time the op is executed
-        def assertion_impl(to_clone):
-            mem_allocated = torch.cuda.memory_allocated()
-            self.assertTrue(
-                mem_allocated < 1200000, "some activations should have been freed"
-            )
-            self.assertTrue(
-                mem_allocated > 800000,
-                "currently subclasses don't seem to be freed in inductor",
-            )
-            return to_clone.clone()
+        script = """
+import torch
 
-        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
-            lib.define(
-                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
-            )
-            lib.impl("assertion_op", assertion_impl, "CPU")
-            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
-            lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
+def main():
+    assert torch.cuda.memory_allocated() == 0
 
-            def fn(inputs):
-                _, y = inputs
-                out = y.cpu()
-                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
-                return cloned_out
+    # Use an op to check that the memory is freed by the time the op is executed
+    def assertion_impl(to_clone):
+        mem_allocated = torch.cuda.memory_allocated()
+        assert mem_allocated < 1200000  # some activations should be freed
+        assert mem_allocated > 800000  # currently subclasses don't seem to be freed in inductor
+        return to_clone.clone()
 
-            gm = torch.fx.symbolic_trace(fn)
-            torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
-            compiled_fn = torch.compile(gm)
+    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+        lib.define(
+            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+        )
+        lib.impl("assertion_op", assertion_impl, "CPU")
+        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+        lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
 
-            from torch.nested._internal.nested_tensor import jagged_from_list
+        def fn(inputs):
+            _, y = inputs
+            out = y.cpu()
+            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+            return cloned_out
 
-            activations = [
-                jagged_from_list(
-                    [
-                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
-                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
-                    ],
-                    None,
-                )[
-                    0
-                ],  # NestedTensor
-                torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
-            ]
-            # 1,200,000 bytes (3 * 4 * 100,000 bytes)
-            self.assertTrue(torch.cuda.memory_allocated() > 1200000)
+        gm = torch.fx.symbolic_trace(fn)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
 
-            out = compiled_fn(activations)
-            self.assertTrue(len(activations) == 0)
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
+        activations = [
+            jagged_from_list(
+                [
+                    torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                    torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                ],
+                None,
+            )[
+                0
+            ],  # NestedTensor
+            torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+        ]
+        # 1,200,000 bytes (3 * 4 * 100,000 bytes)
+        assert torch.cuda.memory_allocated() > 1200000
+
+        out = compiled_fn(activations)
+        assert len(activations) == 0
+
+main()
+        """
 
     def test_callback_graph_break_throws_error(self):
         called = [0]
@@ -2192,6 +2202,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
+    @mock.patch("torch._dynamo.config.inline_inbuilt_nn_modules", True)
     def test_verbose_logs_aot_id(self, _):
         def fn():
             model = torch.nn.Sequential(
