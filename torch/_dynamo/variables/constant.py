@@ -44,7 +44,12 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple, set, frozenset)):
+        if is_literal and isinstance(value, (set, frozenset)):
+            items = []
+            for i, x in enumerate(value):
+                items.append(ConstantVariable.create(x))
+            return variables.SetVariable(items, **kwargs)
+        elif is_literal and isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -56,11 +61,7 @@ class ConstantVariable(VariableTracker):
                         source=item_source,
                     )
                 )
-            if isinstance(value, (list, tuple)):
-                return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
-            else:
-                assert isinstance(value, (set, frozenset)), type(value)
-                return variables.SetVariable(items)
+            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
 
         return ConstantVariable(value, **kwargs)
 
