@@ -649,11 +649,9 @@ class CppOverrides(OpOverrides):
         """
         On windows std::signbit only support float type.
         Ref: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/signbit?view=msvc-170
-        So, we need to cast type to `long double` for accuracy.
-        MSVC only support 64-bit precision, clang is support 80-bits precision.
         """
         return (
-            f"std::signbit(static_cast<long double>({x}))"
+            f"std::signbit(static_cast<float>({x}))"
             if _IS_WINDOWS
             else f"std::signbit({x})"
         )
