@@ -65,7 +65,9 @@ inline bool areAnyOptionalTensorSubclassLike(
   if (c10::impl::dispatch_mode_enabled())
     return true;
   return std::any_of(
-      tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
+      tensors.begin(),
+      tensors.end(),
+      [](const std::optional<Tensor>& opt_tensor) {
         return (
             opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
       });

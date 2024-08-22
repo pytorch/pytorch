@@ -1,13 +1,12 @@
 #include <ATen/ATen.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
-
-#include <c10/core/DeviceType.h>
-#include <c10/core/Stream.h>
 #ifndef WIN32
 #include <pthread.h>
 #endif
@@ -74,6 +73,12 @@ void initModule(PyObject* module) {
       at::detail::getMTIAHooks().setCurrentDevice(stream.device_index());
     }
     at::detail::getMTIAHooks().setCurrentStream(stream);
+  });
+
+  m.def("_mtia_memoryStats", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().memoryStats(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 }
 

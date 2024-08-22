@@ -1,8 +1,5 @@
 #include <filesystem>
-#include <mutex>
-#include <shared_mutex>
 #include <sstream>
-#include <tuple>
 #include <unordered_map>
 
 #include <ATen/core/interned_strings.h>
@@ -11,8 +8,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-namespace c10d {
-namespace control_plane {
+namespace c10d::control_plane {
 
 namespace {
 class RequestImpl : public Request {
@@ -77,15 +73,18 @@ std::string jsonStrEscape(const std::string& str) {
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
-  server_.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-    res.set_content(
-        R"BODY(<h1>torch.distributed.WorkerServer</h1>
+  server_.Get(
+      "/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
+        res.set_content(
+            R"BODY(<h1>torch.distributed.WorkerServer</h1>
 <a href="/handler/">Handler names</a>
 )BODY",
-        "text/html");
-  });
+            "text/html");
+      });
   server_.Get(
-      "/handler/", [](const httplib::Request& req, httplib::Response& res) {
+      "/handler/",
+      [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
         body << "[";
         bool first = true;
@@ -189,5 +188,4 @@ WorkerServer::~WorkerServer() {
   }
 }
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

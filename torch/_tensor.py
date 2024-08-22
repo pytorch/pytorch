@@ -722,7 +722,7 @@ class Tensor(torch._C.TensorBase):
         It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
         value in the state dictionary with the corresponding key, this method defines
         how ``other`` is remapped before being swapped with ``self`` via
-        :func:`~torch.utils.swap_tensors`` in ``module.load_state_dict()``.
+        :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
@@ -1131,7 +1131,11 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.

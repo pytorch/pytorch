@@ -6,12 +6,12 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -62,9 +62,12 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
-    def test_max_autotune_precompile(self, max_autotune_gemm_backends):
+    @parametrize("autotune_in_subproc", (True, False))
+    def test_max_autotune_precompile_matmul(
+        self, max_autotune_gemm_backends, autotune_in_subproc
+    ):
         """
-        Make sure autotuning mm in subprocesses doesn't crash.
+        Make sure autotuning mm doesn't crash.
         """
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
@@ -82,7 +85,7 @@ class TestCKBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
+                "autotune_in_subproc": autotune_in_subproc,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
                 "rocm.n_max_profiling_configs": 2,
@@ -92,6 +95,53 @@ class TestCKBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK",))
+    @parametrize("autotune_in_subproc", (True,))
+    def test_max_autotune_precompile_matmul_dynamic(
+        self, max_autotune_gemm_backends, autotune_in_subproc
+    ):
+        """
+        Test matmul with dynamic shapes
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        a = torch.randn(2240, 256, **tensor_options)
+        b = torch.randn(256, 2048, **tensor_options)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+
+            @torch.compile(dynamic=True)
+            def compiled_mm(a, b):
+                return a @ b
+
+            Y_compiled = compiled_mm(a, b)
+            Y = a @ b
+            torch.testing.assert_close(Y_compiled, Y)
+
+            a1 = torch.randn(1024, 256, **tensor_options)
+            Y1_compiled = compiled_mm(a1, b)
+            Y1 = a1 @ b
+            torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
@@ -163,6 +213,44 @@ class TestCKBackend(TestCase):
 
             Y_compiled = mm(a, b)
             Y_eager = a @ b
+            torch.testing.assert_close(Y_compiled, Y_eager)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CK path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
+    def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        m, k, n = 4096, 224, 2048
+        alpha, beta = 1.0, 1.0
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+        x = torch.ones(x_shape, **tensor_options)
+        a = torch.randn(m, k, **tensor_options)
+        b = torch.randn(k, n, **tensor_options)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 2,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def addmm(x, a, b, alpha, beta):
+                return torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+            Y_compiled = addmm(x, a, b, alpha, beta)
+            Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
             torch.testing.assert_close(Y_compiled, Y_eager)
 
 
