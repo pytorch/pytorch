@@ -2483,13 +2483,14 @@ skipped_tests = {
 }
 
 known_failing_tests = {
-    "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
-    "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-    "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
-    "test_graph_save_on_cpu",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_reentrant_with_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHandle.
-    "test_reentrant_with_non_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHan
-    "test_saved_variable_saved_original_inplace_detach",  # AssertionError: RuntimeError not raised
+    # Category: Compiled autograd
+    "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
+    "test_reentrant_with_leaf_variable_hook",  # hangs when enabled with graph breaks
+    "test_reentrant_with_non_leaf_variable_hook",  # hangs when enabled with graph breaks
+    # Category: Inductor
+    "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
+    "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
+    # Uncategorized
     "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
