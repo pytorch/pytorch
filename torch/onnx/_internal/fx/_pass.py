@@ -235,7 +235,8 @@ class Transform(abc.ABC):
         )
 
     @abc.abstractmethod
-    def _run(self, *args, **kwargs) -> torch.fx.GraphModule: ...
+    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
+        ...
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_pass,
@@ -320,4 +321,5 @@ class Analysis(abc.ABC):
         self.onnxfunction_dispatcher = onnxfunction_dispatcher
 
     @abc.abstractmethod
-    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult: ...
+    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:
+        ...
