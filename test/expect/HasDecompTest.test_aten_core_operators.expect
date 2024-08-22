@@ -381,10 +381,6 @@ aten::new_empty_strided.out
 aten::nextafter
 aten::nextafter.out
 aten::nextafter_
-aten::nll_loss2d_backward
-aten::nll_loss2d_backward.grad_input
-aten::nll_loss2d_forward
-aten::nll_loss2d_forward.output
 aten::normal.Tensor_Tensor
 aten::normal.Tensor_Tensor_out
 aten::normal.Tensor_float
@@ -524,5 +520,9 @@ aten::var.correction_out
 aten::var_mean.correction
 aten::var_mean.correction_out
 aten::view
+aten::view_copy
+aten::view_copy.dtype
+aten::view_copy.dtype_out
+aten::view_copy.out
 aten::where.self
 aten::where.self_out

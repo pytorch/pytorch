@@ -11,6 +11,7 @@ namespace torch {
 namespace inductor {
 using namespace at;
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
   // similar to THPStorage_resize_ in StorageMethods.cpp, but is traceable
   if (variable.storage().device_type() == at::kCUDA) {
@@ -28,6 +29,7 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
 
 static void resize_storage_bytes__functionalize(
     const Tensor& variable,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     SymInt new_size) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("inductor::resize_storage_bytes_", "")

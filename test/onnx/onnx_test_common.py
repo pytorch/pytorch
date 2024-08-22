@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import copy
 import dataclasses
 import io
@@ -26,7 +25,6 @@ from typing import (
 )
 
 import numpy as np
-
 import onnxruntime
 import pytest
 import pytorch_test_common
@@ -38,6 +36,7 @@ from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
+
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
@@ -295,7 +294,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                     *ref_input_args,
                     **ref_input_kwargs,
                     export_options=torch.onnx.ExportOptions(
-                        op_level_debug=self.op_level_debug,
                         dynamic_shapes=self.dynamic_shapes,
                         diagnostic_options=torch.onnx.DiagnosticOptions(
                             verbosity_level=logging.DEBUG
@@ -309,7 +307,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
             onnx_program.save_diagnostics(
                 f"test_report_{self._testMethodName}"
-                f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
                 f"_model_type_{self.model_type}"
                 ".sarif"

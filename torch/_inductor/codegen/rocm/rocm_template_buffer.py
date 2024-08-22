@@ -10,7 +10,7 @@ class ROCmTemplateBuffer(TemplateBuffer):
         make_kernel_render,
         workspace_size: int,
         template: "ROCmTemplate",  # type: ignore[name-defined]  # noqa: F821
-    ):
+    ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size

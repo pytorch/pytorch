@@ -46,13 +46,12 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
 import error_reproduction
-
 import onnx_test_common
-
 import parameterized
 import pytest
 import pytorch_test_common
@@ -65,7 +64,10 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+
+
+if TYPE_CHECKING:
+    from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -240,6 +242,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
     ),
     xfail(
         "alias_copy",
+        dtypes=(torch.int8, torch.uint8, torch.int16, torch.float64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
@@ -1263,6 +1266,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
     ),
     xfail(
+        "unsqueeze_copy",
+        reason="OnnxExporterError: Failed to export model",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
+    ),
+    xfail(
         "where",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
@@ -1966,7 +1974,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """
 
     opset_version = -1
-    op_level_debug: bool = False
     dynamic_shapes: bool = False
     model_type: pytorch_test_common.TorchModelType = (
         pytorch_test_common.TorchModelType.TORCH_NN_MODULE

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
@@ -54,7 +55,7 @@ class WithEffects(HigherOrderOperator):
     per "effect type", which are enumerated in the _EffectType enum.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("with_effects")
 
     def __call__(
@@ -115,6 +116,11 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     return None
 
 
+def new_token_tensor() -> torch.Tensor:
+    # Use dtype bool to not affect Inductor dtype promotions
+    return torch.tensor([], dtype=torch.bool)
+
+
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
 def with_effects_dense(
     token: torch.Tensor,
@@ -123,7 +129,7 @@ def with_effects_dense(
     **kwargs: Dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
-    new_token = torch.tensor([])
+    new_token = new_token_tensor()
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
@@ -150,9 +156,6 @@ def with_effects_proxy(
     *args: Tuple[Any, ...],
     **kwargs: Dict[str, Any],
 ) -> Tuple[torch.Tensor, ...]:
-    if not mode.enable_tracing:
-        return with_effects(token, op, *args, **kwargs)
-
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
 
@@ -218,7 +221,7 @@ def handle_effects(
         assert (
             allow_token_discovery
         ), f"Could not find a token for effect {key} which came from the function {op}"
-        tokens[key] = torch.tensor([])
+        tokens[key] = new_token_tensor()
     token = tokens[key]
 
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI

@@ -2664,7 +2664,9 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
             ]
             + [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is also important for correct visibility
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in [g.inplace, g.mutable, g.functional]
                     if f is not None and "generated" not in f.tags
                 )

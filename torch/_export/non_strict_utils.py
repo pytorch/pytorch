@@ -18,9 +18,14 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _tree_map
+from torch.export.dynamic_shapes import (
+    _check_dynamic_shapes,
+    _combine_args,
+    _process_dynamic_shapes,
+    _tree_map_with_path,
+)
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -37,6 +42,7 @@ from torch.utils._pytree import (
     SequenceKey,
     tree_map_with_path,
 )
+
 
 if TYPE_CHECKING:
     from sympy import Symbol
@@ -90,26 +96,10 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
-
-
-def make_fake_params_buffers(
-    fake_mode: FakeTensorMode,
-    params_buffers: Dict[str, torch.Tensor],
-) -> Dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
-    faked_params_buffers = {}
-    memo: Dict[int, FakeTensor] = {}
-    for key, value in params_buffers.items():
-        if id(value) in memo:
-            fake_tensor = memo[id(value)]
-        else:
-            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
-            memo[id(value)] = fake_tensor
-        faked_params_buffers[key] = fake_tensor
-    return faked_params_buffers  # type: ignore[return-value]
 
 
 def make_fake_inputs(
@@ -135,15 +125,14 @@ def make_fake_inputs(
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
 
-    constraints = torch.export.dynamic_shapes._process_dynamic_shapes(
-        nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=_is_torch_jit_trace
+    combined_args = _combine_args(
+        nn_module, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
     )
-    constraints = constraints or []
+    _check_dynamic_shapes(combined_args, dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
-        if constraint.shared is not None:
-            t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
     context = torch._guards.TracingContext.try_get()
     if context is not None:
@@ -200,6 +189,7 @@ def make_fake_inputs(
             (args, kwargs),
         )
 
+        names: Dict[str, Tuple[int, int]] = {}
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
@@ -208,6 +198,7 @@ def make_fake_inputs(
                 constraint,
                 lambda t_id, dim: sources[(t_id, dim)],
                 fake_mode.shape_env,
+                names,
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
@@ -228,11 +219,11 @@ def _flatten_dynamic_shapes(
 ) -> List[Any]:
     flat_shapes = []
 
-    def _tree_map_helper(t, shape):
+    def _tree_map_helper(path, t, shape):
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map(_tree_map_helper, combined_args, dynamic_shapes)
+    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
 
 

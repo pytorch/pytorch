@@ -31,14 +31,13 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPool,
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
-
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._triton import has_triton_package
+
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.hints import HalideMeta

@@ -1348,7 +1348,7 @@ struct TORCH_API SymIntType : public Type {
   std::string str() const override {
     return "SymInt";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
@@ -1368,7 +1368,7 @@ struct TORCH_API SymFloatType : public Type {
   std::string str() const override {
     return "SymFloat";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "float";
   }
   static const TypeKind Kind = TypeKind::SymFloatType;
@@ -1388,7 +1388,7 @@ struct TORCH_API SymBoolType : public Type {
   std::string str() const override {
     return "SymBool";
   }
-  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer [[maybe_unused]] = nullptr) const override {
     return "bool";
   }
   static const TypeKind Kind = TypeKind::SymBoolType;

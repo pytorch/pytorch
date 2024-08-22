@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import builtins
 import collections
@@ -6,16 +7,15 @@ import itertools
 import math
 import operator
 import warnings
-
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
-
 import torch._prims as prims
 import torch._prims_common as utils
+import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
@@ -48,6 +48,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -259,6 +260,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -283,6 +285,7 @@ __all__ = [
     "swap_axes",  # alias for transpose
     "squeeze",
     "t",
+    "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
@@ -290,8 +293,10 @@ __all__ = [
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
@@ -442,6 +447,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 
+
 #
 # Elementwise unary references
 #
@@ -512,7 +518,7 @@ def _make_inplace(fn):
 
     inplace_name = f"{fn.__name__}_"
     _fn.__name__ = inplace_name
-    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)
+    _fn = register_decomposition(getattr(aten, inplace_name))(_fn)  # type: ignore[assignment]
 
     # We access the __all__ attribute of the module where fn is defined
     # There may be a cleaner way of doing this...
@@ -989,7 +995,7 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     )
     dims = old_strides[:-1]
     torch._check(
-        py_all(stride % 2 == 0 for stride in dims),
+        builtins.all(stride % 2 == 0 for stride in dims),
         lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
     )
     torch._check(
@@ -1045,7 +1051,7 @@ def _make_elementwise_binary_reference(
             return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
-            _ref = out_wrapper()(_ref)
+            _ref = out_wrapper()(_ref)  # type: ignore[assignment]
 
         _ref.__name__ = name
         if aten_op is infer_aten_op:
@@ -2164,7 +2170,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or py_all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
@@ -2198,23 +2204,26 @@ def _make_copy_from_view(fn):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
-    name = fn.__name__
-    fn = out_wrapper()(fn)
+    aten_fn = getattr(aten, fn.__name__)
+    annotations = getattr(fn, "__annotations__", {})
+    fn = out_wrapper()(aten_fn)
 
+    @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
-        if out is None:
-            return result.clone(memory_format=torch.contiguous_format)
-        return result
+        if out is not None:
+            return result
 
-    copy_name = f"{name}_copy"
+        return pytree.tree_map(
+            lambda x: x.clone(memory_format=torch.contiguous_format),
+            result,
+        )
+
+    copy_name = f"{fn.__name__}_copy"
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn.__annotations__.update(annotations)
+    register_decomposition(getattr(aten, copy_name))(_fn)
     return _fn
-
-
-# Saves Python all
-py_all = all
 
 
 @register_decomposition(aten.all)
@@ -2230,10 +2239,6 @@ def all(
         result = result.to(dtype=torch.uint8)
 
     return result
-
-
-# Saves Python any
-py_any = any
 
 
 @register_decomposition(aten.any)
@@ -2671,9 +2676,6 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset_int)
 
 
-as_strided_copy = _make_copy_from_view(as_strided)
-
-
 @register_decomposition(aten.as_strided_scatter)
 @out_wrapper()
 def as_strided_scatter(
@@ -2778,7 +2780,17 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             assert tensor.ndim == 1  # we've already checked this above
             # Don't suggest the legacy behavior in the error message
             torch._check(
-                tensor.shape[0] == 0,
+                # NB: it is not enough to simply assert that tensor.shape[0] == 0;
+                # this MUST be true even under guard size oblivious.
+                # Effectively, we must actually know that the shape is zero,
+                # passing an unbacked SymInt which we will defer a runtime
+                # assert on won't cut it.  This is a policy decision (size
+                # oblivious semantics say that u0 tensors never are inferred
+                # to be zero size, even if they must be that for the cat to go
+                # through), and is load bearing for our Inductor lowerings
+                # (which assume that size oblivious tests are OK to determine
+                # if a shape is permissibly zero.)
+                guard_size_oblivious(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
@@ -2797,9 +2809,14 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
         # TODO: fix this to work with meta tensors
         try:
-            requires_grad = any(x.requires_grad for x in tensors)
+            # BUG? This looks like it wants to call builtins.any() but is
+            # actually calling .any() (in this file). Changing to builtins.any()
+            # causes tests to fail:
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/test_ops.py -k \
+            #   TestFakeTensorCUDA.test_fake_crossref_backward_amp_cat_cuda_float32
+            requires_grad = bool(any(x.requires_grad for x in tensors))  # type: ignore[arg-type]
         except Exception:
-            requires_grad = False
+            requires_grad = False  # type: ignore[assignment]
 
         return empty(
             (0,),
@@ -2865,8 +2882,16 @@ def constant_pad_nd(
         if pad[pad_idx + 1] < 0:
             c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
-    # if none of the pads are positive we can just return the result
-    if builtins.all(p <= 0 for p in pad):
+    # If all the pads are negative we can return the result.
+    # Avoid early exiting if all pads = 0 to prevent specialization on export.
+    # During export, raw if statements are specialized on the input, meaning
+    # that we lose a branch depending on the example input used to export.
+    # Here, this is either the case where all pads = 0, or the case where at
+    # least one pad > 0 and the rest are >= 0.
+    # Avoiding the early exit when all pads = 0 ensures we can export
+    # constant_pad_nd for cases when all pads >= 0.
+    # Note: if any pads are negative, this code specializes due to the if statements above.
+    if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
@@ -2899,11 +2924,11 @@ def constant_pad_nd(
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] > 0:
+        if pad[pad_idx] >= 0:
             c_output = c_output.narrow(
                 i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
-        if pad[pad_idx + 1] > 0:
+        if pad[pad_idx + 1] >= 0:
             c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)
@@ -3069,11 +3094,6 @@ def narrow(
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
     )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
-
-
-# TODO: This must return a sparse tensor if the input is sparse, but refs have
-# no sparse support. See narrow_copy_sparse in core.
-narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -4322,9 +4342,6 @@ def diagonal(
     return result
 
 
-diagonal_copy = _make_copy_from_view(diagonal)
-
-
 @register_decomposition(aten.diag_embed)
 @out_wrapper()
 def diag_embed(
@@ -4427,7 +4444,7 @@ def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
     expects arguments splatted, but `aten.block_diag` expects only
     one argument that is a list of Tensors.
     """
-    return _block_diag_iterable(tensors)
+    return _block_diag_iterable(tensors)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4478,9 +4495,6 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
-
-
-alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
@@ -5077,7 +5091,7 @@ def linspace(
         )
         end = _maybe_convert_to_dtype(end, torch.float64)
 
-    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+    if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
@@ -5176,7 +5190,7 @@ def logspace(
             )
             end = _maybe_convert_to_dtype(end, dtype)
 
-    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+    if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
@@ -5211,7 +5225,7 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
     pass
 
 
-@register_decomposition(aten.meshgrid)
+@register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
     *tensors: Union[TensorLikeType, List[TensorLikeType], Tuple[TensorLikeType]],
     indexing: str,
@@ -5224,7 +5238,7 @@ def meshgrid(
         tensors = tuple(tensors[0])
 
     torch._check(
-        py_all(isinstance(a, TensorLike) for a in tensors),
+        builtins.all(isinstance(a, TensorLike) for a in tensors),
         lambda: "meshgrid expects its inputs to be tensors",
     )
 
@@ -5594,9 +5608,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
-        # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
+        # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
-            a.device.type in ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+            a.device.type
+            in ["cuda", "xpu", torch._C._get_privateuse1_backend_name(), "hpu"]
             and value.device.type == "cpu"
         )
         torch._check(
@@ -6316,6 +6331,17 @@ exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
+
+alias_copy = _make_copy_from_view(aten.alias)
+as_strided_copy = _make_copy_from_view(aten.as_strided)
+diagonal_copy = _make_copy_from_view(aten.diagonal)
+expand_copy = _make_copy_from_view(aten.expand)
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(aten.narrow)
+t_copy = _make_copy_from_view(aten.t)
+unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
+view_copy = _make_copy_from_view(aten.view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp

@@ -11,6 +11,8 @@ def has_triton_package() -> bool:
         return triton_key is not None
     except ImportError:
         return False
+    except RuntimeError:
+        return False
 
 
 @functools.lru_cache(None)
@@ -37,12 +39,6 @@ def has_triton() -> bool:
 
 @functools.lru_cache(None)
 def triton_backend():
-    import torch
-
-    if torch.version.hip:
-        # Does not work with ROCm
-        return None
-
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
@@ -52,12 +48,6 @@ def triton_backend():
 
 @functools.lru_cache(None)
 def triton_hash_with_backend():
-    import torch
-
-    if torch.version.hip:
-        # Does not work with ROCm
-        return None
-
     from triton.compiler.compiler import triton_key
 
     backend = triton_backend()

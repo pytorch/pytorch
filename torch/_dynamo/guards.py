@@ -35,14 +35,18 @@ from typing import (
 )
 from weakref import ReferenceType
 
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-
 import torch
 import torch.utils._device
+from torch._C._dynamo.guards import (
+    check_obj_id,
+    check_type_id,
+    dict_version,
+    DictGuardManager,
+    install_no_tensor_aliasing_guard,
+    install_object_aliasing_guard,
+    RootGuardManager,
+    TensorGuards,
+)
 from torch._dynamo.source import (
     is_from_flatten_script_object_source,
     is_from_local_source,
@@ -60,7 +64,6 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-
 from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
@@ -72,7 +75,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-
 from .source import (
     AttrSource,
     ChainedSource,
@@ -85,7 +87,6 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
-    is_unspecialized_builtin_nnmodule_attr,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -98,6 +99,7 @@ from .source import (
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -105,6 +107,7 @@ from .utils import (
     common_constant_types,
     dict_keys_repr,
     get_custom_getattr,
+    get_torch_function_mode_stack,
     guard_failures,
     istype,
     key_is_id,
@@ -117,8 +120,16 @@ from .utils import (
     verify_guard_fn_signature,
 )
 
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+
+
 if TYPE_CHECKING:
     from sympy import Symbol
+
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
@@ -127,18 +138,6 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
-
-TensorGuards = torch._C._dynamo.guards.TensorGuards
-check_obj_id = torch._C._dynamo.guards.check_obj_id
-check_type_id = torch._C._dynamo.guards.check_type_id
-dict_version = torch._C._dynamo.guards.dict_version
-
-RootGuardManager = torch._C._dynamo.guards.RootGuardManager
-DictGuardManager = torch._C._dynamo.guards.DictGuardManager
-install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
-install_no_tensor_aliasing_guard = (
-    torch._C._dynamo.guards.install_no_tensor_aliasing_guard
-)
 
 
 class GuardManager:
@@ -312,7 +311,6 @@ if sys.version_info[:2] <= (3, 8):
         HAS_UNPARSE_FUNCTIONS = True
     except ImportError:
         HAS_UNPARSE_FUNCTIONS = False
-        pass
 else:
     HAS_UNPARSE_FUNCTIONS = True
 
@@ -866,8 +864,8 @@ class GuardBuilder(GuardBuilderBase):
                 OptimizerSource,
                 NNModuleSource,
                 UnspecializedNNModuleSource,
-                FSDPNNModuleSource,
                 UnspecializedBuiltinNNModuleSource,
+                FSDPNNModuleSource,
             ),
         ):
             assert base_guard_manager  # to make mypy happy
@@ -879,7 +877,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AttrSource):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
@@ -1420,20 +1418,38 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
+
+        ok_mutable_types = (list, set)
+
         ok_types = tuple(
             common_constant_types
             | {
                 type,
-                list,
                 tuple,
-                set,
                 frozenset,
                 slice,
                 range,
                 torch.Size,
                 *np_types,
+                *ok_mutable_types,
             }
         )
+
+        if torch.distributed.is_available():
+            from torch.distributed._tensor.placement_types import (
+                Partial,
+                Replicate,
+                Shard,
+            )
+            from torch.distributed.device_mesh import DeviceMesh
+
+            ok_types = ok_types + (
+                Shard,
+                Replicate,
+                Partial,
+                DeviceMesh,
+            )
+
         if istype(val, dict):
             assert all(
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
@@ -1477,6 +1493,11 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_guard_manager:
             # Construct a debug string to put into the c++ equals match guard.
             code = [f"{ref} == {val!r}"]
+            if istype(val, ok_mutable_types):
+                # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
+                # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+                # pointer equality check.
+                val = deepcopy(val)
             self.get_guard_manager(guard).add_equals_match_guard(
                 val, get_verbose_code_parts(code, guard)
             )
@@ -1616,7 +1637,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
-            install_tensor_aliasing_guard(
+            install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
                 get_verbose_code_parts(code, guard),
@@ -1684,6 +1705,13 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, code)
 
+    def EMPTY_NN_MODULE_HOOKS_DICT(self, guard):
+        """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
+        if config.skip_nnmodule_hook_guards:
+            # This is unsafe if you add/remove a hook on nn module variable
+            return
+        self.SEQUENCE_LENGTH(guard)
+
     def OBJECT_MUTATION(self, guard: Guard):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
@@ -1733,6 +1761,7 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            names: Dict[str, Tuple[int, int]] = {}
             source_pairs: List[Tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
                 Tuple[Source, Union[Source, Symbol], Callable]
@@ -1744,6 +1773,7 @@ class GuardBuilder(GuardBuilderBase):
                         constraint,
                         get_sources,
                         output_graph.shape_env,
+                        names,
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
@@ -1801,7 +1831,7 @@ class GuardBuilder(GuardBuilderBase):
         # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
         # to a new tensor everytime and therefore id differs.
         if (
-            guard.is_nn_module()
+            guard.is_specialized_nn_module()
             and not isinstance(guard.originating_source, NumpyTensorSource)
         ) or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
@@ -1911,7 +1941,7 @@ class GuardBuilder(GuardBuilderBase):
             #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+                value, is_tensor=True, tensor_source=guard.originating_source
             )
 
             if not static:
@@ -2112,22 +2142,6 @@ class DeletedGuardFn:
     pass
 
 
-def is_nn_module_hook(source: Source) -> bool:
-    # Note that we only skip guards on builtin nn modules like Conv2D etc. But still this is a soundness issue if one
-    # adds/removes a hook after the model is compiled.
-    return (
-        is_unspecialized_builtin_nnmodule_attr(source)
-        and isinstance(source, AttrSource)
-        and source.member
-        in (
-            "_backward_hooks",
-            "_backward_pre_hooks",
-            "_forward_hooks",
-            "_forward_pre_hooks",
-        )
-    )
-
-
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -2146,6 +2160,10 @@ class CheckFunctionManager:
             self.guard_manager = GuardManager()
         self.output_graph = output_graph
         w_builder = None
+
+        self.torch_function_mode_stack = (
+            output_graph.torch_function_mode_stack if output_graph else None
+        )
 
         def source_ref(source):
             guard_source = source.guard_source()
@@ -2179,7 +2197,7 @@ class CheckFunctionManager:
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
-                and guard.is_nn_module()
+                and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
@@ -2188,11 +2206,6 @@ class CheckFunctionManager:
             ):
                 continue
 
-            # This is unsafe if you add/remove a hook on unspecialized nn module variable
-            if config.skip_nnmodule_hook_guards and is_nn_module_hook(
-                guard.originating_source
-            ):
-                continue
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
@@ -2250,17 +2263,35 @@ class CheckFunctionManager:
 
         code_parts = []
         verbose_code_parts = []
-        structured_guard_fns = []
+        structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
+
+        torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
+            self.torch_function_mode_stack
+        )
 
         if config.enable_cpp_guard_manager:
+            from .variables.torch_function import IGNORED_MODES
+
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
+
+            self.guard_manager.root.add_torch_function_mode_stack_guard(
+                self.torch_function_mode_stack,
+                list(IGNORED_MODES),
+                ["___check_torch_function_mode_stack()"],
+            )
+            # Clear references to torch_function modes held in the list
+            self.torch_function_mode_stack = None
         else:
             # Don't report this guard, it's always the same, useless!
             global_guard = "___check_global_state()"
             code_parts.append(global_guard)
             verbose_code_parts.append(global_guard)
+
+            tf_mode_stack_guard = "___check_torch_function_mode_stack()"
+            code_parts.append(tf_mode_stack_guard)
+            verbose_code_parts.append(tf_mode_stack_guard)
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
@@ -2376,7 +2407,7 @@ class CheckFunctionManager:
                 source_b = guard.input_source_b
                 code_part = f"{source_a.name()} is {source_b.name()}"
                 if config.enable_cpp_guard_manager:
-                    install_tensor_aliasing_guard(
+                    install_object_aliasing_guard(
                         builder.get_guard_manager_from_source(source_a),
                         builder.get_guard_manager_from_source(source_b),
                         [code_part],
@@ -2407,6 +2438,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
@@ -2545,6 +2577,27 @@ def is_recompiles_enabled():
 
 def is_recompiles_verbose_enabled():
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
+
+
+# this will only be used if cpp guards are disabled
+def make_torch_function_mode_stack_guard(intial_stack):
+    types = [type(x) for x in intial_stack]
+    from .variables.torch_function import IGNORED_MODES
+
+    def check_torch_function_mode_stack():
+        cur_stack = get_torch_function_mode_stack()
+        if len(cur_stack) != len(types):
+            return False
+
+        for ty, mode in zip(types, cur_stack):
+            if ty in IGNORED_MODES:
+                continue
+            if ty != type(mode):
+                return False
+
+        return True
+
+    return check_torch_function_mode_stack
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):

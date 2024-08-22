@@ -82,6 +82,10 @@ def compile_time_strobelight_meta(phase_name):
         def wrapper_function(*args, **kwargs):
             if "skip" in kwargs:
                 kwargs["skip"] = kwargs["skip"] + 1
+
+            if not StrobelightCompileTimeProfiler.enabled:
+                return function(*args, **kwargs)
+
             return StrobelightCompileTimeProfiler.profile_compile_time(
                 function, phase_name, *args, **kwargs
             )
@@ -121,6 +125,10 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 
 def log_export_usage(**kwargs):
+    pass
+
+
+def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
@@ -180,6 +188,10 @@ def justknobs_getval_int(name: str) -> int:
     return 0
 
 
+def is_fb_unit_test() -> bool:
+    return False
+
+
 @functools.lru_cache(None)
 def max_clock_rate():
     if not torch.version.hip:
@@ -224,4 +236,8 @@ REQUIRES_SET_PYTHON_MODULE = False
 
 def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
     print("Uploading profile stats (fb-only otherwise no-op)")
+    return None
+
+
+def log_chromium_event_internal(event, stack, logger_uuid, start_timestamp=None):
     return None
