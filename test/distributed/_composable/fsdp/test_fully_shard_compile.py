@@ -7,6 +7,7 @@ import functools
 import unittest
 from collections import defaultdict
 from unittest import mock
+import itertools
 
 import torch
 import torch._dynamo.testing
@@ -102,10 +103,7 @@ def assert_no_aliased_graph_inputs(graph: torch.fx.Graph) -> None:
             len(aliased_graph_inputs) == 1
         ), f"""
 Found aliased graph inputs: {aliased_graph_inputs},
-type(val): {[type(node.meta['val']) for node in aliased_graph_inputs]},
 val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
-id(val): {[id(node.meta['val']) for node in aliased_graph_inputs]},
-sid: {storage_id}
 """
 
 
@@ -636,9 +634,10 @@ class TestFullyShardCompile(FSDPTest):
                     "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
                 )
 
-    def _create_transformer_factory_fns(self):
+    def _create_transformer_factory_fns(self, all_requires_grad):
         seq_len = 16
         vocab_size = 8
+        n_layers = 3
 
         def model_init_fn():
             torch.manual_seed(self.rank)
@@ -646,9 +645,20 @@ class TestFullyShardCompile(FSDPTest):
             mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
-                n_layers=3,
+                n_layers=n_layers,
             )
             model = Transformer(model_args)
+            if not all_requires_grad:
+                requires_grad_params = ["attention.wq", "attention.wv"]
+                requires_grad_param_count = 0
+                for k, v in model.named_parameters():
+                    for substring in requires_grad_params:
+                        if substring in k:
+                            v.requires_grad_(True)
+                            requires_grad_param_count += 1
+                        else:
+                            v.requires_grad_(False)
+                assert requires_grad_param_count == n_layers * len(requires_grad_params)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
@@ -713,7 +723,7 @@ class TestFullyShardCompile(FSDPTest):
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor(self):
-        for fullgraph in [True, False]:
+        for fullgraph, all_requires_grad in itertools.product([True, False], [True, False]):
             with self._maybe_add_graph_break_to_sdpa(
                 fullgraph
             ), self._reinplace_all_gather_with_optional_checks(
@@ -723,7 +733,7 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
-                        *self._create_transformer_factory_fns(),
+                        *self._create_transformer_factory_fns(all_requires_grad=all_requires_grad),
                         "inductor",
                         fullgraph=fullgraph,
                     )
@@ -736,7 +746,7 @@ class TestFullyShardCompile(FSDPTest):
                 fwd_code = triton_codes[0]
                 file_check = FileCheck().check("def call(args):")
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str="triton_", num_copy=4),
+                    dict(overlapped_compute_op_str="triton_" if all_requires_grad else None, num_copy=4),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
                         num_copy=12,
@@ -777,13 +787,12 @@ class TestFullyShardCompile(FSDPTest):
                         file_check, **bwd_ag_block_info
                     )
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm("),
+                    dict(overlapped_compute_op_str="extern_kernels.mm(" if all_requires_grad else None),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
                     dict(overlapped_compute_op_str=None),
-                    dict(overlapped_compute_op_str=None),
-                ]:
+                ] + [dict(overlapped_compute_op_str=None)] if all_requires_grad else []:
                     file_check = self.inductor_code_check_fsdp_reduce_scatter(
                         file_check, **bwd_rs_block_info
                     )
