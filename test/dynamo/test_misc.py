@@ -9658,8 +9658,6 @@ def ___make_guard_fn():
         self.assertIsInstance(res, torch.Tensor)
 
     def test_iterator_limit(self):
-        counters.clear()
-
         def fn(x):
             def gen():
                 while True:
