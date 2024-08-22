@@ -237,7 +237,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_cond_fn = ctx.functionalize(cond_fn)
         functional_body_fn = ctx.functionalize(body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch

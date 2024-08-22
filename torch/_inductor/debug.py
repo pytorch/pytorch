@@ -566,29 +566,29 @@ class DebugFormatter:
                     node_info["layout"] = str(static_layout)
                 else:
                     node_info["layout"] = str(node.get_layout())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["dtype"] = str(node.get_dtype())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["device"] = str(node.get_device())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["stride"] = str(
                     V.graph.sizevars.size_hints(node.get_stride())
                 )
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
-            except Exception as e:
+            except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
                 node_info["data"] = build_node_info(node.data)

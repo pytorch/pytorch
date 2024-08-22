@@ -2124,7 +2124,7 @@ class _NnapiSerializer:
             assert out_c == in_c
         else:
             # Full convolution
-            out_c, kern_h, kern_w, kern_d = weight_oper.shape
+            out_c, _, _, kern_d = weight_oper.shape
             assert kern_d == in_c
 
         assert out_c == bias_oper.shape[0]

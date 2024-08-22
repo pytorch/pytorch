@@ -658,16 +658,14 @@ class _PipelineStageBase(ABC):
             self.dw_runner.pop(bwd_chunk_id)()
         else:
             (
-                dinputs,
-                input_values,
+                _,
+                _,
                 param_groups,
                 stage_output,
                 output_grads,
             ) = self.backward_state.pop(bwd_chunk_id)
             if self.stage_index != 0:
-                dweights = self.dw_runner.pop(bwd_chunk_id)(
-                    self.submod.parameters(), param_groups
-                )
+                self.dw_runner.pop(bwd_chunk_id)(self.submod.parameters(), param_groups)
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,

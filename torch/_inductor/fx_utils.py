@@ -84,7 +84,6 @@ class FakeTensorUpdater:
         return (node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
-        processed = set()
         existing_storages: DefaultDict[Optional[int], int] = defaultdict(int)
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1

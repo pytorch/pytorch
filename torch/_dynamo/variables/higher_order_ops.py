@@ -1639,7 +1639,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (_, body_treespec),
+                _,
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(

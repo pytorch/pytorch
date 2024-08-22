@@ -350,7 +350,7 @@ def normalize_function(
                             for arg_name, arg_type in bound_types.arguments.items():
                                 param = candidate_signature.parameters[arg_name]
                                 sig_matches = sig_matches and type_matches(param.annotation, arg_type)
-                        except TypeError as e:
+                        except TypeError:
                             sig_matches = False
                         if sig_matches:
                             new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(candidate_signature, args, kwargs,

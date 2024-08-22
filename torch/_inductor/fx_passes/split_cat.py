@@ -718,7 +718,7 @@ class SplitCatSimplifier:
         user_inputs_list: List[List[Union[torch.fx.Node, _Range]]],
     ) -> Optional[List[_Range]]:
         ranges = set()
-        for user_node, user_inputs in zip(next_users, user_inputs_list):
+        for user_inputs in user_inputs_list:
             ranges |= {
                 user_input
                 for user_input in user_inputs
@@ -1405,7 +1405,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
         return
     graph = match.graph
     split_node = next(node for node in match.nodes if node.target == torch.split)
-    split_input, split_size, split_dim = _get_split_args_default(split_node)
+    split_input, _, split_dim = _get_split_args_default(split_node)
     # if the cat and split have different dims, return
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
@@ -1512,7 +1512,7 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         return
     graph = match.graph
     split_node = next(node for node in match.nodes if node.target == torch.split)
-    split_input, split_size, split_dim = _get_split_args_default(split_node)
+    _, _, split_dim = _get_split_args_default(split_node)
     # if the cat and split have different dims, return
     # Find the next users (i.e. users after the getitem)
     next_users = find_next_users(split_node)
@@ -2426,7 +2426,7 @@ def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
                 inputs.append(stack_input)
             else:
                 inputs.append(stack_input.args[0])  # type: ignore[union-attr]
-        new_cat_args, new_cat_args_meta = construct_cat_args(
+        new_cat_args, _ = construct_cat_args(
             graph,
             stack_node,
             inputs,

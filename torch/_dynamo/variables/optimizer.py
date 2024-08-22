@@ -150,7 +150,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.value.param_groups
             )
         )
-        for ind, param_group_vt in enumerate(param_groups_vt.items):
+        for param_group_vt in param_groups_vt.items:
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )

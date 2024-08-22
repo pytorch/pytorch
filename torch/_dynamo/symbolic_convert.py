@@ -2770,9 +2770,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         py_stack = get_torch_function_mode_stack(filter_ignored=False)
 
         if py_stack:
-            has_device_context = isinstance(
-                py_stack[0], torch.utils._device.DeviceContext
-            )
+            isinstance(py_stack[0], torch.utils._device.DeviceContext)
 
         for i, val in enumerate(py_stack):
             self.symbolic_torch_function_mode_stack.append(
