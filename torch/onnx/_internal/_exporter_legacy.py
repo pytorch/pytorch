@@ -107,9 +107,9 @@ class OnnxRegistry:
         # NOTE: _registry is the registry maps OpNameto a list of ONNXFunctions. It is important
         # not to directly modify this variable. Instead, access to it should be done through
         # the public methods: register_custom_op, get_ops, and is_registered_op.
-        self._registry: dict[
-            registration.OpName, list[registration.ONNXFunction]
-        ] = defaultdict(list)
+        self._registry: dict[registration.OpName, list[registration.ONNXFunction]] = (
+            defaultdict(list)
+        )
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
             registration,
@@ -392,8 +392,10 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
-            self.decomposition_table = decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
-                self.onnx_registry
+            self.decomposition_table = (
+                decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
+                    self.onnx_registry
+                )
             )
 
             from torch.onnx._internal.fx import onnxfunction_dispatcher
@@ -766,6 +768,7 @@ class ONNXProgram:
             ...         self.conv2 = torch.nn.Conv2d(32, 64, 3, 1, bias=False)
             ...         self.fc1 = torch.nn.Linear(9216, 128, bias=False)
             ...         self.fc2 = torch.nn.Linear(128, 10, bias=False)
+            ...
             ...     def forward(self, x, b):
             ...         tensor_x = self.conv1(x)
             ...         tensor_x = torch.nn.functional.sigmoid(tensor_x)
@@ -778,11 +781,13 @@ class ONNXProgram:
             ...         tensor_x = self.fc2(tensor_x)
             ...         output = torch.nn.functional.log_softmax(tensor_x, dim=1)
             ...         (
-            ...         self.my_buffer2.add_(1.0) + self.my_buffer1
+            ...             self.my_buffer2.add_(1.0) + self.my_buffer1
             ...         )  # Mutate buffer through in-place addition
             ...         return output
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
-            >>> exported_program = torch.export.export(CustomModule(), args=inputs).run_decompositions({})
+            >>> exported_program = torch.export.export(
+            ...     CustomModule(), args=inputs
+            ... ).run_decompositions({})
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
             >>> pprint.pprint(onnx_program.model_signature)
             ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
@@ -1194,9 +1199,7 @@ class Exporter:
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
-        ), torch._dynamo.config.patch(
-            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-        ):
+        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )
@@ -1401,17 +1404,19 @@ def dynamo_export(
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
+
             def forward(self, x, bias=None):
                 out = self.linear(x)
                 out = out + bias
                 return out
+
+
         model = MyModel()
-        kwargs = {"bias": 3.}
+        kwargs = {"bias": 3.0}
         args = (torch.randn(2, 2, 2),)
-        onnx_program = torch.onnx.dynamo_export(
-            model,
-            *args,
-            **kwargs).save("my_simple_model.onnx")
+        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
+            "my_simple_model.onnx"
+        )
 
     **Example 2 - Exporting with dynamic shapes**
     ::
@@ -1419,10 +1424,8 @@ def dynamo_export(
         # The previous model can be exported with dynamic shapes
         export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
         onnx_program = torch.onnx.dynamo_export(
-            model,
-            *args,
-            **kwargs,
-            export_options=export_options)
+            model, *args, **kwargs, export_options=export_options
+        )
         onnx_program.save("my_dynamic_model.onnx")
 
 
