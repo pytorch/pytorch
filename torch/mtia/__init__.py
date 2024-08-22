@@ -64,7 +64,12 @@ def _lazy_init() -> None:
                 "multiprocessing, you must use the 'spawn' start method"
             )
         if not _is_compiled():
-            raise AssertionError("Torch not compiled with MTIA enabled")
+            raise AssertionError(
+                "Torch not compiled with MTIA enabled. "
+                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
+                "your target dependency!"
+            )
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
