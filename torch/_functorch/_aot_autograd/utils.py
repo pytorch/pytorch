@@ -248,6 +248,27 @@ def is_with_effects_op(node, op):
     return is_with_effects(node) and node.args[1] == op
 
 
+def get_with_effects_users(node: torch.fx.Node, strict: bool = True):
+    assert node.target == torch.ops.higher_order.with_effects
+    users = node.users
+    if not strict:
+        assert (
+            len(users) == 2
+        ), f"with_effects node {node} users:{users}, expected 2 users"
+    getitem_users: List[Optional[torch.fx.Node]] = [None, None]
+    for user in users.keys():
+        assert user.target == operator.getitem
+        idx = user.args[1]
+        assert isinstance(idx, int)
+        getitem_users[idx] = user
+
+    if not strict:
+        assert getitem_users[0] is not None
+        assert getitem_users[1] is not None
+
+    return getitem_users[0], getitem_users[1]
+
+
 def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with

@@ -22,8 +22,10 @@ from typing import (
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
-from torch._functorch._aot_autograd.utils import is_with_effects_op
-from torch._inductor.fx_passes.micro_pipeline_tp import with_effects_users
+from torch._functorch._aot_autograd.utils import (
+    get_with_effects_users,
+    is_with_effects_op,
+)
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -407,7 +409,9 @@ def _scatter_fused_allreduce_waits(
                 nodes.extend(list(user_node.users))
 
         if is_with_effects_wait_tensor(orig_wait):
-            with_effects_out_token, with_effects_result = with_effects_users(orig_wait)
+            with_effects_out_token, with_effects_result = get_with_effects_users(
+                orig_wait
+            )
 
             if with_effects_out_token is not None:
                 graph = orig_wait.graph
@@ -477,11 +481,12 @@ def _fuse_allreduce(
     for comm_block in comm_blocks:
         for wait in comm_block.wait_nodes:
             if is_with_effects_wait_tensor(wait) and len(wait.users) != 0:
-                out_token, out_result = with_effects_users(wait)
+                out_token, out_result = get_with_effects_users(wait)
 
             graph.erase_node(wait)
         graph.erase_node(comm_block.comm_node)
     graph.eliminate_dead_code()
+
     return fused_comm_block
 
 
@@ -540,7 +545,7 @@ def _fuse_ddp_communication(
 
         wait_node = block.wait_nodes[0]
         if is_with_effects_wait_tensor(wait_node):
-            _, wait_node = with_effects_users(wait_node)
+            _, wait_node = get_with_effects_users(wait_node)
 
         if len(wait_node.users) != 1:
             # gradient/wait node should only be used by one user

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast, Dict, List, Optional, Set
 
 import torch
-from torch._functorch._aot_autograd.utils import is_with_effects
+from torch._functorch._aot_autograd.utils import get_with_effects_users, is_with_effects
 
 from .. import config, inductor_prims
 from ..pattern_matcher import (
@@ -77,7 +77,7 @@ class _AllGatherMatch:
             graph = new_node.graph
             with graph.inserting_before(new_node):
                 make_token = graph.call_function(torch.ops.prims._make_token.default)
-            with_effects_out_token, with_effects_result = with_effects_users(
+            with_effects_out_token, with_effects_result = get_with_effects_users(
                 self.with_effects
             )
             with_effects_out_token.replace_all_uses_with(make_token)
@@ -258,12 +258,11 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                 continue
             for pattern, ag_node_idx, is_with_effects_pattern in patterns:
                 match = pattern.match(node)
-
                 if not match:
                     continue
+
                 assert isinstance(match, Match)
                 ag_node = match.nodes[ag_node_idx]
-
                 assert ag_node.target == c10d.all_gather_into_tensor.default
 
                 if ag_node in visited_ag_nodes:
@@ -298,7 +297,7 @@ class _ReduceScatterMatch:
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
         if is_with_effects(self.res_node):
-            with_effects_out_token, with_effects_result = with_effects_users(
+            with_effects_out_token, with_effects_result = get_with_effects_users(
                 self.res_node
             )
 
@@ -318,7 +317,7 @@ class _ReduceScatterMatch:
                 node.graph.erase_node(node)
 
         if is_with_effects(self.res_node) and self.res_node.users:
-            token, res = with_effects_users(self.res_node)
+            token, res = get_with_effects_users(self.res_node)
             graph = self.res_node.graph
             graph.erase_node(token)
             graph.erase_node(res)
@@ -598,7 +597,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
     Find the matmuls that use `node` as the lhs argument.
     """
     if is_with_effects(node):
-        _, node = with_effects_users(node)
+        _, node = get_with_effects_users(node)
 
     matmuls = []
     for user in node.users:
@@ -812,27 +811,6 @@ def _insert_fused_matmul_reduce_scatter(
         )
     else:
         raise AssertionError(f"Unexpected matmul match type: {type(matmul)}")
-
-
-def with_effects_users(node: torch.fx.Node, strict: bool = True):
-    assert node.target == torch.ops.higher_order.with_effects
-    users = node.users
-    if not strict:
-        assert (
-            len(users) == 2
-        ), f"with_effects node {node} users:{users}, expected 2 users"
-    getitem_users: List[Optional[torch.fx.Node]] = [None, None]
-    for user in users.keys():
-        assert user.target == operator.getitem
-        idx = user.args[1]
-        assert isinstance(idx, int)
-        getitem_users[idx] = user
-
-    if not strict:
-        assert getitem_users[0] is not None
-        assert getitem_users[1] is not None
-
-    return getitem_users[0], getitem_users[1]
 
 
 def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
