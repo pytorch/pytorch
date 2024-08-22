@@ -126,10 +126,10 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
                 # NOTE: Compiled Autograd warmup is handled by itself, not here.
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                log.warn("here1 enter eval_frame warmup run start: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
+                log.warn("here1 enter eval_frame warmup run start: %d, context_id: %d, id(callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback))
                 return callback
             else:
-                log.warn("here2 enter eval_frame normal run: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
+                log.warn("here2 enter eval_frame normal run: %d, context_id: %d, id(callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback))
                 return set_eval_frame(callback)
         elif state == "exit":
             context_id_to_state[context_id] = "exit"
@@ -145,11 +145,11 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
                 # NOTE: Compiled Autograd warmup is handled by itself, not here.
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                log.warn("here3 exit eval_frame warmup run end: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
+                log.warn("here3 exit eval_frame warmup run end: %d, context_id: %d, id(callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback))
                 context_id_to_warmup_count[context_id] += 1
                 return set_eval_frame(callback)
             else:
-                log.warn("here4 exit eval_frame normal run: %d, context_id: %d", context_id_to_warmup_count[context_id], context_id)
+                log.warn("here4 exit eval_frame normal run: %d, context_id: %d, id(callback): %d", context_id_to_warmup_count[context_id], context_id, id(callback))
                 return set_eval_frame(callback)
 
 

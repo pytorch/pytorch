@@ -29,6 +29,8 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
 
+from torch._C._dynamo.eval_frame import set_eval_frame
+
 
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
@@ -90,6 +92,8 @@ class AutogradCompilerInstance:
         sizes: List[int],
         scalars: List[Union[int, float]],
     ):
+        prior = set_eval_frame(None)
+        print(f"prior: {prior}, id(prior): {id(prior)}")        
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
@@ -492,67 +496,69 @@ compiled_autograd_enabled = False
 in_compiled_autograd_region = False
 
 
-class _EnableContext:
-    def __init__(self, compiler_fn):
-        self.compiler_fn = compiler_fn
-        self.warmup_count = 0
-        self.prior = None
-        self.set_multithreading_enabled_ctx_mgr = None
+# class _EnableContext:
+#     def __init__(self, compiler_fn):
+#         self.compiler_fn = compiler_fn
+#         self.warmup_count = 0
+#         self.prior = None
+#         self.set_multithreading_enabled_ctx_mgr = None
 
-    def __enter__(self):
-        # print("compiled autograd warmup run start: %s", self.warmup_count)
-        log.warn("compiled autograd warmup run start: %s", self.warmup_count)  # type: ignore[attr-defined]
-        if self.warmup_count >= torch._dynamo.config.warmup_runs:
-            self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-                functools.partial(AutogradCompilerInstance, self.compiler_fn)
-            )
-            if snapshot_verbose_logging_enabled():
-                torch._C._dynamo.compiled_autograd.set_verbose_logger(
-                    cpp_verbose_log_fn
-                )
-            global compiled_autograd_enabled
-            compiled_autograd_enabled = True
-            self.set_multithreading_enabled_ctx_mgr = (
-                torch.autograd.set_multithreading_enabled(False)
-            )
-            self.set_multithreading_enabled_ctx_mgr.__enter__()            
+#     def __enter__(self):
+#         if self.warmup_count >= torch._dynamo.config.warmup_runs:
+#             log.warn("compiled autograd normal run start: %s", self.warmup_count)  # type: ignore[attr-defined]
+#             self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+#                 functools.partial(AutogradCompilerInstance, self.compiler_fn)
+#             )
+#             if snapshot_verbose_logging_enabled():
+#                 torch._C._dynamo.compiled_autograd.set_verbose_logger(
+#                     cpp_verbose_log_fn
+#                 )
+#             global compiled_autograd_enabled
+#             compiled_autograd_enabled = True
+#             self.set_multithreading_enabled_ctx_mgr = (
+#                 torch.autograd.set_multithreading_enabled(False)
+#             )
+#             self.set_multithreading_enabled_ctx_mgr.__enter__()
+#         else:
+#             log.warn("compiled autograd warmup run start: %s", self.warmup_count)  # type: ignore[attr-defined]
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
-            self.warmup_count += 1  # type: ignore[attr-defined]
-            # print("compiled autograd warmup run end: %s", self.warmup_count)
-            log.warn("compiled autograd warmup run end: %s", self.warmup_count)  # type: ignore[attr-defined]
-        else:
-            if self.set_multithreading_enabled_ctx_mgr:
-                self.set_multithreading_enabled_ctx_mgr.__exit__(
-                    exc_type, exc_val, exc_tb
-                )
-                self.set_multithreading_enabled_ctx_mgr = None
-            if not self.prior:
-                compiled_autograd_enabled = False
-            torch._C._dynamo.compiled_autograd.set_autograd_compiler(self.prior)
-            self.prior = None
+#     def __exit__(self, exc_type, exc_val, exc_tb):
+#         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
+#             self.warmup_count += 1  # type: ignore[attr-defined]
+#             # print("compiled autograd warmup run end: %s", self.warmup_count)
+#             log.warn("compiled autograd warmup run end: %s", self.warmup_count)  # type: ignore[attr-defined]
+#         else:
+#             log.warn("compiled autograd normal run end: %s", self.warmup_count)
+#             if self.set_multithreading_enabled_ctx_mgr:
+#                 self.set_multithreading_enabled_ctx_mgr.__exit__(
+#                     exc_type, exc_val, exc_tb
+#                 )
+#                 self.set_multithreading_enabled_ctx_mgr = None
+#             if not self.prior:
+#                 compiled_autograd_enabled = False
+#             torch._C._dynamo.compiled_autograd.set_autograd_compiler(self.prior)
+#             self.prior = None
 
 
-enable = _EnableContext
+# enable = _EnableContext
 
 
-# @contextlib.contextmanager
-# def enable(compiler_fn):
-#     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-#         functools.partial(AutogradCompilerInstance, compiler_fn)
-#     )
-#     if snapshot_verbose_logging_enabled():
-#         torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-#     global compiled_autograd_enabled
-#     compiled_autograd_enabled = True
-#     try:
-#         with torch.autograd.set_multithreading_enabled(False):
-#             yield
-#     finally:
-#         if not prior:
-#             compiled_autograd_enabled = False
-#         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+@contextlib.contextmanager
+def enable(compiler_fn):
+    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+        functools.partial(AutogradCompilerInstance, compiler_fn)
+    )
+    if snapshot_verbose_logging_enabled():
+        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = True
+    try:
+        with torch.autograd.set_multithreading_enabled(False):
+            yield
+    finally:
+        if not prior:
+            compiled_autograd_enabled = False
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
