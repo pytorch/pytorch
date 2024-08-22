@@ -39,7 +39,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
-from . import comms, config, dependencies, ir, metrics
+from . import comms, config, dependencies, ir, metrics, stream_scheduler
 from .codecache import write_text
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
@@ -1698,6 +1698,8 @@ class Scheduler:
         if config.combo_kernels:
             self.create_combo_kernel_nodes(num_ck_nodes=None)
         self.process_grouped_nodes()
+        if config.multiple_streams:
+            stream_scheduler.stream_schedule(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)

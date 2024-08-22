@@ -378,6 +378,14 @@ class MemoryPlanningLine(WrapperLine):
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
+    def set_user_stream(self, stream_id):
+        self.user_streams = [
+            stream_id,
+        ]
+
+    def add_user_stream(self, stream_id):
+        self.user_streams.append(stream_id)
+
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
@@ -401,7 +409,41 @@ class AllocateLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
-        code.writeline(line)
+        # if self has attribution named user_streams, it is used by multiple streams
+        if hasattr(self, "user_streams"):
+            # the redundant stream_id have been removed when user_streams is set
+            if len(self.user_streams) == 1:
+                if self.user_streams[0] != DEFAULT_STREAM_ID:
+                    code.writeline(
+                        f"torch.cuda.set_stream(stream{self.user_streams[0]}_raw)"
+                    )
+                    code.writeline(line)
+                    code.writeline(
+                        f"torch.cuda.set_stream(stream{DEFAULT_STREAM_ID}_raw)"
+                    )
+                else:
+                    code.writeline(line)
+            elif len(self.user_streams) > 1:
+                # assign the `empty_strided` to the first user_stream
+                assign_stream = self.user_streams[0]
+                event_name = f"event_allocate_{self.node.get_name()}"
+                code.writeline(f"{event_name} = torch.cuda.Event()")
+                if assign_stream != DEFAULT_STREAM_ID:
+                    code.writeline(f"torch.cuda.set_stream(stream{assign_stream}_raw)")
+                code.writeline(line)
+                if assign_stream != DEFAULT_STREAM_ID:
+                    code.writeline(
+                        f"torch.cuda.set_stream(stream{DEFAULT_STREAM_ID}_raw)"
+                    )
+                code.writeline(f"{event_name}.record(stream{assign_stream}_raw)")
+                for user_stream in self.user_streams[1:]:
+                    code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+            else:
+                raise AssertionError(f"invalid user_streams: {self.user_streams}")
+        else:
+            code.writeline(line)
+
+
 
 
 @dataclasses.dataclass
@@ -744,7 +786,86 @@ class WrapperCodeGen(CodeGen):
 
     def generate_end(self, result: IndentedBuffer) -> None:
         return
+    def cuda_event_dependency(self, node_name, kernel_IndentedBuffer):
+        """
+        Yueming: is it better to move the dependency detection to streamscheduler?
+        """
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
 
+        def update_event_dependency(tmp_ssnode):
+            dependent_buffers = set()
+            for name in tmp_ssnode.predecessors:
+                predecessor = tmp_ssnode.predecessors[name]
+                if predecessor.is_nop_node:
+                    for prepredecessor in predecessor.predecessors.values():
+                        if (
+                            prepredecessor.stream_id != tmp_ssnode.stream_id
+                            and not prepredecessor.is_nop_node
+                        ):
+                            dependent_buffers.add(prepredecessor)
+                else:
+                    if (
+                        predecessor.stream_id != tmp_ssnode.stream_id
+                        and not predecessor.is_nop_node
+                    ):
+                        dependent_buffers.add(predecessor)
+            for buffer in dependent_buffers:
+                kernel_IndentedBuffer.writeline(
+                    f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{buffer.get_name()})"
+                )
+
+        update_event_dependency(ssnode)
+        for predecessor in ssnode.predecessors.values():
+            if predecessor.is_nop_node:
+                update_event_dependency(predecessor)
+
+    def cuda_event_create(self, node_name, kernel_IndentedBuffer):
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        kernel_IndentedBuffer.writeline(
+            f"event_{ssnode.get_name()} = torch.cuda.Event()"
+        )
+
+    def cuda_event_record(self, node_name, kernel_IndentedBuffer):
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        kernel_IndentedBuffer.writeline(
+            f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)"
+        )
+
+    def generate_kernel_w_stream(self, node_name, call_strs, stream_switch=True):
+        """
+        Attributes:
+            node_name: name of the caller buffer
+            call_strs: list of strings or a single string to write
+            out_node: for cpp wrapper, we need to define a new buffer before using it.
+        """
+        kernel_IndentedBuffer = IndentedBuffer()
+        self.cuda_event_dependency(node_name, kernel_IndentedBuffer)
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        if ssnode.cuda_event:
+            self.cuda_event_create(node_name, kernel_IndentedBuffer)
+        stream_id = ssnode.stream_id
+        kernel_IndentedBuffer = kernel_IndentedBuffer
+        if stream_id != 0:
+            if stream_switch:
+                kernel_IndentedBuffer.writeline(
+                    f"torch.cuda.set_stream(stream{stream_id}_raw)"
+                )
+            if isinstance(call_strs, list):
+                kernel_IndentedBuffer.writelines(call_strs)
+            else:
+                kernel_IndentedBuffer.writeline(call_strs)
+            if stream_switch:
+                kernel_IndentedBuffer.writeline("torch.cuda.set_stream(stream0_raw)")
+        else:
+            if isinstance(call_strs, list):
+                kernel_IndentedBuffer.writelines(call_strs)
+            else:
+                kernel_IndentedBuffer.writeline(call_strs)
+        if ssnode.cuda_event:
+            self.cuda_event_record(node_name, kernel_IndentedBuffer)
+        for line in [_ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
+            self.writeline(line)
+            
     def generate_fallback_kernel(self, fallback_kernel, args):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
@@ -1719,12 +1840,31 @@ class WrapperCodeGen(CodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
-    def writeline(self, line):
-        self.lines.append(line)
+    def writeline(self, line, caller=None, node_name=None):
+        if config.multiple_streams:
+            if caller is not None:
+                assert isinstance(caller, ExternKernel)
+                node_name = caller.name
+            if node_name is not None:
+                self.generate_kernel_w_stream(node_name, line)
+            else:
+                self.lines.append(line)
+        else:
+            self.lines.append(line)
 
-    def writelines(self, lines):
-        for line in lines:
-            self.writeline(line)
+    def writelines(self, lines, caller=None, node_name=None):
+        if config.multiple_streams:
+            if caller is not None:
+                assert isinstance(caller, ExternKernel)
+                node_name = caller.name
+            if node_name is not None:
+                self.generate_kernel_w_stream(node_name, lines)
+            else:
+                for line in lines:
+                    self.writeline(line)
+        else:
+            for line in lines:
+                self.writeline(line)
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
@@ -1851,7 +1991,20 @@ class WrapperCodeGen(CodeGen):
             self.codegen_deferred_allocation(name, layout)
             return
 
-        self.writeline(AllocateLine(self, buffer))
+        new_allocateline = AllocateLine(self, buffer)
+        # when the node is nop node, get users from its predecessors
+        if config.multiple_streams:
+            ssnode = V.graph.stream_graph.name_mapping[buffer.get_name()]
+            new_allocateline.set_user_stream(ssnode.stream_id)
+            user_streams = set()
+            if ssnode.is_nop_node:
+                for predecessor in ssnode.predecessors.values():
+                    if predecessor.stream_id != ssnode.stream_id:
+                        user_streams.add(predecessor.stream_id)
+                for user_stream in user_streams:
+                    new_allocateline.add_user_stream(user_stream)
+
+        self.writeline(new_allocateline)
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
