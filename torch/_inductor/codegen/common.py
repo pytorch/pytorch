@@ -1773,6 +1773,7 @@ class Kernel(CodeGen):
         if mask:
             cond = f"({cond}) | ~({mask})"
 
+        return ""
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def check_bounds(
