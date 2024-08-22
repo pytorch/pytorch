@@ -308,6 +308,11 @@ class FrameStateSizeEntry:
     stride: Optional[List[int]]
 
 
+ITERTOOLS_POLYFILLED_CLASSES = {
+    itertools.chain,
+}
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -866,7 +871,7 @@ class VariableBuilder:
         elif (
             istype(value, type)
             and value in itertools.__dict__.values()
-            and value not in {itertools.chain}
+            and value not in ITERTOOLS_POLYFILLED_CLASSES
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
