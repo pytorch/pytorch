@@ -10,12 +10,20 @@ from typing import Iterable, Iterator, TypeVar
 from ..decorators import substitute_in_graph
 
 
+__all__ = [
+    "chain",
+    "chain_from_iterable",
+    "count",
+    "tee",
+]
+
+
 _T = TypeVar("_T")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
 @substitute_in_graph(itertools.chain.__new__)  # type: ignore[arg-type]
-def chain___new__(
+def chain(
     cls: type[itertools.chain[_T]],
     *iterables: Iterable[_T],
 ) -> Iterator[_T]:
@@ -30,9 +38,12 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
     return itertools.chain(*iterable)
 
 
+chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
+
+
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.count
 @substitute_in_graph(itertools.count.__new__)  # type: ignore[arg-type]
-def count___new__(
+def count(
     cls: type[itertools.count[_T]],  # type: ignore[type-var]
     start: _T = 0,  # type: ignore[assignment]
     step: _T = 1,  # type: ignore[assignment]
