@@ -32,6 +32,11 @@ def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> No
     out_cos.copy_(x.cos())
 
 
+@torch.library.custom_op("test_view::boo", mutates_args={"x"})
+def boo(x: torch.Tensor) -> None:
+    x.sin_()
+
+
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         counters.clear()
@@ -104,6 +109,116 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # we're artificially creating this example to test the counter.
         # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
+
+    def get_clone_count(self, graph):
+        counter = 0
+        for node in graph.nodes:
+            if node.target == torch.ops.higher_order.auto_functionalized:
+                counter += len(node.meta["only_clone_these_tensors"])
+        return counter
+
+    def test_view_inplaced(self):
+        def f(arg0_1):
+            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(
+                torch.ops.test_view.boo.default,
+                x=select,
+                _x_base=arg0_1,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return ()
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_clone_count(gm.graph), 0)
+
+    # introduce a view another_view that is used `after` the copy
+    def test_view_inplaced2(self):
+        def f(arg0_1):
+            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            another_view = arg0_1[2]
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(
+                torch.ops.test_view.boo.default,
+                x=select,
+                _x_base=arg0_1,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_clone_count(gm.graph), 0)
+
+    # introduce a view another_view that is used `before` the copy
+    def test_views_not_inplaced(self):
+        def f(arg0_1):
+            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            another_view = arg0_1[2]
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(
+                torch.ops.test_view.boo.default,
+                x=select,
+                _x_base=arg0_1,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            use_another_view = another_view * 10
+            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return use_another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_clone_count(gm.graph), 1)
+
+    # a view over input with out copy node, inplace not allowed
+    def test_views_not_inplaced2(self):
+        def f(arg0_1):
+            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            another_view = arg0_1[2]
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(
+                torch.ops.test_view.boo.default,
+                x=select,
+                _x_base=arg0_1,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            return
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_clone_count(gm.graph), 1)
+
+    # no copy nodes, view over local, with a use for another view
+    def test_views_not_inplaced3(self):
+        def f(arg0_1):
+            a = torch.ones(10)
+            select = a[0]
+            another_view = a[2]
+            auto_functionalized = torch.ops.higher_order.auto_functionalized(
+                torch.ops.test_view.boo.default,
+                x=select,
+                _x_base=a,
+                _all_bases=[a],
+            )
+            getitem_1 = auto_functionalized[1]
+            return another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_clone_count(gm.graph), 1)
 
     def test_multi_output_intermediate(self):
         for requires_grad in [False, True]:
