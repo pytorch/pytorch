@@ -177,6 +177,9 @@ def increment_op_count(cnt: int) -> None:
     op_count += cnt
 
 
+warmup_count = 0
+
+
 # Calculate total time spent so far for each phase
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent() -> Dict[str, float]:

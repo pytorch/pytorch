@@ -113,7 +113,18 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         )
         return callback
     else:
-        return set_eval_frame(callback)
+        if (
+            torch._dynamo.utils.warmup_count < torch._dynamo.config.warmup_runs
+            # NOTE: Compiled Autograd warmup is handled by itself, not here.
+            and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        ):
+            # print("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
+            log.warn("eval_frame warmup run start: %d", torch._dynamo.utils.warmup_count)
+            torch._dynamo.utils.warmup_count += 1
+            log.warn("eval_frame warmup run end: %d", torch._dynamo.utils.warmup_count)
+            return callback
+        else:
+            return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
@@ -558,8 +569,6 @@ class OptimizeContext(_TorchDynamoContext):
             dynamic=dynamic,
             compiler_config=compiler_config,
         )
-        self.warmup_count = 0
-        self.disable_context = DisableContext()
 
         if config.compiled_autograd:
 
@@ -571,56 +580,6 @@ class OptimizeContext(_TorchDynamoContext):
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_compiled_autograd)
-
-    def __call__(self, fn):
-        # public api for compiler config/options
-        def get_compiler_config():
-            return self.compiler_config
-
-        fn = innermost_fn(fn)
-
-        # add context containing GraphModule to any GraphModule forward functions
-        if isinstance(fn, GraphModule):
-            # add context containing GraphModule to any GraphModule forward functions
-            code_context.get_context(fn.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(fn)
-
-        # Optimize the forward method of torch.nn.Module object
-        if isinstance(fn, torch.nn.Module):
-            mod = fn
-            new_mod = OptimizedModule(mod, self)
-            # Save the function pointer to find the original callable while nesting
-            # of decorators.
-            new_mod._torchdynamo_orig_callable = mod.forward
-            # when compiling torch.nn.Module,
-            # provide public api OptimizedModule.get_compiler_config()
-            assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config
-            return new_mod
-
-        @functools.wraps(fn)
-        def _fn(*args, **kwargs):
-            if (
-                self.warmup_count < torch._dynamo.config.warmup_runs
-                # NOTE: Compiled Autograd warmup is handled by itself, not here.
-                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-            ):
-                inner_fn = self.disable_context(fn)
-                out = inner_fn(*args, **kwargs)
-                self.warmup_count += 1
-                log.debug("OptimizeContext warmup run done: %d", self.warmup_count)
-                return out
-            else:
-                return super(OptimizeContext, self).__call__(fn)(*args, **kwargs)
-
-        # Save the function pointer to find the original callable while nesting
-        # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-        _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
-        _fn._torchdynamo_disable = False  # type: ignore[attr-defined]
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
-        return _fn
 
     def __reduce__(self):
         return (
