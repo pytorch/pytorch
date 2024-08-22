@@ -831,7 +831,7 @@ class SchedulerNode(BaseSchedulerNode):
             _, new_var_ranges = dependencies.index_vars_no_squeeze(
                 *self._sizes, prefix="z"
             )
-            self._body = ir.LoopBody(self._body, new_args, new_var_ranges)
+            self._body: ir.LoopBody = ir.LoopBody(self._body, new_args, new_var_ranges)
         else:
             assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
             self._sizes, self._body = self.node.simplify_and_reorder(
