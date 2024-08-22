@@ -258,7 +258,6 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
-
 @overload
 def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
     ...
@@ -4705,7 +4704,7 @@ class ExternKernel(InputsKernel):
                     return x
         return cls.copy_input(x)
 
-    @classmethod 
+    @classmethod
     def is_stride_ascending(cls, strides, sizes):
         # ignore dimensions of size 1, they dont affect layout
         non_1_indices = [
@@ -4777,11 +4776,8 @@ class ExternKernel(InputsKernel):
                     exact_strides
                     and (
                         isinstance(x.data, ReinterpretView)
-                        or (
-                            list(x.get_layout().stride) == exact_strides
-                            and not isinstance(x.data, ReinterpretView)
-                        )
-                    ) 
+                        or list(x.get_layout().stride) == exact_strides
+                    )
                 )
             ):
                 return x
@@ -4849,7 +4845,6 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_stride_order(cls, x, order, allow_padding=False):
         return cls.require_strides(x, order=order, allow_padding=allow_padding)
-    
 
     @classmethod
     def require_channels_last(cls, x):
