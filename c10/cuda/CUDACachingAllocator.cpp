@@ -133,7 +133,7 @@ namespace {
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 void decrease_stat_array(
-    StatArray& stat_array,
+    MemoryStatArray& stat_array,
     size_t amount,
     const MemoryStatTypeArray& stat_types) {
   for_each_selected_memory_stat_type(
@@ -1248,17 +1248,17 @@ class DeviceCachingAllocator {
 
       c10::reportOutOfMemoryToProfiler(
           static_cast<int64_t>(size),
-          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<int64_t>(MemoryStatType::AGGREGATE)]
               .current,
-          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<int64_t>(MemoryStatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, device));
 
       auto allocated_bytes =
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
               .current;
       auto reserved_bytes =
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
               .current;
       auto observers_local = oom_observers_;
 
@@ -1401,8 +1401,8 @@ class DeviceCachingAllocator {
       // An already-split block is becoming active
       for_each_selected_memory_stat_type(
           params.stat_types, [&](size_t stat_type) {
-            stats.inactive_split_bytes[stat_type].descrease(block->size);
-            stats.inactive_split[stat_type].descrease(1);
+            stats.inactive_split_bytes[stat_type].decrease(block->size);
+            stats.inactive_split[stat_type].decrease(1);
           });
     }
 
@@ -1436,8 +1436,10 @@ class DeviceCachingAllocator {
     c10::reportMemoryUsageToProfiler(
         block->ptr,
         static_cast<int64_t>(block->size),
-        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+            .current,
+        stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+            .current,
         c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
@@ -1489,8 +1491,10 @@ class DeviceCachingAllocator {
     c10::reportMemoryUsageToProfiler(
         orig_block_ptr,
         -static_cast<int64_t>(orig_block_size),
-        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+            .current,
+        stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
+            .current,
         c10::Device(c10::DeviceType::CUDA, block->device));
   }
 
@@ -1597,7 +1601,7 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
       stats.allocation[statType].reset_accumulated();
       stats.segment[statType].reset_accumulated();
       stats.active[statType].reset_accumulated();
@@ -1623,7 +1627,7 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     for (const auto statType :
-         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+         c10::irange(static_cast<size_t>(MemoryStatType::NUM_TYPES))) {
       stats.allocation[statType].reset_peak();
       stats.segment[statType].reset_peak();
       stats.active[statType].reset_peak();
@@ -2436,9 +2440,10 @@ class DeviceCachingAllocator {
 
   MemoryStatTypeArray get_stat_types_for_pool(const BlockPool& pool) {
     MemoryStatTypeArray stat_types = {false};
-    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(MemoryStatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+        pool.is_small ? MemoryStatType::SMALL_POOL
+                      : MemoryStatType::LARGE_POOL)] = true;
     return stat_types;
   }
 
