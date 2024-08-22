@@ -74,6 +74,32 @@ using DtypeAccum = float;
 using DtypeEpilogue = float;
 using DtypeOutput = cutlass::bfloat16_t;
 
+template <typename T>
+struct identity {
+  CUTLASS_HOST_DEVICE
+  T operator()(T lhs) const {
+    return lhs;
+  }
+};
+
+using Multiply = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::multiplies,
+    DtypeEpilogue,
+    DtypeEpilogue,
+    cutlass::FloatRoundStyle::round_to_nearest>;
+
+using Add = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus,
+    DtypeEpilogue,
+    DtypeEpilogue,
+    cutlass::FloatRoundStyle::round_to_nearest>;
+
+using Cast = cutlass::epilogue::fusion::Sm90Compute<
+    identity,
+    DtypeOutput,
+    DtypeEpilogue,
+    cutlass::FloatRoundStyle::round_to_nearest>;
+
 template <bool PingPong, bool FastAccum>
 struct Schedule;
 
@@ -121,13 +147,6 @@ void f8f8bf16_rowwise_impl(
   int N = WQ.size(1);
   int K = XQ.size(1);
 
-  TORCH_CHECK(XQ.is_cuda() && XQ.is_contiguous());
-  TORCH_CHECK(
-      WQ.is_cuda() && WQ.ndimension() == 2 && WQ.stride(1) == WQ.size(0) &&
-      WQ.stride(0) == 1);
-
-  // auto Y = at::empty({M, N}, XQ.options().dtype(at::kBFloat16));
-
   using LayoutInputA = cutlass::layout::RowMajor;
   constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
 
@@ -137,78 +156,45 @@ void f8f8bf16_rowwise_impl(
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  using ArchTag = cutlass::arch::Sm90; // Tag indicating the minimum SM that
-                                       // supports the intended feature
+  // Tag indicating the minimum SM that supports the intended feature
+  using ArchTag = cutlass::arch::Sm90;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
-  using TileShape = cute::Shape<
-      cute::Int<TB_M>,
-      cute::Int<TB_N>,
-      cute::Int<TB_K>>; // Threadblock-level
-                        // tile size
-  using ClusterShape = cute::Shape<
-      cute::Int<TBS_M>,
-      cute::Int<TBS_N>,
-      cute::Int<TBS_K>>; // Shape of the
-                         // threadblocks in a
-                         // cluster
-  using KernelSchedule = cutlass::gemm::collective::
-      KernelScheduleAuto; // Kernel to launch based on the default setting in
-                          // the Collective Builder
+  // Threadblock-level tile size
+  using TileShape =
+      cute::Shape<cute::Int<TB_M>, cute::Int<TB_N>, cute::Int<TB_K>>;
+  // Shape of the threadblocks in a cluster
+  using ClusterShape =
+      cute::Shape<cute::Int<TBS_M>, cute::Int<TBS_N>, cute::Int<TBS_K>>;
 
   // Implement rowwise scaling epilogue.
-  using XScale = cutlass::epilogue::fusion::Sm90ColBroadcast<
-      0,
-      TileShape,
-      DtypeScale,
-      cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>>;
+  constexpr int ColBcastStages = 0;
+  constexpr int RowBcastStages = PONG ? 2 : 1;
 
-  using WScale = cutlass::epilogue::fusion::Sm90RowBroadcast<
-      PONG ? 2 : 1,
-      TileShape,
-      DtypeScale,
-      cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
+  using XScale = cutlass::epilogue::fusion::
+      Sm90ColBroadcast<ColBcastStages, TileShape, DtypeScale>;
 
-  using Bias = cutlass::epilogue::fusion::Sm90RowBroadcast<
-      PONG ? 2 : 1,
-      TileShape,
-      DtypeBias,
-      cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
+  using WScale = cutlass::epilogue::fusion::
+      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeScale>;
+
+  using Bias = cutlass::epilogue::fusion::
+      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeBias>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
-  using Compute0 = cutlass::epilogue::fusion::Sm90Compute<
-      cutlass::multiplies,
-      DtypeEpilogue, // First stage output type.
-      DtypeEpilogue, // First stage input types.
-      cutlass::FloatRoundStyle::round_to_nearest>;
-
-  using EVTCompute0 =
-      cutlass::epilogue::fusion::Sm90EVT<Compute0, WScale, Accum>;
-
-  using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
-      cutlass::multiplies,
-      DtypeEpilogue, // Second stage output type.
-      DtypeEpilogue, // Second stage input types.
-      cutlass::FloatRoundStyle::round_to_nearest>;
-
-  using EVTCompute1 =
-      cutlass::epilogue::fusion::Sm90EVT<Compute1, XScale, EVTCompute0>;
-
-  using ComputeBias = cutlass::epilogue::fusion::Sm90Compute<
-      cutlass::plus,
-      DtypeOutput, // Final (optional) stage output type.
-      DtypeEpilogue, // Final stage input types.
-      cutlass::FloatRoundStyle::round_to_nearest>;
-
-  using EVTComputeBias =
-      cutlass::epilogue::fusion::Sm90EVT<ComputeBias, Bias, EVTCompute1>;
-
-  using EpilogueEVT = EVTComputeBias;
+  using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
+      Cast,
+      cutlass::epilogue::fusion::Sm90EVT<
+          Add,
+          Bias,
+          cutlass::epilogue::fusion::Sm90EVT<
+              Multiply,
+              XScale,
+              cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>>>;
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
-          cutlass::arch::Sm90,
-          cutlass::arch::OpClassTensorOp,
+          ArchTag,
+          OperatorClass,
           TileShape,
           ClusterShape,
           cutlass::epilogue::collective::EpilogueTileAuto,
@@ -252,11 +238,11 @@ void f8f8bf16_rowwise_impl(
   using StrideOutput = typename Gemm::GemmKernel::StrideC;
 
   StrideInputA stride_a = cutlass::make_cute_packed_stride(
-      StrideInputA{}, cute::make_shape(M, K, 1));
+      StrideInputA{}, cute::make_shape(M, static_cast<int>(XQ.stride(0)), 1));
   StrideInputB stride_b = cutlass::make_cute_packed_stride(
-      StrideInputB{}, cute::make_shape(N, K, 1));
+      StrideInputB{}, cute::make_shape(N, static_cast<int>(WQ.stride(1)), 1));
   StrideOutput stride_output = cutlass::make_cute_packed_stride(
-      StrideOutput{}, cute::make_shape(M, N, 1));
+      StrideOutput{}, cute::make_shape(M, static_cast<int>(out.stride(0)), 1));
 
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
@@ -265,10 +251,10 @@ void f8f8bf16_rowwise_impl(
        stride_a,
        reinterpret_cast<DtypeB*>(WQ.data_ptr()),
        stride_b},
-      {{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
-                          : nullptr},
-        {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
-         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}}}},
+      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
+                           : nullptr},
+         {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}}}}},
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
@@ -377,6 +363,57 @@ void dispatch_fp8_rowwise_kernel(
   }
 }
 
+void check_inputs(
+    at::Tensor a,
+    at::Tensor b,
+    at::Tensor scale_a,
+    at::Tensor scale_b,
+    std::optional<at::Tensor> bias,
+    at::Tensor out) {
+  TORCH_CHECK(a.is_cuda());
+  TORCH_CHECK(a.device() == b.device());
+  TORCH_CHECK(scale_a.device() == a.device());
+  TORCH_CHECK(scale_b.device() == b.device());
+
+  TORCH_CHECK(a.dtype() == at::kFloat8_e4m3fn || a.dtype() == at::kFloat8_e5m2);
+  TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
+  TORCH_CHECK(scale_a.dtype() == at::kFloat);
+  TORCH_CHECK(scale_b.dtype() == at::kFloat);
+
+  TORCH_CHECK(a.dim() == 2);
+  TORCH_CHECK(b.dim() == 2);
+  TORCH_CHECK(a.size(1) == b.size(0));
+  TORCH_CHECK(scale_a.dim() == 2);
+  TORCH_CHECK(scale_b.dim() == 2);
+  TORCH_CHECK(scale_a.size(0) == a.size(0));
+  TORCH_CHECK(scale_a.size(1) == 1);
+  TORCH_CHECK(scale_b.size(0) == 1);
+  TORCH_CHECK(scale_b.size(1) == b.size(1));
+
+  TORCH_CHECK(a.stride(1) == 1);
+  TORCH_CHECK(a.stride(0) >= a.size(1));
+  TORCH_CHECK(b.stride(0) == 1);
+  TORCH_CHECK(b.stride(1) >= b.size(0));
+  TORCH_CHECK(scale_a.stride(0) == 1);
+  TORCH_CHECK(scale_b.stride(1) == 1);
+
+  if (bias.has_value()) {
+    TORCH_CHECK(bias->device() == b.device());
+    TORCH_CHECK(bias->dtype() == at::kFloat || bias->dtype() == at::kBFloat16);
+    TORCH_CHECK(bias->dim() == 1);
+    TORCH_CHECK(bias->size(0) == b.size(1));
+    TORCH_CHECK(bias->stride(0) == 1);
+  }
+
+  TORCH_CHECK(out.device() == a.device());
+  TORCH_CHECK(out.dtype() == at::kBFloat16);
+  TORCH_CHECK(out.dim() == 2);
+  TORCH_CHECK(out.size(0) == a.size(0));
+  TORCH_CHECK(out.size(1) == b.size(1));
+  TORCH_CHECK(out.stride(1) == 1);
+  TORCH_CHECK(out.stride(0) >= out.size(1));
+}
+
 } // namespace
 
 #endif // !defined(USE_ROCM)
@@ -391,26 +428,12 @@ void f8f8bf16_rowwise(
     bool use_fast_accum,
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
-  // Check datatypes.
-  TORCH_CHECK(
-      x_scale.dtype() == at::kFloat && w_scale.dtype() == at::kFloat,
-      "Scale tensors must be float32.");
-  if (bias.has_value()) {
-    TORCH_CHECK(
-        bias.value().dtype() == at::kFloat ||
-            bias.value().dtype() == at::kBFloat16,
-        "Bias type must be bfloat16 or float32 if provided.");
-  }
-  // Extract problem size.
-  int M = XQ.size(0);
-  int N = WQ.size(1);
-  int K = XQ.size(1);
+  check_inputs(XQ, WQ, x_scale, w_scale, bias, out);
 
   bool bf16_bias = bias.has_value() && bias->dtype() == at::kBFloat16;
 
   // Templatize based on input dtype.
   bool use_e5m2 = XQ.dtype() == at::kFloat8_e5m2;
-  TORCH_CHECK(WQ.dtype() == at::kFloat8_e4m3fn, "For RowWise scaling the second input is required to be a float8_e4m3fn dtype.");
 
   if (bf16_bias) {
     if (use_fast_accum) {
