@@ -32,7 +32,7 @@ RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
          *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
-    curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh"
+    curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
@@ -73,7 +73,7 @@ ARG TARGETPLATFORM
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              pip install --extra-index-url https://download.pytorch.org/whl/${CUDA_VERSION#.}/ torch torchvision torchaudio ;;
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
