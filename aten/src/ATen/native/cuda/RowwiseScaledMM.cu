@@ -74,14 +74,6 @@ using DtypeAccum = float;
 using DtypeEpilogue = float;
 using DtypeOutput = cutlass::bfloat16_t;
 
-template <typename T>
-struct identity {
-  CUTLASS_HOST_DEVICE
-  T operator()(T lhs) const {
-    return lhs;
-  }
-};
-
 using Multiply = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::multiplies,
     DtypeEpilogue,
@@ -95,7 +87,7 @@ using Add = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::FloatRoundStyle::round_to_nearest>;
 
 using Cast = cutlass::epilogue::fusion::Sm90Compute<
-    identity,
+    cutlass::epilogue::thread::Identity,
     DtypeOutput,
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
@@ -172,17 +164,17 @@ void f8f8bf16_rowwise_impl(
       cute::Shape<cute::Int<TBS_M>, cute::Int<TBS_N>, cute::Int<TBS_K>>;
 
   // Implement rowwise scaling epilogue.
-  constexpr int ColBcastStages = 0;
-  constexpr int RowBcastStages = PONG ? 2 : 1;
+  constexpr int ColBroadcastStages = 0;
+  constexpr int RowBroadcastStages = PONG ? 2 : 1;
 
   using XScale = cutlass::epilogue::fusion::
-      Sm90ColBroadcast<ColBcastStages, TileShape, DtypeScale>;
+      Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
 
   using WScale = cutlass::epilogue::fusion::
-      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeScale>;
+      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeScale>;
 
   using Bias = cutlass::epilogue::fusion::
-      Sm90RowBroadcast<RowBcastStages, TileShape, DtypeBias>;
+      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>;
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
