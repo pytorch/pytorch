@@ -261,6 +261,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_xlogy);
   OP_DECOMPOSE2(special_xlogy, other_scalar);
   OP_DECOMPOSE2(special_xlogy, self_scalar);
+  OP_DECOMPOSE(_scaled_dot_product_attention_math);
 
 
   m.impl("split.sizes", native::split_symint);
