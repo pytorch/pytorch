@@ -506,9 +506,9 @@ class DistMathOpsTest(DTensorTestBase):
                             assert not p.requires_grad
                         else:
                             assert p.requires_grad
+
                 # forward step for both local and distributed models
                 x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
-
                 x_local = x.detach().clone()
                 output_local = model_local(x_local)
 

@@ -44,11 +44,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
-reduce_scatter, all_gather = (
+reduce_scatter, all_gather, all_reduce = (
     c10d_functional.reduce_scatter_tensor,
     c10d_functional.all_gather_into_tensor,
+    c10d_functional.all_reduce,
 )
-all_reduce = c10d_functional.all_reduce
 
 
 class ExpCommCounts(NamedTuple):

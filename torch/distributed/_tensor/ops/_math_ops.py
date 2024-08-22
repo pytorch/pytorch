@@ -906,7 +906,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for PlacementStrategy
         output_specs_list: List[Optional[DTensorSpec]] = []
-        op_args_target_input_specs: List[DTensorSpec] = []
+        input_specs_list: List[DTensorSpec] = []
         redistribute_costs = []
 
         input_src_spec = input_placement_strategy.output_spec
@@ -925,13 +925,11 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             placements=_replicate_dims_start_at(input_src_spec.placements, axis),
             tensor_meta=input_src_spec.tensor_meta,
         )
-        op_args_target_input_specs.append(grad_out_target_spec)
+        input_specs_list.append(grad_out_target_spec)
         redistribute_costs.append(
             generate_redistribute_costs(grad_out_strategy, grad_out_target_spec)
         )
-        output_specs_list.append(grad_out_target_spec) if output_mask[
-            0
-        ] else output_specs_list.append(None)
+        output_specs_list.append(grad_out_target_spec if output_mask[0] else None)
 
         # arg: input
         input_target_spec = DTensorSpec(
@@ -939,26 +937,25 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             placements=_replicate_dims_start_at(input_src_spec.placements, axis),
             tensor_meta=input_src_spec.tensor_meta,
         )
-        op_args_target_input_specs.append(input_target_spec)
+        input_specs_list.append(input_target_spec)
         redistribute_costs.append(
             generate_redistribute_costs(input_strategy, input_target_spec)
         )
 
         # arg: mean, rstd
         mean_src_spec = mean_strategy.strategies[idx].output_spec
-        op_args_target_input_specs.append(mean_src_spec)
+        input_specs_list.append(mean_src_spec)
         redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
         rstd_src_spec = rstd_strategy.strategies[idx].output_spec
-        op_args_target_input_specs.append(rstd_src_spec)
+        input_specs_list.append(rstd_src_spec)
         redistribute_costs.append([0.0 for _ in rstd_strategy.strategies])
 
         def _add_target_input_spec(strategy) -> DTensorSpec:
             # shared logic for setting the weight and bias target input specs
             assert isinstance(strategy, OpStrategy)
             src_spec = strategy.strategies[idx].output_spec
-            nonlocal op_args_target_input_specs, redistribute_costs
             # no need to redistribute since they should be replicated in forward pass
-            op_args_target_input_specs.append(src_spec)
+            input_specs_list.append(src_spec)
             redistribute_costs.append([0.0 for _ in strategy.strategies])
             return src_spec
 
@@ -976,55 +973,48 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             out_placements = map_placements_after_reduction(
                 inp_placements, outer_dims, reduce_dims_map, "sum"
             )
-            if output_mask[1]:
-                output_specs_list.append(
-                    DTensorSpec(
-                        mesh=mesh,
-                        placements=out_placements,
-                        tensor_meta=weight_src_spec.tensor_meta,
-                    )
-                )
-            else:
-                output_specs_list.append(None)
+            weight_out_spec = DTensorSpec(
+                mesh=mesh,
+                placements=out_placements,
+                tensor_meta=weight_src_spec.tensor_meta,
+            )
+            output_specs_list.append(weight_out_spec if output_mask[1] else None)
         else:
-            assert not output_mask[1]
+            assert (
+                output_mask[1] is False
+            ), "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
             output_specs_list.append(None)
 
         # arg: bias
         # d_bias = sum(grad_out, outer_dim, keepdim=False)
         if bias_strategy is not None:
             bias_src_spec = _add_target_input_spec(bias_strategy)
-            grad_out_spec = (
-                output_specs_list[0] if output_mask[0] else input_target_spec
-            )
-            assert isinstance(grad_out_spec, DTensorSpec)
             # d_bias spec follows a reduction over grad_out
-            inp_placements = _replicate_dims_start_at(grad_out_spec.placements, axis)
+            inp_placements = _replicate_dims_start_at(
+                grad_out_target_spec.placements, axis
+            )
             reduce_dims_map = _infer_reduce_dims_map(
-                outer_dims, grad_out_spec.ndim, False
+                outer_dims, grad_out_target_spec.ndim, False
             )
             out_placements = map_placements_after_reduction(
                 inp_placements, outer_dims, reduce_dims_map, "sum"
             )
-
-            if output_mask[2]:
-                output_specs_list.append(
-                    DTensorSpec(
-                        mesh=mesh,
-                        placements=out_placements,
-                        tensor_meta=bias_src_spec.tensor_meta,
-                    )
-                )
-            else:
-                output_specs_list.append(None)
+            bias_out_spec = DTensorSpec(
+                mesh=mesh,
+                placements=out_placements,
+                tensor_meta=bias_src_spec.tensor_meta,
+            )
+            output_specs_list.append(bias_out_spec if output_mask[2] else None)
         else:
-            assert not output_mask[2]
+            assert (
+                output_mask[2] is False
+            ), "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
             output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(
             PlacementStrategy(
                 output_specs=tuple(output_specs_list),
-                input_specs=op_args_target_input_specs,
+                input_specs=input_specs_list,
                 redistribute_cost=redistribute_costs,
             )
         )
