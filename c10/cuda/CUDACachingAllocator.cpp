@@ -26,7 +26,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <regex>
@@ -999,7 +998,7 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     } else {
       ss << "Process " << proc.pid;
     }
-    ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
+    ss << " has " << format_memory_size(proc.usedGpuMemory) << " memory in use. ";
   }
   return ss.str();
 #else
@@ -1231,7 +1230,7 @@ class DeviceCachingAllocator {
       std::string allowed_info;
 
       if (set_fraction) {
-        allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+        allowed_info = format_memory_size(allowed_memory_maximum) + " allowed; ";
       }
 
       std::string proc_info = reportProcessMemoryInfo(device);
@@ -1277,7 +1276,7 @@ class DeviceCachingAllocator {
       std::string private_pool_msg;
 
       if (allocated_in_private_pools > 0) {
-        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+        private_pool_msg = "with " + format_memory_size(allocated_in_private_pools) +
             " allocated in private pools (e.g., CUDA Graphs), ";
       }
 
@@ -1317,22 +1316,22 @@ class DeviceCachingAllocator {
           OutOfMemoryError,
           false,
           "CUDA out of memory. Tried to allocate ",
-          format_size(alloc_size),
+          format_memory_size(alloc_size),
           ". GPU ",
           static_cast<int>(device),
           " has a total capacity of ",
-          format_size(device_total),
+          format_memory_size(device_total),
           " of which ",
-          format_size(device_free),
+          format_memory_size(device_free),
           " is free. ",
           proc_info,
           allowed_info,
           "Of the allocated memory ",
-          format_size(allocated_bytes + allocated_in_private_pools),
+          format_memory_size(allocated_bytes + allocated_in_private_pools),
           " is allocated by PyTorch, ",
           private_pool_msg,
           "and ",
-          format_size(
+          format_memory_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
@@ -3696,25 +3695,6 @@ void local_raw_delete(void* ptr) {
 }
 
 } // namespace Native
-// Size pretty-printer
-std::string format_size(uint64_t size) {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024) {
-    os << size << " bytes";
-  } else if (size <= 1048576) {
-    os << (static_cast<double>(size) / 1024.0);
-    os << " KiB";
-  } else if (size <= 1073741824ULL) {
-    os << static_cast<double>(size) / 1048576.0;
-    os << " MiB";
-  } else {
-    os << static_cast<double>(size) / 1073741824.0;
-    os << " GiB";
-  }
-  return os.str();
-}
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.

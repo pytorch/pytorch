@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/CachingDeviceAllocator.h>
+#include <c10/core/Allocator.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
