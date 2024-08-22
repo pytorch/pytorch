@@ -3,6 +3,7 @@
 
 import functools
 from collections import namedtuple
+from contextlib import nullcontext
 from typing import Callable, Optional
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
@@ -261,7 +262,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_B: int = B,
         KV_H: int = Hkv,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         assert Q_H % KV_H == 0
         q = torch.randn(
@@ -271,10 +272,10 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=False
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -311,7 +312,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_B: int = B,
         KV_H: int = Hkv,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         if not golden_call:
             golden_call = sdpa_call
@@ -322,10 +323,10 @@ class TestFlexDecoding(InductorTestCase):
             requires_grad=False,
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=False
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=False
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -540,6 +541,18 @@ class TestFlexDecoding(InductorTestCase):
             return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    @supported_platform
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
+        qk_d, v_d = head_dims
+        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
+        with context:
+            self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
