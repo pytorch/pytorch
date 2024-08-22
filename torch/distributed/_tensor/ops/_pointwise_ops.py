@@ -570,6 +570,7 @@ for_each_ops = [
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
     aten._foreach_zero_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
 ]
 
 for_each_linearity_ops = [

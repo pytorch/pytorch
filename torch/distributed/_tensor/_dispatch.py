@@ -224,7 +224,12 @@ class OpDispatcher:
             if output_sharding.output_spec is not None:
                 return args[0]
             else:
+                if op_call == aten._amp_foreach_non_finite_check_and_unscale_.default:
+                    found_inf = args[1]
+                    work = mesh.get_group().allreduce(found_inf)
+                    work.wait()
                 return None
+
         elif _is_out_variant_op(op_call):
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
