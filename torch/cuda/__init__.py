@@ -25,6 +25,7 @@ from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -53,18 +54,19 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        import pynvml  # type: ignore[import]
+        if not _version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 

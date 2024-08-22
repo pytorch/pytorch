@@ -397,7 +397,6 @@ class SIMDKernel(Kernel):
         Hook called right before codegen with every index that will be
         used in the fused kernel.
         """
-        pass
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         prior = self.inside_reduction
@@ -1394,7 +1393,26 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
 
         self.codegen_comment(node_schedule)
-        final_kernel.call_kernel(final_kernel.kernel_name)
+
+        # debug printing values of intermediate tensors
+        # Note: MultiKernel debug printing is not supported for now
+        enable_debug_printer = (
+            config.aot_inductor.debug_intermediate_value_printer
+            and not isinstance(final_kernel, MultiKernel)
+        )
+        _, call_args, arg_signatures, _ = (
+            final_kernel.args.python_argdefs()
+            if not isinstance(final_kernel, MultiKernel)
+            else [None, [], None, None]
+        )
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.enable_debug_printer = enable_debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, final_kernel
+        )
+        with debug_printer_manager:
+            final_kernel.call_kernel(final_kernel.kernel_name)
+
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
@@ -1516,7 +1534,16 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+
+        # debug printing values of intermediate tensors
+        _, call_args, arg_signatures, _ = kernel.args.python_argdefs()
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args, kernel_name, arg_signatures, kernel
+        )
+        with debug_printer_manager:
+            kernel.call_kernel(kernel_name, template_node.node)
+
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
@@ -1743,6 +1770,28 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
+
+        # Optionally, prefer tiling into as many dimensions as possible.
+        if config.triton.prefer_nd_tiling:
+            # Get candidate tilings from the node ranges.
+            node_ranges = [
+                node.get_ranges()[0]
+                for node in EnableReduction.filter(node_schedule)
+                if isinstance(node, scheduler.SchedulerNode)
+            ]
+            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            for node_range in node_ranges:
+                # Collapse leading dims, to fit in the maximum dimensionality.
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
+                new_tilings.add(tuple(tiling))
+
+            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+            # Since this is a stable sort, ties are broken by schedule order.
+            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
+            ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

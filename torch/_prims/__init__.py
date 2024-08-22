@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._higher_order_ops.effects import new_token_tensor
 from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
@@ -274,6 +275,7 @@ def _make_prim(
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
     use_old_custom_ops_api: bool = False,
+    register_conj_neg_fallthrough: bool = False,
 ):
     """
     Creates a primitive operation.
@@ -324,6 +326,11 @@ def _make_prim(
             schema=schema,
         )
         prim_def.register_fake(meta)
+
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -704,6 +711,7 @@ clone = _make_prim(
     impl_aten=torch.clone,
     doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
+    register_conj_neg_fallthrough=True,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -2270,6 +2278,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    register_conj_neg_fallthrough=True,
 )
 
 
@@ -3078,7 +3087,7 @@ frexp = _make_prim(
 
 
 def _make_token_aten() -> TensorLikeType:
-    return torch.empty(0)
+    return new_token_tensor()
 
 
 _make_token = _make_prim(

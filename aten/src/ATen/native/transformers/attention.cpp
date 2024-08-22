@@ -19,7 +19,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
-#include <type_traits>
 #include <limits>
 #include <utility>
 
@@ -70,6 +69,9 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
+#include <ATen/ops/_safe_softmax.h>
+#include <ATen/ops/_safe_softmax_native.h>
+#include <ATen/ops/all.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -430,8 +432,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal, enable_gqa};
   auto backend = sdp::select_sdp_backend_cpp(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -455,12 +457,13 @@ int64_t _fused_sdp_choice_meta(
     const std::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool enable_gqa) {
   auto query_key_set = query_.key_set();
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
     return choice_int;
   }
 #else
@@ -474,7 +477,8 @@ int64_t _fused_sdp_choice_meta(
         attn_mask_,
         dropout_p,
         is_causal,
-        scale);
+        scale,
+        enable_gqa);
     return choice_int;
   }
 #endif
@@ -527,7 +531,6 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    // TODO Use the max type of the input and output
     return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
@@ -607,8 +610,49 @@ bool should_compute_logsumexp(const Tensor& query, const Tensor& key, const Tens
   return any_inputs_require_grad && gradmode_enabled;
 }
 
+std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const bool enable_gqa) {
+
+  if (!enable_gqa) {
+    return std::make_tuple(key, value);
+  }
+  const auto q_num_heads = query.sym_size(-3);
+  const auto k_num_heads = key.sym_size(-3);
+  const auto v_num_heads = value.sym_size(-3);
+
+  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
+  bool key_divisible = q_num_heads % k_num_heads == 0;
+  bool value_divisible = q_num_heads % v_num_heads == 0;
+  TORCH_CHECK(all_equal || (key_divisible && value_divisible),
+              "Number of heads in key and value must divide the number of heads in ");
+
+  if (all_equal){
+    return std::make_tuple(key, value);
+  }
+  auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
+  auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
+
+  at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
+  at::Tensor value_repeated = value.repeat_interleave_symint(repeat_value_shape, -3);
+  return std::make_tuple(std::move(key_repeated), std::move(value_repeated));
+}
+
 } // namespace
 
+Tensor _safe_softmax(
+    const Tensor& self,
+    int64_t dim,
+    std::optional<ScalarType> dtype) {
+  auto out = at::softmax(self, dim, dtype);
+  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  const auto masked = self.eq(neg_inf);
+  const auto masked_rows = all(masked, dim, true);
+  const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  return at::where(masked_rows, zero, out);
+}
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -645,12 +689,13 @@ Tensor scaled_dot_product_attention(
     const std::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool enable_gqa) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
-          query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
@@ -713,7 +758,8 @@ Tensor scaled_dot_product_attention(
           dropout_p,
           is_causal,
           std::nullopt, /*dropout_mask*/
-          scale));
+          scale,
+          enable_gqa));
     default:
       TORCH_CHECK(
           false,
@@ -725,7 +771,7 @@ Tensor scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
-        const std::optional<Tensor>& dropout_mask, std::optional<double> scale) {
+        const std::optional<Tensor>& dropout_mask, std::optional<double> scale, bool enable_gqa) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -781,7 +827,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
     attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    auto attn = at::matmul(query, key_acc.transpose(-2, -1) * scaling_factor);
+
+
+    // MQA/GQA handling
+    auto [key_expanded, value_expanded] = pre_process_group_query_attention_input(query, key_acc, value_acc, enable_gqa);
+    auto attn = at::matmul(query, key_expanded.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
       if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
         attn = attn.add(*attn_mask);
@@ -789,7 +839,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn.add_(*attn_mask);
       }
     }
-    attn = at::softmax(attn, -1);
+    attn = at::_safe_softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
         // In order to validate the correctness of the fused kernels, we need to
@@ -797,13 +847,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
         attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value_acc * dropout_scaling).to(origin_dtype), attn.to(origin_dtype));
+        return std::make_tuple(at::matmul(attn, value_expanded * dropout_scaling).to(origin_dtype), attn.to(origin_dtype));
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }
     }
 
-    return std::make_tuple(at::matmul(attn, value_acc).to(origin_dtype), attn.to(origin_dtype));
+    return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
 }
 
 std::tuple<at::Tensor, at::Tensor>

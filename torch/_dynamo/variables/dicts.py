@@ -224,7 +224,7 @@ class ConstDictVariable(VariableTracker):
             raise_observed_exception(KeyError, tx, self)
         return self.items[key]
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             unimplemented(f"dict KeyError: {arg.value}")
@@ -332,9 +332,23 @@ class ConstDictVariable(VariableTracker):
             self.items.update(kwargs)
             return ConstantVariable.create(None)
         elif name in ("get", "__getattr__") and args[0] in self:
-            return self.getitem_const(args[0])
+            return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
+        elif name == "setdefault" and arg_hashable and self.mutable_local:
+            assert not kwargs
+            assert len(args) <= 2
+            value = self.maybe_getitem_const(args[0])
+            if value is not None:
+                return value
+            else:
+                if len(args) == 1:
+                    x = ConstantVariable.create(None)
+                else:
+                    x = args[1]
+                tx.output.side_effects.mutation(self)
+                self.items[Hashable(args[0])] = x
+                return x
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -378,7 +392,7 @@ class DefaultDictVariable(ConstDictVariable):
             assert len(args) == 1
 
             if args[0] in self:
-                return self.getitem_const(args[0])
+                return self.getitem_const(tx, args[0])
             else:
                 if self.default_factory is None:
                     raise KeyError(f"{args[0]}")
@@ -392,6 +406,9 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
+# TODO: Implementing this via inheritance rather than composition is a
+# footgun, because self method calls in dict will route back to the set
+# implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
     """We model a sets as dictonary with None values"""
 
@@ -495,9 +512,22 @@ class SetVariable(ConstDictVariable):
             else:
                 arg = args[0]
             return super().call_method(tx, "update", (arg,), kwargs)
+        elif name == "remove":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] not in self:
+                unimplemented("key does not exist")
+            return super().call_method(tx, "pop", args, kwargs)
+        elif name == "discard":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] in self:
+                return super().call_method(tx, "pop", args, kwargs)
+            else:
+                return ConstantVariable.create(value=None)
         return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
 
 
@@ -640,8 +670,6 @@ class DataClassVariable(ConstDictVariable):
 
     Keeping since we wish to support dataclasses in general in the future
     """
-
-    pass
 
 
 class CustomizedDictVariable(ConstDictVariable):
