@@ -301,7 +301,7 @@ compute_flex_attention = r"""
 
 
     # [Note] Handle fully masked out rows:
-    # Li will be ∑ e^(-inf) == 0.0 for masked out rows, mi will be -inf.
+    # Li will be the sum(e^(-inf)) == 0.0 for masked out rows, mi will be -inf.
     # We set Li to 1.0 which will result in lse/out = 0.0 | after the log(li) + mi(0.0) step
     l_i = tl.where(l_i == 0.0, 1, l_i)
     masked_out_rows = (m_i == float("-inf"))
