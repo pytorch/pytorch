@@ -277,7 +277,6 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     # Check every node in the signature exists in the graph
     input_node_names = [node.name for node in exported_program.graph.nodes if node.op == "placeholder"]
-    print("INPUT NODE NAMES", input_node_names)
 
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(

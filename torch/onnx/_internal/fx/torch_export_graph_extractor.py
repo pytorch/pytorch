@@ -92,9 +92,7 @@ class TorchExport(_exporter_legacy.FXGraphExtractor):
 
         # run_decomposition generates a new graph module with decomposed ops.
         # Thus, we need to run this step after io_adapters.
-        print("GRAPH1", model.graph_module.graph)
         model = model.run_decompositions(options.decomposition_table)
-        print("GRAPH2", model.graph_module.graph)
         # Export FX graph to ONNX ModelProto.
         return self.pre_export_passes(options, model, model.graph_module, updated_model_args)  # type: ignore[return-value]
 

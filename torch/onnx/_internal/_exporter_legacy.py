@@ -1197,7 +1197,7 @@ class Exporter:
         ), torch._dynamo.config.patch(
             dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
-            print("CLASS",self.options.fx_tracer)
+            print("CLASS", self.options.fx_tracer)
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )

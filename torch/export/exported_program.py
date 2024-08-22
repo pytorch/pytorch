@@ -4,8 +4,8 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import types
 import itertools
+import types
 import warnings
 from collections import namedtuple
 from contextlib import contextmanager
@@ -464,7 +464,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         or ep.graph_signature.backward_signature is not None
     ):
         return _decompose_to_joint_ir(ep, decomp_table, _preserve_ops, joint_loss_index)
-    
+
     param_buffer_name_to_idx = {}
     count = 0
     for name, _ in itertools.chain(ep.named_parameters(), ep.named_buffers()):
@@ -472,14 +472,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
         count += 1
 
     mod = ep.module()
-    
-    param_buffer_current_idx_to_original_index = {}
-    count = 0
-    for name, _ in itertools.chain(mod.named_parameters(), mod.named_buffers()):
-        param_buffer_current_idx_to_original_index[count] = param_buffer_name_to_idx[name]
-        count += 1
 
-    print("HEY", [node.name for node in ep.graph_module.graph.nodes if node.op == "placeholder"])
+    param_buffer_original_index_to_current_idx = {}
+    for ix, (name, _) in enumerate(
+        itertools.chain(mod.named_parameters(), mod.named_buffers())
+    ):
+        param_buffer_original_index_to_current_idx[param_buffer_name_to_idx[name]] = ix
 
     fake_args = []
     for node in mod.graph.nodes:
@@ -558,7 +556,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     gm, new_graph_signature = _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
 
-    return _reorder_placeholder_same_as_original_ep_pass(gm, new_graph_signature, param_buffer_current_idx_to_original_index)
+    return _reorder_placeholder_same_as_original_ep_pass(
+        gm, new_graph_signature, param_buffer_original_index_to_current_idx
+    )
 
 
 def _decompose_exported_program(
