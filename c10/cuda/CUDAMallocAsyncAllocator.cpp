@@ -399,6 +399,7 @@ void mallocAsync(
 } // anonymous namespace
 
 void local_raw_delete(void* ptr);
+using namespace c10::CachingDeviceAllocator;
 
 // Same pattern as CUDACachingAllocator.cpp.
 struct CudaMallocAsyncAllocator : public CUDAAllocator {
@@ -664,8 +665,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
-  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) override {
+  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
     assertValidDevice(device);
 
     // Memory currently reserved by the mempool
@@ -700,7 +700,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // Many stat types are specific to the native allocator. We leave these
     // untouched. Their "struct DeviceStats"s will contain zeroed
     // values.
-    c10::CachingDeviceAllocator::DeviceStats stats;
+    DeviceStats stats;
 
     // In the native allocator:
     // allocated_bytes is the total bytes of blocks that have been malloc()ed
@@ -714,17 +714,17 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // Here, in the cudaMallocAsync allocator:
     // We simply ask the driver's opinion about active memory.
     // We don't bother distinguishing between allocated_bytes and active_bytes.
-    stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-        .current = static_cast<int64_t>(used_mem_current);
-    stats.allocated_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
-        static_cast<int64_t>(used_mem_peak);
-    stats.active_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].current =
+    stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
         static_cast<int64_t>(used_mem_current);
-    stats.active_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
+    stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
         static_cast<int64_t>(used_mem_peak);
-    stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)]
-        .current = static_cast<int64_t>(reserved_mem_current);
-    stats.reserved_bytes[static_cast<size_t>(MemoryStatType::AGGREGATE)].peak =
+    stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
+        static_cast<int64_t>(used_mem_current);
+    stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
+        static_cast<int64_t>(used_mem_peak);
+    stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current =
+        static_cast<int64_t>(reserved_mem_current);
+    stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak =
         static_cast<int64_t>(reserved_mem_peak);
 
     return stats;
