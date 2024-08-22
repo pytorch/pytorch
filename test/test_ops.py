@@ -2577,9 +2577,7 @@ class TestFakeTensor(TestCase):
     def test_fake_autocast(self, device, dtype, op):
         if op.name in fake_autocast_device_skips[device]:
             self.skipTest("Skip failing test")
-        context = (
-            torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
-        )
+        context = lambda: torch.amp.autocast(device)
         self._test_fake_helper(device, dtype, op, context)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
