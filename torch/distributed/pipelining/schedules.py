@@ -363,7 +363,7 @@ class _PipelineSchedule(ABC):
 
         # Holds the losses for each microbatch.
         self._internal_losses: List[torch.Tensor] = []
-        logger.info(f"Using {self.__class__.__name__}")  # noqa: G004
+        logger.info("Using %s", self.__class__.__name__)
 
     def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
         if stage.is_last and self._has_backward:
@@ -519,7 +519,7 @@ def _batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
     if len(p2p_ops) == 0:
         return None
     desc_str = f"{desc}, " if desc else ""
-    logger.debug(f"batch_p2p {desc_str}{p2p_ops}")  # noqa: G004
+    logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
     return dist.batch_isend_irecv(p2p_ops).pop()
 
 
@@ -660,9 +660,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.extend(works.values())
 
-            logger.debug(
-                f"[{self._stage.stage_index}] Forwarded microbatch {i}"  # noqa: G004
-            )
+            logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
         # Wait for all forward sends to finish
         # This should not have performance impact because by the time the first
@@ -710,9 +708,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.extend(works.values())
 
-            logger.debug(
-                f"[{self._stage.stage_index}] Forwarded microbatch {i}"  # noqa: G004
-            )
+            logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
             self._maybe_compute_loss(self._stage, output, target_mbs, i)
 
@@ -743,9 +739,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 works = _sorted_batch_p2p(ops, desc="bwd_send")
                 bwd_sends_to_wait.extend(works.values())
 
-            logger.debug(
-                f"[{self._stage.stage_index}] Backwarded microbatch {i}"  # noqa: G004
-            )
+            logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
@@ -2109,7 +2103,9 @@ class ScheduleFlexibleInterleaved1F1B(PipelineScheduleMulti):
 
         if total_bubbles_added > 0:
             logger.warning(
-                f"Non zero bubbles added: {total_bubbles_added=} {bubbles_added=}"  # noqa: G004
+                "Non zero bubbles added: total_bubbles_added=%s bubbles_added=%s",
+                total_bubbles_added,
+                bubbles_added,
             )
         return result
 

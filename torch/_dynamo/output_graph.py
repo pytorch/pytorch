@@ -78,6 +78,7 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
+    get_torch_function_mode_stack,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -361,7 +362,14 @@ class OutputGraph:
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+
+        # Note this returns true iff TF Mode and TF Subclasses are enabled
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
+        self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
+        # This records the initial torch function mode stack for guarding
+        self.torch_function_mode_stack = get_torch_function_mode_stack()
+
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
         # for certain exceptions. THe idea is that if the user has applied
@@ -1536,29 +1544,7 @@ class OutputGraph:
                 return False
             return True
 
-        # NB: You could try to expand this to cover more cases by simply
-        # detecting whenever you have an int output, but this is a bit
-        # dangerous in case someone adds a function that returns an int but is
-        # mutating.  So manually whitelist for now.
-        def is_accessor_node(node):
-            if (
-                node.op == "call_method"
-                and isinstance(node.args[0].meta.get("example_value"), torch.Tensor)
-                and node.target in ["size", "stride", "storage_offset", "item"]
-            ):
-                return True
-            if node.op == "call_function" and node.target in [
-                torch.ops.aten.sym_size,
-                torch.ops.aten.sym_size.default,
-                torch.ops.aten.sym_size.int,
-                torch.ops.aten.sym_stride,
-                torch.ops.aten.sym_stride.default,
-                torch.ops.aten.sym_stride.int,
-                torch.ops.aten.sym_storage_offset,
-                torch.ops.aten.sym_storage_offset.default,
-            ]:
-                return True
-            return False
+        from torch.fx.experimental.symbolic_shapes import is_accessor_node
 
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
