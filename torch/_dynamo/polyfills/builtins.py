@@ -15,7 +15,7 @@ from ..decorators import substitute_in_graph
 __all__ = [
     "all",
     "any",
-    "enumerate",
+    "enumerate___new__",
     "sum",
 ]
 
@@ -40,7 +40,7 @@ def any(iterable: Iterable[object], /) -> bool:
 
 
 @substitute_in_graph(builtins.enumerate.__new__)  # type: ignore[arg-type]
-def enumerate(
+def enumerate___new__(
     cls: type[builtins.enumerate[_T]],
     iterable: Iterable[_T],
     start: int = 0,
