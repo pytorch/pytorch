@@ -1418,8 +1418,13 @@ def get_selected_tests(options) -> List[str]:
 
     if options.mps:
         selected_tests = [
-            "test_mps", "test_metal", "test_modules", "nn/test_convolution",
-            "nn/test_dropout.py", "nn/test_pooling.py", "test_view_ops.py",
+            "test_mps",
+            "test_metal",
+            "test_modules",
+            "nn/test_convolution",
+            "nn/test_dropout.py",
+            "nn/test_pooling.py",
+            "test_view_ops.py",
         ]
     else:
         # Exclude all mps tests otherwise
