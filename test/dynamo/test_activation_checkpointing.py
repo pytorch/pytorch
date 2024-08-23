@@ -4,6 +4,7 @@ import functools
 import math
 import unittest  # noqa: F811
 from importlib import import_module
+import contextlib
 
 import torch
 import torch._dynamo.config
@@ -21,6 +22,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch._dynamo import compiled_autograd
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
@@ -1286,6 +1288,60 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(1, 1)
 
         self.assertEqual(opt_fn(x), fn(x))
+
+    @requires_cuda
+    @requires_distributed()
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_side_effect_in_forward_hooks(self):
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            CheckpointWrapper,
+        )
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+        cnt_ca = CompileCounterWithBackend(backend)
+
+        fwd_pre_hook_call_count = 0
+        fwd_hook_call_count = 0
+
+        def fwd_pre_hook(m, i):
+            nonlocal fwd_pre_hook_call_count
+            fwd_pre_hook_call_count += 1
+            return i
+
+        def fwd_hook(m, i, o):
+            nonlocal fwd_hook_call_count
+            fwd_hook_call_count += 1
+            return o
+
+        lin = torch.nn.Linear(1, 1)
+        mod = torch.nn.Sequential(lin, lin)
+        mod.register_forward_pre_hook(fwd_pre_hook)
+        mod.register_forward_hook(fwd_hook)
+        mod = CheckpointWrapper(mod)
+        ref_mod = copy.deepcopy(mod)
+
+        def fn(model, inp, compiled=False):
+            if compiled:
+                ctx = compiled_autograd.enable(lambda gm: torch.compile(gm, backend=cnt_ca, fullgraph=True))
+            else:
+                ctx = contextlib.nullcontext()
+            with ctx:
+                out = model(inp)
+                loss = out.sum()
+                loss.backward()
+                return out, loss
+
+        mod = torch.compile(mod, backend=cnt, fullgraph=True)
+        inp = torch.randn(1, 1)
+        ref_out, ref_loss = fn(ref_mod, inp, compiled=False)
+        out, loss = fn(mod, inp, compiled=True)
+        self.assertEqual(out, ref_out)
+        self.assertEqual(loss, ref_loss)
+        self.assertEqual(fwd_pre_hook_call_count, 4)
+        self.assertEqual(fwd_hook_call_count, 4)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt_ca.frame_count, 1)
 
 
 if __name__ == "__main__":
