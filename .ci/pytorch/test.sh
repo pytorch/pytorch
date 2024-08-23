@@ -396,6 +396,9 @@ test_inductor_cpp_wrapper_abi_compatible() {
 DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
+  echo $GITHUB_TOKEN
+  echo $BUILD_ENVIRONMENT
+  echo $PR_NUMBER
 
   pip_install --user "fbscribelogger"
 
