@@ -45,6 +45,9 @@ class LocalLRUCache(threading.local):
     def __call__(self, *args, **kwargs) -> object:
         return self.cache(*args, **kwargs)
 
+    def cache_info(self):
+        return self.cache.cache_info()
+
 
 class ShardingPropagator:
     def __init__(self) -> None:
