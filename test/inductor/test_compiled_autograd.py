@@ -2526,10 +2526,6 @@ known_failures_re = re.compile(
 
 # Bugs needing investigation:
 skipped_tests = {
-    # These test unconventional usage of saved tensor hooks do not leak or crash
-    # Running these tests succeed, but somehow cause other tests to fail
-    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",
-    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",
     "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
