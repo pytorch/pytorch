@@ -86,6 +86,8 @@ class Module6(torch.nn.Module):
 
 
 class LinearFunction(torch.autograd.Function):
+    generate_vmap_rule = True
+
     # Note that forward, setup_context, and backward are @staticmethods
     @staticmethod
     def forward(input, weight, bias):
@@ -119,6 +121,11 @@ class LinearFunction(torch.autograd.Function):
 class ModuleLinear(torch.nn.Module):
     def forward(self, input, weight, bias=None):
         return LinearFunction.apply(input, weight, bias)
+
+
+class ModuleBatchLinear(torch.nn.Module):
+    def forward(self, input, weight, bias=None):
+        return torch.vmap(LinearFunction.apply)(input, weight, bias)
 
 
 class MaterializingGradFunction(torch.autograd.Function):
@@ -258,6 +265,18 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         eager_result = model(input, weight)
         optim_result = opt_model(input, weight)
         self.assertEqual(optim_result, eager_result)
+
+    def test_linear_setup_context_vmap(self):
+        def fn(input, weight, bias):
+            return torch.vmap(LinearFunction.apply)(input, weight, bias)
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        batch_input = torch.randn(4, 2, 2, dtype=torch.double, requires_grad=True)
+        batch_weight = torch.randn(4, 3, 2, dtype=torch.double, requires_grad=True)
+        batch_bias = torch.randn(4, 3, dtype=torch.double, requires_grad=True)
+        ref = fn(batch_input, batch_weight, batch_bias)
+        res = compiled_fn(batch_input, batch_weight, batch_bias)
+        self.assertEqual(ref, res)
 
     def test_materialize_grad(self):
         model = MaterializingGradModule()
@@ -542,7 +561,7 @@ class GraphModule(torch.nn.Module):
         function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True]);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
+        autograd_function_apply: "f32[]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_z_, l_weird_b, l_weird_c, args_tensor_mask = [True, False, True], is_setup_ctx_defined = False, generate_vmap_rule = False);  fwd_body_0 = bwd_body_0 = l_x_ = l_z_ = l_weird_b = l_weird_c = None
         return (autograd_function_apply,)
 
     class fwd_body_0(torch.nn.Module):

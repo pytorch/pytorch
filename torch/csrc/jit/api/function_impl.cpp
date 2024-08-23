@@ -66,6 +66,7 @@ static void placeholderCreator(GraphFunction&) {
 }
 
 void GraphFunction::run(Stack& stack) {
+  C10_LOG_EVENT_SAMPLED(run, qualname().qualifiedName(), stack);
   get_executor().run(stack);
 }
 

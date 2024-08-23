@@ -1750,12 +1750,10 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
-    def __init__(
-        self, fwd_graph, setup_ctx_graph, bwd_graph, parent_source, **kwargs
-    ) -> None:
+    def __init__(self, fn_cls, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.fn_cls = fn_cls
         self.fwd_graph = fwd_graph
-        self.setup_ctx_graph = setup_ctx_graph
         self.bwd_graph = bwd_graph
         self.parent_source = parent_source
 
@@ -1804,10 +1802,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         limitation in general that we should check for.
         """
 
-        from torch.autograd.function import _is_setup_context_defined
-
-        is_setup_ctx_defined = _is_setup_context_defined(self.setup_ctx_graph)
-
         prev_side_effects = tx.output.side_effects.clone()
 
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
@@ -1820,17 +1814,13 @@ class AutogradFunctionApplyVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph)
-            fwd_args = args if is_setup_ctx_defined else [ctx, *args]
+            fwd_args = [ctx, *args]
         elif isinstance(self.fwd_graph, types.MethodType):
             fwd_fn = UserMethodVariable(
                 self.fwd_graph.__func__,
                 UserDefinedClassVariable(self.fwd_graph.__class__),
             )
-            fwd_args = (
-                [fwd_fn.obj, *args]
-                if is_setup_ctx_defined
-                else [fwd_fn.obj, ctx, *args]
-            )
+            fwd_args = [fwd_fn.obj, ctx, *args]
         else:
             unimplemented("non-function or method")
 
@@ -1845,44 +1835,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             restore_side_effects=False,
             tracer=fwd_tracer,
         )
-        _fwd_freevars = fwd_freevars.copy()
-
-        if is_setup_ctx_defined:
-            setup_ctx_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                tx.output,
-                parent=tx.output.current_tracer,
-                source_target="autograd.Function",
-            )
-
-            setup_ctx_src = AttrSource(self.parent_source, member="setup_context")
-            ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
-            if isinstance(self.setup_ctx_graph, types.FunctionType):
-                setup_ctx_fn = UserFunctionVariable(self.setup_ctx_graph)
-                setup_ctx_args = [ctx, TupleVariable(args), fwd_out]
-            elif isinstance(self.setup_ctx_graph, types.MethodType):
-                setup_ctx_fn = UserMethodVariable(
-                    self.setup_ctx_graph.__func__,
-                    UserDefinedClassVariable(self.setup_ctx_graph.__class__),
-                )
-                setup_ctx_args = [setup_ctx_fn.obj, TupleVariable(args), fwd_out]
-            else:
-                unimplemented("non-function or method")
-
-            # Speculate subgraph on the setup_context
-            (
-                (setup_ctx_out, _),
-                setup_ctx_graph,
-                setup_ctx_freevars,
-            ) = speculate_subgraph(
-                tx,
-                setup_ctx_fn,
-                setup_ctx_args,
-                {},
-                "autograd.Function",
-                set_subgraph_inputs="semi_automatic",
-                restore_side_effects=False,
-                tracer=setup_ctx_tracer,
-            )
 
         if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
             if (
@@ -1925,7 +1877,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
-        with tx.output.subtracer(fwd_graph, fwd_tracer), tx.strict_translation_mode(
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
@@ -1996,66 +1948,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
 
-        if is_setup_ctx_defined:
-            # Rewrite the output of setup_ctx_graph to (output, stuff_necessary_for_setup_ctx)
-            for node in setup_ctx_graph.find_nodes(op="output"):
-                setup_ctx_graph.erase_node(node)
-                break
-
-            # Because we lift the bwd_freevars as inputs of the bwd_graph,
-            # we have to manually add the bwd_freevars as output of fwd_graph.
-            # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
-            # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
-            setup_ctx_proxy_of_bwd_freevars = []
-            for k in bwd_freevars.keys():
-                if k in setup_ctx_freevars:
-                    setup_ctx_proxy_of_bwd_freevars.append(setup_ctx_freevars[k])
-                else:
-                    setup_ctx_proxy_of_bwd_freevars.append(k)
-
-            if (
-                isinstance(setup_ctx_out, ConstantVariable)
-                and setup_ctx_out.value is None
-            ):
-                setup_ctx_graph.output(None)
-            else:
-                new_setup_ctx_graph_outputs = (
-                    setup_ctx_out.as_proxy(),
-                    setup_ctx_proxy_of_bwd_freevars,
-                )
-                new_setup_ctx_graph_outputs = pytree.tree_map(
-                    lambda x: x.node, new_setup_ctx_graph_outputs
-                )
-                setup_ctx_graph.output(new_setup_ctx_graph_outputs)
-            setup_ctx_graph.lint()
-
-            # Store setup_ctx_body
-            setup_ctx_nn_modules = (
-                tx.output.tracing_context.module_context.copy_graphstate()
-            )
-            setup_ctx_name = add_subgraph(
-                tx,
-                "setup_ctx_body",
-                torch.fx.GraphModule(fwd_nn_modules.nn_modules, setup_ctx_graph),
-            )
-
-            setup_ctx_node = make_attr(tx, setup_ctx_name)
-
-            # # The type of original args can be arbitrary, but we only support basic type in FX graph.
-            # # So the speculated subgraph input includes original tensor args and the lifted freevars.
-            # # We need to filter out the original tensor args and concat them with the lifted freevars
-            # # to generate the proxy args for the FX call_function node.
-            # filtered_args = []
-            # # A boolean list to mark if the type of corresponding argument is tensor.
-            # # This is used to determine if a FX node's argument should be an argument of
-            # # ApplyTemplate.forward and if we should skip the output from ApplyTemplate.backward
-            # # at torch._functorch.autograd_function.AutogradFunctionApply.
-            # args_tensor_mask = [False] * len(args)
-            # for i, arg in enumerate(args):
-            #     if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
-            #         filtered_args.append(arg)
-            #         args_tensor_mask[i] = True
-
         # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
         new_bwd_graph_outputs = None
         for node in bwd_graph.find_nodes(op="output"):
@@ -2109,11 +2001,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         tx.output.side_effects = prev_side_effects
 
+        from torch.autograd.function import _is_setup_context_defined
+
+        is_setup_ctx_defined = _is_setup_context_defined(self.fn_cls.setup_context)
+        generate_vmap_rule = self.fn_cls.generate_vmap_rule
+
         p_args = (
             fwd_node,
-            setup_ctx_node if is_setup_ctx_defined else None,
             bwd_node,
-            *([arg.as_proxy() for arg in filtered_args] + list(_fwd_freevars.keys())),
+            *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
         )
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
@@ -2130,7 +2026,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={"args_tensor_mask": args_tensor_mask},
+                kwargs={
+                    "args_tensor_mask": args_tensor_mask,
+                    "is_setup_ctx_defined": is_setup_ctx_defined,
+                    "generate_vmap_rule": generate_vmap_rule,
+                },
             ),
             example_value=example_value,
         )
