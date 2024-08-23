@@ -374,7 +374,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                     f"\nThe error stack is reproduced here:\n{e}"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
-                pass
 
             continue
 

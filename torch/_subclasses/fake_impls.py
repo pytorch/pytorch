@@ -618,7 +618,6 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
 @register_op_impl(aten._nested_view_from_buffer.default)
 @register_op_impl(aten._nested_view_from_buffer_copy.default)
-@register_op_impl(aten._nested_strided_to_jagged.default)
 def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
         "torch.compile does not support strided NestedTensor"
@@ -1130,13 +1129,15 @@ def make_fast_binary_impl(slow_ref):
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and op.shape == final_shape
+                and guard_size_oblivious(sym_eq(op.shape, final_shape))
             ):
                 break
         else:

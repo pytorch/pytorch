@@ -11,7 +11,7 @@ import torch
 import torch.fx
 from torch._guards import Source
 
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..source import AttrSource
@@ -136,7 +136,7 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -145,7 +145,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
@@ -505,6 +505,9 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
