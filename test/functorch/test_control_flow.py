@@ -1332,15 +1332,27 @@ def forward(self, pred_1, x_1):
     def test_pointwise_scan_RNN(self, device):
         dim = 1
 
-        rnn = torch.nn.RNN(input_size=1, hidden_size=1, batch_first=True, device=device)
-        x = torch.randn(1, 2, 1, device=device)
-        h = torch.randn(1, 2, 1, device=device)
+        rnn = torch.nn.RNN(input_size=5, hidden_size=7, device=device)
+        x = torch.randn(1, 2, 5, device=device)
+        h = torch.randn(1, 2, 7, device=device)
+        
+        new_state_dict = {
+            'weight_ih_l0': torch.ones_like(rnn.weight_ih_l0),
+            'bias_ih_l0': torch.ones_like(rnn.bias_ih_l0),
+            'weight_hh_l0': torch.ones_like(rnn.weight_hh_l0),
+            'bias_hh_l0': torch.ones_like(rnn.bias_hh_l0),
+        }
+        rnn.load_state_dict(new_state_dict)
 
         def RNN(x: torch.Tensor, y: torch.Tensor):
-            c_new = y[0] @ rnn.weight_ih_l0.T + rnn.bias_ih_l0
-            h_new = torch.tanh(c_new + x[1] @ rnn.weight_hh_l0.T + rnn.bias_hh_l0)
-            return (c_new, h_new)
-
+            W_ih = torch.ones((5, 7), device=device)
+            b_ih = torch.ones((7), device=device)
+            W_hh = torch.ones((7, 7), device=device)
+            b_hh = torch.ones((7), device=device)
+            c_new = y[0] @ W_ih + b_ih
+            h_new = torch.tanh(c_new + x[1] @ W_hh + b_hh)
+            return (y[0], h_new)
+        
         inp = (
             torch.concat([torch.zeros_like(x[:, 0:1, :]), x], dim),
             torch.concat([torch.clone(h[:, 0:1, :]), h], dim),
@@ -1348,8 +1360,8 @@ def forward(self, pred_1, x_1):
 
         result = scan(RNN, inp, dim)
         result_out = result[1][:, 1:, :]
-        expected_result = rnn(x, torch.unsqueeze(h[:, 0, :], 0))
-        expected_result_out = expected_result[0]
+        expected_result = rnn(torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0))
+        expected_result_out = torch.permute(expected_result[0], (1, 0, 2))
 
         self.assertEqual(result_out, expected_result_out)
 

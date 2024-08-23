@@ -9,6 +9,7 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    autograd_not_implemented,
     _set_compilation_env,
     reenter_make_fx,
     unique_graph_id,
@@ -124,8 +125,8 @@ def scan(
     ndim = len(shape)
     dim = utils.canonicalize_dim(ndim, dim)
 
-    for x in leaves[1:]:
-        assert x.shape == shape, "All input tensors must have the same shape"
+    # for x in leaves[1:]:
+    #     assert x.shape == shape, "All input tensors must have the same shape"
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
@@ -174,10 +175,12 @@ def generic_scan(operator, elems_flat, dim=0):
 def trace_scan(
     proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
+    from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
+    
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.empty_like(
-                x,
+                aten.slice(x, dim, 0, 1, 1),
                 dtype=x.dtype,
                 device=x.device,
                 requires_grad=x.requires_grad,
@@ -204,15 +207,17 @@ def trace_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
-        assert (
-            o_meta.shape == ()
-        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, input, dim)
+    
+    out = maybe_handle_decomp(proxy_mode, scan_op, args, {})
+    if out is not NotImplemented:
+        return out
+    
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
@@ -229,14 +234,9 @@ def scan_op_dense(combine_fn, input, dim):
     raise NotImplementedError("scan is not implemented for eager")
 
 
-# scan_op.py_impl(DispatchKey.Autograd)(
-#     autograd_not_implemented(scan_op, deferred_error=True)
-# )
-scan_op.py_impl(DispatchKey.Autograd)
-
-
-def scan_autograd(combine_fn, input, dim):
-    return generic_scan(combine_fn, input, dim)
+scan_op.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(scan_op, deferred_error=True)
+)
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)

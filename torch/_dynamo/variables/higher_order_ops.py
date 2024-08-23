@@ -1101,7 +1101,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
-        reason="associative_scan must be captured completely with torch.compile."
+        reason="scan must be captured completely with torch.compile."
     )
     def call_function(
         self,
@@ -1128,7 +1128,24 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         null_shape = SourcelessBuilder.create(tx, ())
         sub_args = [
-            leaf.call_method(tx, "new_empty", args=(null_shape,), kwargs={})
+            leaf.call_method(
+                tx,
+                "new_empty",
+                args=(
+                    SourcelessBuilder.create(
+                        tx,
+                        leaf.size
+                        if leaf.size is not None
+                        else BuiltinVariable(getattr)
+                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+                        .items,
+                    ),
+                ),
+                kwargs={
+                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+                },
+            )
             for leaf in itertools.chain(input.items, input.items)
         ]
         (
@@ -1169,11 +1186,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
                     + f"got {combine_result_meta.dtype}"
-                )
-
-            if combine_result_meta.shape != ():
-                unimplemented(
-                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
