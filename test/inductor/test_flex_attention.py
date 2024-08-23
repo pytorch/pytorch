@@ -4,6 +4,7 @@
 import functools
 import string
 from collections import namedtuple
+from contextlib import nullcontext
 from typing import Callable, Optional
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
+    _score_mod_signature,
     and_masks,
     BlockMask,
     create_block_mask,
@@ -212,8 +214,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
-        # TODO: Make this check stricter after updating eager SDPA masked_softmax semantics
-        if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
+        if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
             self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
@@ -263,7 +264,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_test(
         self,
-        score_mod: Callable,
+        score_mod: _score_mod_signature,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = H,
@@ -272,20 +273,20 @@ class TestFlexAttention(InductorTestCase):
         KV_B: int = B,
         KV_H: int = H,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
     ):
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        block_mask = None
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -294,7 +295,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
 
         golden_out.backward(backward_grad.to(torch.float64))
         ref_out.backward(backward_grad)
@@ -326,16 +327,16 @@ class TestFlexAttention(InductorTestCase):
         KV_B: int = B,
         KV_H: int = H,
         KV_S: int = S,
-        KV_D: int = D,
+        V_D: int = D,
     ):
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
@@ -344,7 +345,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_call(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
 
         golden_out.backward(backward_grad.to(torch.float64))
         ref_out.backward(backward_grad)
@@ -1149,6 +1150,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    @supported_platform
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
+        qk_d, v_d = head_dims
+        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
+        with context:
+            self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+
     @supported_platform
     def test_autograd_function_in_score_mod(self):
         class ApplyMask(torch.autograd.Function):
@@ -1437,7 +1450,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
-    def test_fully_masked_out_rows(self):
+    @common_utils.parametrize("compile", [True, False])
+    def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
         query = torch.randn(
             (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
@@ -1448,7 +1462,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         value = torch.randn(
             (B, H, S, D), dtype=torch.float32, device="cuda", requires_grad=True
         )
-        do = torch.randn((B, H, S, D), dtype=torch.float32, device="cuda")
 
         M = S // 2
 
@@ -1456,14 +1469,32 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return q < M
 
         block_mask = create_block_mask(mask_mod, 1, 1, S, S)
-        out = torch.compile(flex_attention, dynamic=False)(
-            query, key, value, block_mask=block_mask
-        )
-        # TODO: Switch to self.run_test_with_call after updating eager SDPA masked_softmax semantics
-        self.assertEqual(out[:, :, M:, :].sum(), 0)
 
-        out.backward(do)
+        flex = (
+            torch.compile(flex_attention, dynamic=False) if compile else flex_attention
+        )
+        out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
+        self.assertEqual(out[:, :, M:, :].sum(), 0)
+        self.assertTrue((lse[:, :, M:] == 0.0).all())
+
+        loss = out.sum() + lse.sum()
+        loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
+
+    @supported_platform
+    @common_utils.parametrize("compile", [True, False])
+    def test_fully_masked_out_rows(self, compile: bool):
+        M = S // 2
+
+        def mask_mod(b, h, q, kv):
+            return q < M
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+
+        def noop_mod(score, b, h, q_idx, kv_idx):
+            return score
+
+        self.run_test(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
 
     @supported_platform
     def test_comparison_vs_sdpa(self):
@@ -1657,7 +1688,7 @@ class GraphModule(torch.nn.Module):
         fw_graph = self.fw_graph
         joint_graph = self.joint_graph
         mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 128, 128, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True, 'IS_DIVISIBLE': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'ROWS_GUARANTEED_SAFE': False, 'PRESCALE_QK': False, 'OUTPUT_LOGSUMEXP': True, 'IS_DIVISIBLE': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None

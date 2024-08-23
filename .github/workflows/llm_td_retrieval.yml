@@ -58,7 +58,7 @@ jobs:
           aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive --no-progress
 
       - name: Fetch indexes
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         with:
           max_attempts: 3
           retry_wait_seconds: 10

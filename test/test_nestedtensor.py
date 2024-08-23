@@ -2492,6 +2492,53 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             lambda: nt1.reshape(2, -1, -1, 2, 2),
         )
 
+    def test_nested_masked_select(self, device):
+        t = torch.randn([3, 3], device=device)
+        mask = torch.tensor([False], device=device)
+
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), torch.tensor([], device=device))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 0], device=device))
+
+        mask = torch.tensor([[False], [False], [True]], device=device)
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t[-1], atol=0.1, rtol=0.1)
+        self.assertEqual(njt.offsets(), torch.tensor([0, 0, 0, 3], device=device))
+
+        mask = torch.tensor(
+            [[False, False, True], [True, False, True], [False, False, True]],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(njt.offsets(), torch.tensor([0, 1, 3, 4], device=device))
+
+        t = torch.randn([2, 3, 3, 1], device=device)
+        mask = torch.tensor(
+            [
+                [
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                    [[True], [False], [True]],
+                ],
+                [
+                    [[False], [True], [True]],
+                    [[False], [True], [True]],
+                    [[True], [True], [True]],
+                ],
+            ],
+            device=device,
+        )
+        njt = torch.nested.masked_select(t, mask)
+        self.assertEqual(njt.values(), t.masked_select(mask))
+        self.assertEqual(
+            njt.offsets(),
+            torch.tensor(
+                [0, 1, 1, 2, 3, 3, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13],
+                device=device,
+            ),
+        )
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_narrow(self, device, dtype):
         nt = random_nt_from_dims([5, None, None, None], device=device, dtype=dtype)
@@ -6521,6 +6568,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
@@ -7078,6 +7126,8 @@ BACKWARD_FAILURES = {
     # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
     # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
     "clone",
+    # Calling into torch.ops.aten.size directly
+    "masked_select",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7085,6 +7135,11 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+}
+
+COMPARE_TENSOR_COMPONENT_EQUALITY = {
+    # masked_select is expected to output a different shape
+    "masked_select",
 }
 
 
@@ -7147,6 +7202,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqual(grads, grads_ref)
 
     @withXFails(COMPILE_FORWARD_FAILURES)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_compile_forward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
@@ -7164,13 +7220,17 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = f(sample.input, *sample.args, **sample.kwargs)
             out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-            self.assertEqual(out_compile, out_ref)
+            if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                self.assertEqualIgnoringNestedInts(out_compile, out_ref)
+            else:
+                self.assertEqual(out_compile, out_ref)
 
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_compile_backward(self, device, dtype, op):
         for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
             torch.compiler.reset()

@@ -40,8 +40,7 @@ class InputAdaptStep(Protocol):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
-        ...
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]: ...
 
 
 class InputAdapter:
@@ -98,8 +97,7 @@ class OutputAdaptStep(Protocol):
         self,
         model_outputs: Any,
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 class OutputAdapter:
@@ -573,7 +571,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             A tuple of the model args and kwargs.
         """
         ordered_params = tuple(
-            model.state_dict[name] for name in model.graph_signature.parameters  # type: ignore[union-attr,index]
+            model.state_dict[name]
+            for name in model.graph_signature.parameters  # type: ignore[union-attr,index]
         )
         non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
         ordered_buffers = []
@@ -583,7 +582,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             else:
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
-            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn]
+            for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.

@@ -57,6 +57,9 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
 
+# sleep in inductor for testing
+sleep_sec_TESTING_ONLY: Optional[int] = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -738,6 +741,11 @@ class cpp:
     enable_floating_point_contract_flag = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
         == "1"
+    )
+
+    # Disable the tiling select heuristic
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
     )
 
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls

@@ -670,7 +670,7 @@ class EffectTokensWrapper(CompilerWrapper):
             if outs is None:
                 return None
             # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            return outs[num_tokens:]
+            return outs[num_tokens:] if num_tokens != 0 else outs
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
@@ -1500,6 +1500,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _compiled_autograd_should_lift = False
+            _aot_id = aot_config.aot_id
+            _lazy_backward_info = lazy_backward_info
 
             @staticmethod
             def _compiled_autograd_key(ctx):
@@ -1990,6 +1992,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     class CompiledFunctionBackward(torch.autograd.Function):
                         # CompiledFunctionBackward is not yet supported in dynamo skipfiles
                         _compiled_autograd_should_lift = False
+                        _aot_id = aot_config.aot_id
 
                         @staticmethod
                         def forward(ctx, *unused_args):

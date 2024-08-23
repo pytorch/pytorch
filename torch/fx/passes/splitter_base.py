@@ -53,8 +53,8 @@ class _SplitterSettingBase:
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(
-            "--max-acc_splits",
-            "--max-acc_splits",
+            "--max-acc-splits",
+            "--max_acc_splits",
             required=False,
             type=int,
             help="Enforce a maximum number of split subgraphs.",

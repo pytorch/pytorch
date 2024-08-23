@@ -141,13 +141,13 @@ void f8f8bf16_rowwise_impl(
       cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>>;
 
   using WScale = cutlass::epilogue::fusion::Sm90RowBroadcast<
-      0,
+      PONG ? 2 : 1,
       TileShape,
       ElementComputeEpilogue,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
 
   using Bias = cutlass::epilogue::fusion::Sm90RowBroadcast<
-      0,
+      PONG ? 2 : 1,
       TileShape,
       ElementBias,
       cute::Stride<cute::Int<0>, cute::Int<1>, cute::Int<0>>>;
