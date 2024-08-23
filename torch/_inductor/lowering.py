@@ -2013,9 +2013,8 @@ def bucketize(
     ):
         return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
-            )
+        )
         
-
     # The entire boundaries tensor needs to be used by ops.bucketize, so we
     # need to realize it into global memory; or in other words, we can't
     # guarantee that boundaries.get_name() (used below) will exist unless
