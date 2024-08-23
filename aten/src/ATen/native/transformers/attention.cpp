@@ -548,7 +548,7 @@ std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
     // TODO Use the max type of the input and output
-    return at::where(attn_mask->logical_not(), -200000.0, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
+    return at::where(attn_mask->logical_not(), -65504.0, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype)));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
