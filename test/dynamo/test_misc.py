@@ -1002,7 +1002,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     graph_aot,
                     """\
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = arg1_1, y = arg0_1, _x_base_adrs = 377569152, _y_base_adrs = 377099744, _all_bases = [arg1_1, arg0_1], _all_bases_adrs = [377569152, 377099744])
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = arg1_1, y = arg0_1, _all_bases = [arg1_1, arg0_1], _observe_mutation_from = [['x'], ['y']])
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
         getitem_2: "f32[2][1]cpu" = auto_functionalized[2];  auto_functionalized = None
         add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(getitem_1, getitem_2)
@@ -1073,7 +1073,7 @@ def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu"):
 def forward(self, arg0_1: "f32[2][1]cpu"):
         select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _x_base_adrs = 370991840, _y_base_adrs = 370991840, _all_bases = [arg0_1], _all_bases_adrs = [370991840]);  select = select_1 = None
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _all_bases = [arg0_1], _observe_mutation_from = [['x', 'y']]);  select = select_1 = None
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return ()""",
@@ -1150,7 +1150,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 def forward(self, arg0_1: "f32[2][1]cpu"):
         select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1)
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _x_base_adrs = 377540320, _y_base_adrs = 377540320, _all_bases = [arg0_1], _all_bases_adrs = [377540320]);  select = select_1 = None
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = select_1, _all_bases = [arg0_1], _observe_mutation_from = [['x', 'y']]);  select = select_1 = None
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1];  auto_functionalized = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         select_2: "f32[][]cpu" = torch.ops.aten.select.int(getitem_1, 0, 0)
@@ -1232,7 +1232,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 def forward(self, arg0_1: "f32[2][1]cpu", arg1_1: "f32[2][1]cpu", arg2_1: "f32[2][1]cpu"):
         select: "f32[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         select_1: "f32[][]cpu" = torch.ops.aten.select.int(arg1_1, 0, 0)
-        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = [select_1, arg2_1], _x_base_adrs = 376224688, _y_base_adrs = [110925232, 377414032], _all_bases = [arg0_1, arg1_1, arg2_1], _all_bases_adrs = [376224688, 110925232, 377414032]);  select = select_1 = None
+        auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.mylib.foo.default, x = select, y = [select_1, arg2_1], _all_bases = [arg0_1, arg1_1, arg2_1], _observe_mutation_from = [['x'], [('y', 0)], [('y', 1)]]);  select = select_1 = None
         getitem_1: "f32[2][1]cpu" = auto_functionalized[1]
         getitem_2: "f32[2][1]cpu" = auto_functionalized[2]
         getitem_3: "f32[2][1]cpu" = auto_functionalized[3];  auto_functionalized = None
