@@ -8,8 +8,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._composable.fsdp import fully_shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
@@ -286,7 +284,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected_tensor = torch.tensor([False, False, True, True])
         expected_result = DTensor.from_local(expected_tensor, device_mesh, [Shard(0)])
         self.assertEqual(input_result, expected_result)
-
 
 
 if __name__ == "__main__":

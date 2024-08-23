@@ -459,7 +459,7 @@ def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
 
 
 @register_op_strategy(
-    [aten._log_softmax.default, aten._softmax.default],
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
     schema_info=RuntimeSchemaInfo(1),
 )
 def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
