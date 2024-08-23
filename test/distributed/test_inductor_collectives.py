@@ -1063,18 +1063,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("buf0 = empty_strided")
-            .check("buf6 = empty_strided")
-            .check(".run(arg0_1, buf0, buf6, 16")
+            .check("buf10 = empty_strided")
+            .check(".run(arg1_1, buf0, buf10, 16")
             .check(
-                "buf1 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default([buf0, arg0_1]"
+                "buf1 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default([buf0, arg1_1]"
             )
             .check("buf2 = buf1[0]")
             .check("buf3 = buf1[1]")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("buf7 = buf0; del buf0  # reuse")
-            .check(".run(buf7, 16")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("return (buf2, buf6, buf7, buf3")
+            .check("buf11 = buf0; del buf0  # reuse")
+            .check(".run(buf11, 16")
+            .check("return (buf2, buf10, buf11, buf3")
             .run(code)
         )
         out = compiled(inputs, **self.get_world_trs())
