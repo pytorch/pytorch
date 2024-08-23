@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def assert_onnx_program(
-    program: _onnx_program.ONNXProgram | None,
+    program: _onnx_program.ONNXProgram,
     *,
     rtol: float | None = None,
     atol: float | None = None,
@@ -33,8 +33,6 @@ def assert_onnx_program(
         kwargs: The keyword arguments to pass to the program.
             If None, the default example inputs in the ExportedProgram will be used.
     """
-    if program is None:
-        raise ValueError("The program is None. Please provide a program to verify.")
     exported_program = program.exported_program
     if exported_program is None:
         raise ValueError(

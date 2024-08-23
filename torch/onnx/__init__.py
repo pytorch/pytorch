@@ -7,7 +7,6 @@ __all__ = [
     "symbolic_helper",
     "utils",
     "errors",
-    "testing",
     # All opsets
     "symbolic_caffe2",
     "symbolic_opset7",
@@ -64,7 +63,6 @@ from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
 from ._exporter_states import ExportTypes
-from ._internal.exporter import testing
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,
