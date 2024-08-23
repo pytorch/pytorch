@@ -21,7 +21,7 @@ from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _validate_sdpa_input
+from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -827,10 +827,8 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 def _apply_kernel_options(query, key, value, kernel_options):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    if "ROWS_GUARANTEED_SAFE" not in kernel_options:
-        kernel_options["ROWS_GUARANTEED_SAFE"] = False
-    if "PRESCALE_QK" not in kernel_options:
-        kernel_options["PRESCALE_QK"] = False
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("PRESCALE_QK", False)
 
     # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
@@ -838,14 +836,36 @@ def _apply_kernel_options(query, key, value, kernel_options):
         query.requires_grad or key.requires_grad or value.requires_grad
     )
     output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
-    kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+    kernel_options.setdefault("OUTPUT_LOGSUMEXP", output_logsumexp)
 
     if query.size(-2) >= 128 and (query.size(-2) % 128 != 0 or key.size(-2) % 128 != 0):
-        kernel_options["IS_DIVISIBLE"] = False
+        kernel_options.setdefault("IS_DIVISIBLE", False)
     else:
-        kernel_options["IS_DIVISIBLE"] = True
+        kernel_options.setdefault("IS_DIVISIBLE", True)
 
     return kernel_options
+
+
+def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
+    if query.size(-1) != key.size(-1):
+        raise ValueError(
+            f"Expect query and key/value to have the same embedding dimension "
+            f"but got E={query.size(-1)} and E={key.size(-1)}."
+        )
+    # TODO this config segfaults with Triton without:
+    # https://github.com/triton-lang/triton/pull/4540
+    if not (
+        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
+    ):
+        raise ValueError(
+            f"NYI: Currently non power of 2 embedding dimension are not supported. "
+            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
+        )
+    if value.size(-1) > query.size(-1):
+        raise ValueError(
+            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
+            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
+        )
 
 
 def flex_attention(
@@ -913,6 +933,7 @@ def flex_attention(
     """
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
+    _validate_embed_dim(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
