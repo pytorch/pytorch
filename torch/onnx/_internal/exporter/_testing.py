@@ -25,7 +25,7 @@ def assert_onnx_program(
 ) -> None:
     """Assert that the ONNX model produces the same output as the PyTorch ExportedProgram.
     Args:
-        program: The :class:`torch_onnx.ONNXProgram` to verify.
+        program: The ``ONNXProgram`` to verify.
         rtol: Relative tolerance.
         atol: Absolute tolerance.
         args: The positional arguments to pass to the program.
