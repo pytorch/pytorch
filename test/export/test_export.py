@@ -6021,7 +6021,7 @@ def forward(self, x, b_t, y):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos, _x_base = x, _z_base = cos, _all_bases = [x, cos]);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos, _x_base_adrs = 1220240816, _z_base_adrs = 1220240336, _all_bases = [x, cos], _all_bases_adrs = [1220240816, 1220240336]);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
@@ -6033,7 +6033,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos, _x_base = x, _z_base = cos, _all_bases = [x, cos]);  x = cos = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos, _x_base_adrs = 356979488, _z_base_adrs = 356981120, _all_bases = [x, cos], _all_bases_adrs = [356979488, 356981120]);  x = cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, getitem_3, cos_1)""",
@@ -6056,7 +6056,7 @@ def forward(self, x):
 def forward(self, x):
     cos = torch.ops.aten.cos.default(x)
     cos_1 = torch.ops.aten.cos.default(x);  x = None
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1, _x_base = cos, _z_base = cos_1, _all_bases = [cos, cos_1]);  cos = cos_1 = None
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1, _x_base_adrs = 356790896, _z_base_adrs = 356651696, _all_bases = [cos, cos_1], _all_bases_adrs = [356790896, 356651696]);  cos = cos_1 = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
     return (cos_2,)""",

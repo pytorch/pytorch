@@ -129,11 +129,12 @@ def auto_functionalized_dense(
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     _all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
+    _all_bases_addresses: List[Tensor] = kwargs.pop("_all_bases_adrs", [])
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
-    _arg_to_base = {}
+    _arg_to_base_address = {}
     for name in _mutable_args_names:
-        _arg_to_base[name] = kwargs.pop(f"_{name}_base")
+        _arg_to_base_address[name] = kwargs.pop(f"_{name}_base_adrs")
 
     new_kwargs = dict(**kwargs)
     result = []
@@ -165,17 +166,6 @@ def auto_functionalized_dense(
 
     out = _mutable_op(**new_kwargs)
 
-    def transform(input):
-        if input is None:
-            return None
-
-        if isinstance(input, list):
-            return [transform(item) for item in input]
-        else:
-            return input._cdata
-
-    _arg_to_base_address = {arg: transform(t) for (arg, t) in _arg_to_base.items()}
-
     def observe_mutation(base, mutation_source):
         if (
             mutation_source.size() == base.size()
@@ -191,7 +181,7 @@ def auto_functionalized_dense(
             mutation_source.storage_offset(),
         )
 
-    for base in _all_bases:
+    for base, base_address in zip(_all_bases, _all_bases_addresses):
         # an argument is passed as none
         if base is None:
             result.append(None)
@@ -213,7 +203,7 @@ def auto_functionalized_dense(
                 for i, elem in enumerate(arg):
                     # check `base` is a base for the this argument
                     arg_base_address = _arg_to_base_address[name][i]
-                    if base._cdata != arg_base_address:
+                    if base_address != arg_base_address:
                         continue
                     mutation_source = new_kwargs[name][i]
                     base_with_effects = observe_mutation(
@@ -223,7 +213,7 @@ def auto_functionalized_dense(
             else:
                 # check `base` is a base for the this argument
                 arg_base_address = _arg_to_base_address[name]
-                if base._cdata != arg_base_address:
+                if base_address != arg_base_address:
                     continue
                 mutation_source = new_kwargs[name]
                 base_with_effects = observe_mutation(base_with_effects, mutation_source)
@@ -327,8 +317,8 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = get_mutable_arg_names(op)
 
-    all_basis = set()
-    all_basis_addresses: set[int] = set()
+    all_basis = []
+    all_basis_addresses: list[int] = []
     basis: Dict[str, Any] = {}
 
     for arg_name in mutable_args_names:
@@ -347,36 +337,43 @@ def do_auto_functionalize(
 
                 basis[arg_name].append(base)
                 if not all_basis_addresses.__contains__(base._cdata):
-                    all_basis_addresses.add(base._cdata)
-                    all_basis.add(base)
+                    all_basis_addresses.append(base._cdata)
+                    all_basis.append(base)
 
         else:
             base = arg if arg._base is None else arg._base
             basis[arg_name] = base
             if not all_basis_addresses.__contains__(base._cdata):
-                all_basis_addresses.add(base._cdata)
-                all_basis.add(base)
+                all_basis_addresses.append(base._cdata)
+                all_basis.append(base)
 
-    all_basis_list = list(all_basis)
-    all_basis_unwrapped = ctx.unwrap_tensors(all_basis_list)
+    all_basis_unwrapped = ctx.unwrap_tensors(all_basis)
 
     with ctx.redispatch_to_next():
+
+        def transform(input):
+            if input is None:
+                return None
+
+            if isinstance(input, list):
+                return [transform(item) for item in input]
+            else:
+                return input._cdata
+
         for arg in mutable_args_names:
             # several mypy errors:
-            unwrapped_kwargs[f"_{arg}_base"] = ctx.unwrap_tensors(basis.get(arg, None))  # type: ignore[call-overload,index,assignment]
+            unwrapped_kwargs[f"_{arg}_base_adrs"] = transform(basis.get(arg, None))  # type: ignore[call-overload,index,assignment]
 
         unwrapped_outs = auto_functionalized(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _all_bases_adrs=all_basis_addresses)  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = (
-        unwrapped_outs
-        if len(all_basis_list) == 0
-        else unwrapped_outs[: -len(all_basis_list)]
+        unwrapped_outs if len(all_basis) == 0 else unwrapped_outs[: -len(all_basis)]
     )
 
     unwrapped_mutable_out = (
-        [] if len(all_basis_list) == 0 else unwrapped_outs[-len(all_basis_list) :]
+        [] if len(all_basis) == 0 else unwrapped_outs[-len(all_basis) :]
     )
 
     if len(op._schema.returns) == 0:
@@ -388,7 +385,7 @@ def do_auto_functionalize(
     else:
         assert len(unwrapped_actual_out) == len(op._schema.returns)
 
-    for orig_arg, unwrapped_out in zip(all_basis_list, unwrapped_mutable_out):
+    for orig_arg, unwrapped_out in zip(all_basis, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue

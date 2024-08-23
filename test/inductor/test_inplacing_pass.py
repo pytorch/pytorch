@@ -97,7 +97,12 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         def f(x):
             out = torch.empty_like(x)
             _, new_out = auto_functionalized(
-                sin._opoverload, x=x, out=out, _out_base=out, _all_bases=[out]
+                sin._opoverload,
+                x=x,
+                out=out,
+                _out_base_adrs=1,
+                _all_bases=[out],
+                _all_bases_adrs=[1],
             )
             y = out * new_out
             return new_out, y
