@@ -1802,6 +1802,9 @@ class GuardBuilder(GuardBuilderBase):
         if not self.check_fn_manager.output_graph.export:
             output_graph.shape_env.freeze()
 
+        if self.check_fn_manager.symbolic_guard_filter_fn:
+            guards = self.check_fn_manager.symbolic_guard_filter_fn(guards)
+
         for shape_guard in guards:
             self._set_guard_export_info(guard, [shape_guard])
 
@@ -2151,8 +2154,14 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
+        hooks: Optional[torch._dynamo.hooks.Hooks] = None,
     ):
+        guard_fail_fn = hooks.guard_fail_fn if hooks else None
+        guard_filter_fn = hooks.guard_filter_fn if hooks else None
+        self.symbolic_guard_filter_fn = (
+            hooks.symbolic_guard_filter_fn if hooks else None
+        )
+
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.guard_manager = None
@@ -2193,6 +2202,9 @@ class CheckFunctionManager:
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
+
+        if guard_filter_fn:
+            guards = guard_filter_fn(guards)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (

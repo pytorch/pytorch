@@ -784,7 +784,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
-            hooks.guard_fail_fn if hooks else None,
+            hooks,
         )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
