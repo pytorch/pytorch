@@ -599,8 +599,10 @@ class SwapSavedVariables {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_variables.save(&t, std::move(t));
     if (arg.defined()) {
+      bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
       t = SavedVariable(arg.proxy_tensor, false);
+      at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
   void after(SavedVariable& t) {
