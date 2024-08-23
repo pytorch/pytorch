@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
@@ -63,6 +63,7 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-py3_8-gcc11-test:
     name: linux-jammy-py3.8-gcc11
@@ -74,6 +75,7 @@ jobs:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-docs:
     name: linux-docs
@@ -83,39 +85,42 @@ jobs:
       runner_prefix: amz2023.
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+    secrets: inherit
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.8-gcc11-no-ops
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-jammy-py3_8-gcc11-pch:
     name: linux-jammy-py3.8-gcc11-pch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.8-gcc11-pch
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
@@ -128,6 +133,7 @@ jobs:
           { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
       sync-tag: asan-build
+    secrets: inherit
 
 
   linux-jammy-py3_10-clang15-asan-test:
@@ -141,13 +147,14 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
+    secrets: inherit
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
       test-matrix: |
@@ -155,6 +162,7 @@ jobs:
           { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3_8-clang10-onnx-test:
     name: linux-focal-py3.8-clang10-onnx
@@ -166,6 +174,7 @@ jobs:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-py3_8-clang10-build:
     name: linux-focal-py3.8-clang10
@@ -197,13 +206,14 @@ jobs:
       build-environment: linux-focal-py3.8-clang10
       docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang10-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3.11-clang10
       docker-image-name: pytorch-linux-focal-py3.11-clang10
       test-matrix: |
@@ -218,6 +228,7 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3_11-clang10-test:
     name: linux-focal-py3.11-clang10
@@ -229,13 +240,14 @@ jobs:
       build-environment: linux-focal-py3.11-clang10
       docker-image: ${{ needs.linux-focal-py3_11-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_11-clang10-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-py3_12-clang10-build:
     name: linux-focal-py3.12-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3.12-clang10
       docker-image-name: pytorch-linux-focal-py3.12-clang10
       test-matrix: |
@@ -248,6 +260,7 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3_12-clang10-test:
     name: linux-focal-py3.12-clang10
@@ -258,13 +271,14 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_12-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_12-clang10-build.outputs.test-matrix }}
       timeout-minutes: 600
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       test-matrix: |
@@ -273,6 +287,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.8xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-test:
     name: linux-focal-cuda11.8-py3.10-gcc9
@@ -285,13 +300,14 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
@@ -302,6 +318,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
@@ -314,13 +331,14 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3-clang12-mobile-build
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       build-generates-artifacts: false
@@ -328,26 +346,28 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-jammy-cuda-11_8-cudnn9-py3_8-clang12-build:
     name: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-focal-py3-clang9-mobile-custom-build-static:
     name: linux-focal-py3-clang9-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3-clang9-mobile-custom-build-static
       docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       build-generates-artifacts: false
@@ -355,19 +375,21 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-focal-py3_8-clang9-xla-build:
     name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-py3.8-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.1-lite
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.12xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3_8-clang9-xla-test:
     name: linux-focal-py3_8-clang9-xla
@@ -377,6 +399,7 @@ jobs:
       build-environment: linux-focal-py3.8-clang9-xla
       docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
+    secrets: inherit
 
   win-vs2019-cpu-py3-build:
     # don't run build twice on main
@@ -395,6 +418,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
+    secrets: inherit
 
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
@@ -409,6 +433,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
@@ -423,6 +448,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
@@ -437,6 +463,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
@@ -448,6 +475,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
@@ -459,13 +487,14 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.8-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3.8-gcc111-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       build-generates-artifacts: false
@@ -473,6 +502,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_1-py3_8-build:
     # don't run build twice on main
@@ -481,7 +511,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
@@ -491,13 +521,14 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
@@ -509,6 +540,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.g5.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
@@ -520,19 +552,21 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
       test-matrix: |
         { include: [
           { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-py3-clang12-executorch-test:
     name: linux-jammy-py3-clang12-executorch
@@ -542,13 +576,14 @@ jobs:
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-py3_12-clang10-experimental-split-build:
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}amz2023.linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       use_split_build: True
       build-environment: linux-focal-py3.12-clang10
       docker-image-name: pytorch-linux-focal-py3.12-clang10
@@ -561,6 +596,8 @@ jobs:
           { config: "dynamo", shard: 2, num_shards: 3, runner: "amz2023.linux.2xlarge" },
           { config: "dynamo", shard: 3, num_shards: 3, runner: "amz2023.linux.2xlarge" },
         ]}
+    secrets: inherit
+
   linux-focal-py3_12-clang10-experimental-split-build-test:
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
@@ -570,11 +607,14 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.test-matrix }}
       timeout-minutes: 600
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}amz2023."
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm75
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '7.5'
@@ -582,6 +622,7 @@ jobs:
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm75
@@ -591,3 +632,4 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm75
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
