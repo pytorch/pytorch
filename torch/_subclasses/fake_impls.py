@@ -522,7 +522,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -784,7 +784,6 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     query = kwargs["query"]
     key = kwargs["key"]
     value = kwargs["value"]
-    compute_log_sumexp = kwargs["compute_log_sumexp"]
     # unused: attn_bias, dropout_p, is_causal, return_debug_mask, scale
 
     def convert_tensor(t, device):
@@ -794,7 +793,6 @@ def meta__scaled_dot_product_cudnn(fake_mode, func, *args, **kwargs):
     H = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
-    D_QK = query.size(-1)
     D_V = value.size(-1)
 
     res = convert_tensor(
@@ -852,9 +850,7 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
 
     B = query.size(0)
     M = query.size(1)
-    N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = convert_tensor(
@@ -979,7 +975,6 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     M = query.size(1)
     N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = convert_tensor(
@@ -1112,8 +1107,6 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
@@ -1147,7 +1140,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):

@@ -107,7 +107,7 @@ def randn(seed, offset):
 
 
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = randint4x(seed, offset, PHILOX_N_ROUNDS_DEFAULT)
+    r0, r1, _, _ = randint4x(seed, offset, PHILOX_N_ROUNDS_DEFAULT)
     r0 = hl.cast(hl.UInt(64), r0)
     r1 = hl.cast(hl.UInt(64), r1)
 

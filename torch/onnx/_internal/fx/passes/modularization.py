@@ -139,7 +139,7 @@ class _ModuleMeta:
         cls, raw_meta: _DYNAMO_NN_MODULE_META_TYPE
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX dynamo tracer."""
-        module_name, (qualified_name, module_class) = raw_meta
+        module_name, (_, module_class) = raw_meta
         return _ModuleMeta(module_name, module_class, raw_meta)
 
     @classmethod
