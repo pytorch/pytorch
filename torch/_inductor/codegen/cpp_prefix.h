@@ -302,8 +302,9 @@ at::vec::VecMask<int64_t, NI> inline get_mask_for_argmin_argmax(
   using i_t = at::vec::VecMask<int64_t, NI>;
   i_t vmask_itype = vmask.template cast<int64_t, NI>();
   v_t equal_mask = (a.value == value);
+  i_t equal_mask_itype = equal_mask.template cast<int64_t, NI>();
   i_t imask(a.index < index);
-  return i_t::blendv(vmask_itype, imask, equal_mask);
+  return i_t::blendv(vmask_itype, imask, equal_mask_itype);
 }
 
 
@@ -595,9 +596,9 @@ void mm_get_thread_blocking(
     int64_t M,
     int64_t N,
     int64_t K,
-    int64_t M0,
-    int64_t N0,
-    int64_t K0,
+    int64_t Mr,
+    int64_t Nr,
+    int64_t Kr,
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
@@ -640,12 +641,12 @@ void mm_get_thread_blocking(
                               int64_t Mt,
                               int64_t Nt,
                               int64_t Kt) {
-    return Mt == 0 || Mt_ * M0 + Nt_ * N0 < Mt * M0 + Nt * N0;
+    return Mt == 0 || Mt_ * Mr + Nt_ * Nr < Mt * Mr + Nt * Nr;
   };
 
-  int64_t m_blocks = (M + M0 - 1) / M0;
-  int64_t n_blocks = (N + N0 - 1) / N0;
-  int64_t k_blocks = (K + K0 - 1) / K0;
+  int64_t m_blocks = (M + Mr - 1) / Mr;
+  int64_t n_blocks = (N + Nr - 1) / Nr;
+  int64_t k_blocks = (K + Kr - 1) / Kr;
 
   auto [factors, count] = get_factors(num_threads);
   assert(count > 0);

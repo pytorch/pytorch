@@ -77,7 +77,10 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
-layout_constraints: Dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+# Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
+_maybe_layout_constraints: Dict[
+    torch._ops.OpOverload, Optional[Callable[..., Any]]
+] = {}
 fallbacks: Set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
@@ -87,6 +90,25 @@ foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+
+
+def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., Any]]:
+    """Get layout constraints. Returns None if there are no layout constraints."""
+    if not isinstance(fn, torch._ops.OpOverload):
+        # Only OpOverloads have layout constraints.
+        return None
+    if fn in _maybe_layout_constraints:
+        return _maybe_layout_constraints[fn]
+    # OpOverload with custom lowerings override tag-based layout constraints
+    if fn in lowerings:
+        _maybe_layout_constraints[fn] = None
+        return None
+    # We lazily register tag-based layout constraints.
+    if torch._C.Tag.needs_fixed_stride_order in fn.tags:
+        _maybe_layout_constraints[fn] = constrain_to_fx_strides
+        return _maybe_layout_constraints[fn]
+    _maybe_layout_constraints[fn] = None
+    return None
 
 
 def assert_nyi(cond, msg):
@@ -107,9 +129,9 @@ def add_needs_realized_inputs(fn):
 def add_layout_constraint(fn, constraint):
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
-            layout_constraints[getattr(fn, overload)] = constraint
+            _maybe_layout_constraints[getattr(fn, overload)] = constraint
     else:
-        layout_constraints[fn] = constraint
+        _maybe_layout_constraints[fn] = constraint
 
 
 add_needs_realized_inputs(

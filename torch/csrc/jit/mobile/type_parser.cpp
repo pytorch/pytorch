@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 
-#include <queue>
-
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
@@ -122,7 +120,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
       }
     }
     expect("]");
-    return DynamicTypeFactory::create<TupleType>(std::move(types));
+    return DynamicTypeFactory::create<TupleType>(types);
   }
   return nullptr;
 }
@@ -186,7 +184,6 @@ TypePtr TypeParser::parse() {
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
   std::vector<c10::string_view> field_names;
   std::vector<TypePtr> field_types;
-  std::string ns;
   expect(",");
   expect("[");
   while (cur() != "]") {
