@@ -668,7 +668,11 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    if (
+        statically_known_true(sym_eq(start, 0))
+        and statically_known_true(end >= 2**63 - 1)
+        and statically_known_true(sym_eq(step, 1))
+    ):
         return True
     return False
 
