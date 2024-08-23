@@ -230,23 +230,23 @@ struct VecMaskCast<
     mask_t,
     mask_n,
     typename std::enable_if_t<
-        ((mask_n == 1) || (mask_n == 2)) && (dst_n == 2 * mask_n) &&
+        (dst_n == 2 * mask_n) &&
             (std::is_same_v<mask_t, float> || std::is_same_v<mask_t, int>),
         void>> {
   static inline VecMask<int64_t, dst_n> apply(
       const VecMask<mask_t, mask_n>& vec_mask) {
-    auto result = VectorizedN<int64_t, dst_n>();
+    VectorizedN<int64_t, dst_n> result;
     auto int_mask = vec_mask.template cast<int, mask_n>();
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-    for (int i = 0; i < dst_n; i += 2) {
+    for (int i = 0; i < mask_n; ++i) {
       auto int64_vec =
           convert<int64_t, 2, int, 1>(VectorizedN<int, 1>(int_mask[i]));
-      result[i] = int64_vec[0];
-      result[i + 1] = int64_vec[1];
+      result[2 * i] = int64_vec[0];
+      result[2 * i + 1] = int64_vec[1];
     }
-    return result;
+    return VecMask<int64_t, dst_n>(result);
   }
 };
 
@@ -257,13 +257,13 @@ struct VecMaskCast<
     int64_t,
     mask_n,
     typename std::enable_if_t<
-        ((dst_n == 1) || (dst_n == 2)) && (mask_n == 2 * dst_n) &&
+        (mask_n == 2 * dst_n) &&
             (std::is_same_v<dst_t, float> || std::is_same_v<dst_t, int>),
         void>> {
   static inline VecMask<dst_t, dst_n> apply(
       const VecMask<int64_t, mask_n>& vec_mask) {
-    auto result = VectorizedN<int, dst_n>();
-    auto int64_vec = VectorizedN<int64_t, 2>();
+    VectorizedN<int, dst_n> result;
+    VectorizedN<int64_t, 2> int64_vec;
 #ifndef _MSC_VER
 #pragma unroll
 #endif
