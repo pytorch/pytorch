@@ -428,7 +428,7 @@ pr_time_benchmarks() {
      echo "could not run benchmarks on parent"
   fi
   # resetting the original code
-  git checkout --hard "${SHA1}"
+  git checkout "${SHA1}"
 }
 
 
