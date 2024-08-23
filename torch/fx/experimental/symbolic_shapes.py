@@ -3817,7 +3817,10 @@ class ShapeEnv:
                 s = val.node.expr
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
-                    if constraint is not None:
+                    if (
+                        constraint is not None
+                        and not isinstance(constraint, RelaxedUnspecConstraint)
+                    ):
                         symbol_to_constraints[s].add(constraint)
                 else:
                     constraint_violated = False
