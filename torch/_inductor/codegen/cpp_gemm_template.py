@@ -160,9 +160,9 @@ extern "C" {{export_declaration}}
                     {%- endif %}
                     {%- if w_scale_zp is not none %}
                     if (kc == k_block_start) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=False)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=False, actual_N=N)|indent(24, false) }}
                     } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=True)|indent(24, false) }}
+                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_S_2d, acc, accum=True, actual_N=N)|indent(24, false) }}
                     }
                     {%- else %}
                     if (kc == k_block_start) {
@@ -1063,7 +1063,7 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogue_nodes=epilogues,
             reindexers=reindexers,
             Y_2d=Y_2d,
-            use_local_acc=use_local_acc if not self.is_int4_woq_gemm else False,
+            use_local_acc=use_local_acc,
             maybe_k_slicing=self.maybe_k_slicing(),
             x_scale=x_scale,
             x_zp=x_zp,

@@ -472,8 +472,8 @@ inline void {{kernel_name}}_kernel(
         [(4, 64, 32), (4, 64, 64), (4, 64, 128), (4, 64, 256)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int32,
-        output_dtype=torch.bfloat16,
-        compute_dtype=torch.bfloat16,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
     ),
 )
 class CppMicroGemmInt4WoQVec(CppMicroGemmFP32Vec):
@@ -496,7 +496,8 @@ inline void {{kernel_name}}(
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc
+    int64_t ldc,
+    int64_t actual_N
 )
 """
 
@@ -517,7 +518,8 @@ inline void {{kernel_name}}(
                     K,
                     lda,
                     ldb,
-                    ldc
+                    ldc,
+                    actual_N
                 );
             } else {
                 switch (block_m) {
@@ -531,7 +533,8 @@ inline void {{kernel_name}}(
                         K,
                         lda,
                         ldb,
-                        ldc
+                        ldc,
+                        actual_N
                     );
                     break;
                 {%- endfor %}
@@ -570,7 +573,8 @@ inline void {{kernel_name}}_kernel(
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc) {
+    int64_t ldc,
+    int64_t actual_N) {
   constexpr int BLOCK_K = {{block_k}};
   constexpr int ROWS = BLOCK_M;
   constexpr int COLS = BLOCK_N / 16;
@@ -609,9 +613,9 @@ inline void {{kernel_name}}_kernel(
   // load scale and zero point
   auto load_scale_and_zeros = [&](int i, int _kb) {
     // load 2x bfloat16 vector
-    __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * ldc * 2 + 32 * i));
+    __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * actual_N * 2 + 32 * i));
     if (_kb + PREFETCH_SIZE_KB < KB) {
-      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * ldc * 2 + 32 * i, _MM_HINT_T0);
+      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * actual_N * 2 + 32 * i, _MM_HINT_T0);
     }
 
     // convert to 2x f32 vector
@@ -633,7 +637,7 @@ inline void {{kernel_name}}_kernel(
     if constexpr (accum) {
        constexpr int row = i / COLS;
        constexpr int col = i % COLS;
-       at::vec::cvtbf16_fp32(_mm256_loadu_si256((__m256i*)(C + row * ldc + col * 16)), vc[i]);
+       vc[i] = _mm512_loadu_ps(C + row * ldc + col * 16);
     } else {
       vc[i] = _mm512_setzero_ps();
     }
@@ -697,19 +701,7 @@ inline void {{kernel_name}}_kernel(
   auto storec = [&, COLS](auto i) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
-    if constexpr (COLS == 4) {
-      // when BLOCK_N = 64, handle each row at a time
-      // to reduce `cvtfp32_bf16` overhead.
-      if constexpr (col == 0) {
-        __m512i c01 = at::vec::cvtfp32_bf16(vc[row * 4 + 0], vc[row * 4 + 1]);
-        __m512i c23 = at::vec::cvtfp32_bf16(vc[row * 4 + 2], vc[row * 4 + 3]);
-        _mm512_storeu_si512((__m512i*)(C + row * ldc + 0 * 32), c01);
-        _mm512_storeu_si512((__m512i*)(C + row * ldc + 1 * 32), c23);
-      }
-    } else {
-      __m256i ci = at::vec::cvtfp32_bf16(vc[i]);
-      _mm256_storeu_si256((__m256i*)(C + row * ldc + col * 16), ci);
-    }
+    _mm512_storeu_ps(C + row * ldc + col * 16, vc[i]);
   };
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
@@ -723,6 +715,7 @@ inline void {{kernel_name}}_kernel(
         S: ir.Buffer,
         Y: ir.Buffer,
         accum: bool,
+        actual_N: int,
     ) -> str:
         """
         Generate the code for calling the templated kernel that computes
@@ -753,7 +746,8 @@ inline void {{kernel_name}}_kernel(
             res.writeline(f"{K},")
             res.writeline(f"{lda},")
             res.writeline(f"{ldb},")
-            res.writeline(f"{ldc}")
+            res.writeline(f"{ldc},")
+            res.writeline(f"{actual_N}")
         res.writeline(");")
         return res.getvalue()
 
@@ -1081,7 +1075,6 @@ def create_micro_gemm(
                 config.input_dtype == input_dtype
                 and config.compute_dtype == compute_dtype
                 and config.input2_dtype == input2_dtype
-                and config.output_dtype == output_dtype
                 # The output_dtype here is the output dtype of the micro-kernel.
                 # In some cases, the actual output dtype of the op for which the micro-kernel
                 # is being created would be same as that of the activation, but the micro-kernels

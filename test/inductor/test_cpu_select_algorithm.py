@@ -1076,7 +1076,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
 
-    @unittest.skipIf(True, "Failing when K >= 2048")
+    @unittest.skipIf(
+        not torch.cpu._is_avx512_bf16_supported(), "Test requires AVX512BF16 support"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -1095,7 +1097,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @parametrize("inner_k_tiles", (2,))
-    @parametrize("q_group_size", (32,))  # Add support more more sizes later
+    @parametrize("q_group_size", (32, 64))
     def test_int4_woq_gemm(
         self, batch_size, in_features, out_features, inner_k_tiles, q_group_size
     ):
@@ -1121,12 +1123,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
                 # Shape (out_features // 8, in_features // (inner_k_tiles * 16), 32, inner_k_tiles // 2)
                 # dtype is torch.int32
-                self.register_buffer(
-                    "weight",
-                    weight
-                    # Shape (in_features // groupsize, out_features, 2)
-                    # dtype of scales & zeros is torch.bfloat16
-                )
+                self.register_buffer("weight", weight)
+                # Shape (in_features // groupsize, out_features, 2)
+                # dtype of scales & zeros is torch.bfloat16
                 self.register_buffer("scales_and_zeros", scales_and_zeros)
 
             def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -1158,6 +1157,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         eager_mode_output = mod(a)
         mean_err = ((eager_mode_output - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
