@@ -1355,10 +1355,6 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 strides = n.meta["val"].stride()
                 if len(strides):
-                    strides = [
-                        s.node.expr if isinstance(s, torch.SymInt) else s
-                        for s in strides
-                    ]
                     allow_padding = (
                         n.name not in self.user_visible_outputs
                         and not is_input_for_as_strided
@@ -1393,8 +1389,12 @@ class GraphLowering(torch.fx.Interpreter):
                                 allow_padding=allow_padding,
                             )
                         else:
+                            strides = [
+                                s.node.expr if isinstance(s, torch.SymInt) else s
+                                for s in strides
+                            ]
                             result = ir.ExternKernel.require_exact_strides(
-                                result, strides, allow_padding=allow_padding
+                                result, new_strides, allow_padding=allow_padding
                             )
 
             # Realize if (1) any user need inputs realized, or (2) there is
