@@ -893,6 +893,27 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             code[0]
         )
 
+    @supported_platform
+    def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self):
+        torch._dynamo.reset()
+        H = Hq
+        q = torch.randn(B, H, 1, D, device="cuda")
+        for i in range(5):
+            k = torch.randn(B, H, S + i, D, device="cuda")
+            v = torch.randn(B, H, S + i, D, device="cuda")
+            compiled_flex_attention = torch.compile(flex_attention)
+            ref = flex_attention(q, k, v)
+            res = compiled_flex_attention(q, k, v)
+            tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+            torch.testing.assert_close(
+                ref, res, atol=tolerance.atol, rtol=tolerance.rtol
+            )
+            # Ensure no more re-compilation after the second automatic dynamic shape version.
+            if i == 0:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+            else:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
 
 common_utils.instantiate_parametrized_tests(TestFlexDecoding)
 
