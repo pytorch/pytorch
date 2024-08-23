@@ -103,6 +103,7 @@ try:
 except ImportError:
     has_pytest = False
 
+_IS_WINDOWS = sys.platform == "win32"
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -5229,11 +5230,18 @@ class LazyVal:
     pass
 
 
+def normalize_path_separator(orig_path: str) -> str:
+    if _IS_WINDOWS:
+        return orig_path.replace(os.sep, "/")
+    return orig_path
+
+
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
-    s = str(e)
+    file = normalize_path_separator(file)
+    s = normalize_path_separator(str(e))
 
     # Remove everything that looks like stack frames in NOT this file
     def repl_frame(m):
@@ -5249,9 +5257,8 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
-    s = re.sub(file, os.path.basename(file), s)
-    s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
-    s = re.sub(r"\\", "/", s)  # for Windows
+    s = re.sub(file, normalize_path_separator(os.path.basename(file)), s)
+    s = re.sub(normalize_path_separator(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
