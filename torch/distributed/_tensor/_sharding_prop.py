@@ -42,7 +42,7 @@ class LocalLRUCache(threading.local):
     def __init__(self, user_function: Callable) -> None:
         self.cache = lru_cache(None)(user_function)
 
-    def apply(self, *args, **kwargs) -> object:
+    def __call__(self, *args, **kwargs) -> object:
         return self.cache(*args, **kwargs)
 
 
@@ -195,7 +195,7 @@ class ShardingPropagator:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding.apply(op_info.schema)
+                OutputSharding, self.propagate_op_sharding(op_info.schema)
             )
         op_info.output_sharding = output_sharding
 
