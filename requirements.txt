@@ -17,7 +17,6 @@ jinja2
 fsspec
 lintrunner
 ninja
-redis
 # setuptools was removed from default python install
 setuptools ; python_version >= "3.12"
 packaging

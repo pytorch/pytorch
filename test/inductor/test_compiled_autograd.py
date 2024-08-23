@@ -2202,6 +2202,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
+    @mock.patch("torch._dynamo.config.inline_inbuilt_nn_modules", True)
     def test_verbose_logs_aot_id(self, _):
         def fn():
             model = torch.nn.Sequential(

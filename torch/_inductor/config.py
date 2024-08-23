@@ -743,6 +743,11 @@ class cpp:
         == "1"
     )
 
+    # Disable the tiling select heuristic
+    enable_tiling_heuristics = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
+    )
+
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
     # the maximal parallelism of K-slicing. Since K-slicing requires extra thread
     # synchronization and buffers,  the maximal number of slices is limited to
@@ -917,7 +922,9 @@ class aot_inductor:
     )
 
     # filtered nodes to be printed for debug values. If not set, it will dump all debug tensor value info by default
-    filtered_kernel_names = os.environ.get("AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "")
+    filtered_kernel_names = os.environ.get(
+        "AOT_INDUCTOR_FILTERED_KERNELS_TO_PRINT", "default"
+    )
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""

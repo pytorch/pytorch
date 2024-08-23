@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control broadcasting of NCCL uniqueId
+static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
+    "TORCH_NCCL_BCAST_UNIQUEID"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -961,10 +965,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>>
       inInitializationCommMap_;
 
-  // Map from ncclUniqueId to appropriate communicator.
-  std::unordered_map<std::string, std::shared_ptr<NCCLComm>> ncclIdToCommMap_;
-
-  // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
+  // Mutex to guard maps like devNCCLCommMap_.
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
@@ -1106,7 +1107,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
-  bool dumpOnException_;
+  bool dumpOnTimeoutOrEx_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;

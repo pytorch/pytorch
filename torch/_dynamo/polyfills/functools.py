@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from _typeshed import SupportsAllComparisons
 
 
+__all__ = ["reduce"]
+
+
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 
