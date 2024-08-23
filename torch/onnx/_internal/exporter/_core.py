@@ -1180,6 +1180,8 @@ def export(
 
     profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
+    assert onnx_program.exported_program is not None
+
     if not verify:
         # Return if verification is not requested
         if report:
