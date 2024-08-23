@@ -238,7 +238,7 @@ struct VecMaskCheck<int64_t, N> {
     bool all_zero = true;
     for (int i = 0; i < N; ++i) {
       all_zero =
-          all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) == 0);
+          all_zero && (_mm256_testz_si256(vec_mask[i], vec_mask[i]) > 0);
       if (!all_zero) {
         return all_zero;
       }
