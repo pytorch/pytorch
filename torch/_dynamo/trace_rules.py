@@ -47,6 +47,7 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -2934,7 +2935,7 @@ class FunctionIdSet:
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self):
+    def __call__(self) -> Set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
@@ -2990,7 +2991,7 @@ def _builtin_function_ids() -> Dict[int, str]:
         }
     )
     rv.update(
-        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+        {id(v): f"itertools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
     rv.update(
         {
@@ -3214,7 +3215,7 @@ MOD_INLINELIST = {
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
-    "torch._dynamo.polyfill",
+    "torch._dynamo.polyfills",
     "torch._functorch.vmap",
     "torch._functorch.autograd_function",
     "torch._library.custom_ops",
@@ -3459,7 +3460,7 @@ def check_verbose(obj, is_inlined_call=False):
     rule = torch._dynamo.trace_rules.lookup_inner(
         fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
-    if issubclass(rule, UserFunctionVariable):
+    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
@@ -3515,6 +3516,7 @@ def lookup_callable(obj):
         return TorchInGraphFunctionVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
+    return None
 
 
 """

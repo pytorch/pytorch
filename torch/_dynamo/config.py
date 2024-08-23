@@ -468,7 +468,7 @@ compiled_autograd = False
 # reliably achieved by ensuring PT2 only is run on SPMD programs.  If this
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
-enable_compiler_collectives = False
+enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
