@@ -215,7 +215,12 @@ def stage_backward_weight(
 ):
     # for w in weights:
     #     print(f"{w=}")
-    all_dweights = dict()
+    # map weights to param_group_weights
+    grad_acc_to_weight = {}
+    for w in weights:
+        grad_acc = _get_grad_fn_or_grad_acc(w)
+        grad_acc_to_weight[grad_acc] = w
+
     for param_group in param_groups:
         # TODO: Handle case where intermediate can have multiple outputs
         intermediate_edges = tuple(
@@ -232,22 +237,18 @@ def stage_backward_weight(
             weights_edges,
             grad_outputs=sum(param_group["grads"], tuple()),
         )
-        for w, dw in zip(param_group["params"], dweights):
-            all_dweights[w] = dw
+        for grad_acc, dw in zip(param_group["params"], dweights):
+            w = grad_acc_to_weight[grad_acc]
+            if w.grad is None:
+                w.grad = dw
+            else:
+                w.grad += dw
     # return grads in the original order weights were provided in
     out = []
     # grad_accs = [_get_grad_fn_or_grad_acc(w) for w in weights]
     # print(f"{all_dweights.keys()=} {grad_accs=}")
     for w in weights:
-        grad_acc = _get_grad_fn_or_grad_acc(w)
-        if grad_acc not in all_dweights:
-            raise RuntimeError(f"{grad_acc=} not in {all_dweights.keys()=}")
-        dweight = all_dweights[grad_acc]
-        out.append(dweight)
-        if w.grad is None:
-            w.grad = dweight
-        else:
-            w.grad += dweight
+        out.append(w.grad)
     return out
 
 

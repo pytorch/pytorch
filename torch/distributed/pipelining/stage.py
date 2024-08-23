@@ -534,7 +534,6 @@ class _PipelineStageBase(ABC):
             self.submod.set_requires_gradient_sync(last_backward)
             result = perform_backward(backward_type)()
             if last_backward:
-                self.submod.reshard()
                 print(f"[{dist.get_global_rank(self.group, self.group_rank)}-{self.stage_index}] AFTER! {next(self.submod.parameters())=}")
         else:
             # Non-DP submodule, regular backward
