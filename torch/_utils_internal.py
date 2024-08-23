@@ -151,7 +151,7 @@ def log_torch_jit_trace_exportability(
     return
 
 
-def export_api_rollout_check() -> bool:
+def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 

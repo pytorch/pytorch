@@ -304,7 +304,7 @@ def _get_onnx_devices(
             torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
         ],
         ...,
-    ]
+    ],
 ) -> Tuple["ORTC.OrtDevice", ...]:
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
@@ -403,7 +403,12 @@ def _adjust_scalar_from_onnx_to_fx(
         torch.SymBool,
         bool,
     ],
-) -> Union[torch.Tensor, int, float, bool,]:
+) -> Union[
+    torch.Tensor,
+    int,
+    float,
+    bool,
+]:
     """Helper function to wrap ORT-produced torch.Tensor as PyTorch variables"""
     assert isinstance(tensor, torch.Tensor), "ORT's output must be tensor."
     if isinstance(
@@ -561,9 +566,9 @@ class OrtExecutionInfoPerSession:
         self.output_devices: Tuple[ORTC.OrtDevice, ...] = output_devices
         # This is the outputs of executing the original torch.fx.GraphModule with example inputs
         # (i.e., args passed into OrtBackend._ort_acclerated_call).
-        self.example_outputs: Union[
-            Tuple[torch.Tensor, ...], torch.Tensor
-        ] = example_outputs
+        self.example_outputs: Union[Tuple[torch.Tensor, ...], torch.Tensor] = (
+            example_outputs
+        )
 
     def is_supported(self, *args):
         # Compare the args and the input schema in ONNX model and
