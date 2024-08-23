@@ -835,7 +835,17 @@ void flash_attention_kernel_impl(
     double dropout_p,
     bool is_causal,
     std::optional<Tensor> attn_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    long q_zp,
+    double q_scale,
+    long k_zp,
+    double k_scale,
+    long v_zp,
+    double v_scale,
+    long a_zp,
+    double a_scale,
+    long o_zp,
+    double o_scale) {
   auto q_seq_len = query.size(2);
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {

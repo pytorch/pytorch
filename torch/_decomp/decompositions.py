@@ -4876,6 +4876,16 @@ def scaled_dot_product_flash_attention_for_cpu(
     *,
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
+    q_zp: int = 0,
+    q_scale: float = 1.0,
+    k_zp: int = 0,
+    k_scale: float = 1.0,
+    v_zp: int = 0,
+    v_scale: float = 1.0,
+    a_zp: int = 0,
+    a_scale: float = 1.0,
+    o_zp: int = 0,
+    o_scale: float = 1.0,
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
     torch._check(
@@ -4903,6 +4913,16 @@ def scaled_dot_product_flash_attention_for_cpu(
         is_causal=is_causal,
         dropout_mask=None,
         scale=scale,
+        q_zp=q_zp,
+        q_scale=q_scale,
+        k_zp=k_zp,
+        k_scale=k_scale,
+        v_zp=v_zp,
+        v_scale=v_scale,
+        a_zp=a_zp,
+        a_scale=a_scale,
+        o_zp=o_zp,
+        o_scale=o_scale,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via

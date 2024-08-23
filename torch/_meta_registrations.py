@@ -5182,6 +5182,16 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     is_causal: bool = False,
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
+    q_zp: int = 0,
+    q_scale: float = 1.0,
+    k_zp: int = 0,
+    k_scale: float = 1.0,
+    v_zp: int = 0,
+    v_scale: float = 1.0,
+    a_zp: int = 0,
+    a_scale: float = 1.0,
+    o_zp: int = 0,
+    o_scale: float = 1.0,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)

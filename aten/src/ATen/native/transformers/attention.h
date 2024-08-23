@@ -54,7 +54,17 @@ using flash_attention_fn = void (*)(
     const Tensor& query, const Tensor& key, const Tensor& value,
     double dropout_p, bool is_causal,
     std::optional<Tensor> attn_mask,
-    std::optional<double> scale);
+    std::optional<double> scale,
+    long q_zp,
+    double q_scale,
+    long k_zp,
+    double k_scale,
+    long v_zp,
+    double v_scale,
+    long a_zp,
+    double a_scale,
+    long o_zp,
+    double o_scale);
 
 using flash_attention_backward_fn = void (*)(
     const Tensor& grad_q, const Tensor& grad_k,

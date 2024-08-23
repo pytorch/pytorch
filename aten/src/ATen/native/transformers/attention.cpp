@@ -55,6 +55,8 @@
 #include <ATen/ops/_triton_scaled_dot_attention.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/clamp_max.h>
+#include <ATen/ops/clamp_min.h>
 #include <ATen/ops/chunk_native.h>
 #include <ATen/ops/dropout.h>
 #include <ATen/ops/linear_native.h>
@@ -62,6 +64,7 @@
 #include <ATen/ops/matmul_native.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/pad.h>
+#include <ATen/ops/round.h>
 #include <ATen/ops/scaled_dot_product_attention_native.h>
 #include <ATen/ops/softmax.h>
 #include <ATen/ops/split_native.h>
@@ -690,7 +693,17 @@ Tensor scaled_dot_product_attention(
     double dropout_p,
     bool is_causal,
     std::optional<double> scale,
-    bool enable_gqa) {
+    bool enable_gqa,
+    long q_zp,
+    double q_scale,
+    long k_zp,
+    double k_scale,
+    long v_zp,
+    double v_scale,
+    long a_zp,
+    double a_scale,
+    long o_zp,
+    double o_scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
@@ -720,7 +733,17 @@ Tensor scaled_dot_product_attention(
       }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
-          query_, key, value, dropout_p, is_causal, attn_mask, scale));
+          query_, key, value, dropout_p, is_causal, attn_mask, scale,
+          q_zp,
+          q_scale,
+          k_zp,
+          k_scale,
+          v_zp,
+          v_scale,
+          a_zp,
+          a_scale,
+          o_zp,
+          o_scale));
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
@@ -760,7 +783,17 @@ Tensor scaled_dot_product_attention(
           is_causal,
           std::nullopt, /*dropout_mask*/
           scale,
-          enable_gqa));
+          enable_gqa,
+          q_zp,
+          q_scale,
+          k_zp,
+          k_scale,
+          v_zp,
+          v_scale,
+          a_zp,
+          a_scale,
+          o_zp,
+          o_scale));
     default:
       TORCH_CHECK(
           false,
@@ -772,7 +805,17 @@ Tensor scaled_dot_product_attention(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
-        const std::optional<Tensor>& dropout_mask, std::optional<double> scale, bool enable_gqa) {
+        const std::optional<Tensor>& dropout_mask, std::optional<double> scale, bool enable_gqa,
+        long q_zp,
+        double q_scale,
+        long k_zp,
+        double k_scale,
+        long v_zp,
+        double v_scale,
+        long a_zp,
+        double a_scale,
+        long o_zp,
+        double o_scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -785,20 +828,29 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
   auto query_acc = (query_.scalar_type() == at::kHalf ||
-                    query_.scalar_type() == at::kBFloat16) &&
+                    query_.scalar_type() == at::kBFloat16 ||
+                    query_.scalar_type() == at::kByte) &&
           !query_.is_nested()
       ? query_.to(at::kFloat)
       : query_;
-  auto key_acc =
-      (key.scalar_type() == at::kHalf || key.scalar_type() == at::kBFloat16) &&
+  auto key_acc = (key.scalar_type() == at::kHalf ||
+                  key.scalar_type() == at::kBFloat16 ||
+                  key.scalar_type() == at::kByte) &&
           !key.is_nested()
       ? key.to(at::kFloat)
       : key;
   auto value_acc = (value.scalar_type() == at::kHalf ||
-                    value.scalar_type() == at::kBFloat16) &&
+                    value.scalar_type() == at::kBFloat16 ||
+                    value.scalar_type() == at::kByte) &&
           !value.is_nested()
       ? value.to(at::kFloat)
       : value;
+  // for int8 - q/k/v dequantize
+  if (origin_dtype == at::kByte) {
+    query_acc = (query_acc - q_zp) * q_scale;
+    key_acc = (key_acc - k_zp) * k_scale;
+    value_acc = (value_acc - v_zp) * v_scale;
+  }
   auto attn_mask = attn_mask_;
   // Naive, composite implementation defined here.
 
@@ -853,8 +905,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn = at::dropout(attn, dropout_p, true);
       }
     }
-
-    return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
+    // for int8 - softmax quantize
+    if (origin_dtype == at::kByte) {
+      attn = at::clamp_max(
+          at::clamp_min(at::round(attn / a_scale) + a_zp, 0), 255
+      );
+      attn = (attn - a_zp) * a_scale;
+    }
+    auto res = at::matmul(attn, value_expanded);
+    // for int8 - output quantize
+    if (origin_dtype == at::kByte) {
+      res = at::clamp_max(
+          at::clamp_min(at::round(res / o_scale) + o_zp, 0), 255
+      );
+    }
+    return std::make_tuple(res.to(origin_dtype), attn.to(origin_dtype));
 }
 
 std::tuple<at::Tensor, at::Tensor>
@@ -865,7 +930,17 @@ _scaled_dot_product_flash_attention_cpu(
     double dropout_p,
     bool is_causal,
     const std::optional<Tensor>& attn_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    long q_zp,
+    double q_scale,
+    long k_zp,
+    double k_scale,
+    long v_zp,
+    double v_scale,
+    long a_zp,
+    double a_scale,
+    long o_zp,
+    double o_scale) {
   const auto dtype = query.scalar_type();
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);
@@ -893,7 +968,17 @@ _scaled_dot_product_flash_attention_cpu(
       query.options().dtype(accumulate_dtype));
 
   flash_attention_kernel(kCPU, output, logsumexp,
-      query, key, value, dropout_p, is_causal, attn_mask, scale);
+      query, key, value, dropout_p, is_causal, attn_mask, scale,
+      q_zp,
+      q_scale,
+      k_zp,
+      k_scale,
+      v_zp,
+      v_scale,
+      a_zp,
+      a_scale,
+      o_zp,
+      o_scale);
 
   output = output.transpose(1, 2);
   logsumexp = logsumexp.transpose(1, 2);

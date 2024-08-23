@@ -467,6 +467,16 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
                             "enable_gqa: bool = False",
+                            "q_zp: int = 0",
+                            "q_scale: float = 1.0",
+                            "k_zp: int = 0",
+                            "k_scale: float = 1.0",
+                            "v_zp: int = 0",
+                            "v_scale: float = 1.0",
+                            "a_zp: int = 0",
+                            "a_scale: float = 1.0",
+                            "o_zp: int = 0",
+                            "o_scale: float = 1.0",
                         ]
                     )
                 )
