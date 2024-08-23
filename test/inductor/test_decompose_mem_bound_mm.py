@@ -268,7 +268,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose else 0
+            expected_val = 1 if should_decompose and HAS_CUDA else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -280,7 +280,7 @@ class TestDecomposeMemMM(TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = 1 if should_decompose else 0
+            expected_val = 1 if should_decompose and HAS_CUDA else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
