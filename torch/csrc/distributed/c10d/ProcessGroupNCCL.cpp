@@ -1103,11 +1103,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-    at::cuda::OptionalCUDAGuard gpuGuard;
     at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
-    if (deviceIndex >= 0) {
-      gpuGuard.set_index(deviceIndex);
-    }
+    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
@@ -2132,7 +2129,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
               << timerDeltaMs << " ms";
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  // Get the device index
+  auto deviceIndex = device.index();
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // [Group Start/End Note] This is used to ensure that nccl communicator will
   // be created before communication primitives are called. Let's look at this
@@ -2171,10 +2170,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
-
-  // Get the device index
-  auto deviceIndex = device.index();
-  gpuGuard.set_index(deviceIndex);
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2665,7 +2660,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->stashed_for_allocator_safety_->push_back(input);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
     checkForNan(input, ncclStream);
@@ -2830,7 +2825,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
 
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Start event should only be recorded before the ncclGroupStart() (which
   // happens inside AutoNcclGroup guard below)
@@ -3098,7 +3093,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
-  at::cuda::OptionalCUDAGuard gpuGuard;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
