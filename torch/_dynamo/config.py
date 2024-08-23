@@ -312,7 +312,7 @@ skip_torchrec = True
 optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
-skip_fsdp_guards = True
+skip_fsdp_guards = False
 # Whether to apply torch._dynamo.disable() to FSDP2 hooks.
 # Defaults to True. If Traceable FSDP2 is used, set this to False.
 skip_fsdp_hooks = True
