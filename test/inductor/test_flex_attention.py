@@ -542,15 +542,17 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
-        self, dtype: torch.dtype
+        self, dtype: torch.dtype, score_mod: Callable
     ):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, S, S, BLOCK_SIZE=256)
+        block_mask = create_block_mask(causal_mask, 1, 1, 64, 64, BLOCK_SIZE=256)
         attention = functools.partial(
             flex_attention,
+            score_mod=score_mod,
             block_mask=block_mask,
             kernel_options={"FORCE_USE_FLEX_ATTENTION": True},
         )
