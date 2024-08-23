@@ -6303,6 +6303,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 super().__init__("_fallthrough_test_only")
 
+            def __call__(self, *args, **kwargs):
+                return self.call_dispatch(*args, **kwargs)
+
         test_op = _FallthroughTestOnly()
         default_keys = torch._ops._HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS
         self.assertTrue(

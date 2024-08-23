@@ -4992,7 +4992,7 @@ def construct_sum_pyop():
     class MySum(HigherOrderOperator):
         def __init__(self):
             super().__init__("mysum")
-        
+
         def __call__(self, *args, **kwargs):
             return self.call_dispatch(*args, **kwargs)
 
