@@ -84,9 +84,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             def forward(self, x):
                 return x
 
-        self.assert_export(
-            torch.jit.script(ScriptModule()), (torch.randn(1, 1, 2),), dynamo=True
-        )
+        self.assert_export(torch.jit.script(ScriptModule()), (torch.randn(1, 1, 2),))
 
     def test_dynamic_shapes_with_fully_specified_axes(self):
         exported_program = torch.export.export(
@@ -109,7 +107,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             },
         )
 
-        self.assert_export(exported_program, dynamo=True)
+        self.assert_export(exported_program)
 
     def test_partial_dynamic_shapes(self):
         self.assert_export(
