@@ -317,13 +317,19 @@ class ComboKernel(Kernel):
         def grid(
             cls,
             sub_kernel_numels: List[List[int]],
-            x_blocks_list: List[int],
+            x_blocks_list: List[Union[str, int]],
             dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = list(x_blocks_list)
-            ynumel: Optional[List[Any]] = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
-            znumel: Optional[List[Any]] = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
+            ynumel: Optional[Union[List[Any], int]] = [
+                e[-2] if len(e) > 1 else None for e in sub_kernel_numels
+            ]
+            znumel: Optional[Union[List[Any], int]] = [
+                e[-3] if len(e) > 2 else None for e in sub_kernel_numels
+            ]
 
+            ynumel = cast(List[Any], ynumel)
+            znumel = cast(List[Any], znumel)
             if dynamic_shape:
                 ynumel = None if None in ynumel else ynumel
                 znumel = None if None in znumel else znumel
@@ -377,7 +383,7 @@ class ComboKernel(Kernel):
         def grid(
             cls,
             sub_kernel_numels: List[List[int]],
-            x_blocks_list: List[int],
+            x_blocks_list: List[Union[str, int]],
             dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = x_blocks_list
@@ -542,9 +548,9 @@ class ComboKernel(Kernel):
                 if sub_kernel.no_x_dim:
                     min_x_blocks = x_numels
                     x_numels = (
-                        -(cast(int, min_x_blocks))
+                        -min_x_blocks
                         if isinstance(x_numels, int)
-                        else "-" + x_numels
+                        else "-" + cast(str, x_numels)
                     )
                 else:
                     if isinstance(simplified_tree_numel, (Integer, int)):
@@ -635,7 +641,7 @@ class ComboKernel(Kernel):
             return
         # A negative x_blocks_list element means the kernel is not tunable,
         # i.e., no_x_dim = True
-        x_numels_list = [abs(e) for e in self.x_numels_list]
+        x_numels_list = [abs(cast(int, e)) for e in self.x_numels_list]
         total = max(x_numels_list) * len(x_numels_list)
         needed = sum(x_numels_list)
         if needed / total > BLOCK_UTILIZATION:
@@ -759,7 +765,9 @@ class ComboKernel(Kernel):
                     self.dynamic_shape_args.append(f"{tree.prefix}numel_{num}")
         return argdefs
 
-    def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
+    def add_numel_to_call_args_and_grid(
+        self, name: str, call_args: List[Any], arg_types: List[Any], grid: List[Any]
+    ):
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
                 numel_name = f"{tree.prefix}numel_{num}"
@@ -785,7 +793,9 @@ class ComboKernel(Kernel):
                     call_args.append(expr)
                     arg_types.append(type(expr))
 
-    def add_numel_to_call_args_and_grid_benchmark(self, extra_args, grid):
+    def add_numel_to_call_args_and_grid_benchmark(
+        self, extra_args: List[Any], grid: List[Any]
+    ):
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
                 numel_name = f"{tree.prefix}numel_{num}"
@@ -793,9 +803,13 @@ class ComboKernel(Kernel):
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
                 if tree.prefix != "r":
-                    assert isinstance(grid[i][num], str), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(
+                        grid[i][num], str
+                    ), f"Grid {grid[i][num]} should be a dynamic shape."
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert grid[i][num] == numel_sign + numel_name, f"grid mismatch: {grid[i][num]} vs {numel_name}"
+                    assert (
+                        grid[i][num] == numel_sign + numel_name
+                    ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
                 if tree.prefix != "r" or sub_kernel.inside_reduction:
                     extra_args.append(expr)
@@ -916,7 +930,8 @@ class ComboKernel(Kernel):
             grid_tuple = self.dispatch_class.grid(
                 self.grids, self.x_numels_list, dynamic_shape
             )
-            extra_args_str, extra_args = "", []
+            extra_args_str = ""
+            extra_args: List[Any] = []
             if dynamic_shape:
                 self.add_numel_to_call_args_and_grid_benchmark(extra_args, grid_tuple)
                 # convert nested list to list of str
