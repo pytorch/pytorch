@@ -9,8 +9,8 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    autograd_not_implemented,
     _set_compilation_env,
+    autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
 )
@@ -125,8 +125,18 @@ def scan(
     ndim = len(shape)
     dim = utils.canonicalize_dim(ndim, dim)
 
-    # for x in leaves[1:]:
-    #     assert x.shape == shape, "All input tensors must have the same shape"
+    out = combine_fn(
+        pytree.tree_unflatten(leaves, spec),
+        pytree.tree_unflatten(leaves, spec),
+    )
+    out_leaves, tree_out = pytree.tree_flatten(out)
+    assert len(leaves) == len(
+        out_leaves
+    ), "The pytree of the output of the operator needs to match the input pytree"
+    for in_l, out_l in zip(leaves, out_leaves):
+        assert (
+            in_l.shape == out_l.shape
+        ), "The pytree of the output of the operator needs to match the input pytree"
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
@@ -176,7 +186,7 @@ def trace_scan(
     proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
     from torch.fx.experimental.proxy_tensor import maybe_handle_decomp
-    
+
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.empty_like(
@@ -207,17 +217,20 @@ def trace_scan(
             f"combine_fn output type mismatch, expected {i.dtype} "
             + f"but got {o_meta.dtype}"
         )
+        assert (
+            i.shape == o.shape
+        ), "The pytree of the out of the operator needs to match the input pytree"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
     args = (combine_graph, input, dim)
-    
+
     out = maybe_handle_decomp(proxy_mode, scan_op, args, {})
     if out is not NotImplemented:
         return out
-    
+
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="scan"
