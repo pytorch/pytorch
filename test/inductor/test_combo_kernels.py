@@ -488,6 +488,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         def fn(x, y, z):
             return x.sum(1), y.mean(1), z.max(1)
 
+        torch._inductor.metrics.reset()
         inps = (
             torch.rand(16, 128, device="cuda"),
             torch.rand(32, 128, device="cuda"),

@@ -3,7 +3,7 @@ import logging
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union, Iterable
 
 from sympy import Integer, Symbol
 
@@ -328,8 +328,6 @@ class ComboKernel(Kernel):
                 e[-3] if len(e) > 2 else None for e in sub_kernel_numels
             ]
 
-            ynumel = cast(List[Any], ynumel)
-            znumel = cast(List[Any], znumel)
             if dynamic_shape:
                 ynumel = None if None in ynumel else ynumel
                 znumel = None if None in znumel else znumel
@@ -337,13 +335,13 @@ class ComboKernel(Kernel):
                 # TODO: improve 1d/2d mixed cases
                 ynumel = (
                     None
-                    if any(e is None for e in ynumel)
-                    else max(cast(List[int], ynumel))
+                    if any(e is None for e in cast(List[Any], ynumel))
+                    else max(cast(Iterable[int], ynumel))
                 )
                 znumel = (
                     None
-                    if any(e is None for e in znumel)
-                    else max(cast(List[int], znumel))
+                    if any(e is None for e in cast(List[Any], znumel))
+                    else max(cast(Iterable[int], znumel))
                 )
 
             numels = (
@@ -767,7 +765,7 @@ class ComboKernel(Kernel):
 
     def add_numel_to_call_args_and_grid(
         self, name: str, call_args: List[Any], arg_types: List[Any], grid: List[Any]
-    ):
+    ) -> None:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
                 numel_name = f"{tree.prefix}numel_{num}"
@@ -795,7 +793,7 @@ class ComboKernel(Kernel):
 
     def add_numel_to_call_args_and_grid_benchmark(
         self, extra_args: List[Any], grid: List[Any]
-    ):
+    ) -> None:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
                 numel_name = f"{tree.prefix}numel_{num}"
