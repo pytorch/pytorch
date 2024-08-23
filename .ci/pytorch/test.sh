@@ -397,6 +397,8 @@ DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
 
+  pip_install --user "fbscribelogger"
+
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
@@ -504,6 +506,12 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
+        if [[ "$target" == "accuracy" ]]; then
+          # Also collect Export pass rate and display as a separate row
+          $TASKSET python "benchmarks/dynamo/$suite.py" \
+              "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
+              --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+        fi
         TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
