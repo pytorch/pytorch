@@ -118,6 +118,7 @@ _CACHES = (
         "torch._inductor.runtime.triton_heuristics.LocalAutotuneCache",
         _MockLocalAutotuneCacheBackend,
     ),
+    # This causes any mocking test to require 'redis'.
     CacheDecl("redis.Redis", _MockRedisRemoteCache),
 )
 
@@ -129,12 +130,6 @@ _CACHE_CONFIG_EN = (
     "autotune_remote_cache",
     # "bundled_autotune_cache",
 )
-
-
-def _has_redis():
-    import importlib
-
-    return importlib.util.find_spec("redis") is not None
 
 
 class PatchCaches(contextlib.AbstractContextManager):
@@ -186,15 +181,6 @@ class PatchCaches(contextlib.AbstractContextManager):
 
     @classmethod
     def setUp(cls):
-        # If we don't have redis available then fake it since we'll be mocking it anyway.
-        if not _has_redis():
-
-            class FakeRedisModule:
-                class Redis:
-                    pass
-
-            sys.modules["redis"] = FakeRedisModule()
-
         # If this test is using PatchCaches then disable all the caches by
         # default, letting the tests turn them on explicitly. This is because
         # tests using PatchCaches will often want to check stats explicitly.

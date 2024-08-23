@@ -11,6 +11,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -83,7 +84,7 @@ LAYOUT_TO_ATEN = {
 
 _IS_WINDOWS = sys.platform == "win32"
 
-INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
+INDEX_TYPE = "int64_t"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -222,7 +223,9 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
+        return (
+            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
+        )
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
@@ -236,7 +239,7 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"c10::div_floor_integer({x}, {div})"
+                x = f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
             else:
                 x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
@@ -247,7 +250,7 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
+            return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
@@ -345,7 +348,7 @@ class CppPrinter(ExprPrinter):
     def _print_Min(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
+            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -354,7 +357,7 @@ class CppPrinter(ExprPrinter):
     def _print_Max(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
+            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -677,6 +680,33 @@ def unify_mask_base_type(
         for var in vars
     )
     return new_vars
+
+
+def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
+    assert is_integer_dtype(offset.dtype)
+    code.writeline("[&]()")
+    with code.indent():
+        code.writeline(
+            f"{DTYPE_TO_CPP[offset.dtype]} offset[{V.kernel.tiling_factor}];"
+        )
+        code.writeline(f"{DTYPE_TO_CPP[dst_dtype]} result[{V.kernel.tiling_factor}];")
+        code.writeline(f"{offset}.store(offset);")
+        code.writeline(
+            f"for( {DTYPE_TO_CPP[offset.dtype]} offset_idx = 0; offset_idx < {V.kernel.tiling_factor}; offset_idx++ )"
+        )
+        with code.indent():
+            code.writeline(rand_function)
+        num_vectors = V.kernel._get_num_vectors(dtype=dst_dtype)
+        if num_vectors == 1:
+            code.writeline(
+                f"return at::vec::Vectorized<{DTYPE_TO_CPP[dst_dtype]}>::loadu(result);"
+            )
+        else:
+            code.writeline(
+                f"return at::vec::VectorizedN<{DTYPE_TO_CPP[dst_dtype]}, {num_vectors}>::loadu(result);"
+            )
+    code.writeline("()")
+    return code
 
 
 def get_gemm_template_output_and_compute_dtype(input_dtype):

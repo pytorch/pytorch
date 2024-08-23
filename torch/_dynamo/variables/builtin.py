@@ -1641,20 +1641,29 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if name == "__bases__":
+        if name in {"__bases__", "__base__", "__flags__"}:
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):
-                    bases = value.__bases__
-                    if source is not None:
-                        tuple_args = [
-                            VariableBuilder(tx, GetItemSource(source, i))(b)
-                            for i, b in enumerate(bases)
-                        ]
-                    else:
-                        tuple_args = [SourcelessBuilder.create(tx, b) for b in bases]
-
-                    return variables.TupleVariable(tuple_args, **options)
+                    if name == "__bases__":
+                        bases = value.__bases__
+                        if source is not None:
+                            tuple_args = [
+                                VariableBuilder(tx, GetItemSource(source, i))(b)
+                                for i, b in enumerate(bases)
+                            ]
+                        else:
+                            tuple_args = [
+                                SourcelessBuilder.create(tx, b) for b in bases
+                            ]
+                        return variables.TupleVariable(tuple_args, **options)
+                    if name == "__base__":
+                        base = value.__base__
+                        if source is not None:
+                            return VariableBuilder(tx, source)(base)
+                        return SourcelessBuilder.create(tx, base)
+                    if name == "__flags__":
+                        return ConstantVariable.create(value.__flags__)
             except NotImplementedError:
                 pass
 
