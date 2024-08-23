@@ -4818,9 +4818,14 @@ class ExternKernel(InputsKernel):
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
-                if exact_strides:
-                    order = get_stride_order(exact_strides)
-                return cls.require_stride_order(x, order, allow_padding=allow_padding)
+                if order:
+                    return cls.require_stride_order(
+                        x, order, allow_padding=allow_padding
+                    )
+                elif exact_strides:
+                    return cls.require_exact_strides(
+                        x, exact_strides, allow_padding=allow_padding
+                    )
             except NotImplementedError:
                 pass
         # Although this is a clone, inductor is good about fusing clones into previous
