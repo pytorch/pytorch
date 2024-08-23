@@ -4263,6 +4263,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
             }
         ),
     )
@@ -4340,6 +4343,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
                 xfail("count_nonzero"),
                 xfail(

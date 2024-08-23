@@ -346,6 +346,7 @@ def mps_ops_modifier(ops):
         'transpose',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
