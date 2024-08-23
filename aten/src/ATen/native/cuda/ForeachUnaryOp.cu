@@ -304,7 +304,7 @@ struct Sign {
   }
 };
 
-OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, sigmoid, Sigmoid)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)

@@ -10113,14 +10113,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "test_meta_inplace",
                 dtypes=integral_types_and(torch.bool),
             ),
-            # FIXME: fails check
-            # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/TensorIterator.cpp#L508-L510
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestForeach",
-                "test_parity",
-                dtypes=(torch.bool,),
-            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10633,21 +10625,6 @@ foreach_unary_op_db: List[OpInfo] = [
                 "test_meta_outplace",
                 device_type="cuda",
                 dtypes=complex_types(),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_parity",
-                device_type="cuda",
-                dtypes=complex_types(),
-                active_if=lambda kwargs: not kwargs.get("noncontiguous", False),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestForeach",
-                "test_autodiff",
-                device_type="cuda",
-                dtypes=(torch.complex128,),
             ),
         ),
     ),
