@@ -230,6 +230,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(torch._inductor.metrics.generated_kernel_count in [6, 9])
 
+    @requires_cuda
     def test_round_robin_dispatch(self):
         # combo kernel dispatch strategy: round robin
         def test_mutated(a, b, c, d):
@@ -378,7 +379,7 @@ class ComboKernelDynamicShapesTests(TestCase):
 
     @requires_cuda
     def test_dynamic_shapes_mutated(self):
-       # combo kernel dispatch strategy: round robin
+        # combo kernel dispatch strategy: round robin
         def test_mutated(a, b, c, d):
             a.add_(1)
             b.sigmoid_()
@@ -399,7 +400,6 @@ class ComboKernelDynamicShapesTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
-
 
     @requires_cuda
     @torch._inductor.config.patch("combo_kernels_autotune", 0)
@@ -450,6 +450,7 @@ class ComboKernelDynamicShapesTests(TestCase):
             c1 = torch.add(a1, b1)
             c2 = torch.add(a2, b2)
             return c0, c1, c2
+
         inps = (
             torch.rand(20, 30, device="cuda"),
             torch.rand(30, 30, device="cuda"),
@@ -479,12 +480,11 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(5 <= torch._inductor.metrics.generated_kernel_count <= 6)
 
-
     @requires_cuda
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
-    def test_dynamic_shapes_persistent_reduction_mixed_x_dim(self):
+    def test_dynamic_shapes_persistent_reduction_mixed_x_dim_cuda(self):
         def fn(x, y, z):
             return x.sum(1), y.mean(1), z.max(1)
 

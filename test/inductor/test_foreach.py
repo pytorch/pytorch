@@ -491,7 +491,7 @@ class ForeachTests(TestCase):
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
-    def test_enable_dynamic_shapes(self, op=torch._foreach_add):
+    def test_enable_dynamic_shapes_cuda(self, op=torch._foreach_add):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 

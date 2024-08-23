@@ -16,16 +16,16 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 try:
     try:
         from . import (
-            test_foreach,
             test_combo_kernels,
+            test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_foreach
         import test_combo_kernels
+        import test_foreach
         import test_pattern_matcher
         import test_select_algorithm
         import test_torchinductor

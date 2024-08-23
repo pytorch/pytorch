@@ -1620,7 +1620,9 @@ class WrapperCodeGen(CodeGen):
 
     def _grid_dim_str(self, grid_per_dim):
         if isinstance(grid_per_dim, list):
-            return "[" + ", ".join(self._grid_dim_str(item) for item in grid_per_dim) + "]"
+            return (
+                "[" + ", ".join(self._grid_dim_str(item) for item in grid_per_dim) + "]"
+            )
         else:
             return pexpr(grid_per_dim)
 

@@ -1858,7 +1858,9 @@ def split_scan_grid(xnumel, rnumel):
     return grid_fn
 
 
-def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential, default_meta=None):
+def grid_combo_kernels(
+    *numels, num_kernels, min_blocks, is_sequential, default_meta=None
+):
     """min_blocks is the minimal size of the grid x dimension"""
     if not is_sequential:
         # round robin dispatch
@@ -1867,7 +1869,7 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential, default_
             if isinstance(numels_agg[i], (list, tuple)):
                 numels_agg[i] = max(max(numels_agg[i]), 0)
         kernel_grid_fn = grid(*numels_agg)
-        
+
         if isinstance(numels[-1], (list, tuple)):
             min_blocks_d = max(-min(numels[-1]), 0) * num_kernels
         else:
@@ -1876,13 +1878,15 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential, default_
             assert min_blocks_d is not None
             min_blocks = min_blocks_d
         else:
-            assert min_blocks_d is None or min_blocks == min_blocks_d, f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
+            assert (
+                min_blocks_d is None or min_blocks == min_blocks_d
+            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
     else:
         # sequential dispatch
         seq_numels = list(numels)
         # x numels are not used here, just a place holder
         seq_numels[-1] = 1024
-        for i in range(len(seq_numels)-1):
+        for i in range(len(seq_numels) - 1):
             if isinstance(seq_numels[i], (list, tuple)):
                 seq_numels[i] = max(seq_numels[i])
 

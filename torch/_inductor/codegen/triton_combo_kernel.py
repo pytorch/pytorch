@@ -16,7 +16,14 @@ from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
 from ..utils import Placeholder
 from ..virtualized import V
-from .common import DeferredLine, IndentedBuffer, Kernel, PythonPrinter, SizeArg, WorkspaceArg
+from .common import (
+    DeferredLine,
+    IndentedBuffer,
+    Kernel,
+    PythonPrinter,
+    SizeArg,
+    WorkspaceArg,
+)
 from .simd import SIMDScheduling
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
@@ -71,7 +78,9 @@ def _default_custom_combo_kernel_horizontal_partition(
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
-        long_reduction = [n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048]
+        long_reduction = [
+            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048
+        ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
             log.warning(
@@ -288,12 +297,16 @@ class ComboKernel(Kernel):
             for i in range(len(x_numels_list)):
                 xnumels, no_x_dim = (
                     (x_numels_list[i], False)
-                    if isinstance(x_numels_list[i], str) and cast(str, x_numels_list[i][0]) != "-" or (isinstance(x_numels_list[i], int) and cast(int, x_numels_list[i]) > 0)
+                    if isinstance(x_numels_list[i], str)
+                    and cast(str, x_numels_list[i])[0] != "-"
+                    or (
+                        isinstance(x_numels_list[i], int)
+                        and cast(int, x_numels_list[i]) > 0
+                    )
                     else (kernel.min_x_blocks_list[i], True)
                 )
                 xblock_str = (
-                    f"tl.cdiv({xnumels}, XBLOCK)" if not no_x_dim else 
-                    f"{xnumels}"
+                    f"tl.cdiv({xnumels}, XBLOCK)" if not no_x_dim else f"{xnumels}"
                 )
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
@@ -302,11 +315,14 @@ class ComboKernel(Kernel):
 
         @classmethod
         def grid(
-            cls, sub_kernel_numels: List[List[int]], x_blocks_list: List[int], dynamic_shape: bool
+            cls,
+            sub_kernel_numels: List[List[int]],
+            x_blocks_list: List[int],
+            dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = list(x_blocks_list)
-            ynumel = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
-            znumel = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
+            ynumel: Optional[List[Any]] = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
+            znumel: Optional[List[Any]] = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
 
             if dynamic_shape:
                 ynumel = None if None in ynumel else ynumel
@@ -314,10 +330,14 @@ class ComboKernel(Kernel):
             else:
                 # TODO: improve 1d/2d mixed cases
                 ynumel = (
-                    None if any(e is None for e in ynumel) else max(cast(List[int], ynumel))
+                    None
+                    if any(e is None for e in ynumel)
+                    else max(cast(List[int], ynumel))
                 )
                 znumel = (
-                    None if any(e is None for e in znumel) else max(cast(List[int], znumel))
+                    None
+                    if any(e is None for e in znumel)
+                    else max(cast(List[int], znumel))
                 )
 
             numels = (
@@ -355,23 +375,38 @@ class ComboKernel(Kernel):
 
         @classmethod
         def grid(
-            cls, sub_kernel_numels: List[List[int]], x_blocks_list: List[int], dynamic_shape: bool
+            cls,
+            sub_kernel_numels: List[List[int]],
+            x_blocks_list: List[int],
+            dynamic_shape: bool,
         ) -> Tuple[Any, ...]:
             xnumel = x_blocks_list
             # set no_x_dim xnumels to 0
-            xnumel_x_dim = [0 if e < 0 else e for e in xnumel]
+            xnumel_x_dim = [max(e, 0) for e in xnumel]
             ynumel = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
             znumel = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
 
             # TODO: support 1d/2d mixed cases
             xnumel = (
-                None if any(e is None for e in xnumel) else xnumel if dynamic_shape else max(xnumel_x_dim)
+                None
+                if any(e is None for e in xnumel)
+                else xnumel
+                if dynamic_shape
+                else max(xnumel_x_dim)
             )
             ynumel = (
-                None if any(e is None for e in ynumel) else ynumel if dynamic_shape else max(cast(List[int], ynumel))
+                None
+                if any(e is None for e in ynumel)
+                else ynumel
+                if dynamic_shape
+                else max(cast(List[int], ynumel))
             )
             znumel = (
-                None if any(e is None for e in znumel) else znumel if dynamic_shape else max(cast(List[int], znumel))
+                None
+                if any(e is None for e in znumel)
+                else znumel
+                if dynamic_shape
+                else max(cast(List[int], znumel))
             )
 
             numels = (
@@ -477,7 +512,9 @@ class ComboKernel(Kernel):
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     val = int(simplified_tree_numel)
                 else:
-                    raise RuntimeError("Dynamic shape on reduction dimension is not supported")
+                    raise RuntimeError(
+                        "Dynamic shape on reduction dimension is not supported"
+                    )
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
                 uniquify_block_sizes.append("RBLOCK")
@@ -504,7 +541,11 @@ class ComboKernel(Kernel):
                     x_numels = f"{tree.prefix}numel_{num}"
                 if sub_kernel.no_x_dim:
                     min_x_blocks = x_numels
-                    x_numels = -(cast(int, min_x_blocks)) if isinstance(x_numels, int) else "-" + x_numels
+                    x_numels = (
+                        -(cast(int, min_x_blocks))
+                        if isinstance(x_numels, int)
+                        else "-" + x_numels
+                    )
                 else:
                     if isinstance(simplified_tree_numel, (Integer, int)):
                         x_numels = int(simplified_tree_numel)
@@ -727,11 +768,17 @@ class ComboKernel(Kernel):
                 if isinstance(tree.numel, (Integer, Symbol)):
                     expr = tree.numel
                 else:
-                    expr = V.graph.wrapper_code.generate_numel_expr(name, tree, suffix=str(num))
+                    expr = V.graph.wrapper_code.generate_numel_expr(
+                        name, tree, suffix=str(num)
+                    )
                 if tree.prefix != "r":
-                    assert isinstance(grid[i][num], str), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(
+                        grid[i][num], str
+                    ), f"Grid {grid[i][num]} should be a dynamic shape."
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert grid[i][num] == numel_sign + numel_name, f"numel args mismatch: {grid[i][num]} vs {numel_name}"
+                    assert (
+                        grid[i][num] == numel_sign + numel_name
+                    ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
                 if tree.prefix != "r" or sub_kernel.inside_reduction:
@@ -866,12 +913,17 @@ class ComboKernel(Kernel):
         if grid is None:
             assert self.dispatch_class is not None
             dynamic_shape = self.dynamic_shape_args != []
-            grid_tuple = self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
+            grid_tuple = self.dispatch_class.grid(
+                self.grids, self.x_numels_list, dynamic_shape
+            )
             extra_args_str, extra_args = "", []
             if dynamic_shape:
                 self.add_numel_to_call_args_and_grid_benchmark(extra_args, grid_tuple)
                 # convert nested list to list of str
-                grid_tuple = tuple("["+", ".join(pexpr(item) for item in e)+",]" for e in grid_tuple)
+                grid_tuple = tuple(
+                    "[" + ", ".join(pexpr(item) for item in e) + ",]"
+                    for e in grid_tuple
+                )
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 min_blocks = None
             else:
@@ -976,9 +1028,13 @@ class ComboKernel(Kernel):
         wrapper = V.graph.wrapper_code
         assert self.dispatch_class is not None
         dynamic_shape = self.dynamic_shape_args != []
-        grid = list(self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape))
+        grid = list(
+            self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
+        )
         num_kernels = len(self.sub_kernels)
-        min_blocks = max(self.min_x_blocks_list) * num_kernels if not dynamic_shape else None
+        min_blocks = (
+            max(self.min_x_blocks_list) * num_kernels if not dynamic_shape else None
+        )
         is_sequential = self.dispatch_class is self.SequentialDispatch
         if dynamic_shape:
             self.add_numel_to_call_args_and_grid(name, call_args, arg_types, grid)
