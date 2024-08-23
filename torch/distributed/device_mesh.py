@@ -4,7 +4,6 @@ import logging
 import math
 import threading
 from functools import reduce
-from itertools import chain
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -297,9 +296,10 @@ else:
             # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
             # or its flattened mesh's mesh_dim_names.
             self.flatten_name_to_root_dims.setdefault(device_mesh, {})
+            flatten_name_to_root_dims = self.flatten_name_to_root_dims[device_mesh]
             valid_mesh_dim_names = [
                 *device_mesh.mesh_dim_names,
-                *self.flatten_name_to_root_dims[device_mesh].keys(),
+                *flatten_name_to_root_dims,
             ]
 
             if not all(
@@ -311,24 +311,28 @@ else:
                     f"Valid mesh_dim_names are {valid_mesh_dim_names}."
                 )
 
-            # Validate the order of the slice mesh dim indexes.
+            # Validate the order of the slice mesh dim indices.
             # This needs to be in ascending order.
-            slice_mesh_dims = [
-                self.flatten_name_to_root_dims[device_mesh][mesh_dim_name]
-                if mesh_dim_name in self.flatten_name_to_root_dims[device_mesh]
-                else (device_mesh.mesh_dim_names.index(mesh_dim_name),)
-                for mesh_dim_name in mesh_dim_names
-            ]
-            slice_mesh_dims_iter = chain(*slice_mesh_dims)
-            mesh_dims_iter = iter(range(len(device_mesh.mesh_dim_names)))
-            if not all(
-                slice_mesh_dim in mesh_dims_iter
-                for slice_mesh_dim in slice_mesh_dims_iter
-            ):
-                raise KeyError(
-                    f"Invalid slice {mesh_dim_names}. ",
-                    "Please check the order of the slice dims. ",
-                )
+            curr_idx = -1
+            slice_mesh_dims = []
+            for mesh_dim_name in mesh_dim_names:
+                if mesh_dim_name in flatten_name_to_root_dims:
+                    mesh_indices = flatten_name_to_root_dims[mesh_dim_name]
+                    # TODO: this doesn't allow non-contiguous slicing with flatten dim yet. next_idx
+                    # should be mesh_indices[0] once we support non-contiguous slicing with flatten dim.
+                    next_idx = mesh_indices[-1]
+                    slice_mesh_dims.append(mesh_indices)
+                else:
+                    next_idx = device_mesh.mesh_dim_names.index(mesh_dim_name)
+                    slice_mesh_dims.append((next_idx,))
+                if next_idx <= curr_idx:
+                    raise KeyError(
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified. ",
+                        f"Found mesh dim indices to slice: {slice_mesh_dims}. ",
+                        "Mesh dim indices should be in ascending order.",
+                    )
+                curr_idx = next_idx
+
             return slice_mesh_dims
 
     _mesh_resources: _MeshEnv = _MeshEnv()
