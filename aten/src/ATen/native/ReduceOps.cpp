@@ -1408,6 +1408,11 @@ Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, std::optional<Sca
 
 Tensor& mean_out(const Tensor& self, DimnameList dim,
                  bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
+  TORCH_CHECK(
+    canCast(self.scalar_type(), result.scalar_type()),
+      "mean.out(): input types can't be cast to the desired output type ",
+      result.scalar_type());
+  // at::mean_out should make sure dtype and result.scalar_type() are the same
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 

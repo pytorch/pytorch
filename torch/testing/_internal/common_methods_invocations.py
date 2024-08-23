@@ -20956,7 +20956,6 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.mean),
         error_inputs_func=error_inputs_mean,
         skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='cuda', dtypes=[torch.float32]),
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
