@@ -267,15 +267,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(optim_result, eager_result)
 
     def test_linear_setup_context_vmap(self):
-        def fn(input, weight, bias):
-            return torch.vmap(LinearFunction.apply)(input, weight, bias)
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        model = ModuleBatchLinear()
+        compiled_model = torch.compile(backend="eager", fullgraph=True)(model)
         batch_input = torch.randn(4, 2, 2, dtype=torch.double, requires_grad=True)
         batch_weight = torch.randn(4, 3, 2, dtype=torch.double, requires_grad=True)
         batch_bias = torch.randn(4, 3, dtype=torch.double, requires_grad=True)
-        ref = fn(batch_input, batch_weight, batch_bias)
-        res = compiled_fn(batch_input, batch_weight, batch_bias)
+        ref = model(batch_input, batch_weight, batch_bias)
+        res = compiled_model(batch_input, batch_weight, batch_bias)
         self.assertEqual(ref, res)
 
     def test_materialize_grad(self):
