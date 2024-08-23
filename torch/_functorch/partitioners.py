@@ -29,6 +29,7 @@ from torch.utils.checkpoint import CheckpointPolicy
 
 from . import config
 from ._aot_autograd.logging_utils import get_aot_graph_name
+from ._aot_autograd.utils import is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -177,7 +178,7 @@ def _extract_graph_with_inputs_outputs(
 
     for node in joint_graph.nodes:
         if _must_be_in_backward(node) and subgraph != "backward":
-            env[node] = InvalidNode
+            env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
         if node in env:
@@ -186,7 +187,7 @@ def _extract_graph_with_inputs_outputs(
             # joint_graph.nodes).
             continue
         elif node.op == "placeholder":
-            env[node] = InvalidNode
+            env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
@@ -195,7 +196,7 @@ def _extract_graph_with_inputs_outputs(
                 if isinstance(x, fx.Node)
             ]
             if any(all_args):
-                env[node] = InvalidNode
+                env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
@@ -249,12 +250,18 @@ def _is_backward_state(node: fx.Node) -> bool:
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
 
 
+def _has_tag_is_backward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "is_backward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_backward(node)
+    return _has_tag_must_be_in_backward(node) or (
+        _has_tag_is_backward(node) and is_with_effects(node)
+    )
 
 
 def _extract_fwd_bwd_outputs(
