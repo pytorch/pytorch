@@ -2160,6 +2160,21 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
+    def test_logs(self):
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd"
+        )
+        with compiled_autograd.enable(compiler_fn), ctx():
+            torch.randn(4, 4, requires_grad=True).sum().backward()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        assert "torch::autograd::AccumulateGrad (NodeCall" in logs.getvalue()
+        assert (
+            "Cache miss due to new autograd node: torch::autograd::GraphRoot"
+            not in logs.getvalue()
+        )
+
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
