@@ -35,6 +35,10 @@ void device_lazy_init(at::DeviceType device_type) {
 
   std::string module_name = "torch." + at::DeviceTypeName(device_type, true);
   auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
+  if (device_type == at::DeviceType::PrivateUse1 && !module) {
+    return;
+  }
+
   if (!module) {
     throw python_error();
   }
