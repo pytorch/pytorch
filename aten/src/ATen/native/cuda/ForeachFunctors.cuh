@@ -38,10 +38,10 @@ __device__ bool init_args(
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T, typename T2>
+template <int depth, typename T, typename T2, bool large_kernel_arg>
 __device__ bool init_args(
     T** args,
-    TensorListScalarListMetadata<T2, depth>& tl,
+    TensorListScalarListMetadata<T2, depth, large_kernel_arg>& tl,
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
@@ -57,10 +57,10 @@ __device__ bool init_args(
   return all_aligned;
 }
 
-template <int depth, typename T>
+template <int depth, typename T, bool large_kernel_arg>
 __device__ bool init_args(
     T** args,
-    FusedOptimizerTensorListMetadata<depth>& tl,
+    FusedOptimizerTensorListMetadata<depth, large_kernel_arg>& tl,
     const int64_t chunk_idx,
     const int64_t chunk_size,
     const int64_t tensor_loc) {
@@ -233,13 +233,19 @@ struct BinaryOpScalarFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct BinaryOpScalarListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListScalarListMetadata<opmath_t, depth>& tl,
+      TensorListScalarListMetadata<opmath_t, depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -513,13 +519,19 @@ struct PointwiseOpScalarFunctor {
   }
 };
 
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+template <
+    typename T,
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    bool large_kernel_arg>
 struct PointwiseOpScalarListFunctor {
+  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListScalarListMetadata<opmath_t, depth>& tl,
+      TensorListScalarListMetadata<opmath_t, depth, large_kernel_arg>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];

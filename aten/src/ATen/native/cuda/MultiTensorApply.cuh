@@ -37,13 +37,13 @@ bool supports_large_kernel_arg() {
 #endif
 }
 
-#define DISPATCH_MULTI_TENSOR_APPLY(lambda)             \
+#define DISPATCH_MULTI_TENSOR_APPLY(...)                \
   if (supports_large_kernel_arg()) {                    \
     constexpr bool large_kernel_arg C10_UNUSED = true;  \
-    lambda();                                           \
+    __VA_ARGS__();                                      \
   } else {                                              \
     constexpr bool large_kernel_arg C10_UNUSED = false; \
-    lambda();                                           \
+    __VA_ARGS__();                                      \
   }
 
 template <bool large_kernel_arg>
@@ -63,14 +63,17 @@ struct DepthToMaxConfig<false> {
 template <>
 struct DepthToMaxConfig<true> {
   // TODO(yifu): These values are not yet optimally tuned. I simply multiplied
-  // the values for 4KB kernel argument by 7.
+  // the values tuned for 4KB kernel argument size limit by 7 (the kernel
+  // argument size limit increased by 8x but we need to change the type of
+  // block_to_tensor from unsigned char to uint16_t to support larger number of
+  // tensors).
   static constexpr int depth_to_max_tensors[5] = {770, 448, 336, 252, 210};
   static constexpr int depth_to_max_blocks[5] = {2240, 2240, 2240, 2240, 2240};
   static constexpr int depth_to_max_tensors_scalarlist[5] =
       {672, 448, 336, 252, 210};
   static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
-      4032,
-      3360};
+      504,
+      420};
 };
 
 template <typename T>
@@ -92,7 +95,10 @@ template <int n, bool large_kernel_arg>
 struct TensorListMetadata {
   using Conf = DepthToMaxConfig<large_kernel_arg>;
   using BlockToTensorType = typename std::
-      conditional<large_kernel_arg, uint32_t, unsigned char>::type;
+      conditional<large_kernel_arg, uint16_t, unsigned char>::type;
+  static_assert(
+      Conf::depth_to_max_tensors[n - 1] <
+      std::numeric_limits<BlockToTensorType>::max());
 
   const void* addresses[n][Conf::depth_to_max_tensors[n - 1]];
   int64_t numel_for_tensor[Conf::depth_to_max_tensors[n - 1]];
@@ -101,51 +107,80 @@ struct TensorListMetadata {
   int start_tensor_this_launch;
 };
 
-template <typename scalar_vals_t, int n>
+template <typename scalar_vals_t, int n, bool large_kernel_arg>
 struct TensorListScalarListMetadata {
-  const void* addresses[n][depth_to_max_tensors_scalarlist[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist[n - 1]];
-  scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+  using Conf = DepthToMaxConfig<large_kernel_arg>;
+  using BlockToTensorType = typename std::
+      conditional<large_kernel_arg, uint16_t, unsigned char>::type;
+  static_assert(
+      Conf::depth_to_max_tensors[n - 1] <
+      std::numeric_limits<BlockToTensorType>::max());
+
+  const void* addresses[n][Conf::depth_to_max_tensors_scalarlist[n - 1]];
+  int64_t numel_for_tensor[Conf::depth_to_max_tensors_scalarlist[n - 1]];
+  scalar_vals_t scalar_vals[Conf::depth_to_max_tensors_scalarlist[n - 1]];
+  BlockToTensorType block_to_tensor[Conf::depth_to_max_blocks[n - 1]];
+  int block_to_chunk[Conf::depth_to_max_blocks[n - 1]];
 };
 
 // note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of
 // 4kb with `c10::complex<double>`
-template <>
-struct TensorListScalarListMetadata<c10::complex<double>, 1> {
-  const void* addresses[1]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[0]];
+template <bool large_kernel_arg>
+struct TensorListScalarListMetadata<c10::complex<double>, 1, large_kernel_arg> {
+  using Conf = DepthToMaxConfig<large_kernel_arg>;
+  using BlockToTensorType = typename std::
+      conditional<large_kernel_arg, uint16_t, unsigned char>::type;
+  static_assert(
+      Conf::depth_to_max_tensors[1 - 1] <
+      std::numeric_limits<BlockToTensorType>::max());
+
+  const void*
+      addresses[1][Conf::depth_to_max_tensors_scalarlist_of_complex_double[0]];
+  int64_t numel_for_tensor
+      [Conf::depth_to_max_tensors_scalarlist_of_complex_double[0]];
   c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  unsigned char block_to_tensor[depth_to_max_blocks[1 - 1]];
-  int block_to_chunk[depth_to_max_blocks[1 - 1]];
+      scalar_vals[Conf::depth_to_max_tensors_scalarlist_of_complex_double[0]];
+  BlockToTensorType block_to_tensor[Conf::depth_to_max_blocks[1 - 1]];
+  int block_to_chunk[Conf::depth_to_max_blocks[1 - 1]];
 };
 
-template <>
-struct TensorListScalarListMetadata<c10::complex<double>, 2> {
-  const void* addresses[2]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[1]];
+template <bool large_kernel_arg>
+struct TensorListScalarListMetadata<c10::complex<double>, 2, large_kernel_arg> {
+  using Conf = DepthToMaxConfig<large_kernel_arg>;
+  using BlockToTensorType = typename std::
+      conditional<large_kernel_arg, uint16_t, unsigned char>::type;
+  static_assert(
+      Conf::depth_to_max_tensors[2 - 1] <
+      std::numeric_limits<BlockToTensorType>::max());
+
+  const void*
+      addresses[2][Conf::depth_to_max_tensors_scalarlist_of_complex_double[1]];
+  int64_t numel_for_tensor
+      [Conf::depth_to_max_tensors_scalarlist_of_complex_double[1]];
   c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[2 - 1]];
-  int block_to_chunk[depth_to_max_blocks[2 - 1]];
+      scalar_vals[Conf::depth_to_max_tensors_scalarlist_of_complex_double[1]];
+  BlockToTensorType block_to_tensor[Conf::depth_to_max_blocks[2 - 1]];
+  int block_to_chunk[Conf::depth_to_max_blocks[2 - 1]];
 };
 
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
-template <int n>
+template <int n, bool large_kernel_arg>
 struct FusedOptimizerTensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+  using Conf = DepthToMaxConfig<large_kernel_arg>;
+  using BlockToTensorType = typename std::
+      conditional<large_kernel_arg, uint16_t, unsigned char>::type;
+  static_assert(
+      Conf::depth_to_max_tensors[n - 1] <
+      std::numeric_limits<BlockToTensorType>::max());
+
+  const void* addresses[n][Conf::depth_to_max_tensors[n - 1]];
+  int64_t numel_for_tensor[Conf::depth_to_max_tensors[n - 1]];
+  const void*
+      state_steps_addresses[Conf::depth_to_max_tensors_scalarlist[n - 1]];
+  unsigned char block_to_tensor[Conf::depth_to_max_blocks[n - 1]];
+  int block_to_chunk[Conf::depth_to_max_blocks[n - 1]];
   int start_tensor_this_launch;
 };
 
@@ -187,7 +222,10 @@ void multi_tensor_apply(
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
   using scalar_vals_t = typename T::opmath_t;
-  TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
+  TensorListScalarListMetadata<scalar_vals_t, depth, T::use_large_kernel_arg>
+      tensorListMeta;
+
+  using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -360,7 +398,10 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
-  FusedOptimizerTensorListMetadata<depth> tensorListMeta;
+  FusedOptimizerTensorListMetadata<depth, T::use_large_kernel_arg>
+      tensorListMeta;
+
+  using Conf = DepthToMaxConfig<T::use_large_kernel_arg>;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -389,9 +430,10 @@ void multi_tensor_apply_for_fused_optimizer(
       loc_block_info++;
 
       const auto tensor_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info == Conf::depth_to_max_tensors[depth - 1] &&
            chunk == chunks - 1);
-      const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
+      const auto blocks_full =
+          loc_block_info == Conf::depth_to_max_blocks[depth - 1];
 
       if (tensor_full || blocks_full) {
         multi_tensor_apply_kernel<<<
