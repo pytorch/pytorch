@@ -216,7 +216,8 @@ _halide_type = {
     torch.int8: "hl.Int(8)",
     torch.int16: "hl.Int(16)",
     torch.int32: "hl.Int(32)",
-    torch.int64: "hl.Int(64)",
+    #torch.int64: "hl.Int(64)",
+    torch.int64: "hl.Int(32)",
     torch.uint8: "hl.UInt(8)",
     torch.uint16: "hl.UInt(16)",
     torch.uint32: "hl.UInt(32)",
@@ -1443,7 +1444,8 @@ class HalideKernel(SIMDKernel):
             target = [config.halide.cpu_target]
             schduler = config.halide.scheduler_cpu
             scheduler_flags = {
-                "parallelism": parallel_num_threads(),
+                # "parallelism": parallel_num_threads(),
+                "parallelism": 32,  # NO IDEA!
             }
             cuda_device = None
         else:
@@ -1469,7 +1471,7 @@ class HalideKernel(SIMDKernel):
         target.append("strict_float")
 
         # without this we will initialize cuda once per kernel and hit errors
-        target.append("no_runtime")
+        #target.append("no_runtime")
 
         if not config.halide.asserts:
             target.append("no_asserts")
@@ -1647,7 +1649,8 @@ class HalideKernel(SIMDKernel):
 class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
-    int64_type = "hl.Int(64)"
+    #int64_type = "hl.Int(64)"
+    int64_type = "hl.Int(32)"
     kernel_type = HalideKernel  # type: ignore[arg-type]
 
     @classmethod

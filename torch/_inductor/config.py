@@ -1032,7 +1032,8 @@ class rocm:
 
 
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "cpp"
+#cpu_backend = "cpp"
+cpu_backend = "halide"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend = "triton"
@@ -1040,7 +1041,8 @@ cuda_backend = "triton"
 
 class halide:
     # Base halide target to use for CPU devices
-    cpu_target = "host"
+    #cpu_target = "host"
+    cpu_target = "host-metal"
 
     # Base halide target to use for CUDA devices
     gpu_target = "host-cuda"
@@ -1048,7 +1050,8 @@ class halide:
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
     scheduler_cuda = "Anderson2021"
-    scheduler_cpu = "Adams2019"
+    #scheduler_cpu = "Adams2019"
+    scheduler_cpu = "Anderson2021"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False

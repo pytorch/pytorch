@@ -2896,6 +2896,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             {buffers}
             int err = halide_kernel({buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
+            {copy_out_buffers}
         }}
         """
     )
@@ -2982,17 +2983,22 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     def _codegen_glue(cls, meta: HalideMeta, headerfile: object) -> str:
         is_cuda = meta.is_cuda()
         assert is_cuda is ("user_context" in meta.target)
-        assert "no_runtime" in meta.target
+        #assert "no_runtime" in meta.target
         buffers = []
         buffer_names = []
+        out_buffer_names = []
         for i, arg in enumerate(meta.argtypes):
             if arg.is_buffer():
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
+                if arg.name.startswith("out_"):
+                    out_buffer_names.append(f"&hl_buf_{i}")
             else:
                 assert "*" not in arg.ctype
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
+
+        copy_out_buffers = "\n".join([f"    halide_copy_to_host(nullptr, {buf});" for buf in out_buffer_names]);
 
         glue_template = cls.glue_template_cuda if is_cuda else cls.glue_template_cpp
         glue_code = glue_template.format(
@@ -3007,6 +3013,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             ),
             buffers=buffers,
             buffer_names=", ".join(buffer_names),
+            copy_out_buffers=copy_out_buffers,
         )
         return glue_code
 
@@ -3124,6 +3131,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             if meta.scheduler:
                 cmd.extend(["-p", cls.find_libautoschedule(meta.scheduler)])
             cmd.extend(meta.args())
+            if os.getenv("PRINT_BUILD_CMDS", "0") == "1":
+                print(f"{' '.join(cmd)}\n", file=sys.stderr)
             jobs.append(functools.partial(subprocess.check_call, cmd))
 
         binding_types = [
@@ -3207,7 +3216,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                             cuda=is_cuda,
                         ),
                     )
-
+                    if os.getenv("PRINT_BUILD_CMDS", "0") == "1":
+                        print(f"{halide_cmd_gen.get_command_line()}\n", file=sys.stderr)
                     subprocess.check_call(
                         shlex.split(halide_cmd_gen.get_command_line())
                     )
