@@ -12,6 +12,7 @@ These backends include:
 - ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.cusparselt``
 - ``torch.backends.mha``
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
@@ -135,6 +136,13 @@ torch.backends.cudnn
 
 .. py:module:: torch.backends.cudnn.rnn
 
+torch.backends.cusparselt
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cusparselt
+
+.. autofunction:: torch.backends.cusparselt.version
+
+.. autofunction:: torch.backends.cusparselt.is_available
 
 torch.backends.mha
 ^^^^^^^^^^^^^^^^^^

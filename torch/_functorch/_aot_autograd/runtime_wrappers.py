@@ -670,7 +670,7 @@ class EffectTokensWrapper(CompilerWrapper):
             if outs is None:
                 return None
             # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            return outs[num_tokens:]
+            return outs[num_tokens:] if num_tokens != 0 else outs
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
