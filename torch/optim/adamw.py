@@ -11,6 +11,7 @@ from .optimizer import (
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
+    _params_doc,
     _foreach_doc,
     _fused_doc,
     _get_capturable_supported_devices,
@@ -285,8 +286,7 @@ AdamW.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.

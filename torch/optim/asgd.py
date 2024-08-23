@@ -10,6 +10,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
+    _params_doc,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -174,8 +175,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
     averaging`_.
 
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-2)
         lambd (float, optional): decay term (default: 1e-4)
         alpha (float, optional): power for eta update (default: 0.75)

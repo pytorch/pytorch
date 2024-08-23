@@ -1463,6 +1463,67 @@ class TestOptimRenewed(TestCase):
                 optimizer.step()
 
     @optims(optim_db, dtypes=[torch.float32])
+    def test_can_load_from_to_named_state_dict(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        for optim_input in all_optim_inputs:
+            torch.manual_seed(1)
+            model = torch.nn.Sequential(
+                torch.nn.Conv2d(4, 2, 1, stride=2),
+                torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
+            )
+            model.to(dtype=dtype, device=device)
+            input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+
+            def fwd_bwd(optim, mod, i):
+                optim.zero_grad()
+                loss = mod(i).sum()
+                loss.backward()
+                return loss
+
+            init_grp = [
+                {'params': model[0].named_parameters(), 'lr': 1e-2},
+                {'params': model[1].parameters()}
+            ]
+            init_grp2 = [
+                {'params': model[0].parameters(), 'lr': 1e-2},
+                {'params': model[1].named_parameters()}
+            ]
+            # test for parameters, named_parameters, and 2 groups:
+            for params_to_optimizer in [model.parameters(), model.named_parameters(), init_grp]:
+                optimizer = optim_cls(params_to_optimizer, **optim_input.kwargs)
+
+                for _ in range(3):
+                    if optim_info.step_requires_closure:
+                        optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+                    else:
+                        fwd_bwd(optimizer, model, input)
+                        optimizer.step()
+
+                # old_state_dict has all new flags del'd
+                old_state_dict = deepcopy(optimizer.state_dict())
+                old_state_dict_pg = old_state_dict["param_groups"]
+                for group in old_state_dict_pg:
+                    for flag in optim_info.not_og_supported_flags:
+                        if flag in group:
+                            del group[flag]
+
+                for params_to_optimizer2 in [model.parameters(), model.named_parameters(), init_grp, init_grp2]:
+                    optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)
+                    optimizer2.load_state_dict(old_state_dict)
+
+                    # Make sure we can still step
+                    if optim_info.step_requires_closure:
+                        optimizer2.step(functools.partial(fwd_bwd, optimizer2, model, input))
+                    else:
+                        fwd_bwd(optimizer2, model, input)
+                        optimizer2.step()
+
+    @optims(optim_db, dtypes=[torch.float32])
     def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 

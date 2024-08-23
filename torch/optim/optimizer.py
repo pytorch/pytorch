@@ -232,6 +232,9 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
 
 
 # Common doc strings among optimizers
+_params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize 
+            or iterable of dicts defining parameter groups"""
+
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
@@ -837,6 +840,9 @@ class Optimizer:
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
         r"""Load the optimizer state.
+        The names of the parameters (if exist in :meth:`state_dict`) will be ignored.
+        To use the parameters names (when the optimized parameters are different from the loaded state dict)
+        a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the dict according to the change.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned

@@ -10,6 +10,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
+    _params_doc,
     _foreach_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
@@ -219,8 +220,7 @@ Adadelta.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will
             result in a slower average, which can be helpful for preventing
