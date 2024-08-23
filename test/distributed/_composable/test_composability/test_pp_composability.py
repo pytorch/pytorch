@@ -169,10 +169,9 @@ class ComposabilityTest(MultiProcessTestCase):
         # Create pipeline stage
         def build_stage(stage_idx, num_stages):
             partial_model, offset = get_stage_module(stage_idx, num_stages)
-            # TODO: WITH FSDP
-            # dp_model = apply_dp(partial_model, dp_type)
+            dp_model = apply_dp(partial_model, dp_type)
             stage = PipelineStage(
-                partial_model,
+                dp_model,
                 stage_idx,
                 num_stages,
                 self.device,
@@ -238,6 +237,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     ref_p = ref_parameters[name]
                     # TODO: WITH FSDP
                     self.assertTrue(isinstance(p.grad, DTensor))
+                    print(f"{ref_p.grad=} {p.grad.full_tensor()=}")
                     self.assertEqual(ref_p.grad, p.grad.full_tensor())
                     # torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
         elif dp_type == "DDP":
