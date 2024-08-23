@@ -4609,10 +4609,9 @@ class LoopLevel:
         if self.steps.is_number:
             steps_str = f"{self.var}+={cexpr_index(self.steps)}"
         else:
-            step_1 = sympy.Integer(1)
             steps_str = (
-                f"{self.var}+={cexpr_index(self.steps)} >= {cexpr_index(step_1)} ? "
-                f"{cexpr_index(self.steps)} : {cexpr_index(step_1)}"
+                f"{self.var}+={cexpr_index(self.steps)}==0?"
+                f"1:{cexpr_index(self.steps)}"
             )
         line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
