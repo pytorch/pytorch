@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-MAX_CYCLE = 3000
+MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
 
 
 class ItertoolsVariable(VariableTracker):
@@ -231,7 +231,7 @@ class CycleIteratorVariable(IteratorVariable):
         if self.iterator is not None:
             try:
                 new_item = self.iterator.next_variable(tx)
-                if len(self.saved) > MAX_CYCLE:
+                if len(self.saved) > MAX_ITERATOR_LIMIT:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
