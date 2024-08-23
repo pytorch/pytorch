@@ -133,11 +133,11 @@ class Verifier(metaclass=_VerifierMeta):
             operator.abs,
             math.ceil,
             math.floor,
+            math.trunc,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
-        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
+        return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
@@ -149,7 +149,6 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:
@@ -282,7 +281,7 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):

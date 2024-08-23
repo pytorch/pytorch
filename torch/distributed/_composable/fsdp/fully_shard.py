@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
@@ -6,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
+from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -25,7 +27,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 # `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
-    module: nn.Module,
+    module: Union[nn.Module, List[nn.Module]],
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
@@ -60,6 +62,8 @@ def fully_shard(
     gather parameters and later free parameters/reduce gradients.
 
     Args:
+        module (Union[nn.Module, List[nn.Module]): The module or modules to
+            shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
             across the 1D mesh (FSDP). If 2D, then parameters are sharded
@@ -111,16 +115,20 @@ def fully_shard(
         reshard_after_forward, mesh_info
     )
 
-    state = fully_shard.state(module)
-    state.init(module, device, mp_policy)
+    arg_module = module
+    modules = (
+        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
+    )
+    state = fully_shard.state(modules[0])
+    state.init(modules, device, mp_policy)
 
-    managed_modules = _get_managed_modules(module)
+    managed_modules = _get_managed_modules(modules)
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,
-            module,
+            modules,
             mesh_info,
             post_forward_mesh_info,
             device,
@@ -134,11 +142,12 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    cls = module.__class__
-    dct = {"__deepcopy__": unimplemented_deepcopy}
-    new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-    module.__class__ = new_cls
-    return module
+    for module in modules:
+        cls = module.__class__
+        dct = {"__deepcopy__": unimplemented_deepcopy}
+        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        module.__class__ = new_cls
+    return arg_module
 
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
@@ -327,6 +336,21 @@ class FSDPModule:
                 to wait all-gather streams on.
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
+
+    def set_reduce_scatter_divide_factor(self, factor: float) -> None:
+        """
+        Sets a custom divide factor for the reduce-scatter. This becomes a
+        custom reduce op using NCCL's PreMulSum, which allows multiplying by
+        the factor before reduction.
+
+        Args:
+            factor (float): Custom divide factor.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            mul_factor = 1.0 / float(factor)
+            reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
+            fsdp_param_group.reduce_scatter_reduce_op = reduce_op
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:

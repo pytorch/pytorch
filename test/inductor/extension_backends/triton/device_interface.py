@@ -121,3 +121,7 @@ class DeviceInterface(device_interface.DeviceInterface):
     @staticmethod
     def get_compute_capability(device) -> int:
         return 0
+
+    @staticmethod
+    def triton_supported() -> bool:
+        return True

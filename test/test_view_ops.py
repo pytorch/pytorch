@@ -476,14 +476,7 @@ class TestViewOps(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
     def test_conj_imag_view(self, device, dtype) -> None:
-        t = _make_tensor(
-            (
-                4,
-                5,
-            ),
-            dtype,
-            device,
-        )
+        t = _make_tensor((4, 5), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
         v = t.conj()
         self.assertTrue(self.is_view_of(t, v))
@@ -497,14 +490,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     def test_conj_view_with_shared_memory(self, device) -> None:
-        a = _make_tensor(
-            (
-                4,
-                5,
-            ),
-            torch.cfloat,
-            device,
-        )
+        a = _make_tensor((4, 5), torch.cfloat, device)
         b = a.conj()
         c = a.conj()
 
@@ -1645,13 +1631,7 @@ class TestOldViewOps(TestCase):
             res2 = torch.broadcast_tensors(*map(torch.empty, integral_inputs))[0].shape
             self.assertEqual(res1, res2)
 
-        inputs_with_neg_vals = [
-            [1, 1, -12],
-            [-1, 1],
-            [
-                -11,
-            ],
-        ]
+        inputs_with_neg_vals = [[1, 1, -12], [-1, 1], [-11]]
         for integral_inputs_with_neg_vals in inputs_with_neg_vals:
             with self.assertRaisesRegex(
                 RuntimeError, "Trying to create tensor with negative dimension"

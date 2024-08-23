@@ -17,7 +17,7 @@ jobs:
     with:
       build-environment: linux-jammy-xpu-py3.8
       docker-image-name: pytorch-linux-jammy-xpu-2024.0-py3
-      runner: linux.2xlarge
+      runner: linux.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },

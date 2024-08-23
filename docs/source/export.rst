@@ -505,7 +505,7 @@ Input Tensor Shapes
 
 By default, ``torch.export`` will trace the program specializing on the input
 tensors' shapes, unless a dimension is specified as dynamic via the
-``dynamic_shapes`` argumen to ``torch.export``. This means that if there exists
+``dynamic_shapes`` argument to ``torch.export``. This means that if there exists
 shape-dependent control flow, ``torch.export`` will specialize on the branch
 that is being taken with the given sample inputs. For example:
 

@@ -125,6 +125,10 @@ if(NOT BUILD_LIBTORCHLESS)
     add_dependencies(c10 mimalloc-static)
   endif()
 
+  if(LINUX)
+    target_link_libraries(c10 PRIVATE Threads::Threads)
+  endif()
+
   if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
   endif()

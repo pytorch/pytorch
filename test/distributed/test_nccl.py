@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
@@ -22,6 +21,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
 
 HIP_VERSION = (
     0.0

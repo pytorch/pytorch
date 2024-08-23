@@ -909,6 +909,23 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             expected_node_occurrence=node_occurrence,
         )
 
+    def test_fold_bn_erases_bn_node(self):
+        """
+        Ensure the BN node is erased from the graph after folding
+        it into conv in `convert_pt2e` even in train mode.
+        """
+        m = self._get_conv_bn_model(has_conv_bias=False, has_bn=True, has_relu=False)
+        m = capture_pre_autograd_graph(m, self.example_inputs)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+        )
+        m = prepare_qat_pt2e(m, quantizer)
+        m = convert_pt2e(m)
+        (conv_node, bn_node, _) = _get_conv_bn_getitem_nodes(m)
+        self.assertTrue(conv_node is not None)
+        self.assertTrue(bn_node is None)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
@@ -1100,7 +1117,7 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
 
 class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
     class TwoLinear(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.linear1 = torch.nn.Linear(16, 8, bias=False)
             self.linear2 = torch.nn.Linear(8, 8)
@@ -1109,7 +1126,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             return self.linear2(self.linear1(x))
 
     class QATPTQTestModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 16, 3)
             self.linears = TestQuantizeMixQATAndPTQ.TwoLinear()

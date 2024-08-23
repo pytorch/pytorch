@@ -7,6 +7,7 @@ import os
 import sys
 import typing
 import warnings
+import zipfile
 from enum import auto, Enum
 from typing import (
     Any,
@@ -24,16 +25,15 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-
 from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
@@ -233,14 +233,34 @@ def save(
         torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
 
     """
-    from torch._export import save
-
     if not isinstance(ep, ExportedProgram):
         raise TypeError(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
-    save(ep, f, extra_files=extra_files, opset_version=opset_version)
+    from torch._export.serde.schema import SCHEMA_VERSION
+    from torch._export.serde.serialize import serialize, SerializedArtifact
+
+    artifact: SerializedArtifact = serialize(ep, opset_version)
+
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
+
+    with zipfile.ZipFile(f, "w") as zipf:
+        # Save every field in the SerializedArtifact to a file.
+        assert isinstance(artifact.exported_program, bytes)
+        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
+        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
+        zipf.writestr("serialized_constants.pt", artifact.constants)
+        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
+
+        zipf.writestr("version", ".".join(map(str, SCHEMA_VERSION)))
+
+        # Add extra files if provided
+        if extra_files:
+            for extra_file_name, content in extra_files.items():
+                encoded_content = content.encode("utf-8")
+                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
 
 
 def load(
@@ -294,11 +314,68 @@ def load(
         print(extra_files['foo.txt'])
         print(ep(torch.randn(5)))
     """
-    from torch._export import load
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
-    return load(
-        f, extra_files=extra_files, expected_opset_version=expected_opset_version
-    )
+    extra_files = extra_files or {}
+
+    with zipfile.ZipFile(f, "r") as zipf:
+        # Check the version
+        version = zipf.read("version").decode().split(".")
+        from torch._export.serde.schema import SCHEMA_VERSION
+
+        assert len(version) == len(SCHEMA_VERSION)
+        if version[0] != str(SCHEMA_VERSION[0]):
+            raise RuntimeError(
+                f"Serialized version {version} does not match our current "
+                f"schema version {SCHEMA_VERSION}."
+            )
+
+        from torch._export.serde.serialize import deserialize, SerializedArtifact
+
+        # Load serialized_ep and serialized_state_dict from the zip file
+
+        serialized_exported_program: Optional[bytes] = None
+        serialized_state_dict: Optional[bytes] = None
+        serialized_constants: Optional[bytes] = None
+        serialized_example_inputs: Optional[bytes] = None
+
+        for file_info in zipf.infolist():
+            file_content = zipf.read(file_info.filename)
+
+            if file_info.filename == "serialized_exported_program.json":
+                serialized_exported_program = file_content
+            elif file_info.filename == "serialized_state_dict.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_constants = file_content
+            elif file_info.filename == "serialized_state_dict.pt":
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.pt":
+                serialized_constants = file_content
+            elif file_info.filename == "serialized_example_inputs.pt":
+                serialized_example_inputs = file_content
+            elif file_info.filename.startswith("extra_files"):
+                filename = file_info.filename.split("/", 1)[1]
+                extra_files[filename] = file_content.decode("utf-8")
+
+        assert serialized_exported_program is not None
+        assert serialized_state_dict is not None
+        assert serialized_constants is not None
+        assert serialized_example_inputs is not None
+        artifact: SerializedArtifact = SerializedArtifact(
+            serialized_exported_program,
+            serialized_state_dict,
+            serialized_constants,
+            serialized_example_inputs,
+        )
+
+        # Deserialize ExportedProgram
+        ep = deserialize(artifact, expected_opset_version)
+
+        return ep
 
 
 def register_dataclass(

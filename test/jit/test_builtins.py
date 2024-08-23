@@ -9,10 +9,12 @@ from typing import Dict, List
 import torch
 from torch.testing import FileCheck
 
+
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -29,17 +31,17 @@ class TestBuiltins(JitTestCase):
 
     def test_has_attr(self):
         class HasA(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = 0
 
         class HasB(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.b = 1
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mods = torch.nn.ModuleList([HasA(), HasB()])
 
@@ -60,7 +62,7 @@ class TestBuiltins(JitTestCase):
 
     def test_has_attr_invalid_args(self):
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mod = torch.nn.Linear(1, 1)
 

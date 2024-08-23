@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-
 import tempfile
-
-from typing import Mapping, Tuple
+from typing import Mapping, Tuple, TYPE_CHECKING
 
 import onnx
 import onnx.inliner
+
 import pytorch_test_common
 import transformers  # type: ignore[import]
 
@@ -17,9 +16,12 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
+
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.diagnostics import infra
 
 
 def assert_has_diagnostics(
@@ -97,15 +99,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 diagnostics.rules.find_opschema_matched_symbolic_function,
                 name="optional_inputs",
             ),
-            common_utils.subtest(
-                diagnostics.rules.op_level_debugging,
-                name="get_attr_node_in_op_level_debug",
-            ),
         ],
     )
     def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
@@ -126,35 +124,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_program = dynamo_export(
-            MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
-        )
+        onnx_program = dynamo_export(MNISTModel(), tensor_x)
 
         assert_has_diagnostics(
             onnx_program.diagnostic_context,
             diagnostic_rule,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
-        )
-
-    def test_no_warnings_on_complex_dtype_in_op_level_debug(self):
-        class ComplexModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.ops.aten.mul(input, input)
-
-        real = torch.tensor([1, 2], dtype=torch.float32)
-        imag = torch.tensor([3, 4], dtype=torch.float32)
-        x = torch.complex(real, imag)
-
-        onnx_program = dynamo_export(
-            ComplexModel(), x, export_options=ExportOptions(op_level_debug=True)
-        )
-
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
-            diagnostics.levels.NONE,
-            expected_node="aten.mul.Tensor",
         )
 
     def test_trace_only_op_with_evaluator(self):
@@ -185,28 +161,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
-    def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
-        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
-            def forward(self, input, emb):
-                return torch.nn.functional.embedding(input, emb)
-
-        model = EmbedModelWithoutPaddingIdx()
-        x = torch.randint(4, (4, 3, 2))
-        embedding_matrix = torch.rand(10, 3)
-
-        onnx_program = dynamo_export(
-            model,
-            x,
-            embedding_matrix,
-            export_options=ExportOptions(op_level_debug=True),
-        )
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
-            diagnostics.levels.WARNING,
-            expected_node="aten.embedding.default",
-        )
-
     def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
         self,
     ):
@@ -228,7 +182,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self,
     ):
         class TraceModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2 = torch.nn.Conv2d(
                     16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
@@ -341,7 +295,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output + bias
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = SubModule()
 
@@ -403,11 +357,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
                 self.fc1 = nn.Linear(9216, 128, bias=False)
-                self.register_buffer("buffer", torch.randn(1, 128))
+                self.buffer = torch.nn.Buffer(torch.randn(1, 128))
 
             def forward(self, tensor_x: torch.Tensor):
                 tensor_x = self.conv2(tensor_x)
@@ -420,7 +374,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return tensor_x
 
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.submodule = SubModule()
@@ -621,7 +575,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_exported_program_input_with_custom_fx_tracer(self):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal import _exporter_legacy
         from torch.onnx._internal.fx import dynamo_graph_extractor
 
         class Model(torch.nn.Module):
@@ -632,7 +586,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         exported_program = torch.export.export(Model(), args=(x,))
 
         export_options = torch.onnx.ExportOptions()
-        export_options = exporter.ResolvedExportOptions(
+        export_options = _exporter_legacy.ResolvedExportOptions(
             export_options, model=exported_program
         )
         export_options.fx_tracer = (
@@ -650,7 +604,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
     def test_exported_program_torch_distributions_normal_Normal(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.normal = torch.distributions.normal.Normal(0, 1)
                 super().__init__()
 
@@ -826,7 +780,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self, include_initializer, use_fake_mode, use_exported_program
     ):
         class MNISTModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)

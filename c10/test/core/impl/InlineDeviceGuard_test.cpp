@@ -44,7 +44,7 @@ TEST(InlineDeviceGuard, Constructor) {
     /*
     {
       // Optional constructor
-      TestGuard g(make_optional(dev(i)));
+      TestGuard g(std::make_optional(dev(i)));
       test_body(g);
     }
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
@@ -136,7 +136,7 @@ TEST(InlineOptionalDeviceGuard, Constructor) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
     {
       // Optional constructor
-      MaybeTestGuard g(make_optional(dev(i)));
+      MaybeTestGuard g(std::make_optional(dev(i)));
       test_body(g);
     }
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);

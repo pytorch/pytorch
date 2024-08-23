@@ -76,7 +76,7 @@ void convert_handles_to_inputs(
 }
 
 template <typename T>
-void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
+void assert_numel(const ArrayRefTensor<T>& tensor, uint64_t numel) {
   if (tensor.numel() != numel) {
     std::stringstream err;
     err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();

@@ -11,6 +11,7 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
+  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -64,7 +65,23 @@ aspects of contributing to PyTorch.
 <!-- tocstop -->
 
 ## Developing PyTorch
+
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+### Setup the development environment
+
+First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
+
+Then clone the PyTorch project and setup the development environment:
+
+```bash
+git clone git@github.com:<USERNAME>/pytorch.git
+cd pytorch
+git remote add upstream git@github.com:pytorch/pytorch.git
+
+make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+conda activate pytorch-deps
+```
 
 ### Tips and Debugging
 
@@ -173,6 +190,13 @@ the regular environment parameters (`--name` or `--prefix`):
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -n my-env
 conda activate my-env
+```
+
+To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --cuda
+conda activate pytorch-deps
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
@@ -325,7 +349,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 Install all prerequisites by running
 
 ```bash
-make setup_lint
+make setup-lint
 ```
 
 You can now run the same linting steps that are used in CI locally via `make`:

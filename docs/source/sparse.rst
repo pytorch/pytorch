@@ -1341,10 +1341,10 @@ see:
 
     sparse.as_sparse_gradcheck
 
-Unary functions
----------------
+Zero-preserving unary functions
+-------------------------------
 
-We aim to support all zero-preserving unary functions.
+We aim to support all 'zero-preserving unary functions': functions of one argument that map zero to zero.
 
 If you find that we are missing a zero-preserving unary function
 that you need, please feel encouraged to open an issue for a feature request.

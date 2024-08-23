@@ -255,6 +255,9 @@ struct C10_API ExtraMeta {
       custom_storage_error_msg_ = other.custom_storage_error_msg_;
     }
   }
+  ExtraMeta& operator=(const ExtraMeta& other) = delete;
+  ExtraMeta(ExtraMeta&& other) = delete;
+  ExtraMeta& operator=(ExtraMeta&& other) = delete;
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
@@ -1891,7 +1894,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor
    * ] for details.
    */
-  void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value [[maybe_unused]]) {
     // TODO: at some point, we should kill this field completely.
     allow_tensor_metadata_change_ = true;
   }

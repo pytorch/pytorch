@@ -37,7 +37,7 @@ constexpr T value_or_else(const std::optional<T>& v, F&& func) {
 }
 
 template <class T, class F>
-constexpr T value_or_else(optional<T>&& v, F&& func) {
+constexpr T value_or_else(std::optional<T>&& v, F&& func) {
   static_assert(
       std::is_convertible_v<typename std::invoke_result_t<F>, T>,
       "func parameters must be a callable that returns a type convertible to the value stored in the optional");

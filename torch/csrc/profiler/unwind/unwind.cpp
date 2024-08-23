@@ -37,6 +37,7 @@ Stats stats() {
 #else
 
 #include <c10/util/flat_hash_map.h>
+#include <dlfcn.h>
 #include <elf.h>
 #include <link.h>
 #include <linux/limits.h>
@@ -128,7 +129,9 @@ struct UnwindCache {
   Version currentVersion() {
     Version r;
     dl_iterate_phdr(
-        [](struct dl_phdr_info* info, size_t size, void* data) {
+        [](struct dl_phdr_info* info,
+           size_t size [[maybe_unused]],
+           void* data) {
           Version* v = (Version*)data;
           v->adds_ = info->dlpi_adds;
           v->subs_ = info->dlpi_subs;
@@ -142,7 +145,9 @@ struct UnwindCache {
     all_libraries_.clear();
     ip_cache_.clear();
     dl_iterate_phdr(
-        [](struct dl_phdr_info* info, size_t size, void* data) {
+        [](struct dl_phdr_info* info,
+           size_t size [[maybe_unused]],
+           void* data) {
           auto self = (UnwindCache*)data;
           uint64_t last_addr = 0;
           auto segments = (Elf64_Phdr*)info->dlpi_phdr;

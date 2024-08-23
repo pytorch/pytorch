@@ -523,6 +523,13 @@
   - Skylion007
   - ngimel
   - peterbell10
+  - eqy
+  - jansel
+  - jeffdaily
+  - eellison
+  - anijain2305
+  - bdhirsh
+  - zou3519
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -537,6 +544,8 @@
   - ezyang
   - dzhulgakov
   - malfet
+  - albanD
+  - ptrblck
   mandatory_checks_name:
   - EasyCLA
   - Lint

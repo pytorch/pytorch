@@ -46,13 +46,11 @@ if [[ "\$python_nodot" = *310* ]]; then
   PROTOBUF_PACKAGE="protobuf>=3.19.0"
 fi
 
-if [[ "\$python_nodot" = *39*  ]]; then
+if [[ "\$python_nodot" = *39* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
-
-
 
 # Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -83,7 +81,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
-      sympy \
+      sympy>=1.12 \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
@@ -119,9 +117,9 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
 fi
 
 if [[ "$GPU_ARCH_TYPE" == xpu ]]; then
-  # Workaround for __mkl_tmp_MOD unbound variable issue, refer https://github.com/pytorch/pytorch/issues/130543
-  set +u
+  # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
   source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
 fi
 
 # Test the package

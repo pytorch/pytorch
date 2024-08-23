@@ -6,6 +6,7 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
+
 import glob
 import inspect
 import io
@@ -40,6 +41,7 @@ from torch.onnx.symbolic_helper import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
+
 
 unittest.TestCase.maxDiff = None
 
@@ -878,7 +880,8 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 
@@ -1060,7 +1063,7 @@ class TestOperators(common_utils.TestCase):
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
 
         class LSTMModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.rnn = torch.nn.LSTM(
                     RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False
@@ -1156,7 +1159,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 
@@ -1206,7 +1209,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 
