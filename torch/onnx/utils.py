@@ -4,6 +4,7 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -224,13 +225,7 @@ def export(
 
             3. A TUPLE OF ARGUMENTS ENDING WITH A DICTIONARY OF NAMED ARGUMENTS::
 
-                args = (
-                    x,
-                    {
-                        "y": input_y,
-                        "z": input_z
-                    }
-                )
+                args = (x, {"y": input_y, "z": input_z})
 
             All but the last element of the tuple will be passed as non-keyword arguments,
             and named arguments will be set from the last element. If a named argument is
@@ -252,22 +247,14 @@ def export(
                         (
                             x,
                             # WRONG: will be interpreted as named arguments
-                            {y: z}
+                            {y: z},
                         ),
-                        "test.onnx.pb"
+                        "test.onnx.pb",
                     )
 
                 Write::
 
-                    torch.onnx.export(
-                        model,
-                        (
-                            x,
-                            {y: z},
-                            {}
-                        ),
-                        "test.onnx.pb"
-                    )
+                    torch.onnx.export(model, (x, {y: z}, {}), "test.onnx.pb")
 
         f: Path to the output ONNX model file. E.g. "model.onnx".
         kwargs: Named arguments to the model.
@@ -369,12 +356,13 @@ def export(
                     def forward(self, x):
                         return torch.sum(x, dim=1)
 
+
                 torch.onnx.export(
                     SumModule(),
                     (torch.ones(2, 2),),
                     "onnx.pb",
                     input_names=["x"],
-                    output_names=["sum"]
+                    output_names=["sum"],
                 )
 
             Produces::
@@ -410,7 +398,7 @@ def export(
                         "x": {0: "my_custom_axis_name"},
                         # list value: automatic names
                         "sum": [0],
-                    }
+                    },
                 )
 
             Produces::
@@ -1398,9 +1386,9 @@ def _setup_trace_module_map(
         and start from the first non-numeric atom.
 
         Example:
-            >>> _unqualified_variable_name('__main__.Foo.bar')
+            >>> _unqualified_variable_name("__main__.Foo.bar")
             'bar'
-            >>> _unqualified_variable_name('__main__.Foo.bar.0')
+            >>> _unqualified_variable_name("__main__.Foo.bar.0")
             'bar.0'
         """
         name_atoms = qualified_name.split(".")
@@ -1605,7 +1593,9 @@ def _export(
 
             if keep_initializers_as_inputs is not True:
                 params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                    graph,
+                    params_dict,
+                    getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
@@ -1863,7 +1853,9 @@ def _run_symbolic_function(
         }
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
+            return graph_context.op(
+                op_name, *inputs, **attrs, outputs=node.outputsSize()
+            )  # type: ignore[attr-defined]
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
